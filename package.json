@@ -1,0 +1,42 @@
+{
+  "name": "dispatch-tasks",
+  "version": "0.1.0",
+  "description": "AI agent orchestration CLI — parse markdown task files, dispatch each unit of work to OpenCode, and commit results with conventional commits",
+  "type": "module",
+  "bin": {
+    "dispatch": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "cli",
+    "opencode",
+    "ai",
+    "agent",
+    "orchestration",
+    "dispatch",
+    "tasks",
+    "markdown"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@opencode-ai/sdk": "^1.2.10",
+    "chalk": "^5.4.1",
+    "glob": "^11.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.3"
+  }
+}
