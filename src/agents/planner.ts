@@ -8,8 +8,8 @@
  * to make precise edits.
  */
 
-import type { ProviderInstance } from "./provider.js";
-import type { Task } from "./parser.js";
+import type { Agent, AgentBootOptions } from "../agent.js";
+import type { Task } from "../parser.js";
 
 export interface PlanResult {
   /** The system prompt for the executor agent */
@@ -21,34 +21,63 @@ export interface PlanResult {
 }
 
 /**
- * Run the planner agent for a single task. Creates an isolated session,
- * sends the planning prompt, and extracts the resulting execution plan.
+ * A booted planner agent that can produce execution plans for tasks.
  *
- * When `fileContext` is provided (the full markdown content from the task file),
- * it is included in the prompt so the planner can use non-task prose (headings,
- * notes, implementation details) as additional guidance.
+ * To add a new planner implementation:
+ *   1. Create `src/agents/<name>.ts`
+ *   2. Export an async `boot` function that returns a `PlannerAgent`
+ *   3. Register it in `src/agents/index.ts`
  */
-export async function planTask(
-  instance: ProviderInstance,
-  task: Task,
-  cwd: string,
-  fileContext?: string
-): Promise<PlanResult> {
-  try {
-    const sessionId = await instance.createSession();
-    const prompt = buildPlannerPrompt(task, cwd, fileContext);
+export interface PlannerAgent extends Agent {
+  /**
+   * Run the planner for a single task. Creates an isolated session,
+   * sends the planning prompt, and extracts the resulting execution plan.
+   *
+   * When `fileContext` is provided (filtered markdown from the task file),
+   * it is included so the planner can use non-task prose (headings, notes,
+   * implementation details) as additional guidance.
+   */
+  plan(task: Task, fileContext?: string): Promise<PlanResult>;
+}
 
-    const plan = await instance.prompt(sessionId, prompt);
+/**
+ * Boot a planner agent backed by the given provider.
+ *
+ * @throws if `opts.provider` is not supplied — the planner requires a
+ *         provider to create sessions and send prompts.
+ */
+export async function boot(opts: AgentBootOptions): Promise<PlannerAgent> {
+  const { provider, cwd } = opts;
 
-    if (!plan?.trim()) {
-      return { prompt: "", success: false, error: "Planner returned empty plan" };
-    }
-
-    return { prompt: plan, success: true };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return { prompt: "", success: false, error: message };
+  if (!provider) {
+    throw new Error("Planner agent requires a provider instance in boot options");
   }
+
+  return {
+    name: "planner",
+
+    async plan(task: Task, fileContext?: string): Promise<PlanResult> {
+      try {
+        const sessionId = await provider.createSession();
+        const prompt = buildPlannerPrompt(task, cwd, fileContext);
+
+        const plan = await provider.prompt(sessionId, prompt);
+
+        if (!plan?.trim()) {
+          return { prompt: "", success: false, error: "Planner returned empty plan" };
+        }
+
+        return { prompt: plan, success: true };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { prompt: "", success: false, error: message };
+      }
+    },
+
+    async cleanup(): Promise<void> {
+      // Planner has no owned resources — provider lifecycle is managed externally
+    },
+  };
 }
 
 /**
