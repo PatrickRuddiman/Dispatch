@@ -10,6 +10,7 @@
 import { glob } from "glob";
 import { parseTaskFile, markTaskComplete, type Task, type TaskFile } from "./parser.js";
 import { bootOpencode, dispatchTask, type DispatchResult } from "./dispatcher.js";
+import { planTask } from "./planner.js";
 import { commitTask } from "./git.js";
 import { log } from "./logger.js";
 import { createTui, type TaskState } from "./tui.js";
@@ -20,6 +21,8 @@ export interface DispatchOptions {
   concurrency: number;
   dryRun: boolean;
   serverUrl?: string;
+  /** Skip the planner agent and dispatch tasks directly */
+  noPlan?: boolean;
 }
 
 export interface DispatchSummary {
@@ -31,7 +34,7 @@ export interface DispatchSummary {
 }
 
 export async function orchestrate(opts: DispatchOptions): Promise<DispatchSummary> {
-  const { pattern, cwd, concurrency, dryRun, serverUrl } = opts;
+  const { pattern, cwd, concurrency, dryRun, serverUrl, noPlan } = opts;
 
   // Dry-run mode uses simple log output
   if (dryRun) {
@@ -100,21 +103,40 @@ export async function orchestrate(opts: DispatchOptions): Promise<DispatchSummar
       const batchResults = await Promise.all(
         batch.map(async (task) => {
           const tuiTask = tui.state.tasks.find((t) => t.task === task)!;
-          tuiTask.status = "running";
-          tuiTask.elapsed = Date.now();
+          const startTime = Date.now();
+          tuiTask.elapsed = startTime;
 
-          const result = await dispatchTask(instance, task, cwd);
+          // ── Phase A: Plan (unless --no-plan) ─────────────────
+          let plan: string | undefined;
+          if (!noPlan) {
+            tuiTask.status = "planning";
+            const planResult = await planTask(instance, task, cwd);
+
+            if (!planResult.success) {
+              tuiTask.status = "failed";
+              tuiTask.error = `Planning failed: ${planResult.error}`;
+              tuiTask.elapsed = Date.now() - startTime;
+              failed++;
+              return { task, success: false, error: tuiTask.error } as DispatchResult;
+            }
+
+            plan = planResult.prompt;
+          }
+
+          // ── Phase B: Execute ─────────────────────────────────
+          tuiTask.status = "running";
+          const result = await dispatchTask(instance, task, cwd, plan);
 
           if (result.success) {
             await markTaskComplete(task);
             await commitTask(task, cwd);
             tuiTask.status = "done";
-            tuiTask.elapsed = Date.now() - tuiTask.elapsed!;
+            tuiTask.elapsed = Date.now() - startTime;
             completed++;
           } else {
             tuiTask.status = "failed";
             tuiTask.error = result.error;
-            tuiTask.elapsed = Date.now() - tuiTask.elapsed!;
+            tuiTask.elapsed = Date.now() - startTime;
             failed++;
           }
 

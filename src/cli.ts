@@ -25,6 +25,7 @@ const HELP = `
 
   Options:
     --dry-run              List tasks without dispatching
+    --no-plan              Skip the planner agent, dispatch directly
     --concurrency <n>      Max parallel dispatches (default: 1)
     --server-url <url>     URL of a running OpenCode server
     --cwd <dir>            Working directory (default: cwd)
@@ -41,6 +42,7 @@ const HELP = `
 interface CliArgs {
   pattern: string;
   dryRun: boolean;
+  noPlan: boolean;
   concurrency: number;
   serverUrl?: string;
   cwd: string;
@@ -52,6 +54,7 @@ function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = {
     pattern: "",
     dryRun: false,
+    noPlan: false,
     concurrency: 1,
     cwd: process.cwd(),
     help: false,
@@ -68,6 +71,8 @@ function parseArgs(argv: string[]): CliArgs {
       args.version = true;
     } else if (arg === "--dry-run") {
       args.dryRun = true;
+    } else if (arg === "--no-plan") {
+      args.noPlan = true;
     } else if (arg === "--concurrency") {
       i++;
       const val = parseInt(argv[i], 10);
@@ -120,6 +125,7 @@ async function main() {
     cwd: args.cwd,
     concurrency: args.concurrency,
     dryRun: args.dryRun,
+    noPlan: args.noPlan,
     serverUrl: args.serverUrl,
   });
 

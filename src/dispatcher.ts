@@ -42,11 +42,15 @@ export async function bootOpencode(opts?: {
  * Dispatch a single task to OpenCode in its own session.
  * Uses the synchronous `session.prompt()` which blocks until the
  * agent finishes — each task gets a fresh session for context isolation.
+ *
+ * When a `plan` is provided (from the planner agent), it replaces the
+ * generic prompt with the planner's context-rich execution instructions.
  */
 export async function dispatchTask(
   instance: OpencodeInstance,
   task: Task,
-  cwd: string
+  cwd: string,
+  plan?: string
 ): Promise<DispatchResult> {
   const { client } = instance;
 
@@ -57,7 +61,7 @@ export async function dispatchTask(
       return { task, success: false, error: "Failed to create session" };
     }
 
-    const prompt = buildPrompt(task, cwd);
+    const prompt = plan ? buildPlannedPrompt(task, cwd, plan) : buildPrompt(task, cwd);
 
     // session.prompt() is synchronous — blocks until the agent completes
     const { data: response, error } = await client.session.prompt({
@@ -95,6 +99,36 @@ function buildPrompt(task: Task, cwd: string): string {
     `**Task (line ${task.line}):** ${task.text}`,
     ``,
     `Instructions:`,
+    `- Complete ONLY this specific task — do not work on other tasks.`,
+    `- Make the minimal, correct changes needed.`,
+    `- Do NOT commit changes — the orchestrator handles commits.`,
+    `- When finished, confirm by saying "Task complete."`,
+  ].join("\n");
+}
+
+/**
+ * Build a prompt for the executor when a planner has already explored
+ * the codebase and produced a detailed execution plan.
+ */
+function buildPlannedPrompt(task: Task, cwd: string, plan: string): string {
+  return [
+    `You are an **executor agent** completing a task that has been pre-planned by a planner agent.`,
+    `The planner has already explored the codebase and produced detailed instructions below.`,
+    ``,
+    `**Working directory:** ${cwd}`,
+    `**Source file:** ${task.file}`,
+    `**Task (line ${task.line}):** ${task.text}`,
+    ``,
+    `---`,
+    ``,
+    `## Execution Plan`,
+    ``,
+    plan,
+    ``,
+    `---`,
+    ``,
+    `## Executor Constraints`,
+    `- Follow the plan above precisely.`,
     `- Complete ONLY this specific task — do not work on other tasks.`,
     `- Make the minimal, correct changes needed.`,
     `- Do NOT commit changes — the orchestrator handles commits.`,
