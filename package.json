@@ -1,7 +1,7 @@
 {
   "name": "dispatch-tasks",
   "version": "0.1.0",
-  "description": "AI agent orchestration CLI — parse markdown task files, dispatch each unit of work to OpenCode, and commit results with conventional commits",
+  "description": "AI agent orchestration CLI — parse markdown task files, dispatch each unit of work to code agents (OpenCode, GitHub Copilot, etc.), and commit results with conventional commits",
   "type": "module",
   "bin": {
     "dispatch": "./dist/cli.js"
@@ -20,6 +20,7 @@
   "keywords": [
     "cli",
     "opencode",
+    "copilot",
     "ai",
     "agent",
     "orchestration",
@@ -32,6 +33,7 @@
     "node": ">=18"
   },
   "dependencies": {
+    "@github/copilot-sdk": "^0.1.0",
     "@opencode-ai/sdk": "^1.2.10",
     "chalk": "^5.4.1",
     "glob": "^11.0.1"

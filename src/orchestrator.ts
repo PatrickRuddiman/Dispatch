@@ -2,18 +2,21 @@
  * Orchestrator — the core loop that drives the dispatch pipeline:
  *   1. Glob for task files
  *   2. Parse unchecked tasks
- *   3. Dispatch each to OpenCode in an isolated session
- *   4. Mark complete in markdown
- *   5. Commit with conventional commits
+ *   3. Boot the selected provider (OpenCode, Copilot, etc.)
+ *   4. Dispatch each task in an isolated session
+ *   5. Mark complete in markdown
+ *   6. Commit with conventional commits
  */
 
 import { glob } from "glob";
 import { parseTaskFile, markTaskComplete, buildTaskContext, type Task, type TaskFile } from "./parser.js";
-import { bootOpencode, dispatchTask, type DispatchResult } from "./dispatcher.js";
+import { dispatchTask, type DispatchResult } from "./dispatcher.js";
 import { planTask } from "./planner.js";
 import { commitTask } from "./git.js";
 import { log } from "./logger.js";
 import { createTui, type TaskState } from "./tui.js";
+import type { ProviderName } from "./provider.js";
+import { bootProvider } from "./providers/index.js";
 
 export interface DispatchOptions {
   pattern: string;
@@ -23,6 +26,8 @@ export interface DispatchOptions {
   serverUrl?: string;
   /** Skip the planner agent and dispatch tasks directly */
   noPlan?: boolean;
+  /** Which agent backend to use (default: "opencode") */
+  provider?: ProviderName;
 }
 
 export interface DispatchSummary {
@@ -34,7 +39,7 @@ export interface DispatchSummary {
 }
 
 export async function orchestrate(opts: DispatchOptions): Promise<DispatchSummary> {
-  const { pattern, cwd, concurrency, dryRun, serverUrl, noPlan } = opts;
+  const { pattern, cwd, concurrency, dryRun, serverUrl, noPlan, provider = "opencode" } = opts;
 
   // Dry-run mode uses simple log output
   if (dryRun) {
@@ -43,6 +48,7 @@ export async function orchestrate(opts: DispatchOptions): Promise<DispatchSummar
 
   // ── Start TUI ───────────────────────────────────────────────
   const tui = createTui();
+  tui.state.provider = provider;
 
   try {
     // ── 1. Discover task files ──────────────────────────────────
@@ -89,9 +95,9 @@ export async function orchestrate(opts: DispatchOptions): Promise<DispatchSummar
       status: "pending" as const,
     }));
 
-    // ── 3. Boot OpenCode ────────────────────────────────────────
+    // ── 3. Boot provider ────────────────────────────────────────
     tui.state.phase = "booting";
-    const instance = await bootOpencode({ url: serverUrl });
+    const instance = await bootProvider(provider, { url: serverUrl, cwd });
     if (serverUrl) {
       tui.state.serverUrl = serverUrl;
     }
@@ -156,9 +162,7 @@ export async function orchestrate(opts: DispatchOptions): Promise<DispatchSummar
     }
 
     // ── 5. Cleanup ──────────────────────────────────────────────
-    if (instance.cleanup) {
-      await instance.cleanup();
-    }
+    await instance.cleanup();
 
     tui.state.phase = "done";
     tui.stop();

@@ -8,13 +8,16 @@
  * Options:
  *   --dry-run         List tasks without executing
  *   --concurrency N   Max parallel dispatches (default: 1)
- *   --server-url URL  Connect to a running OpenCode server
+ *   --provider NAME   Agent backend: opencode, copilot (default: opencode)
+ *   --server-url URL  Connect to a running provider server
  *   --help            Show usage information
  */
 
 import { resolve } from "node:path";
 import { orchestrate } from "./orchestrator.js";
 import { log } from "./logger.js";
+import type { ProviderName } from "./provider.js";
+import { PROVIDER_NAMES } from "./providers/index.js";
 
 const HELP = `
   dispatch — AI agent orchestration CLI
@@ -27,13 +30,15 @@ const HELP = `
     --dry-run              List tasks without dispatching
     --no-plan              Skip the planner agent, dispatch directly
     --concurrency <n>      Max parallel dispatches (default: 1)
-    --server-url <url>     URL of a running OpenCode server
+    --provider <name>      Agent backend: ${PROVIDER_NAMES.join(", ")} (default: opencode)
+    --server-url <url>     URL of a running provider server
     --cwd <dir>            Working directory (default: cwd)
     -h, --help             Show this help
     -v, --version          Show version
 
   Examples:
     dispatch "tasks/**/*.md"
+    dispatch "tasks/**/*.md" --provider copilot
     dispatch "tasks/**/*.md" --dry-run
     dispatch "tasks/**/*.md" --concurrency 3
     dispatch "tasks/**/*.md" --server-url http://localhost:4096
@@ -44,6 +49,7 @@ interface CliArgs {
   dryRun: boolean;
   noPlan: boolean;
   concurrency: number;
+  provider: ProviderName;
   serverUrl?: string;
   cwd: string;
   help: boolean;
@@ -56,6 +62,7 @@ function parseArgs(argv: string[]): CliArgs {
     dryRun: false,
     noPlan: false,
     concurrency: 1,
+    provider: "opencode",
     cwd: process.cwd(),
     help: false,
     version: false,
@@ -81,6 +88,14 @@ function parseArgs(argv: string[]): CliArgs {
         process.exit(1);
       }
       args.concurrency = val;
+    } else if (arg === "--provider") {
+      i++;
+      const val = argv[i];
+      if (!PROVIDER_NAMES.includes(val as ProviderName)) {
+        log.error(`Unknown provider "${val}". Available: ${PROVIDER_NAMES.join(", ")}`);
+        process.exit(1);
+      }
+      args.provider = val as ProviderName;
     } else if (arg === "--server-url") {
       i++;
       args.serverUrl = argv[i];
@@ -126,6 +141,7 @@ async function main() {
     concurrency: args.concurrency,
     dryRun: args.dryRun,
     noPlan: args.noPlan,
+    provider: args.provider,
     serverUrl: args.serverUrl,
   });
 

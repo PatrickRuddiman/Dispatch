@@ -1,9 +1,9 @@
 /**
- * OpenCode SDK dispatcher — creates a fresh session per task to keep
- * contexts isolated and avoid context rot.
+ * Task dispatcher — creates a fresh session per task to keep contexts
+ * isolated and avoid context rot. Works with any registered provider.
  */
 
-import { createOpencode, createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk";
+import type { ProviderInstance } from "./provider.js";
 import type { Task } from "./parser.js";
 
 export interface DispatchResult {
@@ -12,70 +12,26 @@ export interface DispatchResult {
   error?: string;
 }
 
-export interface OpencodeInstance {
-  client: OpencodeClient;
-  cleanup?: () => Promise<void>;
-}
-
 /**
- * Boot an OpenCode instance — either connect to a running server
- * or start a new one.
- */
-export async function bootOpencode(opts?: {
-  url?: string;
-}): Promise<OpencodeInstance> {
-  if (opts?.url) {
-    const client = createOpencodeClient({ baseUrl: opts.url });
-    return { client };
-  }
-
-  const oc = await createOpencode();
-  return {
-    client: oc.client,
-    cleanup: async () => {
-      oc.server.close();
-    },
-  };
-}
-
-/**
- * Dispatch a single task to OpenCode in its own session.
- * Uses the synchronous `session.prompt()` which blocks until the
- * agent finishes — each task gets a fresh session for context isolation.
+ * Dispatch a single task to the provider in its own session.
+ * Each task gets a fresh session for context isolation.
  *
  * When a `plan` is provided (from the planner agent), it replaces the
  * generic prompt with the planner's context-rich execution instructions.
  */
 export async function dispatchTask(
-  instance: OpencodeInstance,
+  instance: ProviderInstance,
   task: Task,
   cwd: string,
   plan?: string
 ): Promise<DispatchResult> {
-  const { client } = instance;
-
   try {
-    // Create a fresh session for this task — isolated context
-    const { data: session } = await client.session.create();
-    if (!session) {
-      return { task, success: false, error: "Failed to create session" };
-    }
-
+    const sessionId = await instance.createSession();
     const prompt = plan ? buildPlannedPrompt(task, cwd, plan) : buildPrompt(task, cwd);
 
-    // session.prompt() is synchronous — blocks until the agent completes
-    const { data: response, error } = await client.session.prompt({
-      path: { id: session.id },
-      body: {
-        parts: [{ type: "text", text: prompt }],
-      },
-    });
+    const response = await instance.prompt(sessionId, prompt);
 
-    if (error) {
-      return { task, success: false, error: `Prompt failed: ${JSON.stringify(error)}` };
-    }
-
-    if (!response) {
+    if (response === null) {
       return { task, success: false, error: "No response from agent" };
     }
 
