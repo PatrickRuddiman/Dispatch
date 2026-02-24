@@ -2,15 +2,14 @@
  * Planner agent — explores the codebase and researches the implementation
  * for a task, then produces a focused system prompt for the executor agent.
  *
- * The planner runs in its own OpenCode session with read-only intent: it
- * reads files, searches symbols, and reasons about the task without making
- * any changes. Its output is a rich, context-aware prompt that the executor
- * can use to make precise edits.
+ * The planner runs in its own session with read-only intent: it reads files,
+ * searches symbols, and reasons about the task without making any changes.
+ * Its output is a rich, context-aware prompt that the executor can follow
+ * to make precise edits.
  */
 
-import type { OpencodeInstance } from "./dispatcher.js";
+import type { ProviderInstance } from "./provider.js";
 import type { Task } from "./parser.js";
-import type { Part, TextPart } from "@opencode-ai/sdk";
 
 export interface PlanResult {
   /** The system prompt for the executor agent */
@@ -30,40 +29,18 @@ export interface PlanResult {
  * notes, implementation details) as additional guidance.
  */
 export async function planTask(
-  instance: OpencodeInstance,
+  instance: ProviderInstance,
   task: Task,
   cwd: string,
   fileContext?: string
 ): Promise<PlanResult> {
-  const { client } = instance;
-
   try {
-    const { data: session } = await client.session.create();
-    if (!session) {
-      return { prompt: "", success: false, error: "Failed to create planning session" };
-    }
-
+    const sessionId = await instance.createSession();
     const prompt = buildPlannerPrompt(task, cwd, fileContext);
 
-    const { data: response, error } = await client.session.prompt({
-      path: { id: session.id },
-      body: {
-        parts: [{ type: "text", text: prompt }],
-      },
-    });
+    const plan = await instance.prompt(sessionId, prompt);
 
-    if (error) {
-      return { prompt: "", success: false, error: `Planner failed: ${JSON.stringify(error)}` };
-    }
-
-    if (!response) {
-      return { prompt: "", success: false, error: "No response from planner" };
-    }
-
-    // Extract text content from the response parts
-    const plan = extractText(response.parts);
-
-    if (!plan.trim()) {
+    if (!plan?.trim()) {
       return { prompt: "", success: false, error: "Planner returned empty plan" };
     }
 
@@ -140,14 +117,4 @@ function buildPlannerPrompt(task: Task, cwd: string, fileContext?: string): stri
   );
 
   return sections.join("\n");
-}
-
-/**
- * Extract all text content from response parts.
- */
-function extractText(parts: Part[]): string {
-  const textParts = parts.filter(
-    (p): p is TextPart => p.type === "text" && "text" in p
-  );
-  return textParts.map((p) => p.text).join("\n");
 }

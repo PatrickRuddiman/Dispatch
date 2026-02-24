@@ -21,6 +21,8 @@ export interface TuiState {
   startTime: number;
   filesFound: number;
   serverUrl?: string;
+  /** Active provider name — shown in the booting phase */
+  provider?: string;
 }
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -84,14 +86,16 @@ function statusLabel(status: TaskStatus): string {
   }
 }
 
-function phaseLabel(phase: TuiState["phase"]): string {
+function phaseLabel(phase: TuiState["phase"], provider?: string): string {
   switch (phase) {
     case "discovering":
       return `${spinner()} Discovering task files...`;
     case "parsing":
       return `${spinner()} Parsing tasks...`;
-    case "booting":
-      return `${spinner()} Connecting to OpenCode...`;
+    case "booting": {
+      const name = provider ?? "provider";
+      return `${spinner()} Connecting to ${name}...`;
+    }
     case "dispatching":
       return `${spinner()} Dispatching tasks...`;
     case "done":
@@ -114,7 +118,7 @@ function render(state: TuiState): string {
   lines.push(chalk.dim("  ─".repeat(24)));
 
   // ── Phase + Timer ───────────────────────────────────────────
-  lines.push(`  ${phaseLabel(state.phase)}` + chalk.dim(`  ${totalElapsed}`));
+  lines.push(`  ${phaseLabel(state.phase, state.provider)}` + chalk.dim(`  ${totalElapsed}`));
 
   if (state.phase === "dispatching" || state.phase === "done") {
     // ── Progress bar ────────────────────────────────────────
