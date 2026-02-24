@@ -2,11 +2,24 @@
 
 ## What is dispatch-tasks?
 
-dispatch-tasks is a Node.js CLI tool that reads markdown task files containing
-GitHub-style checkbox items (`- [ ] do something`), dispatches each task to an
-AI coding agent in an isolated session, marks the task complete in the source
-file, and creates a conventional commit for the result. It turns a simple
-checklist into an automated, agent-driven development pipeline.
+dispatch-tasks is a Node.js CLI tool that automates multi-task software
+engineering work by delegating to AI coding agents. It has two operating modes:
+
+- **Dispatch mode** reads markdown task files containing GitHub-style checkbox
+  items (`- [ ] do something`), dispatches each task to an AI coding agent in
+  an isolated session, marks the task complete in the source file, and creates a
+  conventional commit for the result.
+- **Spec mode** (`--spec`) fetches issues from an external tracker (GitHub or
+  Azure DevOps), prompts an AI agent to explore the codebase and produce
+  high-level markdown spec files, and writes them to disk so they can be fed
+  back into dispatch mode.
+
+Together, the two modes form a **three-stage AI pipeline** from issue tracker to
+implemented, committed code: a **spec agent** converts issues into strategic
+task files, a **planner agent** explores the codebase to produce detailed
+execution plans for each task, and an **executor agent** follows those plans to
+make code changes. Each stage uses isolated AI sessions to prevent context
+leakage.
 
 ## Why does it exist?
 
@@ -25,10 +38,12 @@ small, well-defined units of work. dispatch-tasks solves three problems:
 ## System topology
 
 The diagram below shows every module in the source tree and how they relate.
-The CLI validates input and delegates to the orchestrator, which drives a
+The CLI validates input and delegates to either the orchestrator (dispatch mode)
+or the spec generator (spec mode). In dispatch mode, the orchestrator drives a
 six-stage pipeline through the parser, provider, planner, dispatcher, and git
-modules. The TUI and logger provide output for interactive and non-interactive
-contexts respectively.
+modules. In spec mode, the spec generator drives a five-stage pipeline through
+the issue fetchers and provider. The TUI and logger provide output for
+interactive and non-interactive contexts respectively.
 
 ```mermaid
 graph TD
@@ -40,6 +55,14 @@ graph TD
         ORCH["orchestrator.ts<br/>Pipeline controller"]
         TUI["tui.ts<br/>Terminal dashboard"]
         LOG["logger.ts<br/>Structured logging"]
+    end
+
+    subgraph "Spec Generation"
+        SPECGEN["spec-generator.ts<br/>Spec pipeline controller"]
+        IFETCH["issue-fetcher.ts<br/>IssueFetcher interface"]
+        GFETCH["issue-fetchers/github.ts<br/>GitHub fetcher"]
+        AFETCH["issue-fetchers/azdevops.ts<br/>Azure DevOps fetcher"]
+        FETCHREG["issue-fetchers/index.ts<br/>Fetcher registry &amp; detection"]
     end
 
     subgraph "Task Parsing"
@@ -65,9 +88,12 @@ graph TD
         GITCLI["git CLI"]
         FS["Node.js fs"]
         GLOB["glob npm package"]
+        GHCLI["GitHub CLI (gh)"]
+        AZCLI["Azure CLI (az)"]
     end
 
     CLI --> ORCH
+    CLI --> SPECGEN
     ORCH --> TUI
     ORCH --> LOG
     ORCH --> PARSER
@@ -75,6 +101,16 @@ graph TD
     ORCH --> DISPATCH
     ORCH --> GIT
     ORCH --> REG
+
+    SPECGEN --> FETCHREG
+    SPECGEN --> REG
+    SPECGEN --> IFACE
+    SPECGEN --> FS
+    FETCHREG --> GFETCH
+    FETCHREG --> AFETCH
+    FETCHREG --> GITCLI
+    GFETCH --> GHCLI
+    AFETCH --> AZCLI
 
     PLANNER --> IFACE
     DISPATCH --> IFACE
@@ -106,7 +142,7 @@ flowchart LR
 
 | Stage | Module | What happens |
 |-------|--------|-------------|
-| Discover | `src/orchestrator.ts` | Glob pattern resolves to absolute file paths. |
+| Discover | `src/agents/orchestrator.ts` | Glob pattern resolves to absolute file paths. |
 | Parse | `src/parser.ts` | Each file is read and regex-matched for `- [ ] ...` lines, producing `Task` and `TaskFile` objects. |
 | Boot | `src/providers/index.ts` | The selected provider (OpenCode or Copilot) is booted via the registry. |
 | Dispatch | `src/planner.ts`, `src/dispatcher.ts` | Per task: optionally run the planner agent in a fresh session, then run the executor agent in another fresh session. Batched via `Promise.all` with configurable concurrency. |
@@ -116,6 +152,45 @@ flowchart LR
 For the full prompt construction chain (how task text becomes a planner prompt,
 then an executor prompt), see the
 [Planning & Dispatch overview](planning-and-dispatch/overview.md).
+
+## Spec generation pipeline
+
+When invoked with `--spec <ids>`, the CLI bypasses the orchestrator entirely
+and delegates to `generateSpecs()` in `src/spec-generator.ts`. This pipeline
+converts issue tracker items into high-level markdown spec files that can later
+be fed into dispatch mode.
+
+```mermaid
+flowchart LR
+    A["1. Detect<br/>identify issue source"] --> B["2. Fetch<br/>retrieve issue details"]
+    B --> C["3. Boot<br/>start AI provider"]
+    C --> D["4. Generate<br/>prompt AI per issue"]
+    D --> E["5. Write<br/>save spec files to disk"]
+```
+
+### Spec stage details
+
+| Stage | Module | What happens |
+|-------|--------|-------------|
+| Detect | `src/issue-fetchers/index.ts` | If `--source` is not given, `detectIssueSource()` runs `git remote get-url origin` and matches the URL against regex patterns for supported platforms (GitHub, Azure DevOps). Supports both SSH and HTTPS remote formats. |
+| Fetch | `src/issue-fetchers/github.ts` or `azdevops.ts` | Each issue number is fetched sequentially via the platform's CLI tool (`gh` or `az`). The result is normalized into an `IssueDetails` object. Failed fetches are recorded but do not abort the pipeline. |
+| Boot | `src/providers/index.ts` | Same `bootProvider` call as dispatch mode — starts or connects to the AI backend. |
+| Generate | `src/spec-generator.ts` | For each successfully fetched issue, a fresh AI session is created, the issue details are wrapped in a ~115-line prompt instructing the AI to explore the codebase and produce a high-level spec, and the response is captured. Issues are processed sequentially, not in parallel. |
+| Write | `src/spec-generator.ts` | The AI response is written to `<output-dir>/<id>-<slug>.md`. The slug is the lowercased, sanitized title truncated to 60 characters. The output directory (default `.dispatch/specs`) is created with `mkdir -p` semantics. |
+
+### Key differences from dispatch mode
+
+| Aspect | Dispatch mode | Spec mode |
+|--------|--------------|-----------|
+| Input | Markdown task files (via glob) | Issue numbers (via `--spec`) |
+| Pipeline controller | `orchestrator.ts` | `spec-generator.ts` |
+| AI interaction | Planner + executor per task | Single spec-generation prompt per issue |
+| Output | Modified markdown + git commits | New spec files on disk |
+| Concurrency | Configurable (`--concurrency`) | Sequential only |
+| Provider cleanup | Called on success path only (gap) | Always called after generation |
+
+For the complete spec generation documentation, see the
+[Spec Generation overview](spec-generation/overview.md).
 
 ## Task lifecycle
 
@@ -141,8 +216,9 @@ machine (discovering, parsing, booting, dispatching, done). See the
 
 ## Provider abstraction
 
-The `ProviderInstance` interface (`src/provider.ts`) defines a four-method
-lifecycle that decouples the pipeline from any specific AI runtime:
+The `ProviderInstance` interface (`src/provider.ts`) defines a three-method
+contract (plus a `name` property) that decouples the pipeline from any specific
+AI runtime:
 
 ```mermaid
 sequenceDiagram
@@ -181,7 +257,7 @@ Currently two backends are implemented:
 
 | Backend | SDK | Session model | Default connection |
 |---------|-----|---------------|-------------------|
-| OpenCode | `@opencode-ai/sdk` v1.2.10 | Server-side (SDK manages sessions) | Local server on `127.0.0.1:4096` |
+| OpenCode | `@opencode-ai/sdk` v1.2.10 | Server-side (SDK manages sessions) | Spawns a local server via `createOpencode()` |
 | Copilot | `@github/copilot-sdk` v0.1.0 | Client-side (`Map<string, CopilotSession>`) | Auto-discovers Copilot CLI |
 
 Both support `--server-url` to connect to an already-running server instead of
@@ -212,14 +288,34 @@ Sessions share the filesystem and environment variables but have isolated
 conversation histories. See the
 [Dispatcher documentation](planning-and-dispatch/dispatcher.md).
 
-### Compile-time provider registry
+### Compile-time registries (providers, agents, fetchers)
 
-Providers are registered in a static `Record<ProviderName, BootFn>` map rather
-than a runtime plugin system. The `ProviderName` type is a string literal union
-(`"opencode" | "copilot"`), giving compile-time exhaustiveness checks and
-eliminating the need for runtime discovery, dynamic imports, or a plugin API.
-The trade-off is that adding a new provider requires a code change. See the
-[Adding a Provider guide](provider-system/adding-a-provider.md).
+Three subsystems use the same registry pattern: a static `Record<Name, BootFn>`
+map with compile-time string literal union keys and no runtime plugin discovery.
+
+| Registry | Key type | Location |
+|----------|----------|----------|
+| Providers | `ProviderName` (`"opencode" \| "copilot"`) | `src/providers/index.ts` |
+| Agents | `AgentName` (`"planner" \| "orchestrator"`) | `src/agents/index.ts` |
+| Issue fetchers | `IssueSourceName` (`"github" \| "azdevops"`) | `src/issue-fetchers/index.ts` |
+
+Each registry exports a `boot` or `get` function and a list of valid names for
+CLI validation. Adding a new implementation requires a code change (new file,
+import, map entry, union member) but gives exhaustiveness checks at compile
+time. See the [Adding a Provider guide](provider-system/adding-a-provider.md)
+and [Adding a Fetcher guide](issue-fetching/adding-a-fetcher.md).
+
+### CLI-as-API for external tools
+
+Issue fetchers and git operations communicate with external tools by shelling
+out to CLI programs (`gh`, `az`, `git`) via `execFile` rather than using HTTP
+APIs or SDKs. This simplifies authentication -- users authenticate once via
+`gh auth login` or `az login` -- but introduces runtime dependencies on
+external tools being installed and on PATH. There are no pre-checks for tool
+availability, no subprocess timeouts, and errors from missing tools surface as
+`ENOENT` exceptions. See the
+[Issue Fetching overview](issue-fetching/overview.md) and
+[Git documentation](planning-and-dispatch/git.md).
 
 ### Context filtering for planner agents
 
@@ -290,7 +386,8 @@ known gaps at the pipeline level:
 
 ### Authentication and secrets
 
-Authentication is provider-specific and managed entirely by the underlying SDKs:
+Authentication is provider-specific and managed entirely by the underlying SDKs
+and CLI tools:
 
 - **OpenCode** connects to a local server process; no explicit credentials are
   passed by dispatch-tasks. The LLM provider configuration lives in the
@@ -302,7 +399,35 @@ Authentication is provider-specific and managed entirely by the underlying SDKs:
   Token rotation is the user's responsibility.
   See the [Copilot backend documentation](provider-system/copilot-backend.md).
 
-dispatch-tasks does not manage, store, or rotate secrets itself.
+- **GitHub CLI (`gh`)** authenticates via `gh auth login`; credentials are
+  stored by the `gh` tool itself and are not managed by dispatch-tasks.
+  See the [GitHub fetcher documentation](issue-fetching/github-fetcher.md).
+
+- **Azure CLI (`az`)** authenticates via `az login`; the `--org` and
+  `--project` flags (or `az` defaults) determine the target organization.
+  See the [Azure DevOps fetcher documentation](issue-fetching/azdevops-fetcher.md).
+
+dispatch-tasks does not manage, store, or rotate secrets itself. All credential
+lifecycle management is delegated to the external tools and SDKs.
+
+### External tool availability
+
+dispatch-tasks depends on several CLI tools at runtime, but performs no
+pre-flight checks for their presence. A missing tool surfaces as an `ENOENT`
+error from Node's `execFile`:
+
+| Tool | Required when | What fails |
+|------|--------------|------------|
+| `git` | Always (dispatch mode commits) | `commitTask()` throws |
+| `gh` | `--spec` with GitHub issues | `github.fetch()` throws |
+| `az` + `azure-devops` extension | `--spec` with Azure DevOps | `azdevops.fetch()` throws |
+| OpenCode CLI or server | `--provider opencode` | `bootProvider()` throws |
+| Copilot CLI | `--provider copilot` | `client.start()` throws |
+
+There are no subprocess timeouts on any `execFile` call. A hung `gh`, `az`, or
+`git` process will block the pipeline indefinitely. See the
+[Issue Fetching integrations](issue-fetching/integrations.md) and
+[CLI Orchestration integrations](cli-orchestration/integrations.md).
 
 ### Monitoring and observability
 
@@ -332,6 +457,17 @@ The parser normalizes CRLF to LF during both `parseTaskContent` and
 regardless of the original file's style. All file I/O assumes UTF-8 encoding
 with no BOM handling.
 See the [Markdown Syntax reference](task-parsing/markdown-syntax.md).
+
+### Issue source auto-detection
+
+When `--source` is not explicitly provided, the spec generator inspects the
+`origin` git remote URL and matches it against a first-match-wins pattern list
+(`github.com` → GitHub, `dev.azure.com` / `visualstudio.com` → Azure DevOps).
+Auto-detection only checks the `origin` remote, so repositories with multiple
+remotes or non-standard hostnames (e.g., GitHub Enterprise) may require
+explicit `--source`. Both SSH and HTTPS remote URL formats are matched. See the
+[Issue Fetching overview](issue-fetching/overview.md) and
+[Spec Generation overview](spec-generation/overview.md).
 
 ### Shared data model
 
@@ -373,6 +509,11 @@ See the [Shared Types overview](shared-types/overview.md) and the
 - **git** -- must be installed and on PATH. Used via `execFile` (no shell).
 - **OpenCode CLI** or **Copilot CLI** -- at least one must be installed
   depending on the chosen provider.
+- **GitHub CLI (`gh`)** -- required for `--spec` mode with GitHub issues.
+  See [Issue Fetching](issue-fetching/overview.md).
+- **Azure CLI (`az`) with azure-devops extension** -- required for `--spec`
+  mode with Azure DevOps work items.
+  See [Issue Fetching](issue-fetching/overview.md).
 
 ## Component index
 
@@ -414,6 +555,25 @@ The strategy pattern that decouples the pipeline from specific AI runtimes.
 - [OpenCode backend](provider-system/opencode-backend.md)
 - [Copilot backend](provider-system/copilot-backend.md)
 - [Adding a provider](provider-system/adding-a-provider.md)
+
+### [Issue Fetching](issue-fetching/overview.md)
+
+The data-ingestion layer for the `--spec` pipeline. Retrieves issues and work
+items from external trackers and normalizes them into a common interface.
+
+- [GitHub fetcher](issue-fetching/github-fetcher.md)
+- [Azure DevOps fetcher](issue-fetching/azdevops-fetcher.md)
+- [Integrations & troubleshooting](issue-fetching/integrations.md)
+- [Adding a fetcher](issue-fetching/adding-a-fetcher.md)
+
+### [Spec Generation](spec-generation/overview.md)
+
+The pipeline that converts issue tracker items into high-level markdown spec
+files. Uses issue fetchers for data ingestion and the AI provider for
+codebase-aware spec authoring.
+
+- [Spec generation overview](spec-generation/overview.md)
+- [Integrations & troubleshooting](spec-generation/integrations.md)
 
 ### [Shared Interfaces & Utilities](shared-types/overview.md)
 

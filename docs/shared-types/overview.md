@@ -42,14 +42,14 @@ graph TD
 
 ## Detailed documentation
 
-- [Logger](./logger.md) — Structured terminal output with chalk styling
-- [Parser utilities](./parser.md) — Task extraction, context filtering, and completion marking
-- [Provider interface](./provider.md) — AI agent runtime abstraction and lifecycle contract
-- [Integrations reference](./integrations.md) — chalk and Node.js fs/promises operational details
+- [Logger](./logger.md) -- Structured terminal output with chalk styling
+- [Parser utilities](./parser.md) -- Task extraction, context filtering, and completion marking
+- [Provider interface](./provider.md) -- AI agent runtime abstraction and lifecycle contract
+- [Integrations reference](./integrations.md) -- chalk and Node.js fs/promises operational details
 
 ## Related documentation
 
-- [CLI & Orchestration](../cli-orchestration/overview.md) — How the CLI and orchestrator consume these types
-- [Task Parsing & Markdown](../task-parsing/overview.md) — In-depth parser behavior and test coverage
-- [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) — How planner and dispatcher use the provider and parser contracts
-- [Provider Abstraction & Backends](../provider-system/provider-overview.md) — Concrete implementations of the ProviderInstance interface
+- [CLI & Orchestration](../cli-orchestration/overview.md) -- How the CLI and orchestrator consume these types
+- [Task Parsing & Markdown](../task-parsing/overview.md) -- In-depth parser behavior and test coverage
+- [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) -- How planner and dispatcher use the provider and parser contracts
+- [Provider Abstraction & Backends](../provider-system/provider-overview.md) -- Concrete implementations of the ProviderInstance interface

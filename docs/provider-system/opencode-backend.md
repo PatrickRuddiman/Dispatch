@@ -183,7 +183,7 @@ The OpenCode server also exposes a Server-Sent Events stream at
 [OpenCode server docs](https://opencode.ai/docs/server/) for the full API
 reference.
 
-## External documentation
+## External references
 
 - [OpenCode SDK reference](https://opencode.ai/docs/sdk/) -- full SDK API
   documentation including all session and prompt methods

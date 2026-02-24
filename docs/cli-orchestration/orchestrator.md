@@ -258,19 +258,19 @@ Returned from `orchestrate()` to the CLI:
 | `skipped` | `number` | Tasks skipped (dry-run mode only) |
 | `results` | `DispatchResult[]` | Per-task result objects |
 
-## Related pages
+## Related documentation
 
-- [CLI](cli.md) — how options are parsed and exit codes are determined
-- [Terminal UI](tui.md) — how pipeline phases drive TUI rendering
-- [Logger](../shared-types/logger.md) — output in dry-run mode
-- [Integrations](integrations.md) — glob file discovery details
-- [Task Parsing & Markdown](../task-parsing/overview.md) — `parseTaskFile()` and
+- [CLI](cli.md) -- how options are parsed and exit codes are determined
+- [Terminal UI](tui.md) -- how pipeline phases drive TUI rendering
+- [Logger](../shared-types/logger.md) -- output in dry-run mode
+- [Integrations](integrations.md) -- glob file discovery details
+- [Task Parsing & Markdown](../task-parsing/overview.md) -- `parseTaskFile()` and
   `markTaskComplete()` behavior
-- [API Reference (parser)](../task-parsing/api-reference.md) — detailed function
+- [API Reference (parser)](../task-parsing/api-reference.md) -- detailed function
   signatures for parser functions called by the orchestrator
-- [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) — `planTask()`,
+- [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) -- `planTask()`,
   `dispatchTask()`, and `commitTask()` internals
-- [Provider Abstraction & Backends](../provider-system/provider-overview.md) — `bootProvider()`
+- [Provider Abstraction & Backends](../provider-system/provider-overview.md) -- `bootProvider()`
   lifecycle
-- [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) — concurrent
+- [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) -- concurrent
   write safety concerns for `markTaskComplete()`

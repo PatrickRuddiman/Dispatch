@@ -353,7 +353,7 @@ cleanup. This can leave:
 See [TUI — Signal handling](tui.md#signal-handling) for a recommended
 implementation.
 
-## Related pages
+## Related documentation
 
 - [CLI](cli.md) — argument parsing and exit codes
 - [Orchestrator](orchestrator.md) — glob usage and provider boot

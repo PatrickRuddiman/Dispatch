@@ -2,7 +2,8 @@
 
 The CLI entry point (`src/cli.ts`) provides a hand-rolled argument parser that
 validates user input, displays help and version information, and delegates
-execution to the [orchestrator](orchestrator.md).
+execution to either the [orchestrator](orchestrator.md) (dispatch mode) or the
+[spec generator](../spec-generation/overview.md) (spec mode).
 
 ## What it does
 
@@ -10,9 +11,13 @@ The CLI is the user-facing surface of `dispatch`. It:
 
 1. Parses `process.argv` into a typed `CliArgs` object.
 2. Handles `--help` and `--version` early-exit paths.
-3. Validates required arguments (the glob pattern is mandatory).
-4. Passes a `DispatchOptions` object to the [orchestrator](orchestrator.md).
-5. Translates the orchestrator's [`DispatchSummary`](orchestrator.md#dispatchsummary) into a POSIX exit code.
+3. Determines the operating mode: **spec mode** (when `--spec` is present) or
+   **dispatch mode** (when a glob pattern is provided).
+4. In spec mode, passes a `SpecOptions` object to
+   [`generateSpecs()`](../spec-generation/overview.md).
+5. In dispatch mode, validates the glob pattern (mandatory) and passes a
+   `DispatchOptions` object to the [orchestrator](orchestrator.md).
+6. Translates the result summary into a POSIX exit code.
 
 ## Why a custom parser instead of commander/yargs?
 
@@ -28,8 +33,8 @@ The likely reasons are:
   The only runtime dependencies are `chalk`, `glob`, and the two provider SDKs.
   Adding a CLI framework would add another dependency (and its transitive
   dependencies) for a relatively simple argument surface.
-- **Small option set**: Dispatch has only 8 options. A hand-rolled parser for
-  this surface area is straightforward and fits in ~60 lines.
+- **Small option set**: Dispatch has 13 options across two modes. A hand-rolled
+  parser for this surface area is straightforward and fits in ~80 lines.
 - **Full control**: The parser can exit immediately with targeted error messages
   (e.g., provider validation against [`PROVIDER_NAMES`](../provider-system/provider-overview.md#the-provider-registry)) without mapping through
   a framework's validation API.
@@ -58,6 +63,8 @@ checks for `--server-url` and `--cwd`.
 
 ## Options reference
 
+### Dispatch mode options
+
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `<glob>` | string (positional) | *required* | Glob pattern matching markdown task files |
@@ -69,6 +76,35 @@ checks for `--server-url` and `--cwd`.
 | `--cwd <dir>` | string | `process.cwd()` | Working directory for file discovery and agent execution |
 | `-h`, `--help` | boolean | `false` | Show usage information |
 | `-v`, `--version` | boolean | `false` | Show version string |
+
+### Spec mode options
+
+Spec mode is activated by passing `--spec`. When active, the glob pattern is
+not required and the dispatch-specific flags (`--dry-run`, `--no-plan`,
+`--concurrency`) are ignored.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `--spec <ids>` | string | *none* | Comma-separated issue or work-item numbers (e.g., `42,43,44`). Activates spec mode. |
+| `--source <name>` | string | *auto-detected* | Issue source: `github` or `azdevops`. Auto-detected from `git remote get-url origin` if omitted. See [issue source detection](../spec-generation/overview.md). |
+| `--org <url>` | string | *none* | Azure DevOps organization URL (e.g., `https://dev.azure.com/myorg`). Required when `--source azdevops`. |
+| `--project <name>` | string | *none* | Azure DevOps project name. Required when `--source azdevops`. |
+| `--output-dir <dir>` | string | `.dispatch/specs` | Output directory for generated spec files. Resolved to an absolute path. Created automatically if it does not exist. |
+| `--provider <name>` | string | `"opencode"` | AI agent backend (shared with dispatch mode) |
+| `--server-url <url>` | string | *none* | Connect to a running provider server (shared with dispatch mode) |
+
+#### Spec mode validation
+
+The `--source` flag is validated against `ISSUE_SOURCE_NAMES` (currently
+`["github", "azdevops"]`). An unknown value exits with code `1` and a
+descriptive error message (`src/cli.ts:117-122`).
+
+When `--source` is omitted, auto-detection runs `git remote get-url origin` and
+matches the output against regex patterns for `github.com` (SSH and HTTPS) and
+`dev.azure.com` / `*.visualstudio.com` (SSH and HTTPS). If no pattern matches,
+the pipeline aborts with an error suggesting `--source` be specified explicitly.
+See the [Spec Generation overview](../spec-generation/overview.md) for the
+full detection logic.
 
 ## The `--server-url` option
 
@@ -93,7 +129,8 @@ process and manages its lifecycle internally.
 
 ## Exit code contract
 
-The CLI uses a binary exit code scheme (`src/cli.ts:148`):
+The CLI uses a binary exit code scheme that applies to both dispatch mode
+(`src/cli.ts:216`) and spec mode (`src/cli.ts:194`):
 
 | Exit code | Meaning |
 |-----------|---------|
@@ -178,7 +215,13 @@ flowchart TD
     C -->|Yes| D["print HELP, exit 0"]
     C -->|No| E{version?}
     E -->|Yes| F["print version, exit 0"]
-    E -->|No| G{pattern?}
+    E -->|No| S{"--spec?"}
+    S -->|Yes| T["generateSpecs(opts)"]
+    T --> U["SpecSummary"]
+    U --> V{"summary.failed > 0?"}
+    V -->|Yes| W["exit 1"]
+    V -->|No| X["exit 0"]
+    S -->|No| G{pattern?}
     G -->|missing| H["log error, exit 1"]
     G -->|present| I["orchestrate(options)"]
     I --> J["DispatchSummary"]
@@ -188,16 +231,25 @@ flowchart TD
     B -.->|validation error| N["log.error(), exit 1"]
 ```
 
+The key branching point is at `src/cli.ts:182`: if `args.spec` is truthy, the
+CLI enters spec mode and calls `generateSpecs()` from `src/spec-generator.ts`.
+Otherwise, it falls through to dispatch mode which requires the glob pattern.
+Both modes share the same exit code contract (see below).
+
 ## Related documentation
 
-- [Orchestrator pipeline](orchestrator.md) — what happens after the CLI
-  delegates to `orchestrate()`
-- [Terminal UI](tui.md) — real-time dashboard rendering during dispatch
-- [Integrations](integrations.md) — tsup build configuration, chalk color
+- [Orchestrator pipeline](orchestrator.md) -- what happens after the CLI
+  delegates to `orchestrate()` in dispatch mode
+- [Spec Generation](../spec-generation/overview.md) -- the full spec generation
+  pipeline invoked by `--spec` mode
+- [Issue Fetching](../issue-fetching/overview.md) -- how issues are retrieved
+  from GitHub and Azure DevOps for spec generation
+- [Terminal UI](tui.md) -- real-time dashboard rendering during dispatch
+- [Integrations](integrations.md) -- tsup build configuration, chalk color
   handling
-- [Provider Abstraction & Backends](../provider-system/provider-overview.md) — provider boot
+- [Provider Abstraction & Backends](../provider-system/provider-overview.md) -- provider boot
   process and server-url semantics
-- [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) — planner,
+- [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) -- planner,
   dispatcher, and git operations that the orchestrator coordinates
-- [Task Parsing & Markdown](../task-parsing/overview.md) — how markdown task
+- [Task Parsing & Markdown](../task-parsing/overview.md) -- how markdown task
   files are parsed and mutated

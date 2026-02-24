@@ -6,14 +6,6 @@ markdown files containing GitHub-style checkbox syntax, extracts structured
 by mutating the source file. Every other module in the pipeline depends on these
 types and functions.
 
-## Why it exists
-
-Dispatch uses plain markdown files as the source of truth for work items. This
-design choice means task files are human-readable, version-controllable, and
-editable with any text editor. The parser bridges the gap between this
-human-friendly format and the structured data that the [orchestrator](../cli-orchestration/orchestrator.md), [planner](../planning-and-dispatch/planner.md),
-[dispatcher](../planning-and-dispatch/dispatcher.md), [TUI](../cli-orchestration/tui.md), and [git](../planning-and-dispatch/git.md) modules require.
-
 ## What it does
 
 The parser module (`src/parser.ts`) provides four core capabilities:
@@ -23,6 +15,14 @@ The parser module (`src/parser.ts`) provides four core capabilities:
 3. **Build filtered context** for the planner agent, stripping sibling tasks
 4. **Mark tasks complete** by performing targeted line-level mutation of the
    source file
+
+## Why it exists
+
+Dispatch uses plain markdown files as the source of truth for work items. This
+design choice means task files are human-readable, version-controllable, and
+editable with any text editor. The parser bridges the gap between this
+human-friendly format and the structured data that the [orchestrator](../cli-orchestration/orchestrator.md), [planner](../planning-and-dispatch/planner.md),
+[dispatcher](../planning-and-dispatch/dispatcher.md), [TUI](../cli-orchestration/tui.md), and [git](../planning-and-dispatch/git.md) modules require.
 
 ## Data flow through the pipeline
 

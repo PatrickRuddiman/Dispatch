@@ -220,7 +220,7 @@ export COPILOT_CLI_PATH=/opt/copilot/bin/copilot
 dispatch "tasks/**/*.md" --provider copilot
 ```
 
-## External documentation
+## External references
 
 - [Copilot SDK quickstart](https://docs.github.com/en/copilot/how-tos/copilot-sdk/sdk-getting-started) --
   getting started with `@github/copilot-sdk`

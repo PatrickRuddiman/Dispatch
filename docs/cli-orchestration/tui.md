@@ -294,11 +294,11 @@ Union type for per-task states: `"pending" | "planning" | "running" | "done" | "
 | `serverUrl` | `string?` | Provider server URL if connecting to existing server |
 | `provider` | `string?` | Active provider name for display |
 
-## Related pages
+## Related documentation
 
-- [Orchestrator pipeline](orchestrator.md) — how the orchestrator drives
+- [Orchestrator pipeline](orchestrator.md) -- how the orchestrator drives
   TUI state transitions
-- [CLI](cli.md) — argument parsing and exit codes
-- [Logger](../shared-types/logger.md) — alternative output for non-TUI contexts
-- [Integrations](integrations.md) — chalk color detection and ANSI behavior
-- [Task Parsing Overview](../task-parsing/overview.md) — the `Task` type displayed by the TUI
+- [CLI](cli.md) -- argument parsing and exit codes
+- [Logger](../shared-types/logger.md) -- alternative output for non-TUI contexts
+- [Integrations](integrations.md) -- chalk color detection and ANSI behavior
+- [Task Parsing Overview](../task-parsing/overview.md) -- the `Task` type displayed by the TUI
