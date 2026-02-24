@@ -1,15 +1,19 @@
 /**
- * Plan generator — fetches issue details from an issue tracker, sends them
+ * Spec generator — fetches issue details from an issue tracker, sends them
  * to the AI provider along with instructions to explore the codebase and
- * research the implementation, then writes comprehensive markdown task
- * files that can be consumed by the main `dispatch` command.
+ * research the approach, then writes high-level markdown spec files that
+ * can be consumed by the main `dispatch` command.
  *
  * Pipeline:
  *   1. Detect or validate the issue source (GitHub, Azure DevOps)
  *   2. Fetch each issue's details
  *   3. Boot the AI provider
- *   4. For each issue, prompt the AI to produce a task file
- *   5. Write task files to the output directory
+ *   4. For each issue, prompt the AI to produce a spec file
+ *   5. Write spec files to the output directory
+ *
+ * The generated specs stay high-level (WHAT, WHY, HOW) because the
+ * planner agent in the dispatch pipeline handles detailed, line-level
+ * implementation planning for each individual task.
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
@@ -21,7 +25,7 @@ import type { ProviderName } from "./provider.js";
 import { bootProvider } from "./providers/index.js";
 import { log } from "./logger.js";
 
-export interface PlanOptions {
+export interface SpecOptions {
   /** Comma-separated issue numbers */
   issues: string;
   /** Explicit issue source override (auto-detected if omitted) */
@@ -32,7 +36,7 @@ export interface PlanOptions {
   serverUrl?: string;
   /** Working directory */
   cwd: string;
-  /** Output directory for plan files (default: .dispatch/plans) */
+  /** Output directory for spec files (default: .dispatch/specs) */
   outputDir?: string;
   /** Azure DevOps organization URL */
   org?: string;
@@ -40,27 +44,27 @@ export interface PlanOptions {
   project?: string;
 }
 
-export interface PlanSummary {
+export interface SpecSummary {
   /** Total issues requested */
   total: number;
-  /** Successfully generated plan files */
+  /** Successfully generated spec files */
   generated: number;
   /** Failed to generate */
   failed: number;
-  /** Paths of generated plan files */
+  /** Paths of generated spec files */
   files: string[];
 }
 
 /**
- * Main entry point for the --plan feature.
+ * Main entry point for the --spec feature.
  */
-export async function generatePlans(opts: PlanOptions): Promise<PlanSummary> {
+export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
   const {
     issues,
     provider,
     serverUrl,
     cwd,
-    outputDir = join(cwd, ".dispatch", "plans"),
+    outputDir = join(cwd, ".dispatch", "specs"),
     org,
     project,
   } = opts;
@@ -72,7 +76,7 @@ export async function generatePlans(opts: PlanOptions): Promise<PlanSummary> {
     .filter(Boolean);
 
   if (issueNumbers.length === 0) {
-    log.error("No issue numbers provided. Use --plan 1,2,3");
+    log.error("No issue numbers provided. Use --spec 1,2,3");
     return { total: 0, generated: 0, failed: 0, files: [] };
   }
 
@@ -116,7 +120,7 @@ export async function generatePlans(opts: PlanOptions): Promise<PlanSummary> {
 
   const validIssues = issueDetails.filter((i) => i.details !== null);
   if (validIssues.length === 0) {
-    log.error("No issues could be fetched. Aborting plan generation.");
+    log.error("No issues could be fetched. Aborting spec generation.");
     return { total: issueNumbers.length, generated: 0, failed: issueNumbers.length, files: [] };
   }
 
@@ -124,7 +128,7 @@ export async function generatePlans(opts: PlanOptions): Promise<PlanSummary> {
   log.info(`Booting ${provider} provider...`);
   const instance = await bootProvider(provider, { url: serverUrl, cwd });
 
-  // ── Generate plan for each issue ────────────────────────────
+  // ── Generate spec for each issue ────────────────────────────
   await mkdir(outputDir, { recursive: true });
 
   const generatedFiles: string[] = [];
@@ -132,9 +136,9 @@ export async function generatePlans(opts: PlanOptions): Promise<PlanSummary> {
 
   for (const { id, details } of validIssues) {
     try {
-      log.info(`Generating plan for #${id}: ${details!.title}...`);
+      log.info(`Generating spec for #${id}: ${details!.title}...`);
 
-      const plan = await generateSinglePlan(instance, details!, cwd);
+      const spec = await generateSingleSpec(instance, details!, cwd);
 
       // Sanitize filename
       const slug = details!.title
@@ -146,13 +150,13 @@ export async function generatePlans(opts: PlanOptions): Promise<PlanSummary> {
       const filename = `${id}-${slug}.md`;
       const filepath = join(outputDir, filename);
 
-      await writeFile(filepath, plan, "utf-8");
+      await writeFile(filepath, spec, "utf-8");
       generatedFiles.push(filepath);
 
-      log.success(`Plan written: ${filepath}`);
+      log.success(`Spec written: ${filepath}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error(`Failed to generate plan for #${id}: ${message}`);
+      log.error(`Failed to generate spec for #${id}: ${message}`);
       failed++;
     }
   }
@@ -161,11 +165,11 @@ export async function generatePlans(opts: PlanOptions): Promise<PlanSummary> {
   await instance.cleanup();
 
   log.info(
-    `Plan generation complete: ${generatedFiles.length} generated, ${failed} failed`
+    `Spec generation complete: ${generatedFiles.length} generated, ${failed} failed`
   );
 
   if (generatedFiles.length > 0) {
-    log.dim(`\n  Run these plans with:`);
+    log.dim(`\n  Run these specs with:`);
     log.dim(`    dispatch "${outputDir}/*.md"\n`);
   }
 
@@ -178,25 +182,25 @@ export async function generatePlans(opts: PlanOptions): Promise<PlanSummary> {
 }
 
 /**
- * Generate a single plan file by prompting the AI to explore the codebase
+ * Generate a single spec file by prompting the AI to explore the codebase
  * and produce a high-level task list that explains WHAT, WHY, and HOW.
  *
  * The generated file intentionally stays at a strategic level — a separate
  * planner agent runs during `dispatch` to produce detailed, line-level
  * implementation plans for each individual task.
  */
-async function generateSinglePlan(
+async function generateSingleSpec(
   instance: ProviderInstance,
   issue: IssueDetails,
   cwd: string
 ): Promise<string> {
   const sessionId = await instance.createSession();
-  const prompt = buildPlanPrompt(issue, cwd);
+  const prompt = buildSpecPrompt(issue, cwd);
 
   const response = await instance.prompt(sessionId, prompt);
 
   if (!response?.trim()) {
-    throw new Error("AI returned an empty plan");
+    throw new Error("AI returned an empty spec");
   }
 
   return response;
@@ -204,7 +208,7 @@ async function generateSinglePlan(
 
 /**
  * Build the prompt that instructs the AI to explore the codebase,
- * understand the issue, and produce a high-level markdown task file.
+ * understand the issue, and produce a high-level markdown spec file.
  *
  * The output emphasises WHAT needs to change, WHY it needs to change,
  * and HOW it fits into the existing project — but deliberately avoids
@@ -212,13 +216,13 @@ async function generateSinglePlan(
  * A dedicated planner agent handles that granularity per-task at
  * dispatch time.
  */
-function buildPlanPrompt(issue: IssueDetails, cwd: string): string {
+function buildSpecPrompt(issue: IssueDetails, cwd: string): string {
   const sections: string[] = [
-    `You are a **planning agent**. Your job is to explore the codebase, understand the issue below, and produce a high-level **markdown task file** that will drive an automated implementation pipeline.`,
+    `You are a **spec agent**. Your job is to explore the codebase, understand the issue below, and produce a high-level **markdown spec file** that will drive an automated implementation pipeline.`,
     ``,
     `**Important:** This file will be consumed by a two-stage pipeline:`,
     `1. A **planner agent** reads each task together with the prose context in this file, then explores the codebase to produce a detailed, line-level implementation plan.`,
-    `2. An **executor agent** follows that detailed plan to make the actual code changes.`,
+    `2. A **coder agent** follows that detailed plan to make the actual code changes.`,
     ``,
     `Because the planner agent handles low-level details, your output must stay **high-level and strategic**. Focus on the WHAT, WHY, and HOW — not exact code or line numbers.`,
     ``,
@@ -257,7 +261,7 @@ function buildPlanPrompt(issue: IssueDetails, cwd: string): string {
     ``,
     `## Instructions`,
     ``,
-    `1. **Explore the codebase** — read relevant files, search for symbols, understand the project structure, language, frameworks, conventions, and patterns. Identify the tech stack (languages, package managers, frameworks, test runners) so your plan aligns with the project's actual standards.`,
+    `1. **Explore the codebase** — read relevant files, search for symbols, understand the project structure, language, frameworks, conventions, and patterns. Identify the tech stack (languages, package managers, frameworks, test runners) so your spec aligns with the project's actual standards.`,
     ``,
     `2. **Understand the issue** — analyze the issue description, acceptance criteria, and discussion comments to fully understand what needs to be done and why.`,
     ``,
@@ -265,7 +269,7 @@ function buildPlanPrompt(issue: IssueDetails, cwd: string): string {
     ``,
     `4. **Identify integration points** — determine which existing modules, interfaces, patterns, and conventions the implementation must align with. Note the key files and modules involved, but do NOT prescribe exact code changes — the planner agent will handle that.`,
     ``,
-    `5. **DO NOT make any changes** — you are only planning, not executing.`,
+    `5. **DO NOT make any changes** — you are only producing a spec, not implementing.`,
     ``,
     `## Output Format`,
     ``,
@@ -318,7 +322,7 @@ function buildPlanPrompt(issue: IssueDetails, cwd: string): string {
     `## Key Guidelines`,
     ``,
     `- **Stay high-level.** Do NOT include code snippets, exact line numbers, diffs, or step-by-step coding instructions. A dedicated planner agent will produce those details for each task at execution time.`,
-    `- **Respect the project's stack.** Your plan must align with the languages, frameworks, libraries, test tools, and conventions already in use. Never suggest technologies that conflict with the existing project.`,
+    `- **Respect the project's stack.** Your spec must align with the languages, frameworks, libraries, test tools, and conventions already in use. Never suggest technologies that conflict with the existing project.`,
     `- **Explain WHAT, WHY, and HOW (strategically).** Each task should say what needs to happen, why it's needed, and which part of the codebase it touches — but leave the tactical "how" to the planner agent.`,
     `- **Detail integration points.** The prose sections (Context, Approach, Integration Points) are critical — they tell the planner agent where to look and what constraints to respect.`,
     `- **Keep tasks atomic and ordered.** Each \`- [ ]\` task must be a single, clear unit of work. Order them so dependencies come first.`,

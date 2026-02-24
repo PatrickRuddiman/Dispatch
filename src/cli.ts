@@ -5,15 +5,15 @@
  *   dispatch <glob>              Dispatch tasks matching the glob pattern
  *   dispatch tasks/**\/*.md       Common usage — process task files
  *
- * Plan mode:
- *   dispatch --plan 1,2,3        Generate task files from issues
+ * Spec mode:
+ *   dispatch --spec 1,2,3        Generate spec files from issues
  *
  * Options:
- *   --plan <ids>        Generate plans from issue/work-item numbers (comma-separated)
+ *   --spec <ids>        Generate specs from issue/work-item numbers (comma-separated)
  *   --source <name>     Issue source: github, azdevops (auto-detected from remote)
  *   --org <url>         Azure DevOps organization URL
  *   --project <name>    Azure DevOps project name
- *   --output-dir <dir>  Output directory for generated plans (default: .dispatch/plans)
+ *   --output-dir <dir>  Output directory for generated specs (default: .dispatch/specs)
  *   --dry-run           List tasks without executing
  *   --concurrency N     Max parallel dispatches (default: 1)
  *   --provider NAME     Agent backend: opencode, copilot (default: opencode)
@@ -23,7 +23,7 @@
 
 import { resolve } from "node:path";
 import { bootOrchestrator } from "./agents/index.js";
-import { generatePlans } from "./plan-generator.js";
+import { generateSpecs } from "./spec-generator.js";
 import { log } from "./logger.js";
 import type { ProviderName } from "./provider.js";
 import type { IssueSourceName } from "./issue-fetcher.js";
@@ -35,7 +35,7 @@ const HELP = `
 
   Usage:
     dispatch <glob>                  Dispatch tasks from markdown files
-    dispatch --plan <ids>            Generate plans from issue numbers
+    dispatch --spec <ids>            Generate spec files from issues
 
   Dispatch options:
     --dry-run              List tasks without dispatching
@@ -45,12 +45,12 @@ const HELP = `
     --server-url <url>     URL of a running provider server
     --cwd <dir>            Working directory (default: cwd)
 
-  Plan options:
-    --plan <ids>           Comma-separated issue/work-item numbers
+  Spec options:
+    --spec <ids>           Comma-separated issue/work-item numbers
     --source <name>        Issue source: ${ISSUE_SOURCE_NAMES.join(", ")} (auto-detected from git remote)
     --org <url>            Azure DevOps organization URL
     --project <name>       Azure DevOps project name
-    --output-dir <dir>     Output directory for plans (default: .dispatch/plans)
+    --output-dir <dir>     Output directory for specs (default: .dispatch/specs)
 
   General:
     -h, --help             Show this help
@@ -61,9 +61,9 @@ const HELP = `
     dispatch "tasks/**/*.md" --provider copilot
     dispatch "tasks/**/*.md" --dry-run
     dispatch "tasks/**/*.md" --concurrency 3
-    dispatch --plan 42,43,44
-    dispatch --plan 42,43 --source github --provider copilot
-    dispatch --plan 100,200 --source azdevops --org https://dev.azure.com/myorg --project MyProject
+    dispatch --spec 42,43,44
+    dispatch --spec 42,43 --source github --provider copilot
+    dispatch --spec 100,200 --source azdevops --org https://dev.azure.com/myorg --project MyProject
 `.trimStart();
 
 interface CliArgs {
@@ -76,8 +76,8 @@ interface CliArgs {
   cwd: string;
   help: boolean;
   version: boolean;
-  // Plan mode
-  plan?: string;
+  // Spec mode
+  spec?: string;
   issueSource?: IssueSourceName;
   org?: string;
   project?: string;
@@ -108,9 +108,9 @@ function parseArgs(argv: string[]): CliArgs {
       args.dryRun = true;
     } else if (arg === "--no-plan") {
       args.noPlan = true;
-    } else if (arg === "--plan") {
+    } else if (arg === "--spec") {
       i++;
-      args.plan = argv[i];
+      args.spec = argv[i];
     } else if (arg === "--source") {
       i++;
       const val = argv[i];
@@ -178,10 +178,10 @@ async function main() {
     process.exit(0);
   }
 
-  // ── Plan mode ──────────────────────────────────────────────
-  if (args.plan) {
-    const summary = await generatePlans({
-      issues: args.plan,
+  // ── Spec mode ──────────────────────────────────────────────
+  if (args.spec) {
+    const summary = await generateSpecs({
+      issues: args.spec,
       issueSource: args.issueSource,
       provider: args.provider,
       serverUrl: args.serverUrl,
@@ -198,7 +198,7 @@ async function main() {
   if (!args.pattern) {
     log.error("Missing glob pattern. Usage: dispatch <glob>");
     log.dim('  Example: dispatch "tasks/**/*.md"');
-    log.dim("  Or use:  dispatch --plan 1,2,3");
+    log.dim("  Or use:  dispatch --spec 1,2,3");
     process.exit(1);
   }
 
