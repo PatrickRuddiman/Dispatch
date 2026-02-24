@@ -22,7 +22,7 @@
  */
 
 import { resolve } from "node:path";
-import { orchestrate } from "./orchestrator.js";
+import { bootOrchestrator } from "./agents/index.js";
 import { generatePlans } from "./plan-generator.js";
 import { log } from "./logger.js";
 import type { ProviderName } from "./provider.js";
@@ -202,15 +202,16 @@ async function main() {
     process.exit(1);
   }
 
-  const summary = await orchestrate({
+  const orchestrator = await bootOrchestrator({ cwd: args.cwd });
+  const summary = await orchestrator.orchestrate({
     pattern: args.pattern,
-    cwd: args.cwd,
     concurrency: args.concurrency,
     dryRun: args.dryRun,
     noPlan: args.noPlan,
     provider: args.provider,
     serverUrl: args.serverUrl,
   });
+  await orchestrator.cleanup();
 
   process.exit(summary.failed > 0 ? 1 : 0);
 }
