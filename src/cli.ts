@@ -5,34 +5,54 @@
  *   dispatch <glob>              Dispatch tasks matching the glob pattern
  *   dispatch tasks/**\/*.md       Common usage — process task files
  *
+ * Plan mode:
+ *   dispatch --plan 1,2,3        Generate task files from issues
+ *
  * Options:
- *   --dry-run         List tasks without executing
- *   --concurrency N   Max parallel dispatches (default: 1)
- *   --provider NAME   Agent backend: opencode, copilot (default: opencode)
- *   --server-url URL  Connect to a running provider server
- *   --help            Show usage information
+ *   --plan <ids>        Generate plans from issue/work-item numbers (comma-separated)
+ *   --source <name>     Issue source: github, azdevops (auto-detected from remote)
+ *   --org <url>         Azure DevOps organization URL
+ *   --project <name>    Azure DevOps project name
+ *   --output-dir <dir>  Output directory for generated plans (default: .dispatch/plans)
+ *   --dry-run           List tasks without executing
+ *   --concurrency N     Max parallel dispatches (default: 1)
+ *   --provider NAME     Agent backend: opencode, copilot (default: opencode)
+ *   --server-url URL    Connect to a running provider server
+ *   --help              Show usage information
  */
 
 import { resolve } from "node:path";
 import { orchestrate } from "./orchestrator.js";
+import { generatePlans } from "./plan-generator.js";
 import { log } from "./logger.js";
 import type { ProviderName } from "./provider.js";
+import type { IssueSourceName } from "./issue-fetcher.js";
 import { PROVIDER_NAMES } from "./providers/index.js";
+import { ISSUE_SOURCE_NAMES } from "./issue-fetchers/index.js";
 
 const HELP = `
   dispatch — AI agent orchestration CLI
 
   Usage:
     dispatch <glob>                  Dispatch tasks from markdown files
-    dispatch tasks/**/*.md           Process all task files
+    dispatch --plan <ids>            Generate plans from issue numbers
 
-  Options:
+  Dispatch options:
     --dry-run              List tasks without dispatching
     --no-plan              Skip the planner agent, dispatch directly
     --concurrency <n>      Max parallel dispatches (default: 1)
     --provider <name>      Agent backend: ${PROVIDER_NAMES.join(", ")} (default: opencode)
     --server-url <url>     URL of a running provider server
     --cwd <dir>            Working directory (default: cwd)
+
+  Plan options:
+    --plan <ids>           Comma-separated issue/work-item numbers
+    --source <name>        Issue source: ${ISSUE_SOURCE_NAMES.join(", ")} (auto-detected from git remote)
+    --org <url>            Azure DevOps organization URL
+    --project <name>       Azure DevOps project name
+    --output-dir <dir>     Output directory for plans (default: .dispatch/plans)
+
+  General:
     -h, --help             Show this help
     -v, --version          Show version
 
@@ -41,7 +61,9 @@ const HELP = `
     dispatch "tasks/**/*.md" --provider copilot
     dispatch "tasks/**/*.md" --dry-run
     dispatch "tasks/**/*.md" --concurrency 3
-    dispatch "tasks/**/*.md" --server-url http://localhost:4096
+    dispatch --plan 42,43,44
+    dispatch --plan 42,43 --source github --provider copilot
+    dispatch --plan 100,200 --source azdevops --org https://dev.azure.com/myorg --project MyProject
 `.trimStart();
 
 interface CliArgs {
@@ -54,6 +76,12 @@ interface CliArgs {
   cwd: string;
   help: boolean;
   version: boolean;
+  // Plan mode
+  plan?: string;
+  issueSource?: IssueSourceName;
+  org?: string;
+  project?: string;
+  outputDir?: string;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -80,6 +108,28 @@ function parseArgs(argv: string[]): CliArgs {
       args.dryRun = true;
     } else if (arg === "--no-plan") {
       args.noPlan = true;
+    } else if (arg === "--plan") {
+      i++;
+      args.plan = argv[i];
+    } else if (arg === "--source") {
+      i++;
+      const val = argv[i];
+      if (!ISSUE_SOURCE_NAMES.includes(val as IssueSourceName)) {
+        log.error(
+          `Unknown issue source "${val}". Available: ${ISSUE_SOURCE_NAMES.join(", ")}`
+        );
+        process.exit(1);
+      }
+      args.issueSource = val as IssueSourceName;
+    } else if (arg === "--org") {
+      i++;
+      args.org = argv[i];
+    } else if (arg === "--project") {
+      i++;
+      args.project = argv[i];
+    } else if (arg === "--output-dir") {
+      i++;
+      args.outputDir = resolve(argv[i]);
     } else if (arg === "--concurrency") {
       i++;
       const val = parseInt(argv[i], 10);
@@ -124,14 +174,31 @@ async function main() {
   }
 
   if (args.version) {
-    // Read version from package.json at build time via tsup define
     console.log("dispatch v0.1.0");
     process.exit(0);
   }
 
+  // ── Plan mode ──────────────────────────────────────────────
+  if (args.plan) {
+    const summary = await generatePlans({
+      issues: args.plan,
+      issueSource: args.issueSource,
+      provider: args.provider,
+      serverUrl: args.serverUrl,
+      cwd: args.cwd,
+      outputDir: args.outputDir,
+      org: args.org,
+      project: args.project,
+    });
+
+    process.exit(summary.failed > 0 ? 1 : 0);
+  }
+
+  // ── Dispatch mode ──────────────────────────────────────────
   if (!args.pattern) {
     log.error("Missing glob pattern. Usage: dispatch <glob>");
     log.dim('  Example: dispatch "tasks/**/*.md"');
+    log.dim("  Or use:  dispatch --plan 1,2,3");
     process.exit(1);
   }
 
