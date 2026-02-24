@@ -24,11 +24,16 @@ export interface PlanResult {
 /**
  * Run the planner agent for a single task. Creates an isolated session,
  * sends the planning prompt, and extracts the resulting execution plan.
+ *
+ * When `fileContext` is provided (the full markdown content from the task file),
+ * it is included in the prompt so the planner can use non-task prose (headings,
+ * notes, implementation details) as additional guidance.
  */
 export async function planTask(
   instance: OpencodeInstance,
   task: Task,
-  cwd: string
+  cwd: string,
+  fileContext?: string
 ): Promise<PlanResult> {
   const { client } = instance;
 
@@ -38,7 +43,7 @@ export async function planTask(
       return { prompt: "", success: false, error: "Failed to create planning session" };
     }
 
-    const prompt = buildPlannerPrompt(task, cwd);
+    const prompt = buildPlannerPrompt(task, cwd, fileContext);
 
     const { data: response, error } = await client.session.prompt({
       path: { id: session.id },
@@ -72,22 +77,46 @@ export async function planTask(
 /**
  * Build the prompt that instructs the planner to explore the codebase,
  * understand the task, and produce an execution plan.
+ *
+ * When file context is provided, it is included as a "Task File Contents"
+ * section so the planner can use headings, prose, and notes from the
+ * markdown file as implementation guidance.
  */
-function buildPlannerPrompt(task: Task, cwd: string): string {
-  return [
+function buildPlannerPrompt(task: Task, cwd: string, fileContext?: string): string {
+  const sections: string[] = [
     `You are a **planning agent**. Your job is to explore the codebase, understand the task below, and produce a detailed execution prompt that another agent will follow to implement the changes.`,
     ``,
     `## Task`,
     `- **Working directory:** ${cwd}`,
     `- **Source file:** ${task.file}`,
     `- **Task (line ${task.line}):** ${task.text}`,
+  ];
+
+  if (fileContext) {
+    sections.push(
+      ``,
+      `## Task File Contents`,
+      ``,
+      `The task comes from a markdown file that may contain important implementation`,
+      `details, requirements, and context in its non-task content (headings, prose,`,
+      `notes). Review this carefully — it may describe conventions, constraints, or`,
+      `technical details that are critical for the implementation.`,
+      ``,
+      `\`\`\`markdown`,
+      fileContext,
+      `\`\`\``,
+    );
+  }
+
+  sections.push(
     ``,
     `## Instructions`,
     ``,
     `1. **Explore the codebase** — read relevant files, search for symbols, and understand the project structure, conventions, and patterns.`,
-    `2. **Identify the files** that need to be created or modified to complete this task.`,
-    `3. **Research the implementation** — understand the existing code patterns, imports, types, and APIs involved.`,
-    `4. **DO NOT make any changes** — you are only planning, not executing.`,
+    `2. **Review the task file contents above** — pay close attention to non-task text (headings, prose, notes) as it often contains important implementation details, requirements, and constraints.`,
+    `3. **Identify the files** that need to be created or modified to complete this task.`,
+    `4. **Research the implementation** — understand the existing code patterns, imports, types, and APIs involved.`,
+    `5. **DO NOT make any changes** — you are only planning, not executing.`,
     ``,
     `## Output Format`,
     ``,
@@ -95,7 +124,7 @@ function buildPlannerPrompt(task: Task, cwd: string): string {
     ``,
     `Your output MUST include:`,
     ``,
-    `1. **Context** — A brief summary of the relevant project structure, conventions, and patterns the executor needs to know.`,
+    `1. **Context** — A brief summary of the relevant project structure, conventions, and patterns the executor needs to know. Include any important details from the task file's non-task content.`,
     `2. **Files to modify** — The exact file paths that need to be created or changed, with the rationale for each.`,
     `3. **Step-by-step implementation** — Precise, ordered steps the executor should follow. Include:`,
     `   - Exact file paths`,
@@ -108,7 +137,9 @@ function buildPlannerPrompt(task: Task, cwd: string): string {
     `   - Follow existing code style and conventions found in the project.`,
     ``,
     `Be specific and concrete. Reference actual code you found during exploration. The executor has no prior context about this codebase — your prompt is all it gets.`,
-  ].join("\n");
+  );
+
+  return sections.join("\n");
 }
 
 /**

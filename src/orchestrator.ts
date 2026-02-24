@@ -70,6 +70,12 @@ export async function orchestrate(opts: DispatchOptions): Promise<DispatchSummar
 
     const allTasks = taskFiles.flatMap((tf) => tf.tasks);
 
+    // Build a lookup from file path → file content for planner context
+    const fileContextMap = new Map<string, string>();
+    for (const tf of taskFiles) {
+      fileContextMap.set(tf.path, tf.content);
+    }
+
     if (allTasks.length === 0) {
       tui.state.phase = "done";
       tui.stop();
@@ -110,7 +116,8 @@ export async function orchestrate(opts: DispatchOptions): Promise<DispatchSummar
           let plan: string | undefined;
           if (!noPlan) {
             tuiTask.status = "planning";
-            const planResult = await planTask(instance, task, cwd);
+            const fileContext = fileContextMap.get(task.file);
+            const planResult = await planTask(instance, task, cwd, fileContext);
 
             if (!planResult.success) {
               tuiTask.status = "failed";
