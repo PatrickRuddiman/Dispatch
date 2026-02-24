@@ -1,0 +1,364 @@
+# Integrations
+
+This page documents the external dependencies and integrations used by the
+CLI & Orchestration group, answering operational questions about configuration,
+behavior, and troubleshooting.
+
+## Chalk
+
+See [Chalk reference](../shared-types/integrations.md#chalk) for full
+documentation on chalk color detection, FORCE_COLOR, non-TTY behavior, and
+level overrides.
+
+Chalk is used in the [logger](../shared-types/logger.md) and [TUI](tui.md)
+for terminal string styling.
+
+---
+
+## Glob (npm package)
+
+**Package**: `glob` v11.0.1
+**Used in**: `src/orchestrator.ts:11`, `src/orchestrator.ts:56`,
+`src/orchestrator.ts:181`
+**Official docs**: [github.com/isaacs/node-glob](https://github.com/isaacs/node-glob)
+
+The glob package is used by the [orchestrator](orchestrator.md) to discover markdown task files
+matching a user-provided pattern.
+
+### Usage in dispatch
+
+```typescript
+const files = await glob(pattern, { cwd, absolute: true });
+```
+
+The orchestrator passes:
+- `pattern` — the user's [glob pattern](cli.md#options-reference) (e.g., `"tasks/**/*.md"`)
+- `cwd` — the working directory (from `--cwd` option or `process.cwd()`)
+- `absolute: true` — returns fully resolved file paths
+
+### Supported glob syntax
+
+The glob package (v11) supports the full Bash glob syntax:
+
+| Pattern | Meaning | Example |
+|---------|---------|---------|
+| `*` | Match any characters in a single path segment | `*.md` matches `foo.md` |
+| `**` | Match zero or more directories (globstar) | `tasks/**/*.md` matches `tasks/a/b/c.md` |
+| `?` | Match exactly one character | `task?.md` matches `task1.md` |
+| `[abc]` | Character class | `[ab].md` matches `a.md`, `b.md` |
+| `[!abc]` | Negated character class | `[!a].md` matches `b.md` but not `a.md` |
+| `{a,b}` | Brace expansion | `{src,lib}/**/*.md` matches in both dirs |
+| `{1..5}` | Numeric range expansion | `task{1..3}.md` matches `task1.md` through `task3.md` |
+| `!(pattern)` | Negation extglob | `!(test).md` matches anything except `test.md` |
+| `+(pattern)` | One or more extglob | `+(a\|b).md` |
+| `?(pattern)` | Zero or one extglob | `?(test).md` |
+
+### Shell quoting
+
+Glob patterns must be quoted when passed through the shell to prevent the
+shell from expanding them before dispatch receives them:
+
+```bash
+# Correct — shell passes the literal pattern to dispatch
+dispatch "tasks/**/*.md"
+dispatch 'tasks/**/*.md'
+
+# Wrong — shell expands the glob, dispatch receives individual filenames
+dispatch tasks/**/*.md
+```
+
+### Symlinks, hidden files, and performance
+
+- **Symlinks**: By default, `**` follows one symbolic link if it is not the
+  first item in the pattern, and none if it is. Use `{ follow: true }` to
+  follow all symlinks (not currently used by dispatch).
+- **Hidden files**: Files starting with `.` are not matched by `*` or `**`
+  unless the `{ dot: true }` option is set (not currently used by dispatch).
+  An explicit dot in the pattern (e.g., `.hidden/*.md`) will match dot files.
+- **Performance**: The glob package uses caching and efficient directory
+  traversal. For typical project sizes (thousands of files), performance is
+  not a concern. For very large directory trees (100k+ files), glob v11 is
+  the second-fastest JavaScript glob implementation. The `{ absolute: true }`
+  option adds negligible overhead (string path resolution, no extra syscalls).
+- **Race conditions**: Glob results represent a snapshot of the filesystem
+  at traversal time. Files may be created, modified, or deleted between
+  discovery and parsing. This is inherent to filesystem globbing.
+
+---
+
+## OpenCode AI Agent SDK
+
+**Package**: `@opencode-ai/sdk` v1.2.10
+**Used in**: `src/providers/opencode.ts`, `src/providers/index.ts:11`,
+`src/orchestrator.ts:100`
+**Official docs**: [opencode.ai/docs](https://opencode.ai/docs)
+
+The OpenCode SDK provides the default AI agent backend for dispatch. For full
+setup instructions and troubleshooting, see [OpenCode Backend](../provider-system/opencode-backend.md).
+
+### Starting or connecting to an OpenCode server
+
+There are two modes:
+
+1. **Automatic server** (default): `createOpencode()` starts a local OpenCode
+   server process. No configuration required — the SDK handles server
+   lifecycle. The server is stopped when `cleanup()` is called.
+
+2. **External server** (`--server-url`): `createOpencodeClient({ baseUrl: url })`
+   connects to an already-running server. Useful for development or shared
+   server setups.
+
+```bash
+# Automatic — SDK starts its own server
+dispatch "tasks/**/*.md"
+
+# External — connect to running server
+dispatch "tasks/**/*.md" --server-url http://localhost:4096
+```
+
+### Credentials and environment variables
+
+The OpenCode SDK handles authentication internally. Refer to the
+[OpenCode documentation](https://opencode.ai/docs) for details on
+configuration. When using an external server, authentication is handled by
+the server itself — the client simply sends HTTP requests.
+
+### Troubleshooting connection failures
+
+| Symptom | Likely cause | Resolution |
+|---------|-------------|------------|
+| "Failed to create OpenCode session" | Server not running or not reachable | Check `--server-url` is correct; verify server is running |
+| "OpenCode prompt failed" | Session expired or server error | Check server logs; ensure server has not been restarted mid-session |
+| Timeout during `bootProvider()` | Server startup taking too long | Increase system resources; check for port conflicts |
+| Orphaned server process after crash | `cleanup()` was not called (see [orchestrator cleanup gap](orchestrator.md#the-cleanup-gap)) | Manually kill the OpenCode server process |
+
+### Rate limits and cost
+
+Rate limits and cost depend on the OpenCode server configuration and the
+underlying AI model it uses. The dispatch tool sends one prompt per task
+(or two if [planning is enabled](../planning-and-dispatch/planner.md): one plan prompt + one execute prompt). With
+`--concurrency N`, up to N prompts may be in flight simultaneously. Consult
+OpenCode documentation for specific rate limit and pricing details.
+
+---
+
+## GitHub Copilot SDK
+
+**Package**: `@github/copilot-sdk` v0.1.0
+**Used in**: `src/providers/copilot.ts`, `src/providers/index.ts:12`,
+`src/orchestrator.ts:100`
+**Official docs**: [github.com/github/copilot-sdk](https://github.com/github/copilot-sdk)
+
+The Copilot SDK provides an alternative AI agent backend. For full setup,
+authentication, and troubleshooting, see [Copilot Backend](../provider-system/copilot-backend.md).
+
+### Authentication
+
+The Copilot provider supports multiple authentication methods
+(`src/providers/copilot.ts:6-11`):
+
+1. **Logged-in Copilot CLI user** (default): If the `copilot` CLI is
+   installed and the user has authenticated via `copilot auth`, no additional
+   configuration is needed.
+2. **Environment variables**: Set one of these:
+    - `COPILOT_GITHUB_TOKEN`
+    - `GH_TOKEN`
+    - `GITHUB_TOKEN`
+
+```bash
+# Using logged-in CLI user
+dispatch "tasks/**/*.md" --provider copilot
+
+# Using a token
+GITHUB_TOKEN=ghp_xxxx dispatch "tasks/**/*.md" --provider copilot
+
+# Connecting to external Copilot CLI server
+dispatch "tasks/**/*.md" --provider copilot --server-url http://localhost:3000
+```
+
+### Monitoring and debugging sessions
+
+The Copilot provider creates one session per task and tracks them in an
+internal `Map<string, CopilotSession>` (`src/providers/copilot.ts:27`).
+See [Copilot session management](../provider-system/copilot-backend.md#session-management)
+for details.
+
+To debug session issues:
+
+- Check that the `copilot` CLI is available on PATH (or set `COPILOT_CLI_PATH`).
+- Verify authentication: Run `copilot auth status` or check the environment
+  variable is set.
+- For connection failures when using `--server-url`, verify the Copilot CLI
+  server is running and accessible at the specified URL.
+
+### Rate limits and throttling
+
+Copilot SDK rate limits depend on the user's Copilot subscription tier and
+GitHub's API limits. With batch dispatch (`--concurrency > 1`), multiple
+sessions send prompts simultaneously. If throttled:
+
+- Individual task prompts may time out or return errors.
+- The task is marked as failed in the [TUI](tui.md); other tasks continue.
+- The `Promise.all` [batch model](orchestrator.md#concurrency-model) means throttled tasks do not block the overall
+  pipeline, they just fail individually.
+
+Consider using `--concurrency 1` if you encounter rate limiting, or add delays
+between batches (not currently supported — would require a code change).
+
+---
+
+## tsup (build tool)
+
+**Package**: `tsup` v8.4.0 (dev dependency)
+**Config file**: `tsup.config.ts`
+**Official docs**: [tsup.egoist.dev](https://tsup.egoist.dev/)
+
+tsup is the build tool that compiles TypeScript source to the distributable
+JavaScript bundle.
+
+### Configuration
+
+The tsup config is in `tsup.config.ts` (not inferred from `package.json`):
+
+```typescript
+export default defineConfig({
+  entry: ["src/cli.ts"],
+  format: ["esm"],
+  target: "node18",
+  outDir: "dist",
+  clean: true,
+  splitting: false,
+  sourcemap: true,
+  dts: false,
+  banner: {
+    js: "#!/usr/bin/env node",
+  },
+});
+```
+
+Key settings:
+
+- **Single entry point**: `src/cli.ts` — all other modules are bundled
+  transitively.
+- **ESM format**: Output is ES modules (matching `"type": "module"` in
+  `package.json`).
+- **Node 18 target**: Uses Node.js 18+ APIs.
+- **Shebang banner**: `#!/usr/bin/env node` is prepended so the output is
+  directly executable.
+- **No code splitting**: All code is in a single `dist/cli.js` file.
+- **Source maps**: Enabled for debugging.
+- **No type declarations**: `dts: false` — this is a CLI tool, not a library.
+
+### The `define` feature and version injection
+
+The comment at `src/cli.ts:127` references tsup's `define` feature for
+injecting the version string at build time. However, **this is not currently
+wired up**. The tsup config has no `define` block, and the version string is
+hardcoded.
+
+To implement build-time version injection:
+
+```typescript
+// tsup.config.ts
+import { readFileSync } from "fs";
+const pkg = JSON.parse(readFileSync("./package.json", "utf-8"));
+
+export default defineConfig({
+  // ... existing config ...
+  define: {
+    __VERSION__: JSON.stringify(pkg.version),
+  },
+});
+```
+
+```typescript
+// src/cli.ts
+declare const __VERSION__: string;
+console.log(`dispatch v${__VERSION__}`);
+```
+
+tsup's `define` feature works like esbuild's `define` — it performs global
+string replacement at build time, replacing every occurrence of the identifier
+with the specified value.
+
+### Build commands
+
+```bash
+npm run build      # Production build
+npm run dev        # Watch mode for development
+```
+
+---
+
+## Node.js process (stdout, argv, exit)
+
+**Used in**: `src/cli.ts:119`, `src/cli.ts:148`, `src/tui.ts:130`,
+`src/tui.ts:201-204`
+**Official docs**: [nodejs.org/api/process.html](https://nodejs.org/api/process.html)
+
+### process.argv
+
+The CLI reads `process.argv.slice(2)` to get user-provided arguments
+(skipping the Node.js binary path and script path).
+
+### process.stdout
+
+The TUI writes directly to `process.stdout` using:
+
+- `process.stdout.write(output)` — for rendering frames (avoids the trailing
+  newline that `console.log` adds).
+- `process.stdout.columns` — to determine terminal width for text truncation
+  (`src/tui.ts:130`). Falls back to 80 columns if not available.
+
+### process.exit
+
+The CLI calls `process.exit()` at several points:
+
+| Location | Exit code | Reason |
+|----------|-----------|--------|
+| `src/cli.ts:123` | `0` | `--help` displayed |
+| `src/cli.ts:129` | `0` | `--version` displayed |
+| `src/cli.ts:135` | `1` | Missing glob pattern |
+| `src/cli.ts:148` | `0` or `1` | Normal completion (`1` if any task failed) |
+| `src/cli.ts:153` | `1` | Unhandled exception in `main()` |
+| `src/cli.ts:87` | `1` | Invalid `--concurrency` value |
+| `src/cli.ts:96` | `1` | Unknown `--provider` value |
+| `src/cli.ts:109` | `1` | Unknown CLI option |
+
+### Raw ANSI escape codes in non-TTY environments
+
+The TUI's cursor control uses these ANSI sequences:
+
+| Sequence | Meaning |
+|----------|---------|
+| `\x1B[${n}A` | Move cursor up n lines (CSI CUU) |
+| `\x1B[0J` | Clear from cursor to end of screen (CSI ED) |
+
+These are written directly via `process.stdout.write()` and are **not**
+filtered by chalk's color detection. In non-TTY environments, they appear
+as literal escape characters in the output. See
+[TUI — TTY compatibility](tui.md#tty-compatibility-and-non-tty-environments)
+for the full impact assessment.
+
+### Signal handling
+
+There is currently **no signal handling** in the dispatch codebase.
+`SIGINT` (Ctrl+C) and `SIGTERM` cause immediate process termination without
+cleanup. This can leave:
+
+- Orphaned provider server processes (OpenCode or Copilot CLI servers).
+- Partially modified markdown files (if a task was mid-mutation).
+- Unstaged or uncommitted git changes.
+
+See [TUI — Signal handling](tui.md#signal-handling) for a recommended
+implementation.
+
+## Related pages
+
+- [CLI](cli.md) — argument parsing and exit codes
+- [Orchestrator](orchestrator.md) — glob usage and provider boot
+- [TUI](tui.md) — ANSI rendering and TTY detection
+- [Logger](../shared-types/logger.md) — chalk usage in logging
+- [Provider Abstraction & Backends](../provider-system/provider-overview.md) — provider SDK details
+- [OpenCode Backend](../provider-system/opencode-backend.md) — OpenCode-specific setup and troubleshooting
+- [Copilot Backend](../provider-system/copilot-backend.md) — Copilot-specific setup and authentication
