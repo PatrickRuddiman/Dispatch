@@ -179,7 +179,11 @@ export async function generatePlans(opts: PlanOptions): Promise<PlanSummary> {
 
 /**
  * Generate a single plan file by prompting the AI to explore the codebase
- * and produce a comprehensive task list with implementation details.
+ * and produce a high-level task list that explains WHAT, WHY, and HOW.
+ *
+ * The generated file intentionally stays at a strategic level — a separate
+ * planner agent runs during `dispatch` to produce detailed, line-level
+ * implementation plans for each individual task.
  */
 async function generateSinglePlan(
   instance: ProviderInstance,
@@ -200,12 +204,23 @@ async function generateSinglePlan(
 
 /**
  * Build the prompt that instructs the AI to explore the codebase,
- * understand the issue, research the implementation, and produce
- * a markdown task file with checkboxes and implementation details.
+ * understand the issue, and produce a high-level markdown task file.
+ *
+ * The output emphasises WHAT needs to change, WHY it needs to change,
+ * and HOW it fits into the existing project — but deliberately avoids
+ * low-level implementation specifics (exact code, line numbers, diffs).
+ * A dedicated planner agent handles that granularity per-task at
+ * dispatch time.
  */
 function buildPlanPrompt(issue: IssueDetails, cwd: string): string {
   const sections: string[] = [
-    `You are a **planning agent**. Your job is to explore the codebase, understand the issue below, research the best implementation approach, and produce a comprehensive **markdown task file** that another agent will use to implement the changes.`,
+    `You are a **planning agent**. Your job is to explore the codebase, understand the issue below, and produce a high-level **markdown task file** that will drive an automated implementation pipeline.`,
+    ``,
+    `**Important:** This file will be consumed by a two-stage pipeline:`,
+    `1. A **planner agent** reads each task together with the prose context in this file, then explores the codebase to produce a detailed, line-level implementation plan.`,
+    `2. An **executor agent** follows that detailed plan to make the actual code changes.`,
+    ``,
+    `Because the planner agent handles low-level details, your output must stay **high-level and strategic**. Focus on the WHAT, WHY, and HOW — not exact code or line numbers.`,
     ``,
     `## Issue Details`,
     ``,
@@ -242,13 +257,15 @@ function buildPlanPrompt(issue: IssueDetails, cwd: string): string {
     ``,
     `## Instructions`,
     ``,
-    `1. **Explore the codebase** — read relevant files, search for symbols, understand the project structure, conventions, and patterns. Pay attention to existing code style, architecture, and dependencies.`,
+    `1. **Explore the codebase** — read relevant files, search for symbols, understand the project structure, language, frameworks, conventions, and patterns. Identify the tech stack (languages, package managers, frameworks, test runners) so your plan aligns with the project's actual standards.`,
     ``,
-    `2. **Understand the issue** — analyze the issue description, acceptance criteria, and discussion comments to fully understand what needs to be done.`,
+    `2. **Understand the issue** — analyze the issue description, acceptance criteria, and discussion comments to fully understand what needs to be done and why.`,
     ``,
-    `3. **Research the implementation** — look up relevant documentation, libraries, and patterns that would help implement this feature or fix. Consider best practices and potential edge cases.`,
+    `3. **Research the approach** — look up relevant documentation, libraries, and patterns. Consider how the change integrates with the existing architecture, standards, and technologies already in use. For example, if the project is TypeScript, do not propose a Python solution; if it uses Vitest, do not suggest Jest.`,
     ``,
-    `4. **DO NOT make any changes** — you are only planning, not executing.`,
+    `4. **Identify integration points** — determine which existing modules, interfaces, patterns, and conventions the implementation must align with. Note the key files and modules involved, but do NOT prescribe exact code changes — the planner agent will handle that.`,
+    ``,
+    `5. **DO NOT make any changes** — you are only planning, not executing.`,
     ``,
     `## Output Format`,
     ``,
@@ -257,44 +274,55 @@ function buildPlanPrompt(issue: IssueDetails, cwd: string): string {
     `\`\`\``,
     `# <Issue title> (#<number>)`,
     ``,
-    `> <One-line summary of the issue and its goal>`,
+    `> <One-line summary: what this issue achieves and why it matters>`,
     ``,
     `## Context`,
     ``,
-    `<Brief description of the relevant parts of the codebase — which files,`,
-    `modules, and patterns are involved. Include specific file paths.>`,
+    `<Describe the relevant parts of the codebase: key modules, directory structure,`,
+    `language/framework, and architectural patterns. Name specific files and modules`,
+    `that are involved so the planner agent knows where to look, but do not include`,
+    `code snippets or line-level details.>`,
     ``,
-    `## Requirements`,
+    `## Why`,
     ``,
-    `<Bullet list of concrete requirements extracted from the issue, acceptance`,
-    `criteria, and discussion. Be specific and actionable.>`,
+    `<Explain the motivation — why this change is needed, what problem it solves,`,
+    `what user or system benefit it provides. Pull from the issue description,`,
+    `acceptance criteria, and discussion.>`,
     ``,
-    `## Implementation Details`,
+    `## Approach`,
     ``,
-    `<Detailed technical notes for the implementer: approach, patterns to follow,`,
-    `imports needed, type signatures, API conventions discovered in the codebase.`,
-    `Include code snippets where helpful. Reference specific files and line numbers.>`,
+    `<High-level description of the implementation strategy. Explain the overall`,
+    `approach, which patterns to follow, what to extend vs. create new, and how`,
+    `the change fits into the existing architecture. Mention relevant standards,`,
+    `technologies, and conventions the implementation MUST align with.>`,
+    ``,
+    `## Integration Points`,
+    ``,
+    `<List the specific modules, interfaces, configurations, and conventions that`,
+    `the implementation must integrate with. For example: existing provider`,
+    `interfaces to implement, CLI argument patterns to follow, test framework`,
+    `and conventions to match, build system requirements, etc.>`,
     ``,
     `## Tasks`,
     ``,
-    `- [ ] First task — clear, atomic, actionable description`,
-    `- [ ] Second task — with enough detail to implement without guessing`,
-    `- [ ] Third task — reference specific files and what to change`,
+    `- [ ] First task — describe WHAT to do and WHY, not exactly HOW`,
+    `- [ ] Second task — name the area/module affected and the goal`,
+    `- [ ] Third task — mention integration requirements if relevant`,
     `- [ ] ...`,
     ``,
     `## References`,
     ``,
-    `- <Links to relevant files, docs, or resources>`,
+    `- <Links to relevant docs, related issues, or external resources>`,
     `\`\`\``,
     ``,
     `## Key Guidelines`,
     ``,
-    `- Each \`- [ ]\` task must be **atomic** — one clear unit of work that can be completed independently.`,
-    `- Tasks should be **ordered** — dependencies should come first.`,
-    `- Include **enough context** in the implementation details that an agent with no prior knowledge of the codebase can complete the tasks.`,
-    `- Reference **specific file paths** and code patterns you discovered.`,
-    `- The prose sections (Context, Requirements, Implementation Details) are critical — they provide the context that guides the executor agent for every task in the file.`,
-    `- Keep the markdown clean — it will be parsed by an automated tool.`,
+    `- **Stay high-level.** Do NOT include code snippets, exact line numbers, diffs, or step-by-step coding instructions. A dedicated planner agent will produce those details for each task at execution time.`,
+    `- **Respect the project's stack.** Your plan must align with the languages, frameworks, libraries, test tools, and conventions already in use. Never suggest technologies that conflict with the existing project.`,
+    `- **Explain WHAT, WHY, and HOW (strategically).** Each task should say what needs to happen, why it's needed, and which part of the codebase it touches — but leave the tactical "how" to the planner agent.`,
+    `- **Detail integration points.** The prose sections (Context, Approach, Integration Points) are critical — they tell the planner agent where to look and what constraints to respect.`,
+    `- **Keep tasks atomic and ordered.** Each \`- [ ]\` task must be a single, clear unit of work. Order them so dependencies come first.`,
+    `- **Keep the markdown clean** — it will be parsed by an automated tool.`,
     `- Output ONLY the markdown content. Do not wrap it in a code fence or add any preamble/explanation outside the markdown.`,
   );
 
