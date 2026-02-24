@@ -8,7 +8,7 @@
  */
 
 import { glob } from "glob";
-import { parseTaskFile, markTaskComplete, type Task, type TaskFile } from "./parser.js";
+import { parseTaskFile, markTaskComplete, buildTaskContext, type Task, type TaskFile } from "./parser.js";
 import { bootOpencode, dispatchTask, type DispatchResult } from "./dispatcher.js";
 import { planTask } from "./planner.js";
 import { commitTask } from "./git.js";
@@ -70,10 +70,10 @@ export async function orchestrate(opts: DispatchOptions): Promise<DispatchSummar
 
     const allTasks = taskFiles.flatMap((tf) => tf.tasks);
 
-    // Build a lookup from file path → file content for planner context
-    const fileContextMap = new Map<string, string>();
+    // Build a lookup from file path → raw content for filtered planner context
+    const fileContentMap = new Map<string, string>();
     for (const tf of taskFiles) {
-      fileContextMap.set(tf.path, tf.content);
+      fileContentMap.set(tf.path, tf.content);
     }
 
     if (allTasks.length === 0) {
@@ -116,7 +116,8 @@ export async function orchestrate(opts: DispatchOptions): Promise<DispatchSummar
           let plan: string | undefined;
           if (!noPlan) {
             tuiTask.status = "planning";
-            const fileContext = fileContextMap.get(task.file);
+            const rawContent = fileContentMap.get(task.file);
+            const fileContext = rawContent ? buildTaskContext(rawContent, task) : undefined;
             const planResult = await planTask(instance, task, cwd, fileContext);
 
             if (!planResult.success) {

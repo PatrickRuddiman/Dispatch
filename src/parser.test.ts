@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { writeFile, unlink, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parseTaskContent, parseTaskFile, markTaskComplete } from "./parser.js";
+import { parseTaskContent, parseTaskFile, markTaskComplete, buildTaskContext } from "./parser.js";
 import { readFile } from "node:fs/promises";
 
 // ─── parseTaskContent (pure, no I/O) ─────────────────────────────────
@@ -418,5 +418,190 @@ describe("markTaskComplete", () => {
     };
 
     await expect(markTaskComplete(task)).rejects.toThrow("does not match");
+  });
+});
+
+// ─── buildTaskContext ────────────────────────────────────────────────
+
+describe("buildTaskContext", () => {
+  const FILE = "/fake/tasks.md";
+
+  it("keeps the current task and removes other unchecked tasks", () => {
+    const md = [
+      "# Setup",
+      "",
+      "- [ ] First task",
+      "- [ ] Second task",
+      "- [ ] Third task",
+    ].join("\n");
+
+    const task = { index: 1, text: "Second task", line: 4, raw: "- [ ] Second task", file: FILE };
+    const result = buildTaskContext(md, task);
+
+    expect(result).toContain("# Setup");
+    expect(result).toContain("- [ ] Second task");
+    expect(result).not.toContain("First task");
+    expect(result).not.toContain("Third task");
+  });
+
+  it("preserves all non-task content (headings, prose, blank lines)", () => {
+    const md = [
+      "# API Refactor",
+      "",
+      "We are migrating from Express to Hono.",
+      "",
+      "## Phase 1",
+      "",
+      "- [ ] Create app.ts",
+      "- [ ] Add health check",
+      "",
+      "## Notes",
+      "",
+      "Use the new middleware pattern.",
+    ].join("\n");
+
+    const task = { index: 0, text: "Create app.ts", line: 7, raw: "- [ ] Create app.ts", file: FILE };
+    const result = buildTaskContext(md, task);
+
+    expect(result).toContain("# API Refactor");
+    expect(result).toContain("We are migrating from Express to Hono.");
+    expect(result).toContain("## Phase 1");
+    expect(result).toContain("## Notes");
+    expect(result).toContain("Use the new middleware pattern.");
+    expect(result).toContain("- [ ] Create app.ts");
+    expect(result).not.toContain("Add health check");
+  });
+
+  it("preserves checked tasks (they are context, not work items)", () => {
+    const md = [
+      "- [x] Already done step",
+      "- [ ] Current task",
+      "- [ ] Other pending task",
+    ].join("\n");
+
+    const task = { index: 0, text: "Current task", line: 2, raw: "- [ ] Current task", file: FILE };
+    const result = buildTaskContext(md, task);
+
+    expect(result).toContain("- [x] Already done step");
+    expect(result).toContain("- [ ] Current task");
+    expect(result).not.toContain("Other pending task");
+  });
+
+  it("works when the file has only one unchecked task", () => {
+    const md = [
+      "# Solo",
+      "",
+      "- [ ] The only task",
+    ].join("\n");
+
+    const task = { index: 0, text: "The only task", line: 3, raw: "- [ ] The only task", file: FILE };
+    const result = buildTaskContext(md, task);
+
+    expect(result).toBe(md);
+  });
+
+  it("handles indented sibling tasks", () => {
+    const md = [
+      "- [ ] Parent task",
+      "  - [ ] Child task A",
+      "  - [ ] Child task B",
+      "  - [ ] Child task C",
+    ].join("\n");
+
+    const task = { index: 1, text: "Child task A", line: 2, raw: "  - [ ] Child task A", file: FILE };
+    const result = buildTaskContext(md, task);
+
+    expect(result).toContain("  - [ ] Child task A");
+    expect(result).not.toContain("Parent task");
+    expect(result).not.toContain("Child task B");
+    expect(result).not.toContain("Child task C");
+  });
+
+  it("handles CRLF line endings", () => {
+    const md = "# Title\r\n\r\n- [ ] Task A\r\n- [ ] Task B\r\n";
+
+    const task = { index: 1, text: "Task B", line: 4, raw: "- [ ] Task B", file: FILE };
+    const result = buildTaskContext(md, task);
+
+    expect(result).toContain("# Title");
+    expect(result).toContain("- [ ] Task B");
+    expect(result).not.toContain("Task A");
+  });
+
+  it("preserves asterisk tasks of other types in non-task content", () => {
+    const md = [
+      "* regular list item",
+      "* [ ] Task one",
+      "* [ ] Task two",
+      "* another regular item",
+    ].join("\n");
+
+    const task = { index: 0, text: "Task one", line: 2, raw: "* [ ] Task one", file: FILE };
+    const result = buildTaskContext(md, task);
+
+    expect(result).toContain("* regular list item");
+    expect(result).toContain("* [ ] Task one");
+    expect(result).toContain("* another regular item");
+    expect(result).not.toContain("Task two");
+  });
+
+  it("produces a realistic filtered context for a multi-section file", () => {
+    const md = [
+      "# API Refactor",
+      "",
+      "We are migrating from Express to Hono. All routes should use",
+      "the new `Hono` router and middleware pattern.",
+      "",
+      "## Phase 1: Setup",
+      "",
+      "- [x] Install hono",
+      "- [ ] Create `src/app.ts` entry point with Hono instance",
+      "- [ ] Migrate health check route to `/health`",
+      "",
+      "## Phase 2: Auth",
+      "",
+      "Auth uses JWT with RS256. The public key is at `config/jwt.pub`.",
+      "",
+      "- [ ] Move JWT middleware to `src/middleware/auth.ts`",
+      "  - [ ] Support both cookie and Authorization header",
+      "  - [ ] Return 401 with `{ error: 'unauthorized' }` body",
+      "",
+      "## Phase 3: Cleanup",
+      "",
+      "- [ ] Remove Express dependency from package.json",
+      "- [ ] Update Dockerfile CMD to use new entry point",
+    ].join("\n");
+
+    // Planning for the JWT middleware task (line 16)
+    const task = {
+      index: 2,
+      text: "Move JWT middleware to `src/middleware/auth.ts`",
+      line: 16,
+      raw: "- [ ] Move JWT middleware to `src/middleware/auth.ts`",
+      file: FILE,
+    };
+    const result = buildTaskContext(md, task);
+
+    // Should contain all headings and prose
+    expect(result).toContain("# API Refactor");
+    expect(result).toContain("We are migrating from Express to Hono.");
+    expect(result).toContain("## Phase 1: Setup");
+    expect(result).toContain("## Phase 2: Auth");
+    expect(result).toContain("Auth uses JWT with RS256. The public key is at `config/jwt.pub`.");
+    expect(result).toContain("## Phase 3: Cleanup");
+
+    // Should contain the checked task (context)
+    expect(result).toContain("- [x] Install hono");
+
+    // Should contain ONLY the target task
+    expect(result).toContain("- [ ] Move JWT middleware to `src/middleware/auth.ts`");
+
+    // Should NOT contain any other unchecked tasks
+    expect(result).not.toContain("Create `src/app.ts`");
+    expect(result).not.toContain("Migrate health check");
+    expect(result).not.toContain("Support both cookie");
+    expect(result).not.toContain("Return 401");
+    expect(result).not.toContain("Remove Express");
+    expect(result).not.toContain("Update Dockerfile");
   });
 });

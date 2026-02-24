@@ -29,7 +29,35 @@ export interface TaskFile {
 }
 
 const UNCHECKED_RE = /^(\s*[-*]\s)\[ \]\s+(.+)$/;
+const CHECKED_RE = /^(\s*[-*]\s)\[[xX]\]\s+/;
 const CHECKED_SUB = "$1[x] $2";
+
+/**
+ * Build a filtered view of the file content for a single task's planner context.
+ * Keeps:
+ *   - All non-task lines (headings, prose, notes, blank lines, checked tasks)
+ *   - The specific unchecked task line being planned
+ * Removes:
+ *   - All *other* unchecked `[ ]` task lines
+ *
+ * This prevents the planner (and downstream executor) from being confused
+ * by sibling tasks that belong to different agents.
+ */
+export function buildTaskContext(content: string, task: Task): string {
+  const normalized = content.replace(/\r\n/g, "\n");
+  const lines = normalized.split("\n");
+
+  const filtered = lines.filter((line, i) => {
+    // Always keep the line that matches the current task
+    if (i + 1 === task.line) return true;
+    // Remove other unchecked task lines
+    if (UNCHECKED_RE.test(line)) return false;
+    // Keep everything else (headings, prose, checked tasks, blank lines)
+    return true;
+  });
+
+  return filtered.join("\n");
+}
 
 /**
  * Parse markdown content (string) and return all unchecked tasks.
