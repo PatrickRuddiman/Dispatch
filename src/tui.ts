@@ -6,7 +6,7 @@
 import chalk from "chalk";
 import type { Task } from "./parser.js";
 
-export type TaskStatus = "pending" | "running" | "done" | "failed";
+export type TaskStatus = "pending" | "planning" | "running" | "done" | "failed";
 
 export interface TaskState {
   task: Task;
@@ -58,6 +58,8 @@ function statusIcon(status: TaskStatus): string {
   switch (status) {
     case "pending":
       return chalk.dim("○");
+    case "planning":
+      return spinner();
     case "running":
       return spinner();
     case "done":
@@ -71,8 +73,10 @@ function statusLabel(status: TaskStatus): string {
   switch (status) {
     case "pending":
       return chalk.dim("pending");
+    case "planning":
+      return chalk.magenta("planning");
     case "running":
-      return chalk.cyan("running");
+      return chalk.cyan("executing");
     case "done":
       return chalk.green("done");
     case "failed":
@@ -122,8 +126,8 @@ function render(state: TuiState): string {
     const cols = process.stdout.columns || 80;
     const maxTextLen = cols - 30;
 
-    // Show up to 15 tasks with focus on current running + recent
-    const running = state.tasks.filter((t) => t.status === "running");
+    // Show up to 15 tasks with focus on current active + recent
+    const running = state.tasks.filter((t) => t.status === "running" || t.status === "planning");
     const completed = state.tasks.filter(
       (t) => t.status === "done" || t.status === "failed"
     );
@@ -149,7 +153,7 @@ function render(state: TuiState): string {
       }
 
       const elapsedStr =
-        ts.status === "running"
+        ts.status === "running" || ts.status === "planning"
           ? chalk.dim(` ${elapsed(now - (ts.elapsed || now))}`)
           : ts.status === "done" && ts.elapsed
             ? chalk.dim(` ${elapsed(ts.elapsed)}`)

@@ -1,6 +1,9 @@
 /**
  * Markdown task parser — extracts unchecked `[ ]` tasks from markdown files
  * and provides utilities to mark them as complete `[x]`.
+ *
+ * Non-task content (headings, prose, notes) is preserved in `TaskFile.context`
+ * so the planner agent can use it for implementation guidance.
  */
 
 import { readFile, writeFile } from "node:fs/promises";
@@ -21,17 +24,49 @@ export interface Task {
 export interface TaskFile {
   path: string;
   tasks: Task[];
+  /** Full file content — includes non-task prose, headings, and notes */
+  content: string;
 }
 
 const UNCHECKED_RE = /^(\s*[-*]\s)\[ \]\s+(.+)$/;
+const CHECKED_RE = /^(\s*[-*]\s)\[[xX]\]\s+/;
 const CHECKED_SUB = "$1[x] $2";
 
 /**
- * Parse a single markdown file and return all unchecked tasks.
+ * Build a filtered view of the file content for a single task's planner context.
+ * Keeps:
+ *   - All non-task lines (headings, prose, notes, blank lines, checked tasks)
+ *   - The specific unchecked task line being planned
+ * Removes:
+ *   - All *other* unchecked `[ ]` task lines
+ *
+ * This prevents the planner (and downstream executor) from being confused
+ * by sibling tasks that belong to different agents.
  */
-export async function parseTaskFile(filePath: string): Promise<TaskFile> {
-  const content = await readFile(filePath, "utf-8");
-  const lines = content.split("\n");
+export function buildTaskContext(content: string, task: Task): string {
+  const normalized = content.replace(/\r\n/g, "\n");
+  const lines = normalized.split("\n");
+
+  const filtered = lines.filter((line, i) => {
+    // Always keep the line that matches the current task
+    if (i + 1 === task.line) return true;
+    // Remove other unchecked task lines
+    if (UNCHECKED_RE.test(line)) return false;
+    // Keep everything else (headings, prose, checked tasks, blank lines)
+    return true;
+  });
+
+  return filtered.join("\n");
+}
+
+/**
+ * Parse markdown content (string) and return all unchecked tasks.
+ * Pure function — no file I/O. Useful for testing and reuse.
+ */
+export function parseTaskContent(content: string, filePath: string): TaskFile {
+  // Normalize CRLF → LF so the regex anchors work consistently
+  const normalized = content.replace(/\r\n/g, "\n");
+  const lines = normalized.split("\n");
   const tasks: Task[] = [];
 
   for (let i = 0; i < lines.length; i++) {
@@ -47,7 +82,15 @@ export async function parseTaskFile(filePath: string): Promise<TaskFile> {
     }
   }
 
-  return { path: filePath, tasks };
+  return { path: filePath, tasks, content };
+}
+
+/**
+ * Parse a single markdown file and return all unchecked tasks.
+ */
+export async function parseTaskFile(filePath: string): Promise<TaskFile> {
+  const content = await readFile(filePath, "utf-8");
+  return parseTaskContent(content, filePath);
 }
 
 /**
