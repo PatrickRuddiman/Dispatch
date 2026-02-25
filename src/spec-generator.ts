@@ -17,7 +17,7 @@
  * implementation planning for each individual task.
  */
 
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { cpus, freemem } from "node:os";
 import type { ProviderInstance } from "./provider.js";

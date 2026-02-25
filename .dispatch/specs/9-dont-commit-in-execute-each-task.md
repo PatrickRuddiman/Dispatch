@@ -62,7 +62,7 @@ All changes are prompt-level and control-flow-level — no new modules, interfac
 
 ## Tasks
 
-- [ ] (P) Remove the auto-commit from the orchestrator — In `src/agents/orchestrator.ts`, remove the `commitTask(task, cwd)` call from the task-success path and remove the `commitTask` import from `../git.js`. Keep `markTaskComplete(task)` and all other orchestrator logic unchanged. This is the core behavioral change that stops the orchestrator from automatically committing after every task.
+- [x] (P) Remove the auto-commit from the orchestrator — In `src/agents/orchestrator.ts`, remove the `commitTask(task, cwd)` call from the task-success path and remove the `commitTask` import from `../git.js`. Keep `markTaskComplete(task)` and all other orchestrator logic unchanged. This is the core behavioral change that stops the orchestrator from automatically committing after every task.
 
 - [x] (P) Update the spec agent prompt to include commit strategy guidance — In `src/spec-generator.ts`, extend `buildSpecPrompt()` to instruct the spec agent that it controls commit timing. The guidance should tell the spec agent to embed commit instructions within implementation task descriptions at logical boundaries rather than creating standalone commit tasks. Reference the conventional commit types (feat, fix, docs, refactor, test, chore, style, perf, ci) so generated specs produce consistent commit messages.
 

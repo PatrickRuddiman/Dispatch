@@ -6,7 +6,6 @@
  *   4. Plan each task via a planner agent (optional)
  *   5. Dispatch each task in an isolated session
  *   6. Mark complete in markdown
- *   7. Commit with conventional commits
  */
 
 import { basename } from "node:path";
@@ -14,7 +13,6 @@ import { glob } from "glob";
 import { parseTaskFile, markTaskComplete, buildTaskContext, groupTasksByMode, type Task, type TaskFile } from "../parser.js";
 import { dispatchTask, type DispatchResult } from "../dispatcher.js";
 import { boot as bootPlanner } from "./planner.js";
-import { commitTask } from "../git.js";
 import { log } from "../logger.js";
 import { registerCleanup } from "../cleanup.js";
 import { createTui, type TaskState } from "../tui.js";
@@ -203,7 +201,6 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
 
                 if (result.success) {
                   await markTaskComplete(task);
-                  await commitTask(task, cwd);
                   tuiTask.status = "done";
                   tuiTask.elapsed = Date.now() - startTime;
                   completed++;
