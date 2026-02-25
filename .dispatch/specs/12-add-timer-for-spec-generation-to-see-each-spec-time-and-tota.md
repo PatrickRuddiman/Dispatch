@@ -74,7 +74,7 @@ Follow the existing timing idiom already established in the orchestrator and TUI
 
 - [x] (S) Add timing instrumentation to `generateSpecs()` in `spec-generator.ts` — wrap the four phases (issue fetching, provider boot, spec generation per-issue, and total pipeline) with `Date.now()` start/end measurements. Log phase durations via `log.info()` or `log.debug()` using the shared `elapsed()` formatter. Append per-spec duration to the existing success log line for each spec. Add a total elapsed time to the final summary log line.
 
-- [ ] (P) Extend the `SpecSummary` interface in `spec-generator.ts` to include timing data — add at minimum a `durationMs: number` field for total pipeline time. Optionally add per-file timing (e.g., a map of filepath to duration in ms) for programmatic consumers.
+- [x] (P) Extend the `SpecSummary` interface in `spec-generator.ts` to include timing data — add at minimum a `durationMs: number` field for total pipeline time. Optionally add per-file timing (e.g., a map of filepath to duration in ms) for programmatic consumers.
 
 - [x] (P) Add unit tests for the shared `elapsed()` formatter — test edge cases like 0ms, sub-second, exactly 60s, and multi-minute durations. Follow the conventions in the existing `parser.test.ts` (Vitest, `.test.ts` suffix, colocated with source).
 

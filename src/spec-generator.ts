@@ -241,7 +241,7 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
 
   if (issueNumbers.length === 0) {
     log.error("No issue numbers provided. Use --spec 1,2,3");
-    return { total: 0, generated: 0, failed: 0, files: [], durationMs: 0 };
+    return { total: 0, generated: 0, failed: 0, files: [], durationMs: 0, fileDurationsMs: {} };
   }
 
   // ── Detect or validate issue source ─────────────────────────
@@ -256,7 +256,7 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
         `  Use --source <name> to specify explicitly, or ensure the git remote\n` +
         `  points to a supported platform (github.com, dev.azure.com).`
       );
-      return { total: issueNumbers.length, generated: 0, failed: issueNumbers.length, files: [], durationMs: Date.now() - pipelineStart };
+      return { total: issueNumbers.length, generated: 0, failed: issueNumbers.length, files: [], durationMs: Date.now() - pipelineStart, fileDurationsMs: {} };
     }
     source = detected;
     log.info(`Detected issue source: ${source}`);
@@ -297,7 +297,7 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
   const validIssues = issueDetails.filter((i) => i.details !== null);
   if (validIssues.length === 0) {
     log.error("No issues could be fetched. Aborting spec generation.");
-    return { total: issueNumbers.length, generated: 0, failed: issueNumbers.length, files: [], durationMs: Date.now() - pipelineStart };
+    return { total: issueNumbers.length, generated: 0, failed: issueNumbers.length, files: [], durationMs: Date.now() - pipelineStart, fileDurationsMs: {} };
   }
 
   // ── Boot AI provider ────────────────────────────────────────
@@ -339,7 +339,9 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
 
           const prompt = buildSpecPrompt(details!, cwd, filepath);
           await generateSingleSpec(instance, prompt, filepath);
-          log.success(`Spec written: ${filepath} (${elapsed(Date.now() - specStart)})`);
+          const specDuration = Date.now() - specStart;
+          fileDurationsMs[filepath] = specDuration;
+          log.success(`Spec written: ${filepath} (${elapsed(specDuration)})`);
 
           // Push spec content back to the issue tracker
           if (fetcher.update) {
@@ -391,6 +393,7 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
     failed,
     files: generatedFiles,
     durationMs: totalDuration,
+    fileDurationsMs,
   };
 }
 
@@ -415,7 +418,7 @@ async function generateSpecsFromFiles(opts: SpecOptions): Promise<SpecSummary> {
 
   if (files.length === 0) {
     log.error(`No files matched the pattern "${pattern}".`);
-    return { total: 0, generated: 0, failed: 0, files: [], durationMs: 0 };
+    return { total: 0, generated: 0, failed: 0, files: [], durationMs: 0, fileDurationsMs: {} };
   }
 
   log.info(`Matched ${files.length} file(s) for spec generation (concurrency: ${concurrency})...`);
@@ -431,10 +434,11 @@ async function generateSpecsFromFiles(opts: SpecOptions): Promise<SpecSummary> {
   // ── Generate spec for each file (parallel batches) ──────────
   const generatedFiles: string[] = [];
   let failed = 0;
+  const fileDurationsMs: Record<string, number> = {};
 
   const genQueue = [...files];
 
-  while (genQueue.length > 0) {
+    while (genQueue.length > 0) {
     const batch = genQueue.splice(0, concurrency);
     log.info(`Generating specs for batch of ${batch.length} (${generatedFiles.length + failed}/${files.length} done)...`);
 
@@ -447,7 +451,9 @@ async function generateSpecsFromFiles(opts: SpecOptions): Promise<SpecSummary> {
           const content = await readFile(filePath, "utf-8");
           const prompt = buildFileSpecPrompt(filePath, content, cwd);
           await generateSingleSpec(instance, prompt, filePath);
-          log.success(`Spec written: ${filePath} (${elapsed(Date.now() - specStart)})`);
+          const specDuration = Date.now() - specStart;
+          fileDurationsMs[filePath] = specDuration;
+          log.success(`Spec written: ${filePath} (${elapsed(specDuration)})`);
 
           return filePath;
         } catch (err) {
@@ -487,6 +493,7 @@ async function generateSpecsFromFiles(opts: SpecOptions): Promise<SpecSummary> {
     failed,
     files: generatedFiles,
     durationMs: totalDuration,
+    fileDurationsMs,
   };
 }
 
