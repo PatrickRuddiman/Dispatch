@@ -138,7 +138,7 @@ function buildPlannerPrompt(task: Task, cwd: string, fileContext?: string): stri
     `   - Code snippets, type signatures, or patterns to follow (based on existing code you read)`,
     `   - Import statements needed`,
     `4. **Constraints** — Any important constraints:`,
-    `   - Do NOT commit changes — the orchestrator handles commits.`,
+    `   - If the task description includes a commit instruction, include a final step in the plan to commit the changes using conventional commit conventions (supported types: feat, fix, docs, refactor, test, chore, style, perf, ci). If the task does not mention committing, instruct the executor to NOT commit changes.`,
     `   - Make minimal, correct changes — do not refactor unrelated code.`,
     `   - Follow existing code style and conventions found in the project.`,
     ``,

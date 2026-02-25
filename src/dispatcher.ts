@@ -63,7 +63,7 @@ function buildPrompt(task: Task, cwd: string): string {
     `Instructions:`,
     `- Complete ONLY this specific task — do not work on other tasks.`,
     `- Make the minimal, correct changes needed.`,
-    `- Do NOT commit changes — the orchestrator handles commits.`,
+    buildCommitInstruction(task.text),
     `- When finished, confirm by saying "Task complete."`,
   ].join("\n");
 }
@@ -96,7 +96,28 @@ function buildPlannedPrompt(task: Task, cwd: string, plan: string): string {
     `- Do NOT explore the codebase. The planner has already done all necessary research. Only read or modify the files explicitly referenced in the plan.`,
     `- Do NOT re-plan, question, or revise the plan. Trust it as given and execute it faithfully.`,
     `- Do NOT search for additional context using grep, find, or similar tools unless the plan explicitly instructs you to.`,
-    `- Do NOT commit changes — the orchestrator handles commits.`,
+    buildCommitInstruction(task.text),
     `- When finished, confirm by saying "Task complete."`,
   ].join("\n");
+}
+
+/**
+ * Check whether a task description includes an instruction to commit.
+ */
+function taskRequestsCommit(taskText: string): boolean {
+  return /\bcommit\b/i.test(taskText);
+}
+
+/**
+ * Build a commit instruction line based on whether the task requests a commit.
+ */
+function buildCommitInstruction(taskText: string): string {
+  if (taskRequestsCommit(taskText)) {
+    return (
+      `- The task description includes a commit instruction. After completing the implementation, ` +
+      `stage all changes and create a conventional commit. Use one of these types: ` +
+      `feat, fix, docs, refactor, test, chore, style, perf, ci.`
+    );
+  }
+  return `- Do NOT commit changes — the orchestrator handles commits.`;
 }
