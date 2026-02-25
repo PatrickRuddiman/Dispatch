@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isIssueNumbers, buildFileSpecPrompt, validateSpecStructure } from "./spec-generator.js";
+import { isIssueNumbers, buildFileSpecPrompt, validateSpecStructure, extractSpecContent } from "./spec-generator.js";
 
 describe("isIssueNumbers", () => {
   it("returns true for a single issue number", () => {
@@ -379,5 +379,263 @@ describe("validateSpecStructure", () => {
     const result = validateSpecStructure(content);
     expect(result.valid).toBe(true);
     expect(result.reason).toBeUndefined();
+  });
+});
+
+// ─── extractSpecContent (pure, no I/O) ───────────────────────────────
+
+describe("extractSpecContent", () => {
+  it("passes through already-clean content unchanged", () => {
+    const clean = [
+      "# My Spec (#1)",
+      "",
+      "> Summary of the spec",
+      "",
+      "## Context",
+      "",
+      "Some context here.",
+      "",
+      "## Tasks",
+      "",
+      "- [ ] First task",
+      "",
+      "## References",
+      "",
+      "- Link to issue",
+      "",
+    ].join("\n");
+
+    const result = extractSpecContent(clean);
+    expect(result).toBe(clean.trimEnd() + "\n");
+  });
+
+  it("strips markdown code-fence wrapping", () => {
+    const wrapped = [
+      "```markdown",
+      "# My Spec (#1)",
+      "",
+      "> Summary",
+      "",
+      "## Context",
+      "",
+      "Details here.",
+      "",
+      "## Tasks",
+      "",
+      "- [ ] Do something",
+      "```",
+    ].join("\n");
+
+    const result = extractSpecContent(wrapped);
+    expect(result).toContain("# My Spec (#1)");
+    expect(result).not.toContain("```");
+  });
+
+  it("strips bare code-fence wrapping without language tag", () => {
+    const wrapped = [
+      "```",
+      "# My Spec (#1)",
+      "",
+      "## Tasks",
+      "",
+      "- [ ] Task",
+      "```",
+    ].join("\n");
+
+    const result = extractSpecContent(wrapped);
+    expect(result).toContain("# My Spec (#1)");
+    expect(result).not.toContain("```");
+  });
+
+  it("removes preamble text before the first H1 heading", () => {
+    const withPreamble = [
+      "Here's the spec file I've written:",
+      "",
+      "# My Spec (#1)",
+      "",
+      "> Summary",
+      "",
+      "## Context",
+      "",
+      "Details.",
+      "",
+      "## Tasks",
+      "",
+      "- [ ] Task one",
+    ].join("\n");
+
+    const result = extractSpecContent(withPreamble);
+    expect(result).toMatch(/^# My Spec/);
+    expect(result).not.toContain("Here's the spec file");
+  });
+
+  it("removes postamble text after the last recognized section", () => {
+    const withPostamble = [
+      "# My Spec (#1)",
+      "",
+      "> Summary",
+      "",
+      "## Context",
+      "",
+      "Details.",
+      "",
+      "## Tasks",
+      "",
+      "- [ ] Task one",
+      "",
+      "## Summary",
+      "",
+      "Here's a summary of what I wrote for you.",
+    ].join("\n");
+
+    const result = extractSpecContent(withPostamble);
+    expect(result).toContain("# My Spec (#1)");
+    expect(result).toContain("## Tasks");
+    expect(result).toContain("- [ ] Task one");
+    expect(result).not.toContain("## Summary");
+    expect(result).not.toContain("Here's a summary of what I wrote");
+  });
+
+  it("handles content with both preamble and postamble", () => {
+    const messy = [
+      "I've written the spec to the file. Here it is:",
+      "",
+      "```markdown",
+      "# My Spec (#1)",
+      "",
+      "> Summary",
+      "",
+      "## Context",
+      "",
+      "Context details.",
+      "",
+      "## Tasks",
+      "",
+      "- [ ] Do the thing",
+      "",
+      "## References",
+      "",
+      "- https://example.com",
+      "```",
+      "",
+      "Let me know if you'd like me to make any changes!",
+    ].join("\n");
+
+    const result = extractSpecContent(messy);
+    expect(result).toMatch(/^# My Spec/);
+    expect(result).toContain("## Context");
+    expect(result).toContain("## Tasks");
+    expect(result).toContain("- [ ] Do the thing");
+    expect(result).toContain("## References");
+    expect(result).not.toContain("I've written the spec");
+    expect(result).not.toContain("Let me know");
+    expect(result).not.toContain("```");
+  });
+
+  it("returns unrecognizable content as-is when no H1 heading found", () => {
+    const noSpec = "The spec file has been written to .dispatch/specs/10-spec.md";
+    const result = extractSpecContent(noSpec);
+    expect(result).toBe(noSpec);
+  });
+
+  it("returns content as-is when it has no H1 heading after fence stripping", () => {
+    const noH1 = [
+      "Some random text",
+      "without any headings",
+      "or structure",
+    ].join("\n");
+
+    const result = extractSpecContent(noH1);
+    expect(result).toBe(noH1);
+  });
+
+  it("handles empty string input", () => {
+    const result = extractSpecContent("");
+    expect(result).toBe("");
+  });
+
+  it("preserves all recognized H2 sections", () => {
+    const fullSpec = [
+      "# Complete Spec (#5)",
+      "",
+      "> Summary line",
+      "",
+      "## Context",
+      "",
+      "Context content.",
+      "",
+      "## Why",
+      "",
+      "Why content.",
+      "",
+      "## Approach",
+      "",
+      "Approach content.",
+      "",
+      "## Integration Points",
+      "",
+      "Integration content.",
+      "",
+      "## Tasks",
+      "",
+      "- [ ] Task one",
+      "- [ ] Task two",
+      "",
+      "## References",
+      "",
+      "- Link one",
+      "",
+      "## Key Guidelines",
+      "",
+      "- Guideline one",
+    ].join("\n");
+
+    const result = extractSpecContent(fullSpec);
+    expect(result).toContain("## Context");
+    expect(result).toContain("## Why");
+    expect(result).toContain("## Approach");
+    expect(result).toContain("## Integration Points");
+    expect(result).toContain("## Tasks");
+    expect(result).toContain("## References");
+    expect(result).toContain("## Key Guidelines");
+  });
+
+  it("does not strip internal code fences within the spec", () => {
+    const withInternalFence = [
+      "# My Spec (#1)",
+      "",
+      "## Context",
+      "",
+      "Example code:",
+      "",
+      "```typescript",
+      "const x = 1;",
+      "```",
+      "",
+      "## Tasks",
+      "",
+      "- [ ] Task",
+    ].join("\n");
+
+    const result = extractSpecContent(withInternalFence);
+    expect(result).toContain("```typescript");
+    expect(result).toContain("const x = 1;");
+  });
+
+  it("handles content where only preamble exists before H1 with no postamble", () => {
+    const preambleOnly = [
+      "Sure! Here's the spec:",
+      "",
+      "# Spec Title (#3)",
+      "",
+      "## Tasks",
+      "",
+      "- [ ] A task",
+    ].join("\n");
+
+    const result = extractSpecContent(preambleOnly);
+    expect(result).toMatch(/^# Spec Title/);
+    expect(result).not.toContain("Sure!");
+    expect(result).toContain("- [ ] A task");
   });
 });

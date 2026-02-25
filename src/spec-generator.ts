@@ -80,9 +80,17 @@ export function extractSpecContent(raw: string): string {
   let content = raw;
 
   // 1. Strip code-fence wrapping (``` or ```markdown around entire content)
+  //    The fence may wrap the entire input or may appear after preamble text,
+  //    so we search for a fenced block containing an H1 heading.
   const fenceMatch = content.match(/^\s*```(?:markdown)?\s*\n([\s\S]*?)\n\s*```\s*$/);
   if (fenceMatch) {
     content = fenceMatch[1];
+  } else {
+    // Try to find a fenced block that contains an H1, even with surrounding text
+    const innerFenceMatch = content.match(/```(?:markdown)?\s*\n([\s\S]*?)\n\s*```/);
+    if (innerFenceMatch && /^# /m.test(innerFenceMatch[1])) {
+      content = innerFenceMatch[1];
+    }
   }
 
   // 2. Remove preamble — everything before the first H1 heading
