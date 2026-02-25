@@ -11,7 +11,7 @@ import { readFile, writeFile } from "node:fs/promises";
 export interface Task {
   /** Zero-based index within the file */
   index: number;
-  /** The raw text after `- [ ] ` */
+  /** The raw text after `- [ ] `, with any (P)/(S) prefix stripped */
   text: string;
   /** Line number in the file (1-based) */
   line: number;
@@ -19,6 +19,8 @@ export interface Task {
   raw: string;
   /** The source file path */
   file: string;
+  /** Execution mode — "parallel" or "serial". Defaults to "serial" when unspecified. */
+  mode?: "parallel" | "serial";
 }
 
 export interface TaskFile {
@@ -31,6 +33,7 @@ export interface TaskFile {
 const UNCHECKED_RE = /^(\s*[-*]\s)\[ \]\s+(.+)$/;
 const CHECKED_RE = /^(\s*[-*]\s)\[[xX]\]\s+/;
 const CHECKED_SUB = "$1[x] $2";
+const MODE_PREFIX_RE = /^\(([PS])\)\s+/;
 
 /**
  * Build a filtered view of the file content for a single task's planner context.
@@ -72,12 +75,22 @@ export function parseTaskContent(content: string, filePath: string): TaskFile {
   for (let i = 0; i < lines.length; i++) {
     const match = lines[i].match(UNCHECKED_RE);
     if (match) {
+      let text = match[2].trim();
+      let mode: "parallel" | "serial" = "serial";
+
+      const modeMatch = text.match(MODE_PREFIX_RE);
+      if (modeMatch) {
+        mode = modeMatch[1] === "P" ? "parallel" : "serial";
+        text = text.slice(modeMatch[0].length);
+      }
+
       tasks.push({
         index: tasks.length,
-        text: match[2].trim(),
+        text,
         line: i + 1,
         raw: lines[i],
         file: filePath,
+        mode,
       });
     }
   }

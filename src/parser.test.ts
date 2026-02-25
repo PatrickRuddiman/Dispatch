@@ -298,6 +298,111 @@ describe("parseTaskContent", () => {
   });
 });
 
+// ─── parseTaskContent: mode extraction ───────────────────────────────
+
+describe("parseTaskContent — mode extraction", () => {
+  const FILE = "/fake/tasks.md";
+
+  it("extracts (P) prefix as parallel mode and strips it from text", () => {
+    const md = "- [ ] (P) Add validation to the user form";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0]).toMatchObject({
+      text: "Add validation to the user form",
+      mode: "parallel",
+    });
+  });
+
+  it("extracts (S) prefix as serial mode and strips it from text", () => {
+    const md = "- [ ] (S) Refactor the orchestrator dispatch loop";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0]).toMatchObject({
+      text: "Refactor the orchestrator dispatch loop",
+      mode: "serial",
+    });
+  });
+
+  it("defaults to serial mode when no prefix is present", () => {
+    const md = "- [ ] No prefix defaults to serial";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0]).toMatchObject({
+      text: "No prefix defaults to serial",
+      mode: "serial",
+    });
+  });
+
+  it("preserves raw line with (P)/(S) prefix intact", () => {
+    const md = "- [ ] (P) Parallel task";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0].raw).toBe("- [ ] (P) Parallel task");
+  });
+
+  it("handles mixed modes in the same file", () => {
+    const md = [
+      "- [ ] (P) First parallel task",
+      "- [ ] (S) Serial task",
+      "- [ ] Untagged task",
+      "- [ ] (P) Second parallel task",
+    ].join("\n");
+
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks).toHaveLength(4);
+    expect(result.tasks[0]).toMatchObject({ text: "First parallel task", mode: "parallel" });
+    expect(result.tasks[1]).toMatchObject({ text: "Serial task", mode: "serial" });
+    expect(result.tasks[2]).toMatchObject({ text: "Untagged task", mode: "serial" });
+    expect(result.tasks[3]).toMatchObject({ text: "Second parallel task", mode: "parallel" });
+  });
+
+  it("does not strip non-mode parenthetical prefixes", () => {
+    const md = "- [ ] (parenthetical) notes should remain";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({
+      text: "(parenthetical) notes should remain",
+      mode: "serial",
+    });
+  });
+
+  it("does not match lowercase (p) or (s)", () => {
+    const md = [
+      "- [ ] (p) lowercase p",
+      "- [ ] (s) lowercase s",
+    ].join("\n");
+
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({ text: "(p) lowercase p", mode: "serial" });
+    expect(result.tasks[1]).toMatchObject({ text: "(s) lowercase s", mode: "serial" });
+  });
+
+  it("handles (P)/(S) on indented tasks", () => {
+    const md = [
+      "  - [ ] (P) Indented parallel",
+      "    - [ ] (S) Deeply indented serial",
+    ].join("\n");
+
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({ text: "Indented parallel", mode: "parallel" });
+    expect(result.tasks[1]).toMatchObject({ text: "Deeply indented serial", mode: "serial" });
+  });
+
+  it("handles (P)/(S) with CRLF line endings", () => {
+    const md = "- [ ] (P) CRLF parallel task\r\n- [ ] (S) CRLF serial task\r\n";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({ text: "CRLF parallel task", mode: "parallel" });
+    expect(result.tasks[1]).toMatchObject({ text: "CRLF serial task", mode: "serial" });
+  });
+
+  it("requires a space after (P)/(S) to count as a mode prefix", () => {
+    const md = "- [ ] (P)NoSpace should not match";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({
+      text: "(P)NoSpace should not match",
+      mode: "serial",
+    });
+  });
+});
+
 // ─── parseTaskFile (with file I/O) ───────────────────────────────────
 
 describe("parseTaskFile", () => {

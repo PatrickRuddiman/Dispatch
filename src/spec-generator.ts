@@ -8,15 +8,16 @@
  *   1. Detect or validate the issue source (GitHub, Azure DevOps)
  *   2. Fetch each issue's details
  *   3. Boot the AI provider
- *   4. For each issue, prompt the AI to produce a spec file
- *   5. Write spec files to the output directory
+ *   4. For each issue, tell the AI agent the target filepath and prompt it
+ *      to explore the codebase and write the spec directly to disk
+ *   5. Verify the spec file was written
  *
  * The generated specs stay high-level (WHAT, WHY, HOW) because the
  * planner agent in the dispatch pipeline handles detailed, line-level
  * implementation planning for each individual task.
  */
 
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { cpus, freemem } from "node:os";
 import type { ProviderInstance } from "./provider.js";
@@ -157,29 +158,27 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
 
     const batchResults = await Promise.all(
       batch.map(async ({ id, details }) => {
+        // Compute the target filepath before prompting — the agent writes here directly
+        const slug = details!.title
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, "")
+          .slice(0, 60);
+
+        const filename = `${id}-${slug}.md`;
+        const filepath = join(outputDir, filename);
+
         try {
           log.info(`Generating spec for #${id}: ${details!.title}...`);
 
-          const spec = await generateSingleSpec(instance, details!, cwd);
-
-          // Sanitize filename
-          const slug = details!.title
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, "-")
-            .replace(/^-|-$/g, "")
-            .slice(0, 60);
-
-          const filename = `${id}-${slug}.md`;
-          const filepath = join(outputDir, filename);
-
-          await writeFile(filepath, spec, "utf-8");
+          await generateSingleSpec(instance, details!, cwd, filepath);
           log.success(`Spec written: ${filepath}`);
 
           // Push spec content back to the issue tracker
           if (fetcher.update) {
             try {
-              const specTitle = details!.title;
-              await fetcher.update(id, specTitle, spec, fetchOpts);
+              const specContent = await readFile(filepath, "utf-8");
+              await fetcher.update(id, details!.title, specContent, fetchOpts);
               log.success(`Updated issue #${id} with spec content`);
             } catch (err) {
               const message = err instanceof Error ? err.message : String(err);
@@ -227,51 +226,62 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
 }
 
 /**
- * Generate a single spec file by prompting the AI to explore the codebase
- * and produce a high-level task list that explains WHAT, WHY, and HOW.
+ * Instruct the AI agent to generate and write a single spec file to disk.
  *
- * The generated file intentionally stays at a strategic level — a separate
- * planner agent runs during `dispatch` to produce detailed, line-level
- * implementation plans for each individual task.
+ * The agent is given the exact output path and told to write the spec
+ * directly using its file tools. We then verify the file exists.
+ *
+ * @throws if the agent session errors or the file is not present after the session
  */
 async function generateSingleSpec(
   instance: ProviderInstance,
   issue: IssueDetails,
-  cwd: string
-): Promise<string> {
+  cwd: string,
+  outputPath: string
+): Promise<void> {
   const sessionId = await instance.createSession();
-  const prompt = buildSpecPrompt(issue, cwd);
+  const prompt = buildSpecPrompt(issue, cwd, outputPath);
   log.debug(`Spec prompt built (${prompt.length} chars)`);
 
   const response = await instance.prompt(sessionId, prompt);
 
-  if (!response?.trim()) {
-    throw new Error("AI returned an empty spec");
+  if (response === null) {
+    throw new Error("AI agent returned no response");
   }
 
-  log.debug(`Spec response received (${response.length} chars)`);
-  return response;
+  log.debug(`Spec agent response (${response.length} chars)`);
+
+  // Verify the agent wrote the file
+  try {
+    await readFile(outputPath, "utf-8");
+  } catch {
+    throw new Error(
+      `Spec agent did not write the file to ${outputPath}. ` +
+      `Agent response: ${response.slice(0, 300)}`
+    );
+  }
 }
 
 /**
- * Build the prompt that instructs the AI to explore the codebase,
- * understand the issue, and produce a high-level markdown spec file.
+ * Build the prompt that instructs the AI agent to explore the codebase,
+ * understand the issue, and write a high-level markdown spec file to disk.
  *
- * The output emphasises WHAT needs to change, WHY it needs to change,
- * and HOW it fits into the existing project — but deliberately avoids
- * low-level implementation specifics (exact code, line numbers, diffs).
- * A dedicated planner agent handles that granularity per-task at
+ * The agent is responsible for writing the file — this is not a completion
+ * API call. The output emphasises WHAT needs to change, WHY it needs to
+ * change, and HOW it fits into the existing project — but deliberately
+ * avoids low-level implementation specifics (exact code, line numbers,
+ * diffs). A dedicated planner agent handles that granularity per-task at
  * dispatch time.
  */
-function buildSpecPrompt(issue: IssueDetails, cwd: string): string {
+function buildSpecPrompt(issue: IssueDetails, cwd: string, outputPath: string): string {
   const sections: string[] = [
-    `You are a **spec agent**. Your job is to explore the codebase, understand the issue below, and produce a high-level **markdown spec file** that will drive an automated implementation pipeline.`,
+    `You are a **spec agent**. Your job is to explore the codebase, understand the issue below, and write a high-level **markdown spec file** to disk that will drive an automated implementation pipeline.`,
     ``,
     `**Important:** This file will be consumed by a two-stage pipeline:`,
     `1. A **planner agent** reads each task together with the prose context in this file, then explores the codebase to produce a detailed, line-level implementation plan.`,
     `2. A **coder agent** follows that detailed plan to make the actual code changes.`,
     ``,
-    `Because the planner agent handles low-level details, your output must stay **high-level and strategic**. Focus on the WHAT, WHY, and HOW — not exact code or line numbers.`,
+    `Because the planner agent handles low-level details, your spec must stay **high-level and strategic**. Focus on the WHAT, WHY, and HOW — not exact code or line numbers.`,
     ``,
     `## Issue Details`,
     ``,
@@ -316,13 +326,16 @@ function buildSpecPrompt(issue: IssueDetails, cwd: string): string {
     ``,
     `4. **Identify integration points** — determine which existing modules, interfaces, patterns, and conventions the implementation must align with. Note the key files and modules involved, but do NOT prescribe exact code changes — the planner agent will handle that.`,
     ``,
-    `5. **DO NOT make any changes** — you are only producing a spec, not implementing.`,
+    `5. **DO NOT make any code changes** — you are only producing a spec, not implementing.`,
     ``,
-    `## Output Format`,
+    `## Output`,
     ``,
-    `Produce your response as a **complete markdown file** that follows this exact structure. The file will be saved and later used with the \`dispatch\` command to execute the tasks.`,
+    `Write the complete spec as a markdown file to this exact path:`,
     ``,
-    `\`\`\``,
+    `\`${outputPath}\``,
+    ``,
+    `Use your Write tool to save the file. The file must follow this structure exactly:`,
+    ``,
     `# <Issue title> (#<number>)`,
     ``,
     `> <One-line summary: what this issue achieves and why it matters>`,
@@ -364,7 +377,6 @@ function buildSpecPrompt(issue: IssueDetails, cwd: string): string {
     `## References`,
     ``,
     `- <Links to relevant docs, related issues, or external resources>`,
-    `\`\`\``,
     ``,
     `## Key Guidelines`,
     ``,
@@ -374,7 +386,6 @@ function buildSpecPrompt(issue: IssueDetails, cwd: string): string {
     `- **Detail integration points.** The prose sections (Context, Approach, Integration Points) are critical — they tell the planner agent where to look and what constraints to respect.`,
     `- **Keep tasks atomic and ordered.** Each \`- [ ]\` task must be a single, clear unit of work. Order them so dependencies come first.`,
     `- **Keep the markdown clean** — it will be parsed by an automated tool.`,
-    `- Output ONLY the markdown content. Do not wrap it in a code fence or add any preamble/explanation outside the markdown.`,
   );
 
   return sections.join("\n");
