@@ -32,11 +32,24 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
     throw err;
   }
 
+  // ── Retrieve the active model (best-effort) ──────────────────
+  let model: string | undefined;
+  try {
+    const models = await client.listModels();
+    if (models.length > 0) {
+      model = models[0].id;
+      log.debug(`Detected model: ${model}`);
+    }
+  } catch (err) {
+    log.debug(`Failed to retrieve model from Copilot: ${log.formatErrorChain(err)}`);
+  }
+
   // Track live sessions for prompt routing and cleanup
   const sessions = new Map<string, CopilotSession>();
 
   return {
     name: "copilot",
+    model,
 
     async createSession(): Promise<string> {
       log.debug("Creating Copilot session...");
