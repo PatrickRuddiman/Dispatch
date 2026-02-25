@@ -207,6 +207,8 @@ export interface SpecSummary {
   files: string[];
   /** Total pipeline wall-clock duration in milliseconds */
   durationMs: number;
+  /** Per-file generation durations in milliseconds (filepath → ms) */
+  fileDurationsMs: Record<string, number>;
 }
 
 /**
@@ -311,6 +313,7 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
 
   const generatedFiles: string[] = [];
   let failed = issueDetails.filter((i) => i.details === null).length;
+  const fileDurationsMs: Record<string, number> = {};
 
   const genQueue = [...validIssues];
 

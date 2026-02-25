@@ -76,7 +76,7 @@ Follow the existing timing idiom already established in the orchestrator and TUI
 
 - [ ] (P) Extend the `SpecSummary` interface in `spec-generator.ts` to include timing data — add at minimum a `durationMs: number` field for total pipeline time. Optionally add per-file timing (e.g., a map of filepath to duration in ms) for programmatic consumers.
 
-- [ ] (P) Add unit tests for the shared `elapsed()` formatter — test edge cases like 0ms, sub-second, exactly 60s, and multi-minute durations. Follow the conventions in the existing `parser.test.ts` (Vitest, `.test.ts` suffix, colocated with source).
+- [x] (P) Add unit tests for the shared `elapsed()` formatter — test edge cases like 0ms, sub-second, exactly 60s, and multi-minute durations. Follow the conventions in the existing `parser.test.ts` (Vitest, `.test.ts` suffix, colocated with source).
 
 ## References
 
