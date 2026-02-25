@@ -111,7 +111,7 @@ Both new functions (`extractSpecContent` and `validateSpecStructure`) must be ex
 
 - [x] (P) Add unit tests in `src/spec-generator.test.ts` for `extractSpecContent()` — cover: already-clean content (no-op), code-fence-wrapped content, content with preamble before H1, content with postamble summary, content with both preamble and postamble, content with no recognizable structure (returned as-is). Follow conventions from `src/parser.test.ts`.
 
-- [ ] (P) Add unit tests in `src/spec-generator.test.ts` for `validateSpecStructure()` — cover: valid spec structure, missing H1, missing Tasks section, missing checkboxes, empty content. Follow same testing conventions.
+- [x] (P) Add unit tests in `src/spec-generator.test.ts` for `validateSpecStructure()` — cover: valid spec structure, missing H1, missing Tasks section, missing checkboxes, empty content. Follow same testing conventions.
 
 ## References
 

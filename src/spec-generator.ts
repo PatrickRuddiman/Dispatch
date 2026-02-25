@@ -737,7 +737,7 @@ export function buildFileSpecPrompt(filePath: string, content: string, cwd: stri
     ``,
     `\`${filePath}\``,
     ``,
-    `Use your Write tool to save the file. The file must follow this structure exactly:`,
+    `Use your Write tool to save the file. The file content MUST begin with the H1 heading — no preamble, no code fences, no conversational text before it. Do not add any text after the final spec section — no postamble, no summary, no commentary. The file must follow this structure exactly:`,
     ``,
     `# <Title>`,
     ``,
