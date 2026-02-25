@@ -23,7 +23,7 @@
 
 import { resolve } from "node:path";
 import { bootOrchestrator } from "./agents/index.js";
-import { generateSpecs } from "./spec-generator.js";
+import { generateSpecs, defaultConcurrency } from "./spec-generator.js";
 import { log } from "./logger.js";
 import type { ProviderName } from "./provider.js";
 import type { IssueSourceName } from "./issue-fetcher.js";
@@ -40,7 +40,7 @@ const HELP = `
   Dispatch options:
     --dry-run              List tasks without dispatching
     --no-plan              Skip the planner agent, dispatch directly
-    --concurrency <n>      Max parallel dispatches (default: 1; spec mode: min(cpus, freeMB/500))
+    --concurrency <n>      Max parallel dispatches (default: min(cpus, freeMB/500))
     --provider <name>      Agent backend: ${PROVIDER_NAMES.join(", ")} (default: opencode)
     --server-url <url>     URL of a running provider server
     --cwd <dir>            Working directory (default: cwd)
@@ -68,7 +68,7 @@ const HELP = `
 `.trimStart();
 
 interface CliArgs {
-  pattern: string;
+  pattern: string[];
   dryRun: boolean;
   noPlan: boolean;
   /** undefined means "use mode-specific default" */
@@ -89,7 +89,7 @@ interface CliArgs {
 
 function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = {
-    pattern: "",
+    pattern: [],
     dryRun: false,
     noPlan: false,
     provider: "opencode",
@@ -158,7 +158,7 @@ function parseArgs(argv: string[]): CliArgs {
       i++;
       args.cwd = resolve(argv[i]);
     } else if (!arg.startsWith("-")) {
-      args.pattern = arg;
+      args.pattern.push(arg);
     } else {
       log.error(`Unknown option: ${arg}`);
       process.exit(1);
@@ -204,9 +204,10 @@ async function main() {
   }
 
   // ── Dispatch mode ──────────────────────────────────────────
-  if (!args.pattern) {
+  if (!args.pattern.length) {
     log.error("Missing glob pattern. Usage: dispatch <glob>");
     log.dim('  Example: dispatch "tasks/**/*.md"');
+    log.dim("  Example: dispatch tasks/a.md tasks/b.md");
     log.dim("  Or use:  dispatch --spec 1,2,3");
     process.exit(1);
   }
@@ -214,7 +215,7 @@ async function main() {
   const orchestrator = await bootOrchestrator({ cwd: args.cwd });
   const summary = await orchestrator.orchestrate({
     pattern: args.pattern,
-    concurrency: args.concurrency ?? 1,
+    concurrency: args.concurrency ?? defaultConcurrency(),
     dryRun: args.dryRun,
     noPlan: args.noPlan,
     provider: args.provider,

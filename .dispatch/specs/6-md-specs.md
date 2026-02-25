@@ -4,28 +4,32 @@
 
 ## Context
 
-Dispatch is a TypeScript (ESM-only, Node 18+) CLI tool that orchestrates AI agents to implement tasks from markdown spec files. It has two main modes:
+Dispatch is a TypeScript (ESM-only, Node 18+) CLI tool that orchestrates AI agents to implement tasks from markdown spec files. It is built with `tsup`, tested with Vitest v4, and uses strict TypeScript with the `bundler` module resolution strategy. All import paths use the `.js` extension convention required by ESM.
+
+The project has two main modes:
 
 - **Dispatch mode** (`dispatch <glob>`) — reads markdown task files, plans, and dispatches work to AI agents.
 - **Spec mode** (`dispatch --spec <ids>`) — fetches issues from GitHub or Azure DevOps by number, sends them to an AI agent that explores the codebase, and writes structured markdown spec files to disk.
 
-The spec generation pipeline lives in `src/spec-generator.ts`. It exports `generateSpecs()` which accepts a `SpecOptions` object containing a comma-separated string of issue numbers. The function:
+### Key modules involved
 
-1. Parses the issue numbers string by splitting on commas.
-2. Detects or validates the issue source (GitHub/Azure DevOps) via `src/issue-fetchers/index.ts`.
-3. Fetches each issue using the platform's CLI tool, normalizing results to `IssueDetails` objects (defined in `src/issue-fetcher.ts`).
-4. Boots an AI provider via `src/providers/index.ts`.
-5. For each issue, calls `generateSingleSpec()` which builds a detailed prompt via `buildSpecPrompt()`, creates an AI session, and instructs the agent to write the spec file directly to disk.
-6. Optionally pushes the generated spec content back to the issue tracker.
-7. Returns a `SpecSummary` with counts and file paths.
+- **`src/cli.ts`** — CLI entry point with a hand-rolled `parseArgs()` function and `main()` routing logic. The `--spec` flag captures a string value which is passed directly as `SpecOptions.issues`. The `HELP` string documents all options and examples. The `CliArgs` interface has `spec?: string` along with `issueSource`, `org`, `project`, and `outputDir` fields for spec mode.
 
-The CLI entry point is `src/cli.ts`, which uses a hand-rolled argument parser (`parseArgs()`). The `--spec` flag's value is passed directly as `SpecOptions.issues`. The routing logic checks `args.spec` and calls `generateSpecs()` if present.
+- **`src/spec-generator.ts`** — The spec generation pipeline. Exports `SpecOptions` (interface with `issues: string` and optional fields for issue source, provider, concurrency, output directory, etc.), `SpecSummary` (counts and file paths), and `generateSpecs()` (the main entry function). Internally contains `generateSingleSpec()` (creates AI session, sends prompt, verifies file written) and `buildSpecPrompt()` (constructs a ~130-line prompt from `IssueDetails`). The function uses a batch-parallel pattern with `Promise.all` and `splice` for concurrency-limited processing.
 
-The `glob` npm package (v11) is already a runtime dependency, used in `src/agents/orchestrator.ts` for dispatch mode file resolution.
+- **`src/issue-fetcher.ts`** — Defines the `IssueDetails` interface (`number`, `title`, `body`, `labels`, `state`, `url`, `comments`, `acceptanceCriteria`), `IssueFetchOptions`, and the `IssueFetcher` interface.
 
-The `IssueDetails` interface has fields: `number`, `title`, `body`, `labels`, `state`, `url`, `comments`, `acceptanceCriteria`.
+- **`src/issue-fetchers/index.ts`** — Registry of issue fetchers, `detectIssueSource()` function, and `ISSUE_SOURCE_NAMES` constant.
 
-The `buildSpecPrompt()` function constructs a ~115-line prompt incorporating all `IssueDetails` fields — number, title, state, URL, labels, body, acceptance criteria, and comments.
+- **`src/agents/orchestrator.ts`** — Contains the existing `glob` import pattern: `import { glob } from "glob"` with options `{ cwd, absolute: true }`.
+
+- **`src/parser.test.ts`** — 995-line co-located test file demonstrating Vitest conventions: `describe`/`it`/`expect`, `afterEach` cleanup, `const FILE = "/fake/tasks.md"` for pure tests, `mkdtemp`/`rm` for I/O tests, imports from `./parser.js`.
+
+### Dependencies already available
+
+- `glob` v11 — runtime dependency, already imported in `src/agents/orchestrator.ts`
+- `node:fs/promises` — already used in `src/spec-generator.ts` for `mkdir` and `readFile`
+- `node:path` — already used for `join` in `src/spec-generator.ts`
 
 ## Why
 
@@ -40,63 +44,90 @@ By accepting a glob pattern (e.g., `dispatch --spec "drafts/*.md"`), users can p
 
 ## Approach
 
-### Input detection (no new CLI flag)
+### Input detection — no new CLI flag
 
-The `--spec` value can be disambiguated automatically:
+The `--spec` value is disambiguated automatically using a pure utility function:
 
-- **Issue numbers:** purely numeric digits and commas (e.g., `"42,43,44"`). Matches pattern `/^\d+(,\s*\d+)*$/`.
-- **Glob/file patterns:** anything else — contains path separators, wildcards, `.md` extension, or other non-numeric characters (e.g., `"drafts/*.md"`, `"./my-spec.md"`).
+- **Issue numbers:** the string matches `/^\d+(,\s*\d+)*$/` — only digits, commas, and optional whitespace (e.g., `"42"`, `"1,2,3"`, `"1, 2, 3"`).
+- **Glob/file patterns:** anything that does not match the above regex — contains path separators, wildcards, `.md` extension, alphabetic characters, etc. (e.g., `"drafts/*.md"`, `"./my-spec.md"`, `"spec.md"`).
 
-This detection should be a small, well-named utility function (e.g., `isGlobPattern()` or `isFilePath()`) that can be unit-tested in isolation. The check should happen early — either in `cli.ts` before calling into the spec generator, or at the top of `generateSpecs()` to route between the two code paths.
+This detection function (e.g., `isIssueNumbers(input: string): boolean`) should be exported from `src/spec-generator.ts` so it can be unit-tested. It is called at the top of `generateSpecs()` to route between the two code paths, keeping `main()` in `cli.ts` unchanged — it just calls `generateSpecs()` with the `--spec` value as before.
 
-### Glob-based spec generation
+### Two code paths within the spec generator
 
-When a glob pattern is detected, the pipeline diverges from the issue-tracker path:
+The `SpecOptions` interface is updated to make `issues` optional and add an optional `glob` field (or the existing `issues` field is reused since the detection happens inside `generateSpecs()`). The cleanest approach: keep the `issues` field as the sole input string, and let `generateSpecs()` internally detect which mode to use.
 
-1. **Resolve the glob** to a list of absolute file paths using the existing `glob` npm dependency (same usage pattern as `src/agents/orchestrator.ts`).
-2. **Read each file** using `readFile` from `node:fs/promises`.
-3. **Construct lightweight `IssueDetails`-like objects** from the file content. The file's basename (without extension) serves as the title, the full file content serves as the body, and remaining fields (number, labels, state, url, comments, acceptanceCriteria) are filled with sensible defaults or empty values.
-4. **Build the spec prompt** — reuse or adapt `buildSpecPrompt()`. The prompt needs a variant that works without issue-tracker metadata (no issue number, no URL, no state). A separate function or conditional branch within the existing function can handle this. The key constraint: the `outputPath` for the generated spec should be the **same path as the source file**, so the AI agent overwrites it in-place.
-5. **Generate specs via the AI provider** — reuse `generateSingleSpec()` or a similar function. The core loop (create session, send prompt, verify file written) is the same.
-6. **Skip issue-tracker operations** — no issue source detection, no fetching, no `fetcher.update()` call.
+When the input is detected as a glob pattern, `generateSpecs()` delegates to a new internal function (e.g., `generateSpecsFromFiles()`) that:
 
-### Architecture integration
+1. **Resolves the glob** using the `glob` package with `{ cwd, absolute: true }` — the same pattern used in `src/agents/orchestrator.ts`.
+2. **Reads each file** using `readFile` from `node:fs/promises`.
+3. **Builds a file-specific prompt** using a new `buildFileSpecPrompt()` function (or an adapted variant of `buildSpecPrompt()`) that accepts a file path and its content string rather than `IssueDetails`. The prompt uses the file's basename (without extension) as the title and the file's full content as the description. It omits issue-tracker metadata (number, URL, state, labels) but retains the same output format instructions and spec structure requirements.
+4. **Generates specs** by calling `generateSingleSpec()` (or a variant that accepts a prompt string directly) for each file. The `outputPath` is the **same path as the source file** — overwriting it in-place.
+5. **Skips all issue-tracker operations** — no `detectIssueSource()`, no `fetcher.fetch()`, no `fetcher.update()`.
+6. **Uses the same batch-parallel concurrency pattern** (splice-based queue with `Promise.all` batches).
+7. **Returns a `SpecSummary`** with accurate totals.
 
-- The `SpecOptions` interface needs a way to represent the new input type. One clean approach: add an optional field for the raw glob input alongside the existing `issues` field, or make `issues` optional and add a `files` or `glob` field. The `generateSpecs()` function then branches based on which field is populated.
-- An alternative approach is to create a dedicated `generateSpecsFromFiles()` function that shares the AI-provider and batch-concurrency logic but skips all issue-fetcher code. This avoids cluttering `generateSpecs()` with conditionals.
-- The `buildSpecPrompt()` function currently accepts `IssueDetails`. For file-based specs, a variant prompt builder is needed that takes a file path and content string instead, since most `IssueDetails` fields are meaningless for local files. The prompt should still instruct the AI agent to explore the codebase and produce the same structured spec format.
-- The `SpecSummary` return type can be reused as-is.
+### Adapting `generateSingleSpec()`
+
+The current `generateSingleSpec()` is tightly coupled to `IssueDetails` because it calls `buildSpecPrompt(issue, cwd, outputPath)` internally. Two options:
+
+- **Option A:** Make `generateSingleSpec()` accept a pre-built prompt string instead of (or in addition to) an `IssueDetails` object, so both code paths can use it. This is cleaner.
+- **Option B:** Create a parallel `generateSingleSpecFromFile()` that duplicates the session-create/prompt/verify logic. This is simpler but duplicates code.
+
+Option A is preferred — refactor `generateSingleSpec()` to accept `(instance, prompt, outputPath)` and have both the issue-based and file-based paths build their prompts externally before calling it.
+
+### File-based prompt builder
+
+A new `buildFileSpecPrompt(filePath: string, content: string, cwd: string)` function constructs a prompt similar to `buildSpecPrompt()` but:
+
+- Uses the filename (basename without `.md`) as the title/identifier instead of issue number.
+- Uses the file content as the description/body instead of `IssueDetails.body`.
+- Omits issue-specific metadata sections (number, state, URL, labels, acceptance criteria, comments).
+- Uses the source file path as the `outputPath` (in-place overwrite).
+- Retains the identical output format specification (sections: `# Title`, `> Summary`, `## Context`, `## Why`, `## Approach`, `## Integration Points`, `## Tasks`, `## References`, `## Key Guidelines`).
+- Retains the identical instructions (explore codebase, understand the content, research approach, identify integration points, DO NOT make code changes).
+- Retains the `(P)`/`(S)` task tagging instructions.
 
 ### Key design decisions
 
-- **Overwrite in-place:** The source markdown file is overwritten with the generated spec. The `outputPath` passed to the prompt builder and `generateSingleSpec()` is the original file path, not a path under `--output-dir`. The `--output-dir` flag is ignored in glob mode.
-- **No issue source required:** When glob mode is active, `--source`, `--org`, and `--project` flags are irrelevant and should be ignored (or warned about if provided).
-- **Concurrency:** The same batch-parallel pattern used for issue-based generation applies to file-based generation.
+- **Overwrite in-place:** The source markdown file is overwritten with the generated spec. The `--output-dir` flag is ignored in file/glob mode.
+- **No issue source required:** When glob mode is active, `--source`, `--org`, and `--project` flags are irrelevant and silently ignored.
+- **Concurrency:** The same batch-parallel pattern applies. The default concurrency calculation (`min(cpuCount, freeMB/500)`) is reused.
+- **Empty glob results:** If the glob resolves to zero files, log an error and return an empty `SpecSummary` (matching the pattern for zero issue numbers).
 
 ## Integration Points
 
-- **`src/cli.ts`** — the `parseArgs()` function and `main()` routing logic. The `--spec` flag already captures a string value; the routing in `main()` needs to detect whether the value is issue numbers or a glob, then call the appropriate generation function. The `HELP` string and examples need updating.
-- **`src/spec-generator.ts`** — the `SpecOptions` interface, `generateSpecs()` function, `generateSingleSpec()`, and `buildSpecPrompt()`. This is the primary module to extend. The new glob-based path should share the AI provider boot/cleanup and batch concurrency patterns.
-- **`src/issue-fetcher.ts`** — the `IssueDetails` interface is referenced by `buildSpecPrompt()`. The file-based path either needs to construct compatible `IssueDetails` objects or use a different prompt builder that doesn't require them.
-- **`glob` npm package** — already a dependency (v11), already imported in `src/agents/orchestrator.ts`. Should be imported the same way in whatever module resolves file patterns.
-- **`node:fs/promises`** — already used in `src/spec-generator.ts` for `mkdir` and `readFile`. Will also be needed to read source markdown files.
-- **Vitest** — test framework (v4). Tests are co-located as `<module>.test.ts` files in `src/`. The new detection logic and any pure utility functions should have unit tests following the same patterns as `src/parser.test.ts`.
-- **TypeScript strict mode** — all new code must pass `tsc --noEmit` with the existing `tsconfig.json`.
-- **ESM-only** — all imports must use `.js` extensions in import paths (TypeScript ESM convention used throughout the project).
+- **`src/spec-generator.ts`** — Primary module to extend. The `SpecOptions` interface, `generateSpecs()` routing, `generateSingleSpec()` signature, and a new `buildFileSpecPrompt()` function. Must maintain the existing `buildSpecPrompt()` for the issue-based path. The batch concurrency pattern (splice-queue + `Promise.all`) must be reused.
+
+- **`src/cli.ts`** — The `HELP` string needs updated descriptions and examples for glob-based spec generation. The `main()` routing logic should remain unchanged since `generateSpecs()` handles detection internally. The `--spec` option description in HELP should note it accepts both issue numbers and glob patterns.
+
+- **`src/issue-fetcher.ts`** — The `IssueDetails` interface is not modified. The file-based path avoids constructing `IssueDetails` objects entirely, using a dedicated prompt builder instead.
+
+- **`glob` npm package** — Import using the same pattern as `src/agents/orchestrator.ts`: `import { glob } from "glob"` with options `{ cwd, absolute: true }`.
+
+- **`node:fs/promises`** — Already imported in `src/spec-generator.ts`. Use `readFile` to read source markdown files.
+
+- **`node:path`** — Already imported. Use `basename` (with extension stripping) to derive titles from filenames.
+
+- **Vitest** — Co-located test file `src/spec-generator.test.ts`. Follow patterns from `src/parser.test.ts`: `describe`/`it`/`expect` blocks, imports with `.js` extension, `const`-based test fixtures, descriptive test names.
+
+- **TypeScript strict mode** — All new code must compile under `tsc --noEmit` with the existing `tsconfig.json`. No `any` types.
+
+- **ESM conventions** — All imports must use `.js` extensions (e.g., `import { ... } from "./spec-generator.js"`).
 
 ## Tasks
 
-- [ ] **Add input-type detection utility** — Create a function (e.g., `isIssueNumbers(input: string): boolean`) that determines whether the `--spec` value is a comma-separated list of issue numbers or a glob/file pattern. This should be a pure function that can be unit-tested. Place it in `src/spec-generator.ts` or a small utility module. The regex should match strings that are only digits, commas, and whitespace.
+- [x] (S) **Add input-type detection utility** — Create and export a pure function `isIssueNumbers(input: string): boolean` in `src/spec-generator.ts` that returns `true` when the input string consists solely of digits, commas, and whitespace (matching the pattern for comma-separated issue numbers). Everything else is treated as a glob/file pattern. This function is the branching point for the two spec-generation code paths and must be testable in isolation.
 
-- [ ] **Extend `SpecOptions` and routing in `generateSpecs()`** — Update the `SpecOptions` interface and `generateSpecs()` function to support the file-based path. When the input is detected as a glob pattern, the function should skip issue source detection and fetching, instead resolving files via `glob` and reading their content. Consider whether to branch within `generateSpecs()` or create a separate `generateSpecsFromFiles()` function — either approach is acceptable as long as the code remains clean and the AI provider boot/cleanup and batch concurrency patterns are reused.
+- [ ] (P) **Add unit tests for the detection utility** — Create `src/spec-generator.test.ts` with a `describe("isIssueNumbers")` block covering: pure numeric strings (`"42"`, `"1,2,3"`, `"1, 2, 3"`), glob patterns (`"*.md"`, `"drafts/*.md"`, `"./spec.md"`), relative file paths (`"drafts/feature.md"`), plain filenames (`"spec.md"`), edge cases (empty string, whitespace-only string), and strings with mixed content (`"42,foo"`). Follow the Vitest patterns from `src/parser.test.ts`.
 
-- [ ] **Build a file-based spec prompt** — Create a variant of `buildSpecPrompt()` (or adapt it) that works with a file path and its markdown content instead of `IssueDetails`. The prompt should still instruct the AI agent to explore the codebase, understand the content as a feature/issue description, and write a structured spec to the same file path (overwriting it). The output format (sections: Context, Why, Approach, Integration Points, Tasks, References) must remain identical.
+- [ ] (S) **Build a file-based spec prompt function** — Create a `buildFileSpecPrompt(filePath: string, content: string, cwd: string)` function in `src/spec-generator.ts` that constructs the same style of spec-agent prompt as `buildSpecPrompt()` but uses the file path and its content instead of `IssueDetails`. The filename (basename minus extension) serves as the title. The file content serves as the description. The output path is the same as the input file path (in-place overwrite). The output format instructions, spec structure template, `(P)`/`(S)` tagging rules, and agent guidelines must be identical to those in `buildSpecPrompt()`.
 
-- [ ] **Implement the file-based generation loop** — Wire the glob resolution, file reading, prompt building, and `generateSingleSpec()` calls together in a batch-parallel loop matching the existing concurrency pattern. The output path for each file should be its original path (in-place overwrite). Skip `fetcher.update()` calls since there is no issue tracker. Return a `SpecSummary` with accurate counts and file paths.
+- [ ] (S) **Refactor `generateSingleSpec()` to accept a prompt string** — Change `generateSingleSpec()` so it accepts a pre-built prompt string and an output path (instead of building the prompt internally from `IssueDetails`). Update the existing issue-based call site in `generateSpecs()` to build the prompt externally via `buildSpecPrompt()` and pass it in. This decouples the function from `IssueDetails` so both code paths can reuse it.
 
-- [ ] **Update CLI help text and routing** — Update the `HELP` string in `src/cli.ts` to document that `--spec` also accepts glob patterns for local markdown files. Add an example like `dispatch --spec "drafts/*.md"`. Update the `Spec options` section description. Ensure the routing in `main()` correctly passes the `--spec` value to the appropriate code path (the detection logic should be transparent to `main()` — it just calls `generateSpecs()` which handles both cases internally).
+- [ ] (S) **Implement the file-based generation path in `generateSpecs()`** — Add a branch at the top of `generateSpecs()` that calls `isIssueNumbers()` on the `issues` input. When it returns `false`, delegate to a new internal function (e.g., `generateSpecsFromFiles()`) that: resolves the glob with `{ cwd, absolute: true }`, reads each file, builds prompts via `buildFileSpecPrompt()`, generates specs via the refactored `generateSingleSpec()`, and returns a `SpecSummary`. Reuse the AI provider boot/cleanup and the splice-based batch concurrency pattern. Skip all issue-fetcher operations. Log appropriate messages for empty glob results and per-file progress.
 
-- [ ] **Add unit tests for the detection utility** — Write tests in a co-located test file (e.g., `src/spec-generator.test.ts`) covering the input-type detection function. Test cases should include: pure numeric (`"42"`), comma-separated numbers (`"1,2,3"`), numbers with spaces (`"1, 2, 3"`), glob patterns (`"*.md"`, `"drafts/*.md"`, `"./spec.md"`), relative paths (`"drafts/feature.md"`), and edge cases (empty string, single filename like `"spec.md"`). Follow the Vitest patterns used in `src/parser.test.ts`.
+- [ ] (P) **Update CLI help text** — Update the `HELP` string in `src/cli.ts` to document that `--spec` accepts both comma-separated issue numbers and glob patterns for local markdown files. Update the `Spec options` section description for `--spec` to mention both input types. Add an example like `dispatch --spec "drafts/*.md"` to the examples list.
 
 ## References
 
@@ -105,3 +136,5 @@ When a glob pattern is detected, the pipeline diverges from the issue-tracker pa
 - Existing glob usage pattern: `src/agents/orchestrator.ts`
 - Existing spec generation pipeline: `src/spec-generator.ts`
 - CLI argument parsing: `src/cli.ts`
+- Issue details interface: `src/issue-fetcher.ts`
+- Test conventions: `src/parser.test.ts`

@@ -48,6 +48,23 @@ export interface SpecOptions {
   concurrency?: number;
 }
 
+/** Returns a safe default concurrency: min(cpuCount, freeMB/500), at least 1. */
+export function defaultConcurrency(): number {
+  return Math.max(1, Math.min(cpus().length, Math.floor(freemem() / 1024 / 1024 / 500)));
+}
+
+/**
+ * Returns `true` when the input string consists solely of comma-separated
+ * issue numbers (digits, commas, and optional whitespace).  Anything else
+ * — paths, globs, filenames — returns `false`.
+ *
+ * This is the branching point for the two spec-generation code paths:
+ * issue-tracker mode vs. local-file/glob mode.
+ */
+export function isIssueNumbers(input: string): boolean {
+  return /^\d+(,\s*\d+)*$/.test(input);
+}
+
 export interface SpecSummary {
   /** Total issues requested */
   total: number;
@@ -71,7 +88,7 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
     outputDir = join(cwd, ".dispatch", "specs"),
     org,
     project,
-    concurrency = Math.max(1, Math.min(cpus().length, Math.floor(freemem() / 1024 / 1024 / 500))),
+    concurrency = defaultConcurrency(),
   } = opts;
 
   // Parse issue numbers

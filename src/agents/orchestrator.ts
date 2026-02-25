@@ -27,8 +27,8 @@ import { detectIssueSource, getIssueFetcher } from "../issue-fetchers/index.js";
  * dispatched and how, separate from the agent's boot-time configuration.
  */
 export interface OrchestrateRunOptions {
-  /** Glob pattern for task files */
-  pattern: string;
+  /** Glob pattern(s) for task files */
+  pattern: string[];
   /** Max parallel dispatches */
   concurrency: number;
   /** List tasks without executing */
@@ -101,9 +101,17 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
         if (files.length === 0) {
           tui.state.phase = "done";
           tui.stop();
-          log.warn("No files matched the pattern: " + pattern);
+          log.warn("No files matched the pattern(s): " + pattern.join(", "));
           return { total: 0, completed: 0, failed: 0, skipped: 0, results: [] };
         }
+        // Sort numerically by leading digits in filename (e.g. "6-foo.md" before "11-bar.md")
+        files.sort((a, b) => {
+          const numA = parseInt(basename(a).match(/^(\d+)/)?.[1] ?? "0", 10);
+          const numB = parseInt(basename(b).match(/^(\d+)/)?.[1] ?? "0", 10);
+          if (numA !== numB) return numA - numB;
+          return a.localeCompare(b);
+        });
+
         tui.state.filesFound = files.length;
 
         // ── 2. Parse all tasks ──────────────────────────────────────
@@ -283,13 +291,19 @@ async function closeCompletedSpecIssues(
 }
 
 async function dryRunMode(
-  pattern: string,
+  pattern: string[],
   cwd: string
 ): Promise<DispatchSummary> {
   const files = await glob(pattern, { cwd, absolute: true });
+  files.sort((a, b) => {
+    const numA = parseInt(basename(a).match(/^(\d+)/)?.[1] ?? "0", 10);
+    const numB = parseInt(basename(b).match(/^(\d+)/)?.[1] ?? "0", 10);
+    if (numA !== numB) return numA - numB;
+    return a.localeCompare(b);
+  });
 
   if (files.length === 0) {
-    log.warn("No files matched the pattern: " + pattern);
+    log.warn("No files matched the pattern(s): " + pattern.join(", "));
     return { total: 0, completed: 0, failed: 0, skipped: 0, results: [] };
   }
 
