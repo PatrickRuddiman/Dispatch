@@ -107,7 +107,7 @@ Both new functions (`extractSpecContent` and `validateSpecStructure`) must be ex
 
 - [x] (S) Integrate post-processing into `generateSingleSpec()` — after verifying the file exists, read the content, run it through `extractSpecContent()`, validate with `validateSpecStructure()`, and write the cleaned content back to disk if it changed. Add `writeFile` to the imports from `node:fs/promises`. This must complete before `generateSingleSpec()` returns so the downstream `fetcher.update()` call in `generateSpecs()` reads clean content.
 
-- [ ] (P) Strengthen the `buildSpecPrompt()` instructions — add explicit prohibitions against preamble, postamble, summaries, code-fence wrapping, and conversational text. Place these instructions near the role definition at the top of the prompt AND reiterate them near the Write tool / output section so they frame both the beginning and end of the AI agent's attention window.
+- [x] (P) Strengthen the `buildSpecPrompt()` instructions — add explicit prohibitions against preamble, postamble, summaries, code-fence wrapping, and conversational text. Place these instructions near the role definition at the top of the prompt AND reiterate them near the Write tool / output section so they frame both the beginning and end of the AI agent's attention window.
 
 - [x] (P) Add unit tests in `src/spec-generator.test.ts` for `extractSpecContent()` — cover: already-clean content (no-op), code-fence-wrapped content, content with preamble before H1, content with postamble summary, content with both preamble and postamble, content with no recognizable structure (returned as-is). Follow conventions from `src/parser.test.ts`.
 
