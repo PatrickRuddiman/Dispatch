@@ -68,7 +68,7 @@ All changes are prompt-level and control-flow-level — no new modules, interfac
 
 - [x] (P) Update executor prompts to conditionally allow commits — In `src/dispatcher.ts`, replace the hard-coded "Do NOT commit" instruction in both `buildPrompt()` and `buildPlannedPrompt()` with a conditional instruction: if the task description includes a commit instruction, perform the commit using conventional commit conventions; otherwise, do not commit. List the supported conventional commit types in the prompt.
 
-- [ ] (P) Update planner prompt to respect task-level commit instructions — In `src/agents/planner.ts`, replace the "Do NOT commit" constraint in `buildPlannerPrompt()` with a conditional instruction that tells the planner to include commit steps in its execution plan when the task text specifies committing, and to omit commit steps otherwise.
+- [x] (P) Update planner prompt to respect task-level commit instructions — In `src/agents/planner.ts`, replace the "Do NOT commit" constraint in `buildPlannerPrompt()` with a conditional instruction that tells the planner to include commit steps in its execution plan when the task text specifies committing, and to omit commit steps otherwise.
 
 ## References
 
