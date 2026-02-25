@@ -120,7 +120,7 @@ Add comprehensive tests following the existing Vitest conventions in `src/parser
 
 - [x] (P) Extend the `Task` interface in `src/parser.ts` with an optional `mode` field (`"parallel" | "serial"`) and update `parseTaskContent` to extract and strip `(P)`/`(S)` prefixes from the task text, defaulting to `"serial"` when no prefix is present
 
-- [ ] (P) Update `buildSpecPrompt` in `src/spec-generator.ts` to instruct the spec agent to tag tasks with `(P)` or `(S)` prefixes, explain the semantics (parallel-safe vs. serial/dependent), encourage parallelism as the default, and show example syntax
+- [x] (P) Update `buildSpecPrompt` in `src/spec-generator.ts` to instruct the spec agent to tag tasks with `(P)` or `(S)` prefixes, explain the semantics (parallel-safe vs. serial/dependent), encourage parallelism as the default, and show example syntax
 
 - [ ] (P) Harden the executor constraints in `buildPlannedPrompt` in `src/dispatcher.ts` to explicitly forbid codebase exploration, re-planning, and deviation from the provided plan — ensuring the executor stays focused when running in parallel with other executors
 
