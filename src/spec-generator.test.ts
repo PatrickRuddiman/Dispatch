@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isIssueNumbers } from "./spec-generator.js";
+import { isIssueNumbers, buildFileSpecPrompt } from "./spec-generator.js";
 
 describe("isIssueNumbers", () => {
   it("returns true for a single issue number", () => {
@@ -88,5 +88,125 @@ describe("isIssueNumbers", () => {
 
   it("returns false for mixed numeric and alphabetic content", () => {
     expect(isIssueNumbers("42,foo")).toBe(false);
+  });
+});
+
+describe("buildFileSpecPrompt", () => {
+  const FILE_PATH = "/home/user/drafts/my-feature.md";
+  const CONTENT = "This is the feature description.\n\nIt has multiple paragraphs.";
+  const CWD = "/home/user/project";
+
+  it("returns a string", () => {
+    const result = buildFileSpecPrompt(FILE_PATH, CONTENT, CWD);
+    expect(typeof result).toBe("string");
+  });
+
+  it("derives the title from the filename without extension", () => {
+    const result = buildFileSpecPrompt(FILE_PATH, CONTENT, CWD);
+    expect(result).toContain("- **Title:** my-feature");
+  });
+
+  it("includes the source file path", () => {
+    const result = buildFileSpecPrompt(FILE_PATH, CONTENT, CWD);
+    expect(result).toContain(`- **Source file:** ${FILE_PATH}`);
+  });
+
+  it("includes the file content under a Content heading", () => {
+    const result = buildFileSpecPrompt(FILE_PATH, CONTENT, CWD);
+    expect(result).toContain("### Content");
+    expect(result).toContain(CONTENT);
+  });
+
+  it("uses the file path as the output path", () => {
+    const result = buildFileSpecPrompt(FILE_PATH, CONTENT, CWD);
+    expect(result).toContain(`\`${FILE_PATH}\``);
+  });
+
+  it("includes the working directory", () => {
+    const result = buildFileSpecPrompt(FILE_PATH, CONTENT, CWD);
+    expect(result).toContain(`\`${CWD}\``);
+  });
+
+  it("includes the spec agent preamble", () => {
+    const result = buildFileSpecPrompt(FILE_PATH, CONTENT, CWD);
+    expect(result).toContain("You are a **spec agent**");
+  });
+
+  it("includes the two-stage pipeline explanation", () => {
+    const result = buildFileSpecPrompt(FILE_PATH, CONTENT, CWD);
+    expect(result).toContain("planner agent");
+    expect(result).toContain("coder agent");
+  });
+
+  it("includes all required spec sections in the template", () => {
+    const result = buildFileSpecPrompt(FILE_PATH, CONTENT, CWD);
+    expect(result).toContain("## Context");
+    expect(result).toContain("## Why");
+    expect(result).toContain("## Approach");
+    expect(result).toContain("## Integration Points");
+    expect(result).toContain("## Tasks");
+    expect(result).toContain("## References");
+    expect(result).toContain("## Key Guidelines");
+  });
+
+  it("includes (P)/(S) tagging instructions", () => {
+    const result = buildFileSpecPrompt(FILE_PATH, CONTENT, CWD);
+    expect(result).toContain("`(P)`");
+    expect(result).toContain("`(S)`");
+    expect(result).toContain("**Parallel-safe.**");
+    expect(result).toContain("**Serial / dependent.**");
+  });
+
+  it("includes the task example", () => {
+    const result = buildFileSpecPrompt(FILE_PATH, CONTENT, CWD);
+    expect(result).toContain("- [ ] (P) Add validation helper to the form utils module");
+    expect(result).toContain("- [ ] (S) Refactor the form component to use the new validation helper");
+  });
+
+  it("includes all five instructions", () => {
+    const result = buildFileSpecPrompt(FILE_PATH, CONTENT, CWD);
+    expect(result).toContain("1. **Explore the codebase**");
+    expect(result).toContain("2. **Understand the content**");
+    expect(result).toContain("3. **Research the approach**");
+    expect(result).toContain("4. **Identify integration points**");
+    expect(result).toContain("5. **DO NOT make any code changes**");
+  });
+
+  it("does not include issue-specific metadata", () => {
+    const result = buildFileSpecPrompt(FILE_PATH, CONTENT, CWD);
+    expect(result).not.toContain("**Number:**");
+    expect(result).not.toContain("**State:**");
+    expect(result).not.toContain("**URL:**");
+    expect(result).not.toContain("**Labels:**");
+    expect(result).not.toContain("### Acceptance Criteria");
+    expect(result).not.toContain("### Discussion");
+  });
+
+  it("uses # <Title> in the output template instead of # <Issue title> (#<number>)", () => {
+    const result = buildFileSpecPrompt(FILE_PATH, CONTENT, CWD);
+    expect(result).toContain("# <Title>");
+    expect(result).not.toContain("(#<number>)");
+  });
+
+  it("omits Content section when content is empty", () => {
+    const result = buildFileSpecPrompt(FILE_PATH, "", CWD);
+    expect(result).not.toContain("### Content");
+  });
+
+  it("handles a file path without .md extension", () => {
+    const result = buildFileSpecPrompt("/home/user/drafts/feature.txt", CONTENT, CWD);
+    // basename("/home/user/drafts/feature.txt", ".md") yields "feature.txt"
+    expect(result).toContain("- **Title:** feature.txt");
+  });
+
+  it("includes all key guidelines", () => {
+    const result = buildFileSpecPrompt(FILE_PATH, CONTENT, CWD);
+    expect(result).toContain("**Stay high-level.**");
+    expect(result).toContain("**Respect the project's stack.**");
+    expect(result).toContain("**Explain WHAT, WHY, and HOW (strategically).**");
+    expect(result).toContain("**Detail integration points.**");
+    expect(result).toContain("**Keep tasks atomic and ordered.**");
+    expect(result).toContain("**Tag every task with `(P)` or `(S)`.**");
+    expect(result).toContain("**Keep the markdown clean**");
   });
 });

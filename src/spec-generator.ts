@@ -18,7 +18,7 @@
  */
 
 import { mkdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { cpus, freemem } from "node:os";
 import type { ProviderInstance } from "./provider.js";
 import type { IssueDetails, IssueFetchOptions, IssueSourceName } from "./issue-fetcher.js";
@@ -369,6 +369,130 @@ function buildSpecPrompt(issue: IssueDetails, cwd: string, outputPath: string): 
     `<Explain the motivation — why this change is needed, what problem it solves,`,
     `what user or system benefit it provides. Pull from the issue description,`,
     `acceptance criteria, and discussion.>`,
+    ``,
+    `## Approach`,
+    ``,
+    `<High-level description of the implementation strategy. Explain the overall`,
+    `approach, which patterns to follow, what to extend vs. create new, and how`,
+    `the change fits into the existing architecture. Mention relevant standards,`,
+    `technologies, and conventions the implementation MUST align with.>`,
+    ``,
+    `## Integration Points`,
+    ``,
+    `<List the specific modules, interfaces, configurations, and conventions that`,
+    `the implementation must integrate with. For example: existing provider`,
+    `interfaces to implement, CLI argument patterns to follow, test framework`,
+    `and conventions to match, build system requirements, etc.>`,
+    ``,
+    `## Tasks`,
+    ``,
+    `Each task MUST be prefixed with an execution-mode tag:`,
+    ``,
+    `- \`(P)\` — **Parallel-safe.** This task has no dependency on the output of a prior task and can run concurrently with other \`(P)\` tasks.`,
+    `- \`(S)\` — **Serial / dependent.** This task depends on a prior task's output or modifies shared state that conflicts with concurrent work. It acts as a barrier: all preceding tasks complete before it starts, and it completes before subsequent tasks begin.`,
+    ``,
+    `**Default to \`(P)\`.** Most tasks are independent (e.g., adding a function in one module, writing tests in another). Only use \`(S)\` when a task genuinely depends on the result of a prior task (e.g., "refactor module X" followed by "update callers of module X").`,
+    ``,
+    `If a task has no \`(P)\` or \`(S)\` prefix, the system treats it as serial, so always tag explicitly.`,
+    ``,
+    `Example:`,
+    ``,
+    `- [ ] (P) Add validation helper to the form utils module`,
+    `- [ ] (P) Add unit tests for the new validation helper`,
+    `- [ ] (S) Refactor the form component to use the new validation helper`,
+    `- [ ] (P) Update documentation for the form utils module`,
+    ``,
+    ``,
+    `## References`,
+    ``,
+    `- <Links to relevant docs, related issues, or external resources>`,
+    ``,
+    `## Key Guidelines`,
+    ``,
+    `- **Stay high-level.** Do NOT include code snippets, exact line numbers, diffs, or step-by-step coding instructions. A dedicated planner agent will produce those details for each task at execution time.`,
+    `- **Respect the project's stack.** Your spec must align with the languages, frameworks, libraries, test tools, and conventions already in use. Never suggest technologies that conflict with the existing project.`,
+    `- **Explain WHAT, WHY, and HOW (strategically).** Each task should say what needs to happen, why it's needed, and which part of the codebase it touches — but leave the tactical "how" to the planner agent.`,
+    `- **Detail integration points.** The prose sections (Context, Approach, Integration Points) are critical — they tell the planner agent where to look and what constraints to respect.`,
+    `- **Keep tasks atomic and ordered.** Each \`- [ ]\` task must be a single, clear unit of work. Order them so dependencies come first.`,
+    `- **Tag every task with \`(P)\` or \`(S)\`.** Default to \`(P)\` (parallel) unless the task depends on a prior task's output. Group related serial dependencies together and prefer parallelism to maximize throughput.`,
+    `- **Keep the markdown clean** — it will be parsed by an automated tool.`,
+  );
+
+  return sections.join("\n");
+}
+
+/**
+ * Build a spec prompt from a local markdown file instead of an issue-tracker
+ * issue.  The filename (basename without extension) serves as the title, and
+ * the file content serves as the description.  The output path is the source
+ * file itself (in-place overwrite).
+ *
+ * The output-format instructions, spec structure template, (P)/(S) tagging
+ * rules, and agent guidelines are identical to those in `buildSpecPrompt()`.
+ */
+export function buildFileSpecPrompt(filePath: string, content: string, cwd: string): string {
+  const title = basename(filePath, ".md");
+
+  const sections: string[] = [
+    `You are a **spec agent**. Your job is to explore the codebase, understand the content below, and write a high-level **markdown spec file** to disk that will drive an automated implementation pipeline.`,
+    ``,
+    `**Important:** This file will be consumed by a two-stage pipeline:`,
+    `1. A **planner agent** reads each task together with the prose context in this file, then explores the codebase to produce a detailed, line-level implementation plan.`,
+    `2. A **coder agent** follows that detailed plan to make the actual code changes.`,
+    ``,
+    `Because the planner agent handles low-level details, your spec must stay **high-level and strategic**. Focus on the WHAT, WHY, and HOW — not exact code or line numbers.`,
+    ``,
+    `## File Details`,
+    ``,
+    `- **Title:** ${title}`,
+    `- **Source file:** ${filePath}`,
+  ];
+
+  if (content) {
+    sections.push(``, `### Content`, ``, content);
+  }
+
+  sections.push(
+    ``,
+    `## Working Directory`,
+    ``,
+    `\`${cwd}\``,
+    ``,
+    `## Instructions`,
+    ``,
+    `1. **Explore the codebase** — read relevant files, search for symbols, understand the project structure, language, frameworks, conventions, and patterns. Identify the tech stack (languages, package managers, frameworks, test runners) so your spec aligns with the project's actual standards.`,
+    ``,
+    `2. **Understand the content** — analyze the file content to fully understand what needs to be done and why.`,
+    ``,
+    `3. **Research the approach** — look up relevant documentation, libraries, and patterns. Consider how the change integrates with the existing architecture, standards, and technologies already in use. For example, if the project is TypeScript, do not propose a Python solution; if it uses Vitest, do not suggest Jest.`,
+    ``,
+    `4. **Identify integration points** — determine which existing modules, interfaces, patterns, and conventions the implementation must align with. Note the key files and modules involved, but do NOT prescribe exact code changes — the planner agent will handle that.`,
+    ``,
+    `5. **DO NOT make any code changes** — you are only producing a spec, not implementing.`,
+    ``,
+    `## Output`,
+    ``,
+    `Write the complete spec as a markdown file to this exact path:`,
+    ``,
+    `\`${filePath}\``,
+    ``,
+    `Use your Write tool to save the file. The file must follow this structure exactly:`,
+    ``,
+    `# <Title>`,
+    ``,
+    `> <One-line summary: what this achieves and why it matters>`,
+    ``,
+    `## Context`,
+    ``,
+    `<Describe the relevant parts of the codebase: key modules, directory structure,`,
+    `language/framework, and architectural patterns. Name specific files and modules`,
+    `that are involved so the planner agent knows where to look, but do not include`,
+    `code snippets or line-level details.>`,
+    ``,
+    `## Why`,
+    ``,
+    `<Explain the motivation — why this change is needed, what problem it solves,`,
+    `what user or system benefit it provides. Pull from the file content.>`,
     ``,
     `## Approach`,
     ``,
