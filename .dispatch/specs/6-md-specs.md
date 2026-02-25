@@ -127,7 +127,7 @@ A new `buildFileSpecPrompt(filePath: string, content: string, cwd: string)` func
 
 - [x] (S) **Implement the file-based generation path in `generateSpecs()`** — Add a branch at the top of `generateSpecs()` that calls `isIssueNumbers()` on the `issues` input. When it returns `false`, delegate to a new internal function (e.g., `generateSpecsFromFiles()`) that: resolves the glob with `{ cwd, absolute: true }`, reads each file, builds prompts via `buildFileSpecPrompt()`, generates specs via the refactored `generateSingleSpec()`, and returns a `SpecSummary`. Reuse the AI provider boot/cleanup and the splice-based batch concurrency pattern. Skip all issue-fetcher operations. Log appropriate messages for empty glob results and per-file progress.
 
-- [ ] (P) **Update CLI help text** — Update the `HELP` string in `src/cli.ts` to document that `--spec` accepts both comma-separated issue numbers and glob patterns for local markdown files. Update the `Spec options` section description for `--spec` to mention both input types. Add an example like `dispatch --spec "drafts/*.md"` to the examples list.
+- [x] (P) **Update CLI help text** — Update the `HELP` string in `src/cli.ts` to document that `--spec` accepts both comma-separated issue numbers and glob patterns for local markdown files. Update the `Spec options` section description for `--spec` to mention both input types. Add an example like `dispatch --spec "drafts/*.md"` to the examples list.
 
 ## References
 

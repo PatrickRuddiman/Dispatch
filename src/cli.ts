@@ -48,7 +48,7 @@ const HELP = `
     --cwd <dir>            Working directory (default: cwd)
 
   Spec options:
-    --spec <ids>           Comma-separated issue/work-item numbers
+    --spec <value>         Comma-separated issue numbers or glob pattern for local .md files
     --source <name>        Issue source: ${ISSUE_SOURCE_NAMES.join(", ")} (auto-detected from git remote)
     --org <url>            Azure DevOps organization URL
     --project <name>       Azure DevOps project name
@@ -67,6 +67,8 @@ const HELP = `
     dispatch --spec 42,43,44
     dispatch --spec 42,43 --source github --provider copilot
     dispatch --spec 100,200 --source azdevops --org https://dev.azure.com/myorg --project MyProject
+    dispatch --spec "drafts/*.md"
+    dispatch --spec "./my-feature.md" --provider copilot
 `.trimStart();
 
 interface CliArgs {
