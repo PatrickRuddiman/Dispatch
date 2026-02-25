@@ -61,6 +61,15 @@ const HELP = `
     -h, --help             Show this help
     -v, --version          Show version
 
+  Config:
+    dispatch config set <key> <value>   Set a default config value
+    dispatch config get <key>           Get a config value
+    dispatch config list                List all config values
+    dispatch config reset               Reset config (delete config file)
+    dispatch config path                Show config file path
+
+    Valid keys: provider, concurrency, source, org, project, serverUrl
+
   Examples:
     dispatch "tasks/**/*.md"
     dispatch "tasks/**/*.md" --provider copilot
@@ -71,6 +80,9 @@ const HELP = `
     dispatch --spec 100,200 --source azdevops --org https://dev.azure.com/myorg --project MyProject
     dispatch --spec "drafts/*.md"
     dispatch --spec "./my-feature.md" --provider copilot
+    dispatch config set provider copilot
+    dispatch config list
+    dispatch config reset
 `.trimStart();
 
 interface CliArgs {
