@@ -26,6 +26,7 @@ import { getIssueFetcher, detectIssueSource, ISSUE_SOURCE_NAMES } from "./issue-
 import type { ProviderName } from "./provider.js";
 import { bootProvider } from "./providers/index.js";
 import { log } from "./logger.js";
+import { elapsed } from "./format.js";
 import { registerCleanup } from "./cleanup.js";
 import { glob } from "glob";
 
@@ -204,6 +205,8 @@ export interface SpecSummary {
   failed: number;
   /** Paths of generated spec files */
   files: string[];
+  /** Total pipeline wall-clock duration in milliseconds */
+  durationMs: number;
 }
 
 /**
@@ -221,6 +224,8 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
     concurrency = defaultConcurrency(),
   } = opts;
 
+  const pipelineStart = Date.now();
+
   // ── Route: file/glob mode vs. issue-tracker mode ────────────
   if (!isIssueNumbers(issues)) {
     return generateSpecsFromFiles(opts);
@@ -234,7 +239,7 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
 
   if (issueNumbers.length === 0) {
     log.error("No issue numbers provided. Use --spec 1,2,3");
-    return { total: 0, generated: 0, failed: 0, files: [] };
+    return { total: 0, generated: 0, failed: 0, files: [], durationMs: 0 };
   }
 
   // ── Detect or validate issue source ─────────────────────────
@@ -249,7 +254,7 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
         `  Use --source <name> to specify explicitly, or ensure the git remote\n` +
         `  points to a supported platform (github.com, dev.azure.com).`
       );
-      return { total: issueNumbers.length, generated: 0, failed: issueNumbers.length, files: [] };
+      return { total: issueNumbers.length, generated: 0, failed: issueNumbers.length, files: [], durationMs: Date.now() - pipelineStart };
     }
     source = detected;
     log.info(`Detected issue source: ${source}`);
@@ -259,6 +264,7 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
   const fetchOpts: IssueFetchOptions = { cwd, org, project };
 
   // ── Fetch all issues (parallel batches) ─────────────────────
+  const fetchStart = Date.now();
   log.info(`Fetching ${issueNumbers.length} issue(s) from ${source} (concurrency: ${concurrency})...`);
 
   const issueDetails: { id: string; details: IssueDetails | null; error?: string }[] = [];
@@ -284,18 +290,21 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
     );
     issueDetails.push(...batchResults);
   }
+  log.debug(`Issue fetching completed in ${elapsed(Date.now() - fetchStart)}`);
 
   const validIssues = issueDetails.filter((i) => i.details !== null);
   if (validIssues.length === 0) {
     log.error("No issues could be fetched. Aborting spec generation.");
-    return { total: issueNumbers.length, generated: 0, failed: issueNumbers.length, files: [] };
+    return { total: issueNumbers.length, generated: 0, failed: issueNumbers.length, files: [], durationMs: Date.now() - pipelineStart };
   }
 
   // ── Boot AI provider ────────────────────────────────────────
+  const bootStart = Date.now();
   log.info(`Booting ${provider} provider...`);
   log.debug(serverUrl ? `Using server URL: ${serverUrl}` : "No --server-url, will spawn local server");
   const instance = await bootProvider(provider, { url: serverUrl, cwd });
   registerCleanup(() => instance.cleanup());
+  log.debug(`Provider booted in ${elapsed(Date.now() - bootStart)}`);
 
   // ── Generate spec for each issue (parallel batches) ─────────
   await mkdir(outputDir, { recursive: true });
@@ -311,6 +320,7 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
 
     const batchResults = await Promise.all(
       batch.map(async ({ id, details }) => {
+        const specStart = Date.now();
         // Compute the target filepath before prompting — the agent writes here directly
         const slug = details!.title
           .toLowerCase()
@@ -326,7 +336,7 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
 
           const prompt = buildSpecPrompt(details!, cwd, filepath);
           await generateSingleSpec(instance, prompt, filepath);
-          log.success(`Spec written: ${filepath}`);
+          log.success(`Spec written: ${filepath} (${elapsed(Date.now() - specStart)})`);
 
           // Push spec content back to the issue tracker
           if (fetcher.update) {
@@ -362,8 +372,9 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
   // ── Cleanup ─────────────────────────────────────────────────
   await instance.cleanup();
 
+  const totalDuration = Date.now() - pipelineStart;
   log.info(
-    `Spec generation complete: ${generatedFiles.length} generated, ${failed} failed`
+    `Spec generation complete: ${generatedFiles.length} generated, ${failed} failed in ${elapsed(totalDuration)}`
   );
 
   if (generatedFiles.length > 0) {
@@ -376,6 +387,7 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
     generated: generatedFiles.length,
     failed,
     files: generatedFiles,
+    durationMs: totalDuration,
   };
 }
 
@@ -393,21 +405,25 @@ async function generateSpecsFromFiles(opts: SpecOptions): Promise<SpecSummary> {
     concurrency = defaultConcurrency(),
   } = opts;
 
+  const pipelineStart = Date.now();
+
   // ── Resolve glob ────────────────────────────────────────────
   const files = await glob(pattern, { cwd, absolute: true });
 
   if (files.length === 0) {
     log.error(`No files matched the pattern "${pattern}".`);
-    return { total: 0, generated: 0, failed: 0, files: [] };
+    return { total: 0, generated: 0, failed: 0, files: [], durationMs: 0 };
   }
 
   log.info(`Matched ${files.length} file(s) for spec generation (concurrency: ${concurrency})...`);
 
   // ── Boot AI provider ────────────────────────────────────────
+  const bootStart = Date.now();
   log.info(`Booting ${provider} provider...`);
   log.debug(serverUrl ? `Using server URL: ${serverUrl}` : "No --server-url, will spawn local server");
   const instance = await bootProvider(provider, { url: serverUrl, cwd });
   registerCleanup(() => instance.cleanup());
+  log.debug(`Provider booted in ${elapsed(Date.now() - bootStart)}`);
 
   // ── Generate spec for each file (parallel batches) ──────────
   const generatedFiles: string[] = [];
@@ -421,13 +437,14 @@ async function generateSpecsFromFiles(opts: SpecOptions): Promise<SpecSummary> {
 
     const batchResults = await Promise.all(
       batch.map(async (filePath) => {
+        const specStart = Date.now();
         try {
           log.info(`Generating spec for ${filePath}...`);
 
           const content = await readFile(filePath, "utf-8");
           const prompt = buildFileSpecPrompt(filePath, content, cwd);
           await generateSingleSpec(instance, prompt, filePath);
-          log.success(`Spec written: ${filePath}`);
+          log.success(`Spec written: ${filePath} (${elapsed(Date.now() - specStart)})`);
 
           return filePath;
         } catch (err) {
@@ -451,8 +468,9 @@ async function generateSpecsFromFiles(opts: SpecOptions): Promise<SpecSummary> {
   // ── Cleanup ─────────────────────────────────────────────────
   await instance.cleanup();
 
+  const totalDuration = Date.now() - pipelineStart;
   log.info(
-    `Spec generation complete: ${generatedFiles.length} generated, ${failed} failed`
+    `Spec generation complete: ${generatedFiles.length} generated, ${failed} failed in ${elapsed(totalDuration)}`
   );
 
   if (generatedFiles.length > 0) {
@@ -465,6 +483,7 @@ async function generateSpecsFromFiles(opts: SpecOptions): Promise<SpecSummary> {
     generated: generatedFiles.length,
     failed,
     files: generatedFiles,
+    durationMs: totalDuration,
   };
 }
 
