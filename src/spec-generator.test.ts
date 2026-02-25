@@ -73,4 +73,20 @@ describe("isIssueNumbers", () => {
   it("returns false for a string with only a comma", () => {
     expect(isIssueNumbers(",")).toBe(false);
   });
+
+  it("returns false for a bare wildcard glob pattern", () => {
+    expect(isIssueNumbers("*.md")).toBe(false);
+  });
+
+  it("returns false for a dot-slash relative path", () => {
+    expect(isIssueNumbers("./spec.md")).toBe(false);
+  });
+
+  it("returns false for a relative file path in a subdirectory", () => {
+    expect(isIssueNumbers("drafts/feature.md")).toBe(false);
+  });
+
+  it("returns false for mixed numeric and alphabetic content", () => {
+    expect(isIssueNumbers("42,foo")).toBe(false);
+  });
 });
