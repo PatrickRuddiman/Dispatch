@@ -26,6 +26,7 @@ import { getIssueFetcher, detectIssueSource, ISSUE_SOURCE_NAMES } from "./issue-
 import type { ProviderName } from "./provider.js";
 import { bootProvider } from "./providers/index.js";
 import { log } from "./logger.js";
+import { glob } from "glob";
 
 export interface SpecOptions {
   /** Comma-separated issue numbers */
@@ -90,6 +91,11 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
     project,
     concurrency = defaultConcurrency(),
   } = opts;
+
+  // ── Route: file/glob mode vs. issue-tracker mode ────────────
+  if (!isIssueNumbers(issues)) {
+    return generateSpecsFromFiles(opts);
+  }
 
   // Parse issue numbers
   const issueNumbers = issues
@@ -237,6 +243,94 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
 
   return {
     total: issueNumbers.length,
+    generated: generatedFiles.length,
+    failed,
+    files: generatedFiles,
+  };
+}
+
+/**
+ * Generate specs from local markdown files matched by a glob pattern.
+ * The source file is read, a prompt is built from its content, and the
+ * AI agent overwrites the file in-place with a structured spec.
+ */
+async function generateSpecsFromFiles(opts: SpecOptions): Promise<SpecSummary> {
+  const {
+    issues: pattern,
+    provider,
+    serverUrl,
+    cwd,
+    concurrency = defaultConcurrency(),
+  } = opts;
+
+  // ── Resolve glob ────────────────────────────────────────────
+  const files = await glob(pattern, { cwd, absolute: true });
+
+  if (files.length === 0) {
+    log.error(`No files matched the pattern "${pattern}".`);
+    return { total: 0, generated: 0, failed: 0, files: [] };
+  }
+
+  log.info(`Matched ${files.length} file(s) for spec generation (concurrency: ${concurrency})...`);
+
+  // ── Boot AI provider ────────────────────────────────────────
+  log.info(`Booting ${provider} provider...`);
+  log.debug(serverUrl ? `Using server URL: ${serverUrl}` : "No --server-url, will spawn local server");
+  const instance = await bootProvider(provider, { url: serverUrl, cwd });
+
+  // ── Generate spec for each file (parallel batches) ──────────
+  const generatedFiles: string[] = [];
+  let failed = 0;
+
+  const genQueue = [...files];
+
+  while (genQueue.length > 0) {
+    const batch = genQueue.splice(0, concurrency);
+    log.info(`Generating specs for batch of ${batch.length} (${generatedFiles.length + failed}/${files.length} done)...`);
+
+    const batchResults = await Promise.all(
+      batch.map(async (filePath) => {
+        try {
+          log.info(`Generating spec for ${filePath}...`);
+
+          const content = await readFile(filePath, "utf-8");
+          const prompt = buildFileSpecPrompt(filePath, content, cwd);
+          await generateSingleSpec(instance, prompt, filePath);
+          log.success(`Spec written: ${filePath}`);
+
+          return filePath;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.error(`Failed to generate spec for ${filePath}: ${message}`);
+          log.debug(log.formatErrorChain(err));
+          return null;
+        }
+      })
+    );
+
+    for (const result of batchResults) {
+      if (result !== null) {
+        generatedFiles.push(result);
+      } else {
+        failed++;
+      }
+    }
+  }
+
+  // ── Cleanup ─────────────────────────────────────────────────
+  await instance.cleanup();
+
+  log.info(
+    `Spec generation complete: ${generatedFiles.length} generated, ${failed} failed`
+  );
+
+  if (generatedFiles.length > 0) {
+    log.dim(`\n  Run these specs with:`);
+    log.dim(`    dispatch ${files.map((f) => '"' + f + '"').join(" ")}\n`);
+  }
+
+  return {
+    total: files.length,
     generated: generatedFiles.length,
     failed,
     files: generatedFiles,
