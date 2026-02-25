@@ -110,7 +110,7 @@ Add `src/config.test.ts` following the established conventions in `src/parser.te
 
 ## Tasks
 
-- [ ] **Create `src/config.ts` with the config data layer** — Define the `DispatchConfig` interface, `CONFIG_KEYS` array, `getConfigPath()`, `loadConfig()`, `saveConfig()`, and validation functions. This module is the foundation all other tasks depend on. Accept an optional config directory path parameter on I/O functions so tests can redirect to a tmpdir. Validate constrained keys (`provider`, `source`) against the existing `PROVIDER_NAMES` and `ISSUE_SOURCE_NAMES` registries. Validate `concurrency` as a positive integer. Use only Node.js built-ins.
+- [x] **Create `src/config.ts` with the config data layer** — Define the `DispatchConfig` interface, `CONFIG_KEYS` array, `getConfigPath()`, `loadConfig()`, `saveConfig()`, and validation functions. This module is the foundation all other tasks depend on. Accept an optional config directory path parameter on I/O functions so tests can redirect to a tmpdir. Validate constrained keys (`provider`, `source`) against the existing `PROVIDER_NAMES` and `ISSUE_SOURCE_NAMES` registries. Validate `concurrency` as a positive integer. Use only Node.js built-ins.
 
 - [ ] **Implement config sub-operations handler** — Build a `handleConfigCommand(argv: string[])` function that implements `set`, `get`, `list`, `reset`, and `path` operations. Validate keys against `CONFIG_KEYS` and values against the appropriate registries for constrained keys. Use `log` for error/success output and plain `console.log` for pipe-friendly output (`get`, `list`, `path`). Exit with code 1 on validation errors, consistent with `parseArgs` error handling.
 
