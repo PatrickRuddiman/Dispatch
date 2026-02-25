@@ -40,7 +40,7 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
   } else {
     log.debug("No --server-url provided, spawning local OpenCode server...");
     try {
-      const oc = await createOpencode();
+      const oc = await createOpencode({ port: 0 });
       client = oc.client;
       stopServer = () => oc.server.close();
       log.debug("OpenCode server started successfully");

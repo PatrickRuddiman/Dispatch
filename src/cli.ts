@@ -10,7 +10,7 @@
  *   dispatch --spec "drafts/*.md" Generate specs from local markdown files
  *
  * Options:
- *   --spec <ids>        Generate specs from issue/work-item numbers (comma-separated)
+ *   --spec <value>      Issue numbers (comma-separated) or glob pattern for local .md files
  *   --source <name>     Issue source: github, azdevops (auto-detected from remote)
  *   --org <url>         Azure DevOps organization URL
  *   --project <name>    Azure DevOps project name
@@ -37,6 +37,7 @@ const HELP = `
   Usage:
     dispatch <glob>                  Dispatch tasks from markdown files
     dispatch --spec <ids>            Generate spec files from issues
+    dispatch --spec <glob>           Generate specs from local markdown files
 
   Dispatch options:
     --dry-run              List tasks without dispatching

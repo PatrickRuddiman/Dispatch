@@ -101,7 +101,7 @@ The `orchestrate()` method in `src/agents/orchestrator.ts` has a `catch` block t
 
 ## Tasks
 
-- [ ] (P) Randomize the OpenCode server port -- In `src/providers/opencode.ts`, pass `{ port: 0 }` to `createOpencode()` in the auto-spawn code path so each Dispatch instance gets a unique, OS-assigned port. This eliminates port collisions when multiple instances run concurrently. Only the `else` branch in `boot()` (where no `opts.url` is provided) should be changed; the `--server-url` path must remain untouched.
+- [x] (P) Randomize the OpenCode server port -- In `src/providers/opencode.ts`, pass `{ port: 0 }` to `createOpencode()` in the auto-spawn code path so each Dispatch instance gets a unique, OS-assigned port. This eliminates port collisions when multiple instances run concurrently. Only the `else` branch in `boot()` (where no `opts.url` is provided) should be changed; the `--server-url` path must remain untouched.
 
 - [x] (P) Guard cleanup against double invocation -- In `src/providers/opencode.ts`, add a boolean idempotency guard to the `cleanup()` closure so that `server.close()` is called at most once. This prevents errors or warnings when both signal handlers and normal-flow cleanup trigger in sequence. The guard should be a simple `cleaned` flag within the `boot()` closure scope. This makes the OpenCode implementation honor the `ProviderInstance` interface's documented contract.
 
