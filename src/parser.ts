@@ -132,3 +132,40 @@ export async function markTaskComplete(task: Task): Promise<void> {
   lines[lineIndex] = updated;
   await writeFile(task.file, lines.join("\n"), "utf-8");
 }
+
+/**
+ * Group a flat task list into ordered execution groups.
+ *
+ * - Consecutive parallel tasks accumulate into the current group.
+ * - A serial task caps the current group (is appended to it), then a new group begins.
+ * - A lone serial task (no preceding parallel tasks) forms a solo group.
+ *
+ * The orchestrator runs each group concurrently, waiting for the group to
+ * complete before starting the next one.
+ */
+export function groupTasksByMode(tasks: Task[]): Task[][] {
+  if (tasks.length === 0) return [];
+
+  const groups: Task[][] = [];
+  let current: Task[] = [];
+
+  for (const task of tasks) {
+    const mode = task.mode ?? "serial";
+
+    if (mode === "parallel") {
+      current.push(task);
+    } else {
+      // Serial task caps the current group
+      current.push(task);
+      groups.push(current);
+      current = [];
+    }
+  }
+
+  // Flush any remaining parallel tasks that weren't capped by a serial task
+  if (current.length > 0) {
+    groups.push(current);
+  }
+
+  return groups;
+}

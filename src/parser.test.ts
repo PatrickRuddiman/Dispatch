@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { writeFile, unlink, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parseTaskContent, parseTaskFile, markTaskComplete, buildTaskContext } from "./parser.js";
+import { parseTaskContent, parseTaskFile, markTaskComplete, buildTaskContext, groupTasksByMode, type Task } from "./parser.js";
 import { readFile } from "node:fs/promises";
 
 // ─── parseTaskContent (pure, no I/O) ─────────────────────────────────
@@ -708,5 +708,149 @@ describe("buildTaskContext", () => {
     expect(result).not.toContain("Return 401");
     expect(result).not.toContain("Remove Express");
     expect(result).not.toContain("Update Dockerfile");
+  });
+});
+
+// ─── groupTasksByMode ───────────────────────────────────────────────
+
+describe("groupTasksByMode", () => {
+  /** Helper to create a minimal Task with the given mode */
+  function makeTask(mode?: "parallel" | "serial", index = 0): Task {
+    return {
+      index,
+      text: `Task ${index}`,
+      line: index + 1,
+      raw: `- [ ] Task ${index}`,
+      file: "/fake/tasks.md",
+      mode,
+    };
+  }
+
+  it("returns empty array for empty input", () => {
+    expect(groupTasksByMode([])).toEqual([]);
+  });
+
+  it("groups a lone serial task as a solo group", () => {
+    const tasks = [makeTask("serial", 0)];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toHaveLength(1);
+    expect(groups[0][0].mode).toBe("serial");
+  });
+
+  it("groups a lone parallel task as a solo group", () => {
+    const tasks = [makeTask("parallel", 0)];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toHaveLength(1);
+    expect(groups[0][0].mode).toBe("parallel");
+  });
+
+  it("accumulates consecutive parallel tasks into one group", () => {
+    const tasks = [
+      makeTask("parallel", 0),
+      makeTask("parallel", 1),
+      makeTask("parallel", 2),
+    ];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toHaveLength(3);
+  });
+
+  it("serial task caps the current group", () => {
+    const tasks = [
+      makeTask("parallel", 0),
+      makeTask("serial", 1),
+    ];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toHaveLength(2);
+    expect(groups[0][0].mode).toBe("parallel");
+    expect(groups[0][1].mode).toBe("serial");
+  });
+
+  it("produces correct groups for P S S P P P pattern", () => {
+    const tasks = [
+      makeTask("parallel", 0),
+      makeTask("serial", 1),
+      makeTask("serial", 2),
+      makeTask("parallel", 3),
+      makeTask("parallel", 4),
+      makeTask("parallel", 5),
+    ];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toHaveLength(3);
+    expect(groups[0]).toHaveLength(2); // [P, S]
+    expect(groups[1]).toHaveLength(1); // [S]
+    expect(groups[2]).toHaveLength(3); // [P, P, P]
+  });
+
+  it("handles all-serial tasks as individual solo groups", () => {
+    const tasks = [
+      makeTask("serial", 0),
+      makeTask("serial", 1),
+      makeTask("serial", 2),
+    ];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toHaveLength(3);
+    expect(groups[0]).toHaveLength(1);
+    expect(groups[1]).toHaveLength(1);
+    expect(groups[2]).toHaveLength(1);
+  });
+
+  it("treats undefined mode as serial (default behavior)", () => {
+    const tasks = [
+      makeTask(undefined, 0),
+      makeTask("parallel", 1),
+      makeTask(undefined, 2),
+    ];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toHaveLength(2);
+    expect(groups[0]).toHaveLength(1); // [undefined/serial]
+    expect(groups[1]).toHaveLength(2); // [P, undefined/serial]
+  });
+
+  it("preserves task order within groups", () => {
+    const tasks = [
+      makeTask("parallel", 0),
+      makeTask("parallel", 1),
+      makeTask("serial", 2),
+      makeTask("parallel", 3),
+      makeTask("parallel", 4),
+    ];
+    const groups = groupTasksByMode(tasks);
+    expect(groups[0].map((t) => t.index)).toEqual([0, 1, 2]);
+    expect(groups[1].map((t) => t.index)).toEqual([3, 4]);
+  });
+
+  it("handles serial at start followed by parallel tasks", () => {
+    const tasks = [
+      makeTask("serial", 0),
+      makeTask("parallel", 1),
+      makeTask("parallel", 2),
+    ];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toHaveLength(2);
+    expect(groups[0]).toHaveLength(1); // [S]
+    expect(groups[1]).toHaveLength(2); // [P, P]
+  });
+
+  it("handles alternating P S P S pattern", () => {
+    const tasks = [
+      makeTask("parallel", 0),
+      makeTask("serial", 1),
+      makeTask("parallel", 2),
+      makeTask("serial", 3),
+    ];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toHaveLength(2);
+    expect(groups[0]).toHaveLength(2); // [P, S]
+    expect(groups[1]).toHaveLength(2); // [P, S]
+  });
+
+  it("single serial task produces exactly one group of length 1", () => {
+    const tasks = [makeTask("serial", 0)];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toEqual([[tasks[0]]]);
   });
 });
