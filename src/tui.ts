@@ -4,6 +4,7 @@
  */
 
 import chalk from "chalk";
+import { elapsed } from "./format.js";
 import type { Task } from "./parser.js";
 
 export type TaskStatus = "pending" | "planning" | "running" | "done" | "failed";
@@ -46,14 +47,6 @@ function progressBar(done: number, total: number): string {
     chalk.dim("░".repeat(empty)) +
     chalk.white(` ${pct}%`)
   );
-}
-
-function elapsed(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  const m = Math.floor(s / 60);
-  const sec = s % 60;
-  if (m > 0) return `${m}m ${sec}s`;
-  return `${sec}s`;
 }
 
 function statusIcon(status: TaskStatus): string {
