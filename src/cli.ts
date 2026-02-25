@@ -31,7 +31,7 @@ import type { ProviderName } from "./provider.js";
 import type { IssueSourceName } from "./issue-fetcher.js";
 import { PROVIDER_NAMES } from "./providers/index.js";
 import { ISSUE_SOURCE_NAMES } from "./issue-fetchers/index.js";
-import { handleConfigCommand } from "./config.js";
+import { handleConfigCommand, loadConfig } from "./config.js";
 
 const HELP = `
   dispatch — AI agent orchestration CLI
@@ -201,7 +201,27 @@ async function main() {
     process.exit(0);
   }
 
-  const [args, _explicitFlags] = parseArgs(rawArgv);
+  const [args, explicitFlags] = parseArgs(rawArgv);
+
+  // ── Merge config-file defaults beneath CLI flags ───────────
+  const config = await loadConfig();
+
+  // Config key → CliArgs field mapping
+  const CONFIG_TO_CLI: Record<string, keyof typeof args> = {
+    provider: "provider",
+    concurrency: "concurrency",
+    source: "issueSource",
+    org: "org",
+    project: "project",
+    serverUrl: "serverUrl",
+  };
+
+  for (const [configKey, cliField] of Object.entries(CONFIG_TO_CLI)) {
+    const configValue = config[configKey as keyof typeof config];
+    if (configValue !== undefined && !explicitFlags.has(cliField)) {
+      (args as unknown as Record<string, unknown>)[cliField] = configValue;
+    }
+  }
 
   // Enable verbose logging before anything else
   log.verbose = args.verbose;
