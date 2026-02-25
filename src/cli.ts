@@ -7,6 +7,7 @@
  *
  * Spec mode:
  *   dispatch --spec 1,2,3        Generate spec files from issues
+ *   dispatch --spec "drafts/*.md" Generate specs from local markdown files
  *
  * Options:
  *   --spec <ids>        Generate specs from issue/work-item numbers (comma-separated)

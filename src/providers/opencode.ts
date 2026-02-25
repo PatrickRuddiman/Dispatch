@@ -32,6 +32,7 @@ import { log } from "../logger.js";
 export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance> {
   let client: OpencodeClient;
   let stopServer: (() => void) | undefined;
+  let cleaned = false;
 
   if (opts?.url) {
     log.debug(`Connecting to existing OpenCode server at ${opts.url}`);
@@ -163,6 +164,8 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
     },
 
     async cleanup(): Promise<void> {
+      if (cleaned) return;
+      cleaned = true;
       log.debug("Cleaning up OpenCode provider...");
       stopServer?.();
     },
