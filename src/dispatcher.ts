@@ -5,6 +5,7 @@
 
 import type { ProviderInstance } from "./provider.js";
 import type { Task } from "./parser.js";
+import { log } from "./logger.js";
 
 export interface DispatchResult {
   task: Task;
@@ -26,18 +27,23 @@ export async function dispatchTask(
   plan?: string
 ): Promise<DispatchResult> {
   try {
+    log.debug(`Dispatching task: ${task.file}:${task.line} — ${task.text.slice(0, 80)}`);
     const sessionId = await instance.createSession();
     const prompt = plan ? buildPlannedPrompt(task, cwd, plan) : buildPrompt(task, cwd);
+    log.debug(`Prompt built (${prompt.length} chars, ${plan ? "with plan" : "no plan"})`);
 
     const response = await instance.prompt(sessionId, prompt);
 
     if (response === null) {
+      log.debug("Task dispatch returned null response");
       return { task, success: false, error: "No response from agent" };
     }
 
+    log.debug(`Task dispatch completed (${response.length} chars response)`);
     return { task, success: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    log.debug(`Task dispatch failed: ${log.formatErrorChain(err)}`);
     return { task, success: false, error: message };
   }
 }

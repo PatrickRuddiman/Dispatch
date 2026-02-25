@@ -67,4 +67,24 @@ export interface IssueFetcher {
    * @throws If the issue cannot be found or the CLI tool fails
    */
   fetch(issueId: string, opts?: IssueFetchOptions): Promise<IssueDetails>;
+
+  /**
+   * Update the title and/or body of an issue / work item.
+   * Optional — not all backends need to implement this.
+   *
+   * @param issueId - The issue number or work item ID
+   * @param title   - New title (omit to leave unchanged)
+   * @param body    - New body/description
+   * @param opts    - Platform-specific options
+   */
+  update?(issueId: string, title: string, body: string, opts?: IssueFetchOptions): Promise<void>;
+
+  /**
+   * Close / resolve an issue / work item.
+   * Optional — not all backends need to implement this.
+   *
+   * @param issueId - The issue number or work item ID
+   * @param opts    - Platform-specific options
+   */
+  close?(issueId: string, opts?: IssueFetchOptions): Promise<void>;
 }

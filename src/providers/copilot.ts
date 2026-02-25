@@ -12,16 +12,25 @@
 
 import { CopilotClient, type CopilotSession } from "@github/copilot-sdk";
 import type { ProviderInstance, ProviderBootOptions } from "../provider.js";
+import { log } from "../logger.js";
 
 /**
  * Boot a Copilot provider instance — starts or connects to a Copilot CLI server.
  */
 export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance> {
+  log.debug(opts?.url ? `Connecting to Copilot CLI at ${opts.url}` : "Starting Copilot CLI...");
+
   const client = new CopilotClient({
     ...(opts?.url ? { cliUrl: opts.url } : {}),
   });
 
-  await client.start();
+  try {
+    await client.start();
+    log.debug("Copilot CLI started successfully");
+  } catch (err) {
+    log.debug(`Failed to start Copilot CLI: ${log.formatErrorChain(err)}`);
+    throw err;
+  }
 
   // Track live sessions for prompt routing and cleanup
   const sessions = new Map<string, CopilotSession>();
@@ -30,9 +39,16 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
     name: "copilot",
 
     async createSession(): Promise<string> {
-      const session = await client.createSession();
-      sessions.set(session.sessionId, session);
-      return session.sessionId;
+      log.debug("Creating Copilot session...");
+      try {
+        const session = await client.createSession();
+        sessions.set(session.sessionId, session);
+        log.debug(`Session created: ${session.sessionId}`);
+        return session.sessionId;
+      } catch (err) {
+        log.debug(`Session creation failed: ${log.formatErrorChain(err)}`);
+        throw err;
+      }
     },
 
     async prompt(sessionId: string, text: string): Promise<string | null> {
@@ -41,14 +57,26 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
         throw new Error(`Copilot session ${sessionId} not found`);
       }
 
-      const event = await session.sendAndWait({ prompt: text });
+      log.debug(`Sending prompt to session ${sessionId} (${text.length} chars)...`);
+      try {
+        const event = await session.sendAndWait({ prompt: text });
 
-      // Extract response text from the completion event
-      if (!event) return null;
-      return event.data?.content ?? null;
+        // Extract response text from the completion event
+        if (!event) {
+          log.debug("Prompt returned null event");
+          return null;
+        }
+        const result = event.data?.content ?? null;
+        log.debug(`Prompt response received (${result?.length ?? 0} chars)`);
+        return result;
+      } catch (err) {
+        log.debug(`Prompt failed: ${log.formatErrorChain(err)}`);
+        throw err;
+      }
     },
 
     async cleanup(): Promise<void> {
+      log.debug("Cleaning up Copilot provider...");
       // Destroy all active sessions before stopping the server
       const destroyOps = [...sessions.values()].map((s) =>
         s.destroy().catch(() => {})

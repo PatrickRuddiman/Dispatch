@@ -15,6 +15,16 @@ const exec = promisify(execFile);
 export const fetcher: IssueFetcher = {
   name: "github",
 
+  async update(issueId: string, title: string, body: string, opts: IssueFetchOptions = {}): Promise<void> {
+    const cwd = opts.cwd || process.cwd();
+    await exec("gh", ["issue", "edit", issueId, "--title", title, "--body", body], { cwd });
+  },
+
+  async close(issueId: string, opts: IssueFetchOptions = {}): Promise<void> {
+    const cwd = opts.cwd || process.cwd();
+    await exec("gh", ["issue", "close", issueId], { cwd });
+  },
+
   async fetch(issueId: string, opts: IssueFetchOptions = {}): Promise<IssueDetails> {
     const cwd = opts.cwd || process.cwd();
 

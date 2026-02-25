@@ -40,7 +40,7 @@ const HELP = `
   Dispatch options:
     --dry-run              List tasks without dispatching
     --no-plan              Skip the planner agent, dispatch directly
-    --concurrency <n>      Max parallel dispatches (default: 1)
+    --concurrency <n>      Max parallel dispatches (default: 1; spec mode: min(cpus, freeMB/500))
     --provider <name>      Agent backend: ${PROVIDER_NAMES.join(", ")} (default: opencode)
     --server-url <url>     URL of a running provider server
     --cwd <dir>            Working directory (default: cwd)
@@ -53,6 +53,7 @@ const HELP = `
     --output-dir <dir>     Output directory for specs (default: .dispatch/specs)
 
   General:
+    --verbose              Show detailed debug output for troubleshooting
     -h, --help             Show this help
     -v, --version          Show version
 
@@ -70,12 +71,14 @@ interface CliArgs {
   pattern: string;
   dryRun: boolean;
   noPlan: boolean;
-  concurrency: number;
+  /** undefined means "use mode-specific default" */
+  concurrency?: number;
   provider: ProviderName;
   serverUrl?: string;
   cwd: string;
   help: boolean;
   version: boolean;
+  verbose: boolean;
   // Spec mode
   spec?: string;
   issueSource?: IssueSourceName;
@@ -89,11 +92,11 @@ function parseArgs(argv: string[]): CliArgs {
     pattern: "",
     dryRun: false,
     noPlan: false,
-    concurrency: 1,
     provider: "opencode",
     cwd: process.cwd(),
     help: false,
     version: false,
+    verbose: false,
   };
 
   let i = 0;
@@ -108,6 +111,8 @@ function parseArgs(argv: string[]): CliArgs {
       args.dryRun = true;
     } else if (arg === "--no-plan") {
       args.noPlan = true;
+    } else if (arg === "--verbose") {
+      args.verbose = true;
     } else if (arg === "--spec") {
       i++;
       args.spec = argv[i];
@@ -168,6 +173,9 @@ function parseArgs(argv: string[]): CliArgs {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
 
+  // Enable verbose logging before anything else
+  log.verbose = args.verbose;
+
   if (args.help) {
     console.log(HELP);
     process.exit(0);
@@ -189,6 +197,7 @@ async function main() {
       outputDir: args.outputDir,
       org: args.org,
       project: args.project,
+      concurrency: args.concurrency,
     });
 
     process.exit(summary.failed > 0 ? 1 : 0);
@@ -205,7 +214,7 @@ async function main() {
   const orchestrator = await bootOrchestrator({ cwd: args.cwd });
   const summary = await orchestrator.orchestrate({
     pattern: args.pattern,
-    concurrency: args.concurrency,
+    concurrency: args.concurrency ?? 1,
     dryRun: args.dryRun,
     noPlan: args.noPlan,
     provider: args.provider,

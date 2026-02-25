@@ -18,6 +18,7 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { cpus, freemem } from "node:os";
 import type { ProviderInstance } from "./provider.js";
 import type { IssueDetails, IssueFetchOptions, IssueSourceName } from "./issue-fetcher.js";
 import { getIssueFetcher, detectIssueSource, ISSUE_SOURCE_NAMES } from "./issue-fetchers/index.js";
@@ -42,6 +43,8 @@ export interface SpecOptions {
   org?: string;
   /** Azure DevOps project name */
   project?: string;
+  /** Max parallel fetches/generations (default: min(cpuCount, freeMB/500)) */
+  concurrency?: number;
 }
 
 export interface SpecSummary {
@@ -67,6 +70,7 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
     outputDir = join(cwd, ".dispatch", "specs"),
     org,
     project,
+    concurrency = Math.max(1, Math.min(cpus().length, Math.floor(freemem() / 1024 / 1024 / 500))),
   } = opts;
 
   // Parse issue numbers
@@ -101,21 +105,31 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
   const fetcher = getIssueFetcher(source);
   const fetchOpts: IssueFetchOptions = { cwd, org, project };
 
-  // ── Fetch all issues ────────────────────────────────────────
-  log.info(`Fetching ${issueNumbers.length} issue(s) from ${source}...`);
+  // ── Fetch all issues (parallel batches) ─────────────────────
+  log.info(`Fetching ${issueNumbers.length} issue(s) from ${source} (concurrency: ${concurrency})...`);
 
   const issueDetails: { id: string; details: IssueDetails | null; error?: string }[] = [];
+  const fetchQueue = [...issueNumbers];
 
-  for (const id of issueNumbers) {
-    try {
-      const details = await fetcher.fetch(id, fetchOpts);
-      issueDetails.push({ id, details });
-      log.success(`Fetched #${id}: ${details.title}`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      issueDetails.push({ id, details: null, error: message });
-      log.error(`Failed to fetch #${id}: ${message}`);
-    }
+  while (fetchQueue.length > 0) {
+    const batch = fetchQueue.splice(0, concurrency);
+    log.debug(`Fetching batch of ${batch.length}: #${batch.join(", #")}`);
+    const batchResults = await Promise.all(
+      batch.map(async (id) => {
+        try {
+          const details = await fetcher.fetch(id, fetchOpts);
+          log.success(`Fetched #${id}: ${details.title}`);
+          log.debug(`Body: ${details.body?.length ?? 0} chars, Labels: ${details.labels.length}, Comments: ${details.comments.length}`);
+          return { id, details };
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.error(`Failed to fetch #${id}: ${message}`);
+          log.debug(log.formatErrorChain(err));
+          return { id, details: null, error: message };
+        }
+      })
+    );
+    issueDetails.push(...batchResults);
   }
 
   const validIssues = issueDetails.filter((i) => i.details !== null);
@@ -126,38 +140,69 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
 
   // ── Boot AI provider ────────────────────────────────────────
   log.info(`Booting ${provider} provider...`);
+  log.debug(serverUrl ? `Using server URL: ${serverUrl}` : "No --server-url, will spawn local server");
   const instance = await bootProvider(provider, { url: serverUrl, cwd });
 
-  // ── Generate spec for each issue ────────────────────────────
+  // ── Generate spec for each issue (parallel batches) ─────────
   await mkdir(outputDir, { recursive: true });
 
   const generatedFiles: string[] = [];
   let failed = issueDetails.filter((i) => i.details === null).length;
 
-  for (const { id, details } of validIssues) {
-    try {
-      log.info(`Generating spec for #${id}: ${details!.title}...`);
+  const genQueue = [...validIssues];
 
-      const spec = await generateSingleSpec(instance, details!, cwd);
+  while (genQueue.length > 0) {
+    const batch = genQueue.splice(0, concurrency);
+    log.info(`Generating specs for batch of ${batch.length} (${generatedFiles.length + failed}/${issueNumbers.length} done)...`);
 
-      // Sanitize filename
-      const slug = details!.title
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-|-$/g, "")
-        .slice(0, 60);
+    const batchResults = await Promise.all(
+      batch.map(async ({ id, details }) => {
+        try {
+          log.info(`Generating spec for #${id}: ${details!.title}...`);
 
-      const filename = `${id}-${slug}.md`;
-      const filepath = join(outputDir, filename);
+          const spec = await generateSingleSpec(instance, details!, cwd);
 
-      await writeFile(filepath, spec, "utf-8");
-      generatedFiles.push(filepath);
+          // Sanitize filename
+          const slug = details!.title
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-|-$/g, "")
+            .slice(0, 60);
 
-      log.success(`Spec written: ${filepath}`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      log.error(`Failed to generate spec for #${id}: ${message}`);
-      failed++;
+          const filename = `${id}-${slug}.md`;
+          const filepath = join(outputDir, filename);
+
+          await writeFile(filepath, spec, "utf-8");
+          log.success(`Spec written: ${filepath}`);
+
+          // Push spec content back to the issue tracker
+          if (fetcher.update) {
+            try {
+              const specTitle = details!.title;
+              await fetcher.update(id, specTitle, spec, fetchOpts);
+              log.success(`Updated issue #${id} with spec content`);
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              log.warn(`Could not update issue #${id}: ${message}`);
+            }
+          }
+
+          return filepath;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.error(`Failed to generate spec for #${id}: ${message}`);
+          log.debug(log.formatErrorChain(err));
+          return null;
+        }
+      })
+    );
+
+    for (const result of batchResults) {
+      if (result !== null) {
+        generatedFiles.push(result);
+      } else {
+        failed++;
+      }
     }
   }
 
@@ -196,6 +241,7 @@ async function generateSingleSpec(
 ): Promise<string> {
   const sessionId = await instance.createSession();
   const prompt = buildSpecPrompt(issue, cwd);
+  log.debug(`Spec prompt built (${prompt.length} chars)`);
 
   const response = await instance.prompt(sessionId, prompt);
 
@@ -203,6 +249,7 @@ async function generateSingleSpec(
     throw new Error("AI returned an empty spec");
   }
 
+  log.debug(`Spec response received (${response.length} chars)`);
   return response;
 }
 

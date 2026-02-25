@@ -9,6 +9,7 @@
  *   7. Commit with conventional commits
  */
 
+import { basename } from "node:path";
 import { glob } from "glob";
 import { parseTaskFile, markTaskComplete, buildTaskContext, type Task, type TaskFile } from "../parser.js";
 import { dispatchTask, type DispatchResult } from "../dispatcher.js";
@@ -19,6 +20,7 @@ import { createTui, type TaskState } from "../tui.js";
 import type { Agent, AgentBootOptions } from "../agent.js";
 import type { ProviderName } from "../provider.js";
 import { bootProvider } from "../providers/index.js";
+import { detectIssueSource, getIssueFetcher } from "../issue-fetchers/index.js";
 
 /**
  * Runtime options passed to `orchestrate()` — these control what gets
@@ -205,7 +207,10 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
           results.push(...batchResults);
         }
 
-        // ── 6. Cleanup ──────────────────────────────────────────────
+        // ── 6. Close originating issues for completed spec files ────
+        await closeCompletedSpecIssues(taskFiles, results, cwd);
+
+        // ── 7. Cleanup ──────────────────────────────────────────────
         await planner?.cleanup();
         await instance.cleanup();
 
@@ -224,6 +229,52 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
       // are created and cleaned up within each orchestrate() call
     },
   };
+}
+
+/**
+ * For each spec file where all tasks completed successfully, extract the
+ * issue number from the filename (`<id>-<slug>.md`) and close the originating
+ * issue on the tracker.
+ */
+async function closeCompletedSpecIssues(
+  taskFiles: TaskFile[],
+  results: DispatchResult[],
+  cwd: string
+): Promise<void> {
+  // Detect the issue source — skip silently if not in a supported repo
+  const source = await detectIssueSource(cwd);
+  if (!source) return;
+
+  const fetcher = getIssueFetcher(source);
+  if (!fetcher.close) return;
+
+  // Build a set of tasks that succeeded
+  const succeededTasks = new Set(
+    results.filter((r) => r.success).map((r) => r.task)
+  );
+
+  for (const taskFile of taskFiles) {
+    const fileTasks = taskFile.tasks;
+    if (fileTasks.length === 0) continue;
+
+    // Only close if every task in this file completed successfully
+    const allSucceeded = fileTasks.every((t) => succeededTasks.has(t));
+    if (!allSucceeded) continue;
+
+    // Extract the issue ID from the filename: "<id>-<slug>.md"
+    const filename = basename(taskFile.path);
+    const match = /^(\d+)-/.exec(filename);
+    if (!match) continue;
+
+    const issueId = match[1];
+    try {
+      await fetcher.close(issueId, { cwd });
+      log.success(`Closed issue #${issueId} (all tasks in ${filename} completed)`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn(`Could not close issue #${issueId}: ${message}`);
+    }
+  }
 }
 
 async function dryRunMode(
