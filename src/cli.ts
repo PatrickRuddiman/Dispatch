@@ -93,7 +93,7 @@ interface CliArgs {
   outputDir?: string;
 }
 
-function parseArgs(argv: string[]): CliArgs {
+function parseArgs(argv: string[]): [CliArgs, Set<string>] {
   const args: CliArgs = {
     pattern: [],
     dryRun: false,
@@ -105,23 +105,31 @@ function parseArgs(argv: string[]): CliArgs {
     verbose: false,
   };
 
+  const explicitFlags = new Set<string>();
+
   let i = 0;
   while (i < argv.length) {
     const arg = argv[i];
 
     if (arg === "--help" || arg === "-h") {
       args.help = true;
+      explicitFlags.add("help");
     } else if (arg === "--version" || arg === "-v") {
       args.version = true;
+      explicitFlags.add("version");
     } else if (arg === "--dry-run") {
       args.dryRun = true;
+      explicitFlags.add("dryRun");
     } else if (arg === "--no-plan") {
       args.noPlan = true;
+      explicitFlags.add("noPlan");
     } else if (arg === "--verbose") {
       args.verbose = true;
+      explicitFlags.add("verbose");
     } else if (arg === "--spec") {
       i++;
       args.spec = argv[i];
+      explicitFlags.add("spec");
     } else if (arg === "--source") {
       i++;
       const val = argv[i];
@@ -132,15 +140,19 @@ function parseArgs(argv: string[]): CliArgs {
         process.exit(1);
       }
       args.issueSource = val as IssueSourceName;
+      explicitFlags.add("issueSource");
     } else if (arg === "--org") {
       i++;
       args.org = argv[i];
+      explicitFlags.add("org");
     } else if (arg === "--project") {
       i++;
       args.project = argv[i];
+      explicitFlags.add("project");
     } else if (arg === "--output-dir") {
       i++;
       args.outputDir = resolve(argv[i]);
+      explicitFlags.add("outputDir");
     } else if (arg === "--concurrency") {
       i++;
       const val = parseInt(argv[i], 10);
@@ -149,6 +161,7 @@ function parseArgs(argv: string[]): CliArgs {
         process.exit(1);
       }
       args.concurrency = val;
+      explicitFlags.add("concurrency");
     } else if (arg === "--provider") {
       i++;
       const val = argv[i];
@@ -157,12 +170,15 @@ function parseArgs(argv: string[]): CliArgs {
         process.exit(1);
       }
       args.provider = val as ProviderName;
+      explicitFlags.add("provider");
     } else if (arg === "--server-url") {
       i++;
       args.serverUrl = argv[i];
+      explicitFlags.add("serverUrl");
     } else if (arg === "--cwd") {
       i++;
       args.cwd = resolve(argv[i]);
+      explicitFlags.add("cwd");
     } else if (!arg.startsWith("-")) {
       args.pattern.push(arg);
     } else {
@@ -173,7 +189,7 @@ function parseArgs(argv: string[]): CliArgs {
     i++;
   }
 
-  return args;
+  return [args, explicitFlags];
 }
 
 async function main() {
@@ -185,7 +201,7 @@ async function main() {
     process.exit(0);
   }
 
-  const args = parseArgs(rawArgv);
+  const [args, _explicitFlags] = parseArgs(rawArgv);
 
   // Enable verbose logging before anything else
   log.verbose = args.verbose;

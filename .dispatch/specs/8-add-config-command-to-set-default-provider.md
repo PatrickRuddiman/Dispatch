@@ -116,7 +116,7 @@ Add `src/config.test.ts` following the established conventions in `src/parser.te
 
 - [x] **Add `config` subcommand routing in `src/cli.ts`** — Detect `config` as the first positional argument in `main()` on the raw argv before calling `parseArgs`. Delegate to `handleConfigCommand` with the remaining tokens and exit. This must happen before `parseArgs` processes the argv, since `parseArgs` would treat `config` as a glob pattern.
 
-- [ ] **Extend `parseArgs` to track explicitly-set flags** — Modify `parseArgs` in `src/cli.ts` to maintain a `Set<string>` of flag names that were explicitly provided on the command line. Populate the set as each `--flag` is encountered during the while-loop iteration. Return this set alongside the `CliArgs` object. The `CliArgs` interface shape must not change.
+- [x] **Extend `parseArgs` to track explicitly-set flags** — Modify `parseArgs` in `src/cli.ts` to maintain a `Set<string>` of flag names that were explicitly provided on the command line. Populate the set as each `--flag` is encountered during the while-loop iteration. Return this set alongside the `CliArgs` object. The `CliArgs` interface shape must not change.
 
 - [ ] **Add config-to-CLI-args merge layer in `src/cli.ts`** — After `parseArgs()` returns in `main()`, call `loadConfig()` and apply stored config values as defaults for any `CliArgs` field whose corresponding flag was not in the explicit-flags set. Handle the config key to `CliArgs` field name mapping (e.g., `source` config key maps to `issueSource` field). Enforce precedence: CLI flag > config file > hardcoded default.
 
