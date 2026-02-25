@@ -126,7 +126,7 @@ Add comprehensive tests following the existing Vitest conventions in `src/parser
 
 - [x] (S) Implement and export `groupTasksByMode` in `src/parser.ts` — a pure function that takes a flat `Task[]` and returns `Task[][]` where consecutive parallel tasks accumulate into groups, serial tasks cap the current group, and lone serial tasks form solo groups
 
-- [ ] (S) Refactor the dispatch loop in `src/agents/orchestrator.ts` to call `groupTasksByMode`, then iterate over each group dispatching all tasks in the group concurrently (respecting `--concurrency`) and waiting for the group to complete before starting the next
+- [x] (S) Refactor the dispatch loop in `src/agents/orchestrator.ts` to call `groupTasksByMode`, then iterate over each group dispatching all tasks in the group concurrently (respecting `--concurrency`) and waiting for the group to complete before starting the next
 
 - [ ] (S) Add Vitest tests for `(P)`/`(S)` mode extraction in the parser — covering correct mode assignment, prefix stripping from `task.text`, default serial behavior for untagged tasks, whitespace variations, and edge cases with special characters after the prefix
 

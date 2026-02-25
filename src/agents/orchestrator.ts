@@ -11,7 +11,7 @@
 
 import { basename } from "node:path";
 import { glob } from "glob";
-import { parseTaskFile, markTaskComplete, buildTaskContext, type Task, type TaskFile } from "../parser.js";
+import { parseTaskFile, markTaskComplete, buildTaskContext, groupTasksByMode, type Task, type TaskFile } from "../parser.js";
 import { dispatchTask, type DispatchResult } from "../dispatcher.js";
 import { boot as bootPlanner } from "./planner.js";
 import { commitTask } from "../git.js";
@@ -154,57 +154,62 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
         let completed = 0;
         let failed = 0;
 
-        const queue = [...allTasks];
+        const groups = groupTasksByMode(allTasks);
 
-        while (queue.length > 0) {
-          const batch = queue.splice(0, concurrency);
-          const batchResults = await Promise.all(
-            batch.map(async (task) => {
-              const tuiTask = tui.state.tasks.find((t) => t.task === task)!;
-              const startTime = Date.now();
-              tuiTask.elapsed = startTime;
+        for (const group of groups) {
+          // Dispatch all tasks in the group concurrently, respecting --concurrency
+          const groupQueue = [...group];
 
-              // ── Phase A: Plan (unless --no-plan) ─────────────────
-              let plan: string | undefined;
-              if (planner) {
-                tuiTask.status = "planning";
-                const rawContent = fileContentMap.get(task.file);
-                const fileContext = rawContent ? buildTaskContext(rawContent, task) : undefined;
-                const planResult = await planner.plan(task, fileContext);
+          while (groupQueue.length > 0) {
+            const batch = groupQueue.splice(0, concurrency);
+            const batchResults = await Promise.all(
+              batch.map(async (task) => {
+                const tuiTask = tui.state.tasks.find((t) => t.task === task)!;
+                const startTime = Date.now();
+                tuiTask.elapsed = startTime;
 
-                if (!planResult.success) {
-                  tuiTask.status = "failed";
-                  tuiTask.error = `Planning failed: ${planResult.error}`;
-                  tuiTask.elapsed = Date.now() - startTime;
-                  failed++;
-                  return { task, success: false, error: tuiTask.error } as DispatchResult;
+                // ── Phase A: Plan (unless --no-plan) ─────────────────
+                let plan: string | undefined;
+                if (planner) {
+                  tuiTask.status = "planning";
+                  const rawContent = fileContentMap.get(task.file);
+                  const fileContext = rawContent ? buildTaskContext(rawContent, task) : undefined;
+                  const planResult = await planner.plan(task, fileContext);
+
+                  if (!planResult.success) {
+                    tuiTask.status = "failed";
+                    tuiTask.error = `Planning failed: ${planResult.error}`;
+                    tuiTask.elapsed = Date.now() - startTime;
+                    failed++;
+                    return { task, success: false, error: tuiTask.error } as DispatchResult;
+                  }
+
+                  plan = planResult.prompt;
                 }
 
-                plan = planResult.prompt;
-              }
+                // ── Phase B: Execute ─────────────────────────────────
+                tuiTask.status = "running";
+                const result = await dispatchTask(instance, task, cwd, plan);
 
-              // ── Phase B: Execute ─────────────────────────────────
-              tuiTask.status = "running";
-              const result = await dispatchTask(instance, task, cwd, plan);
+                if (result.success) {
+                  await markTaskComplete(task);
+                  await commitTask(task, cwd);
+                  tuiTask.status = "done";
+                  tuiTask.elapsed = Date.now() - startTime;
+                  completed++;
+                } else {
+                  tuiTask.status = "failed";
+                  tuiTask.error = result.error;
+                  tuiTask.elapsed = Date.now() - startTime;
+                  failed++;
+                }
 
-              if (result.success) {
-                await markTaskComplete(task);
-                await commitTask(task, cwd);
-                tuiTask.status = "done";
-                tuiTask.elapsed = Date.now() - startTime;
-                completed++;
-              } else {
-                tuiTask.status = "failed";
-                tuiTask.error = result.error;
-                tuiTask.elapsed = Date.now() - startTime;
-                failed++;
-              }
+                return result;
+              })
+            );
 
-              return result;
-            })
-          );
-
-          results.push(...batchResults);
+            results.push(...batchResults);
+          }
         }
 
         // ── 6. Close originating issues for completed spec files ────
