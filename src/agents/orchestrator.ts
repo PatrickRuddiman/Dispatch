@@ -16,6 +16,7 @@ import { dispatchTask, type DispatchResult } from "../dispatcher.js";
 import { boot as bootPlanner } from "./planner.js";
 import { commitTask } from "../git.js";
 import { log } from "../logger.js";
+import { registerCleanup } from "../cleanup.js";
 import { createTui, type TaskState } from "../tui.js";
 import type { Agent, AgentBootOptions } from "../agent.js";
 import type { ProviderName } from "../provider.js";
@@ -149,6 +150,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
         // ── 3. Boot provider ────────────────────────────────────────
         tui.state.phase = "booting";
         const instance = await bootProvider(provider, { url: serverUrl, cwd });
+        registerCleanup(() => instance.cleanup());
         if (serverUrl) {
           tui.state.serverUrl = serverUrl;
         }

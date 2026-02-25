@@ -26,6 +26,7 @@ import { getIssueFetcher, detectIssueSource, ISSUE_SOURCE_NAMES } from "./issue-
 import type { ProviderName } from "./provider.js";
 import { bootProvider } from "./providers/index.js";
 import { log } from "./logger.js";
+import { registerCleanup } from "./cleanup.js";
 import { glob } from "glob";
 
 export interface SpecOptions {
@@ -166,6 +167,7 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
   log.info(`Booting ${provider} provider...`);
   log.debug(serverUrl ? `Using server URL: ${serverUrl}` : "No --server-url, will spawn local server");
   const instance = await bootProvider(provider, { url: serverUrl, cwd });
+  registerCleanup(() => instance.cleanup());
 
   // ── Generate spec for each issue (parallel batches) ─────────
   await mkdir(outputDir, { recursive: true });
@@ -277,6 +279,7 @@ async function generateSpecsFromFiles(opts: SpecOptions): Promise<SpecSummary> {
   log.info(`Booting ${provider} provider...`);
   log.debug(serverUrl ? `Using server URL: ${serverUrl}` : "No --server-url, will spawn local server");
   const instance = await bootProvider(provider, { url: serverUrl, cwd });
+  registerCleanup(() => instance.cleanup());
 
   // ── Generate spec for each file (parallel batches) ──────────
   const generatedFiles: string[] = [];

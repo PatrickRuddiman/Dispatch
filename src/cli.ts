@@ -26,6 +26,7 @@ import { resolve } from "node:path";
 import { bootOrchestrator } from "./agents/index.js";
 import { generateSpecs, defaultConcurrency } from "./spec-generator.js";
 import { log } from "./logger.js";
+import { runCleanup } from "./cleanup.js";
 import type { ProviderName } from "./provider.js";
 import type { IssueSourceName } from "./issue-fetcher.js";
 import { PROVIDER_NAMES } from "./providers/index.js";
@@ -180,6 +181,19 @@ async function main() {
   // Enable verbose logging before anything else
   log.verbose = args.verbose;
 
+  // ── Graceful shutdown on signals ───────────────────────────
+  process.on("SIGINT", async () => {
+    log.debug("Received SIGINT, cleaning up...");
+    await runCleanup();
+    process.exit(130);
+  });
+
+  process.on("SIGTERM", async () => {
+    log.debug("Received SIGTERM, cleaning up...");
+    await runCleanup();
+    process.exit(143);
+  });
+
   if (args.help) {
     console.log(HELP);
     process.exit(0);
@@ -230,7 +244,8 @@ async function main() {
   process.exit(summary.failed > 0 ? 1 : 0);
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   log.error(err instanceof Error ? err.message : String(err));
+  await runCleanup();
   process.exit(1);
 });
