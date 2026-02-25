@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { writeFile, unlink, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parseTaskContent, parseTaskFile, markTaskComplete, buildTaskContext, groupTasksByMode, type Task } from "./parser.js";
+import { parseTaskContent, parseTaskFile, markTaskComplete, buildTaskContext, groupTasksByMode, type Task } from "../parser.js";
 import { readFile } from "node:fs/promises";
 
 // ─── parseTaskContent (pure, no I/O) ─────────────────────────────────

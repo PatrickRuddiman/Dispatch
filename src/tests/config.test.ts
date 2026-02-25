@@ -12,7 +12,7 @@ import {
   CONFIG_KEYS,
   handleConfigCommand,
   type DispatchConfig,
-} from "./config.js";
+} from "../config.js";
 
 // ─── Config file I/O ─────────────────────────────────────────────────
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { elapsed } from "./format.js";
+import { elapsed } from "../format.js";
 
 describe("elapsed", () => {
   it("returns '0s' for zero milliseconds", () => {

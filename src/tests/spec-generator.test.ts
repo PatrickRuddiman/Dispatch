@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isIssueNumbers, buildFileSpecPrompt, validateSpecStructure, extractSpecContent } from "./spec-generator.js";
+import { isIssueNumbers, buildFileSpecPrompt, validateSpecStructure, extractSpecContent } from "../spec-generator.js";
 
 describe("isIssueNumbers", () => {
   it("returns true for a single issue number", () => {
