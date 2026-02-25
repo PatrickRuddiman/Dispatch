@@ -1,8 +1,8 @@
 # Integrations Reference
 
 This document covers the external dependencies used by the shared interfaces and
-utilities layer: **chalk** for terminal styling and **Node.js fs/promises** for
-file I/O.
+utilities layer: **chalk** for terminal styling, **Node.js fs/promises** for
+file I/O, and **Node.js process signals** for graceful shutdown.
 
 ## chalk
 
@@ -192,11 +192,90 @@ Both `readFile` and `writeFile` are called with `"utf-8"` encoding. This means:
   and could interfere with line-0 parsing, though this is unlikely with markdown
   files
 
+## Node.js Process Signals (SIGINT, SIGTERM)
+
+- **Module:** `node:process` (built-in)
+- **Used in:** `src/cli.ts:242-252`
+- **Official docs:** [nodejs.org/api/process.html#signal-events](https://nodejs.org/api/process.html#signal-events)
+
+Dispatch installs signal handlers for `SIGINT` and `SIGTERM` to ensure
+graceful shutdown of provider resources. Before these handlers were added,
+signals caused immediate process termination, potentially leaving orphaned
+provider server processes (OpenCode or Copilot CLI servers).
+
+### How signal handlers work
+
+The handlers are registered in `main()` at `src/cli.ts:242-252`, after
+verbose logging is enabled but before any business logic runs:
+
+1. `process.on("SIGINT", ...)` — Fires when the user presses Ctrl+C or
+   the process receives signal 2.
+2. `process.on("SIGTERM", ...)` — Fires when the process receives signal 15
+   (e.g., `kill <pid>`, container shutdown, or process manager stop).
+
+Both handlers follow the same pattern:
+
+1. Log a debug message via `log.debug()` (visible only in `--verbose` mode).
+2. Call `await runCleanup()` to drain the [cleanup registry](./cleanup.md).
+3. Call `process.exit()` with the conventional exit code.
+
+### Exit codes
+
+| Signal | Exit code | Convention |
+|--------|-----------|------------|
+| SIGINT | 130 | 128 + signal number (2) |
+| SIGTERM | 143 | 128 + signal number (15) |
+
+The `128 + N` convention is used by most Unix shells and CI systems to
+indicate that a process was terminated by signal N. CI pipelines (GitHub
+Actions, Jenkins, GitLab CI) interpret exit codes above 128 as
+signal-terminated processes and typically mark the job as failed.
+
+### Error-path cleanup
+
+In addition to signal handlers, `src/cli.ts:304-307` installs a `.catch()`
+on the `main()` promise that also calls `runCleanup()` before
+`process.exit(1)`. This ensures provider processes are cleaned up even when
+an unhandled exception escapes the main function.
+
+### Double-signal behavior
+
+If a user sends two rapid Ctrl+C signals, the second signal arrives while
+`runCleanup()` from the first is still executing. Because `runCleanup()`
+uses `splice(0)` to atomically drain the cleanup array (see
+[Cleanup registry — Drain-and-clear pattern](./cleanup.md#the-drain-and-clear-pattern)),
+the second invocation sees an empty array and returns immediately. This
+prevents double-execution of cleanup functions.
+
+However, if a cleanup function itself hangs (e.g., a provider server is
+unresponsive), the `await` in `runCleanup()` will block indefinitely. There
+is no timeout mechanism. In this case, a third signal or `kill -9` would be
+needed to force termination.
+
+### Troubleshooting hung shutdown
+
+| Symptom | Likely cause | Resolution |
+|---------|-------------|------------|
+| Process hangs after Ctrl+C | A cleanup function is blocking (e.g., waiting for provider server to stop) | Send another Ctrl+C or `kill -9 <pid>` |
+| Exit code 130 in CI | SIGINT was received (Ctrl+C or CI timeout signal) | Expected behavior; check CI timeout settings |
+| Exit code 143 in CI | SIGTERM was sent (container/pod shutdown) | Expected behavior; ensure cleanup runs within the container's grace period |
+| Orphaned server process despite signal handling | Process killed with `SIGKILL` (signal 9), which cannot be caught | Manually kill the orphaned process; consider using a process manager with SIGTERM grace periods |
+
+### Which signals cannot be handled
+
+Node.js (and POSIX in general) does not allow handling `SIGKILL` (signal 9)
+or `SIGSTOP` (signal 19). If a process is killed with `kill -9`, no cleanup
+runs. This is a fundamental OS constraint, not a Dispatch limitation.
+
 ## Related documentation
 
 - [Overview](./overview.md) -- Shared Interfaces & Utilities layer
+- [Cleanup registry](./cleanup.md) -- The cleanup mechanism invoked by signal
+  handlers
 - [Logger](./logger.md) -- How chalk is used in the logger
 - [Parser utilities](./parser.md) -- How fs/promises is used in the parser
 - [TUI](../cli-orchestration/tui.md) -- How chalk is used in the TUI display
+- [CLI & Orchestration Integrations](../cli-orchestration/integrations.md) --
+  Signal handling section in the CLI context
 - [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) --
   File I/O safety, race conditions, and the read-modify-write pattern

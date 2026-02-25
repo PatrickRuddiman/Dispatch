@@ -62,20 +62,35 @@ replaces the file content entirely; it does not merge changes.
 
 ### Current mitigation in the orchestrator
 
-Looking at `src/orchestrator.ts:111-162`, the [orchestrator](../cli-orchestration/orchestrator.md) processes tasks in
-**batches** using `Promise.all`:
+Looking at `src/agents/orchestrator.ts:165-220`, the [orchestrator](../cli-orchestration/orchestrator.md) first
+partitions tasks into execution groups via
+[`groupTasksByMode()`](./api-reference.md#grouptasksbymode), then processes each
+group using a batch-sequential `Promise.all` loop:
 
 ```typescript
-const batch = queue.splice(0, concurrency);
-const batchResults = await Promise.all(
-  batch.map(async (task) => { /* ... */ })
-);
+const groups = groupTasksByMode(allTasks);
+for (const group of groups) {
+  const groupQueue = [...group];
+  while (groupQueue.length > 0) {
+    const batch = groupQueue.splice(0, concurrency);
+    const batchResults = await Promise.all(
+      batch.map(async (task) => { /* ... */ })
+    );
+  }
+}
 ```
 
 Within a batch, tasks run concurrently. However, the `markTaskComplete` call
-happens **after** each task's agent execution completes (`src/orchestrator.ts:145`),
+happens **after** each task's agent execution completes (`src/agents/orchestrator.ts:203`),
 and the orchestrator does **not** re-parse the file between completions within
 the same batch.
+
+Serial `(S)` groups always contain exactly one task, so they never produce
+concurrent `markTaskComplete` calls. The race condition risk is limited to
+parallel `(P)` groups running with `--concurrency > 1`.
+
+See the [Orchestrator concurrency model](../cli-orchestration/orchestrator.md#concurrency-model)
+for full details on the group-aware batch-sequential algorithm.
 
 **Risk assessment:**
 

@@ -248,25 +248,25 @@ if (!process.stdout.isTTY) {
 
 ## Signal handling
 
-There is currently **no signal handling** for `SIGINT` or `SIGTERM`. If the
-user presses Ctrl+C during dispatch:
+Signal handlers for `SIGINT` and `SIGTERM` are installed at
+`src/cli.ts:242-252`. Both call `runCleanup()` from the
+[cleanup registry](../shared-types/cleanup.md) to shut down provider
+processes before exiting with the conventional `128 + signal` exit code.
 
-1. Node.js terminates the process immediately.
-2. The TUI's `setInterval` is not cleared (the process exits anyway).
-3. `instance.cleanup()` is **not called**, potentially leaving orphaned
-   provider server processes. See [the cleanup gap](orchestrator.md#the-cleanup-gap).
-4. Any in-progress [markdown mutations](../task-parsing/api-reference.md#marktaskcomplete) or [git commits](../planning-and-dispatch/git.md) may be left in an
-   incomplete state.
+When a signal is received during dispatch:
 
-Adding signal handlers would allow graceful shutdown:
+1. The signal handler calls `await runCleanup()`, which drains all registered
+   cleanup functions (including provider `cleanup()` calls).
+2. `process.exit(130)` (SIGINT) or `process.exit(143)` (SIGTERM) terminates
+   the process.
+3. The TUI's `setInterval` is not explicitly cleared, but process exit stops
+   it automatically.
 
-```typescript
-process.on('SIGINT', async () => {
-  tui.stop();
-  await instance?.cleanup();
-  process.exit(130); // 128 + SIGINT(2)
-});
-```
+Note that provider cleanup functions are registered via `registerCleanup()`
+in the orchestrator and spec generator — the TUI itself does not register
+cleanup functions. See [Cleanup registry](../shared-types/cleanup.md) for
+the full lifecycle and [Process Signals integration](../shared-types/integrations.md#nodejs-process-signals-sigint-sigterm)
+for exit code conventions, double-signal behavior, and troubleshooting.
 
 ## Interfaces
 

@@ -62,6 +62,15 @@ When using a personal access token, create a
 [fine-grained token](https://github.com/settings/personal-access-tokens/new)
 with the **Copilot Requests** permission enabled.
 
+### Bring Your Own Key (BYOK)
+
+The `@github/copilot-sdk` also supports a Bring Your Own Key mode, where you
+supply your own API key for a supported LLM provider instead of routing through
+GitHub's Copilot backend. This is configured at the SDK/CLI level -- see the
+[Copilot SDK documentation](https://docs.github.com/en/copilot/how-tos/copilot-sdk/sdk-getting-started)
+for BYOK setup. The dispatch provider does not add any BYOK-specific logic; it
+passes through whatever authentication the `CopilotClient` resolves.
+
 ### Rotating tokens
 
 Token rotation depends on the authentication method:
@@ -75,8 +84,31 @@ Token rotation depends on the authentication method:
 
 ## How the provider works
 
-The boot function in `src/providers/copilot.ts:19-61` creates a `CopilotClient`
+The boot function in `src/providers/copilot.ts:20-33` creates a `CopilotClient`
 and calls `client.start()` to launch (or connect to) a Copilot CLI server.
+
+### Architecture: SDK to CLI via JSON-RPC
+
+The `@github/copilot-sdk` does not communicate directly with GitHub's API. The
+architecture is:
+
+```
+dispatch-tasks → CopilotClient (SDK) → JSON-RPC → Copilot CLI (server mode) → GitHub API
+```
+
+When `client.start()` is called:
+
+1. The SDK discovers the `copilot` binary (or uses `COPILOT_CLI_PATH`).
+2. It spawns the Copilot CLI in **server mode** as a child process.
+3. Communication between the SDK and the CLI server uses JSON-RPC over the
+   process's stdio or a local socket.
+4. The CLI server handles authentication, model routing, and API communication
+   with GitHub's backend.
+
+This means `client.start()` allocates **system resources**: a child process for
+the Copilot CLI server. The corresponding `client.stop()` terminates this child
+process. This is why cleanup calls `client.stop()` -- without it, the CLI server
+process would be orphaned.
 
 ### Connection modes
 
@@ -91,10 +123,23 @@ Unlike the [OpenCode provider](./opencode-backend.md) (which uses separate `crea
 `CopilotClient` class that handles both cases through the optional `cliUrl`
 constructor option.
 
+### Synchronous prompt model
+
+The Copilot provider uses a **synchronous blocking** prompt model. When
+`session.sendAndWait({ prompt: text })` is called, it blocks until the Copilot
+backend produces a complete response. There is no SSE streaming or event-based
+coordination -- the entire request-response cycle happens within a single call.
+
+This contrasts with the [OpenCode provider](./opencode-backend.md#asynchronous-prompt-model),
+which uses an async `promptAsync` + SSE pattern to avoid HTTP timeout issues.
+The Copilot SDK's `sendAndWait()` handles timeouts internally via the JSON-RPC
+layer, so the HTTP timeout problem that motivated the OpenCode async approach
+does not apply here.
+
 ## Session management
 
 The Copilot provider maintains an in-memory `Map<string, CopilotSession>` at
-`src/providers/copilot.ts:27` to track live sessions. This client-side map is
+`src/providers/copilot.ts:36` to track live sessions. This client-side map is
 necessary because the `CopilotClient.createSession()` returns a `CopilotSession`
 object that must be retained for subsequent `sendAndWait()` calls -- unlike the
 OpenCode SDK where sessions are server-managed and referenced by ID.
@@ -116,11 +161,11 @@ When `prompt()` is called:
 ## Handling malformed responses
 
 The `prompt()` implementation uses defensive null-checking at
-`src/providers/copilot.ts:47-48`:
+`src/providers/copilot.ts:65-69`:
 
 ```ts
 if (!event) return null;
-return event.data?.content ?? null;
+const result = event.data?.content ?? null;
 ```
 
 If `sendAndWait()` returns an event with missing or malformed `data`, the
@@ -128,23 +173,48 @@ optional chaining (`event.data?.content`) safely evaluates to `undefined`, and
 the nullish coalescing (`?? null`) converts it to `null`. This prevents the
 provider from throwing on unexpected SDK behavior and instead signals "no
 response" to the [orchestrator](../cli-orchestration/orchestrator.md), which records the task as failed with "No response
-from agent" (`src/dispatcher.ts:35`). See the [Dispatcher](../planning-and-dispatch/dispatcher.md) for details on how
+from agent" (`src/dispatcher.ts:39`). See the [Dispatcher](../planning-and-dispatch/dispatcher.md) for details on how
 failed responses are handled.
+
+Note: this null-checking path handles both truly null events (no response) and
+events where `data.content` is an empty string. An empty string is falsy in
+JavaScript but will pass through `?? null` because nullish coalescing only
+triggers on `null` or `undefined`, not on `""`. So an empty-string response
+would be returned as `""` (truthy for the dispatcher's `response === null`
+check), which would be treated as a successful dispatch.
 
 ## Cleanup behavior
 
-The `cleanup()` method (`src/providers/copilot.ts:51-60`):
+The `cleanup()` method (`src/providers/copilot.ts:78-88`):
 
 1. Iterates all sessions in the map and calls `session.destroy()` on each,
    swallowing any errors with `.catch(() => {})`.
 2. Waits for all destroy operations with `Promise.all()`.
 3. Clears the session map.
-4. Calls `client.stop()` to shut down the Copilot CLI server, also swallowing
-   errors.
+4. Calls `client.stop()` to shut down the Copilot CLI server process, also
+   swallowing errors.
 
 The error swallowing is intentional -- during cleanup, some sessions may have
 already been destroyed (e.g., by the server shutting down), and the provider
 should not fail on double-destroy attempts.
+
+### Missing idempotency guard
+
+Unlike the [OpenCode provider](./opencode-backend.md#idempotency-guard), the
+Copilot provider does **not** have a `cleaned` boolean flag to prevent
+double-cleanup. If `cleanup()` is called twice:
+
+1. The second call iterates an empty session map (cleared on the first call) --
+   this is harmless.
+2. `client.stop()` is called a second time. Whether this causes an error depends
+   on the SDK's internal behavior; the `.catch(() => {})` swallows any error
+   regardless.
+
+In practice, this is not a bug because the error swallowing makes double-cleanup
+safe. However, it is a minor inconsistency with the OpenCode provider's
+defensive style. See the
+[provider overview](./provider-overview.md#cleanup-idempotency-comparison) for
+a side-by-side comparison.
 
 ## Rate limits and quotas
 

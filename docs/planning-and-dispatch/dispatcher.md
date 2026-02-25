@@ -53,7 +53,7 @@ server-side objects.
 ### Prompt construction
 
 The dispatcher builds one of two prompt variants depending on whether a plan
-is available:
+is available (`src/dispatcher.ts:32`):
 
 #### Simple prompt (`buildPrompt`)
 
@@ -62,7 +62,9 @@ Used when `--no-plan` is active or when no plan is provided. Contains:
 - Working directory path
 - Source file path and line number
 - [Task](../task-parsing/api-reference.md#task) text
-- Constraints: complete only this task, make minimal changes, do not commit
+- Constraints: complete only this task, make minimal changes
+- Commit instruction (conditional -- see [Commit instruction detection](#commit-instruction-detection))
+- Confirmation request: "When finished, confirm by saying 'Task complete.'"
 
 #### Planned prompt (`buildPlannedPrompt`)
 
@@ -70,12 +72,85 @@ Used when the [planner](./planner.md) has produced an execution plan. Contains
 everything in the simple prompt, plus:
 
 - The full plan text in an "Execution Plan" section
-- An "Executor Constraints" section instructing the agent to follow the plan
-  precisely
+- An "Executor Constraints" section with six rules (see
+  [executor constraints](#executor-constraints))
 
 The plan text from `planTask()` is embedded verbatim -- there is no truncation
 or validation of plan size before it reaches the executor. See
 [Maximum prompt size](#maximum-prompt-size) for implications.
+
+### Commit instruction detection
+
+The dispatcher dynamically adjusts the commit instruction in the prompt based
+on the task text, using `taskRequestsCommit()` and `buildCommitInstruction()`
+(`src/dispatcher.ts:107-123`).
+
+**Detection logic**: `taskRequestsCommit()` tests the task text against
+`/\bcommit\b/i` — a case-insensitive word-boundary match for the word "commit".
+
+| Task text | Match? | Reason |
+|-----------|--------|--------|
+| `"Commit the database migration"` | Yes | Word "commit" present |
+| `"Add auth and commit changes"` | Yes | Word "commit" present |
+| `"Update the uncommitted files list"` | No | "commit" is part of "uncommitted" — word boundary fails |
+| `"Fix the recommit logic"` | No | "commit" is part of "recommit" — word boundary fails |
+
+**When matched**: The prompt includes an instruction to stage all changes and
+create a conventional commit using one of the standard types (`feat`, `fix`,
+`docs`, `refactor`, `test`, `chore`, `style`, `perf`, `ci`).
+
+**When not matched**: The prompt explicitly instructs the agent **not** to
+commit — the orchestrator handles commits externally.
+
+**False-positive risk**: The word-boundary regex is simple and could match
+task descriptions that mention "commit" in a non-instructional context (e.g.,
+`"Review the last commit message format"`). In such cases, the agent would be
+instructed to create a commit when none was intended. Since the regex operates
+on the raw task text with no semantic understanding, task authors should be
+aware that including the word "commit" triggers this behavior.
+
+### Executor constraints
+
+When a plan is provided, `buildPlannedPrompt()` appends six constraint rules
+(`src/dispatcher.ts:93-98`) that restrict the executor agent's behavior:
+
+1. **Follow the plan precisely** — do not deviate, skip steps, or reorder.
+2. **Complete only this task** — do not work on other tasks.
+3. **Minimal changes** — do not refactor unrelated code.
+4. **No exploration** — do not read or modify files not referenced in the plan.
+   The planner has already done all necessary research.
+5. **No re-planning** — do not question or revise the plan. Trust it as given.
+6. **No search tools** — do not use `grep`, `find`, or similar tools unless the
+   plan explicitly instructs it.
+
+These constraints exist because the two-phase planner-executor model assumes
+the planner has already explored the codebase. Allowing the executor to explore
+independently would negate the benefits of planning (focused context, reduced
+token usage) and risk the executor making decisions that conflict with the plan.
+
+**Enforcement is prompt-only.** Neither the OpenCode nor Copilot SDKs expose
+capability restrictions (e.g., read-only file access, tool whitelisting). The
+constraints rely entirely on the AI agent following the prompt instructions.
+An agent that ignores prompt instructions could explore, re-plan, or modify
+files outside the plan's scope.
+
+### Planned vs unplanned dispatch outcomes
+
+The choice between planned and unplanned prompts affects what the agent sees and
+how it behaves:
+
+| Aspect | Unplanned (`--no-plan`) | Planned (default) |
+|--------|------------------------|-------------------|
+| Prompt function | `buildPrompt()` | `buildPlannedPrompt()` |
+| Agent role | General-purpose executor | Plan follower |
+| Codebase exploration | Agent explores freely | Agent told not to explore |
+| Plan section | Absent | Full plan embedded verbatim |
+| Constraint strictness | Minimal ("complete only this task") | Strict ("do not deviate, skip, or reorder") |
+| Prompt size | Smaller (task text only) | Larger (task text + plan text) |
+
+Unplanned dispatch is simpler and gives the agent more autonomy, but the agent
+has no pre-researched context. Planned dispatch is more deterministic but
+depends on plan quality and adds prompt size overhead.
 
 ### Success verification
 
@@ -113,6 +188,22 @@ the task as failed in the [TUI](../cli-orchestration/tui.md).
 If the provider's `prompt()` call returns `null` (indicating no response was
 generated), this is treated as a failure with the message "No response from
 agent."
+
+### Provider prompt model differences
+
+The dispatcher calls `instance.prompt(sessionId, prompt)` uniformly regardless
+of the backend. However, the underlying execution differs significantly:
+
+- **OpenCode**: The `prompt()` method uses a 5-step asynchronous flow involving
+  `promptAsync()`, SSE event streaming, and post-completion message fetching. See
+  [OpenCode async prompt model](../provider-system/opencode-backend.md#asynchronous-prompt-model).
+- **Copilot**: The `prompt()` method uses a single blocking `sendAndWait()` call
+  that returns when the agent finishes. See
+  [Copilot synchronous model](../provider-system/copilot-backend.md#synchronous-prompt-model).
+
+The dispatcher is unaware of these differences -- the `ProviderInstance`
+interface abstracts them away. From the dispatcher's perspective, `prompt()` is
+always an async call that eventually resolves with a string or null.
 
 ## Timeout and cancellation
 

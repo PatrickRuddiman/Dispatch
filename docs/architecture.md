@@ -40,10 +40,10 @@ small, well-defined units of work. dispatch-tasks solves three problems:
 The diagram below shows every module in the source tree and how they relate.
 The CLI validates input and delegates to either the orchestrator (dispatch mode)
 or the spec generator (spec mode). In dispatch mode, the orchestrator drives a
-six-stage pipeline through the parser, provider, planner, dispatcher, and git
-modules. In spec mode, the spec generator drives a five-stage pipeline through
-the issue fetchers and provider. The TUI and logger provide output for
-interactive and non-interactive contexts respectively.
+seven-stage pipeline through the parser, provider, planner, dispatcher, and
+issue-fetcher modules. In spec mode, the spec generator drives a five-stage
+pipeline through the issue fetchers and provider. The TUI and logger provide
+output for interactive and non-interactive contexts respectively.
 
 ```mermaid
 graph TD
@@ -126,28 +126,32 @@ graph TD
 
 ## Pipeline data flow
 
-Every `dispatch` invocation follows a six-stage pipeline. The orchestrator
-drives the stages sequentially, with configurable concurrency in stage 4.
+Every `dispatch` invocation follows a seven-stage pipeline. The orchestrator
+drives the stages sequentially, with configurable concurrency in stage 5.
+Tasks are partitioned into execution groups by their `(P)` / `(S)` mode prefix
+before dispatch begins.
 
 ```mermaid
 flowchart LR
     A["1. Discover<br/>glob for task files"] --> B["2. Parse<br/>extract unchecked tasks"]
     B --> C["3. Boot<br/>start AI provider"]
-    C --> D["4. Dispatch<br/>plan + execute per task"]
-    D --> E["5. Mutate<br/>mark [ ] → [x] in file"]
-    E --> F["6. Commit<br/>conventional commit via git"]
+    C --> D["4. Group<br/>groupTasksByMode()"]
+    D --> E["5. Dispatch<br/>plan + execute per group"]
+    E --> F["6. Mutate<br/>mark [ ] → [x] in file"]
+    F --> G["7. Close<br/>auto-close issues on tracker"]
 ```
 
 ### Stage details
 
 | Stage | Module | What happens |
 |-------|--------|-------------|
-| Discover | `src/agents/orchestrator.ts` | Glob pattern resolves to absolute file paths. |
+| Discover | `src/agents/orchestrator.ts` | Glob pattern resolves to absolute file paths, sorted by leading filename digits. |
 | Parse | `src/parser.ts` | Each file is read and regex-matched for `- [ ] ...` lines, producing `Task` and `TaskFile` objects. |
-| Boot | `src/providers/index.ts` | The selected provider (OpenCode or Copilot) is booted via the registry. |
-| Dispatch | `src/planner.ts`, `src/dispatcher.ts` | Per task: optionally run the planner agent in a fresh session, then run the executor agent in another fresh session. Batched via `Promise.all` with configurable concurrency. |
+| Boot | `src/providers/index.ts` | The selected provider (OpenCode or Copilot) is booted via the registry. Provider cleanup is registered with `registerCleanup()`. |
+| Group | `src/parser.ts` | `groupTasksByMode()` partitions tasks into contiguous groups of same-mode `(P)` or `(S)` tasks. |
+| Dispatch | `src/agents/orchestrator.ts`, `src/planner.ts`, `src/dispatcher.ts` | Per group (sequential): per task within group (batch-concurrent): optionally run the planner agent, then run the executor agent. |
 | Mutate | `src/parser.ts` | `markTaskComplete` re-reads the file, validates the target line, replaces `[ ]` with `[x]`, and writes back. |
-| Commit | `src/git.ts` | `git add -A`, check for staged changes, `git commit -m "<type>: <subject>"` with inferred conventional commit type. |
+| Close | `src/agents/orchestrator.ts` | For each spec file where all tasks succeeded, extract issue ID from `<id>-<slug>.md` filename and close the issue on the tracker. |
 
 For the full prompt construction chain (how task text becomes a planner prompt,
 then an executor prompt), see the
@@ -333,12 +337,15 @@ style, perf, ci) is inferred from the task text via cascading regex patterns.
 The type cannot be overridden by the task author. See the
 [Git documentation](planning-and-dispatch/git.md).
 
-### Batch-sequential concurrency
+### Group-aware batch-sequential concurrency
 
-The orchestrator processes tasks in batches of size `--concurrency` (default 1)
-using `Promise.all`. This is not work-stealing or backpressure-aware -- when a
-batch finishes, the next batch starts. See the
-[Orchestrator documentation](cli-orchestration/orchestrator.md).
+The orchestrator partitions tasks into execution groups based on their `(P)`
+(parallel) or `(S)` (serial) mode prefix using `groupTasksByMode()`. Groups are
+processed sequentially; within each parallel group, tasks are dispatched in
+batches of size `--concurrency` (default 1) using `Promise.all`. Serial groups
+always contain exactly one task, ensuring it runs alone with no concurrent
+overlap. See the
+[Orchestrator documentation](cli-orchestration/orchestrator.md#concurrency-model).
 
 ## Cross-cutting concerns
 
@@ -369,10 +376,12 @@ known gaps at the pipeline level:
   A failed task does not block other tasks in the same batch.
   See the [Dispatcher documentation](planning-and-dispatch/dispatcher.md).
 
-- **Provider cleanup gap.** `instance.cleanup()` is only called on the success
-  path in `orchestrate()`. If an error occurs mid-dispatch, the catch block
-  does not call cleanup, potentially leaving orphaned provider server processes.
-  See the [Orchestrator documentation](cli-orchestration/orchestrator.md).
+- **Provider cleanup gap (mitigated).** `instance.cleanup()` is only called on the success
+  path in `orchestrate()`. However, `registerCleanup()` from `src/cleanup.ts`
+  registers the provider cleanup at boot time, allowing the CLI's signal and
+  error handlers to drain cleanup functions via `runCleanup()`. This mitigates
+  the gap for most failure paths, though `SIGKILL` remains unhandleable.
+  See the [Orchestrator documentation](cli-orchestration/orchestrator.md#process-level-cleanup-via-registercleanup).
 
 - **Markdown-then-commit failure.** If `commitTask()` fails after
   `markTaskComplete()` succeeds, the markdown file is left in a
@@ -446,9 +455,14 @@ dispatch-tasks has minimal observability:
   Provider failures surface only when a `prompt()` call fails.
   See the [Integrations page](planning-and-dispatch/integrations.md).
 
-- **No signal handling.** `SIGINT` and `SIGTERM` cause immediate process
-  termination without provider cleanup or TUI teardown.
-  See the [CLI Integrations page](cli-orchestration/integrations.md).
+- **Signal handling.** `SIGINT` and `SIGTERM` handlers are installed at
+  `src/cli.ts:242-252`. Both call `runCleanup()` from the
+  [cleanup registry](shared-types/cleanup.md) to shut down provider processes
+  before exiting with the conventional `128 + signal` exit code (130 for
+  SIGINT, 143 for SIGTERM). A `.catch()` handler on the main promise also
+  calls `runCleanup()` before `process.exit(1)`.
+  See the [Process Signals integration](shared-types/integrations.md#nodejs-process-signals-sigint-sigterm)
+  and [CLI Integrations page](cli-orchestration/integrations.md).
 
 ### File encoding and line endings
 
@@ -520,7 +534,7 @@ See the [Shared Types overview](shared-types/overview.md) and the
 ### [CLI & Orchestration](cli-orchestration/overview.md)
 
 The entry point and pipeline controller. Parses arguments, drives the
-six-stage pipeline, and provides visual feedback.
+seven-stage pipeline, and provides visual feedback.
 
 - [CLI argument parser](cli-orchestration/cli.md)
 - [Orchestrator pipeline](cli-orchestration/orchestrator.md)
@@ -583,3 +597,14 @@ The foundational contracts and utilities that every other module depends on.
 - [Parser types](shared-types/parser.md)
 - [Provider interface](shared-types/provider.md)
 - [Integrations](shared-types/integrations.md)
+
+### [Testing](testing/overview.md)
+
+The project test suite covering configuration, formatting, task parsing, and
+spec generation. Uses Vitest v4.x with real filesystem I/O (no mocks).
+
+- [Test suite overview](testing/overview.md)
+- [Configuration tests](testing/config-tests.md)
+- [Format utility tests](testing/format-tests.md)
+- [Parser tests](testing/parser-tests.md)
+- [Spec generator tests](testing/spec-generator-tests.md)

@@ -11,11 +11,12 @@ Represents a single unchecked task extracted from a markdown file.
 
 ```typescript
 interface Task {
-  index: number;   // Zero-based index within the file
-  text: string;    // The raw text after "- [ ] " (trimmed)
-  line: number;    // Line number in the file (1-based)
-  raw: string;     // Full original line content, including indentation
-  file: string;    // The source file path
+  index: number;                      // Zero-based index within the file
+  text: string;                       // The raw text after "- [ ] ", with any (P)/(S) prefix stripped
+  line: number;                       // Line number in the file (1-based)
+  raw: string;                        // Full original line content, including indentation
+  file: string;                       // The source file path
+  mode?: "parallel" | "serial";       // Execution mode (defaults to "serial" when unspecified)
 }
 ```
 
@@ -24,12 +25,13 @@ interface Task {
 | Field | Description |
 |---|---|
 | `index` | Sequential zero-based counter of unchecked tasks in the file. The first unchecked task is `0`, the second is `1`, etc. Checked tasks and non-task lines do not affect the index. |
-| `text` | The task description extracted from after `[ ] `. Leading/trailing whitespace is trimmed via `.trim()`. Inline markdown formatting (bold, code, links) is preserved as-is. |
+| `text` | The task description extracted from after `[ ] `. Leading/trailing whitespace is trimmed via `.trim()`. If the text starts with a `(P)` or `(S)` mode prefix, the prefix is stripped before storing. Inline markdown formatting (bold, code, links) is preserved as-is. |
 | `line` | 1-based line number in the file. Accounts for blank lines, headings, and other non-task content. Used by `markTaskComplete` to locate the line for mutation. |
 | `raw` | The complete original line including leading whitespace and the checkbox prefix. Example: `"  - [ ] Nested task"`. |
 | `file` | The file path as passed to `parseTaskContent` or `parseTaskFile`. For `parseTaskFile`, this is the absolute path resolved by the caller. |
+| `mode` | Execution mode parsed from an optional `(P)` or `(S)` prefix in the task text. `"parallel"` means the task can run concurrently with adjacent parallel tasks; `"serial"` means the task caps its group and forces sequential execution. Defaults to `"serial"` when no prefix is present. See [Markdown Syntax Reference — Mode Prefixes](./markdown-syntax.md#parallel-and-serial-mode-prefixes) for the full specification. |
 
-Defined at `src/parser.ts:11-22`.
+Defined at `src/parser.ts:11-24`.
 
 ### TaskFile
 
@@ -51,7 +53,7 @@ interface TaskFile {
 | `tasks` | Array of all unchecked tasks, in order of appearance. Empty array if no unchecked tasks exist. |
 | `content` | The **original** file content as passed to `parseTaskContent`. This is the pre-normalization string -- CRLF sequences are not stripped. The orchestrator passes this field to `buildTaskContext` for planner context generation. |
 
-Defined at `src/parser.ts:24-29`.
+Defined at `src/parser.ts:26-31`.
 
 ## Functions
 
@@ -84,7 +86,7 @@ string (before CRLF normalization).
    number
 5. Returns the `TaskFile` with the original (un-normalized) content
 
-Defined at `src/parser.ts:66-86`.
+Defined at `src/parser.ts:69-99`.
 
 ### parseTaskFile
 
@@ -113,11 +115,11 @@ Read a file from disk and parse its contents. Thin wrapper around
 
 **Notes:**
 
-- Reads the file as UTF-8 (`src/parser.ts:92`)
+- Reads the file as UTF-8 (`src/parser.ts:105`)
 - Accepts any file path -- does not enforce `.md` extension
 - The `filePath` value is stored in `TaskFile.path` and each `Task.file`
 
-Defined at `src/parser.ts:91-94`.
+Defined at `src/parser.ts:104-107`.
 
 ### buildTaskContext
 
@@ -156,7 +158,7 @@ kept because they provide implementation context. See
 for more detail. See also [Task Context & Lifecycle](../planning-and-dispatch/task-context-and-lifecycle.md)
 for how this filtering fits into the dispatch pipeline.
 
-Defined at `src/parser.ts:46-60`.
+Defined at `src/parser.ts:49-63`.
 
 ### markTaskComplete
 
@@ -203,7 +205,59 @@ successfully dispatched.
 - See [Architecture & Concurrency](./architecture-and-concurrency.md#concurrent-task-completion)
   for concurrency analysis
 
-Defined at `src/parser.ts:99-121`.
+Defined at `src/parser.ts:112-134`.
+
+### groupTasksByMode
+
+```typescript
+function groupTasksByMode(tasks: Task[]): Task[][]
+```
+
+Group a flat task list into ordered execution groups based on each task's
+`mode` field. The [orchestrator](../cli-orchestration/orchestrator.md) runs
+each group concurrently (up to `--concurrency`), waiting for the group to
+complete before starting the next one.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `tasks` | `Task[]` | Flat array of tasks (typically from `taskFiles.flatMap(tf => tf.tasks)`) |
+
+**Returns:** An array of task groups (`Task[][]`). Each inner array is an
+execution group that the orchestrator dispatches concurrently.
+
+**Grouping algorithm:**
+
+The algorithm iterates through tasks in order, accumulating them into groups:
+
+1. A task with `mode === "parallel"` is appended to the current group.
+2. A task with `mode === "serial"` (or no mode) is appended to the current
+   group, then the group is closed. A new empty group begins.
+3. If tasks remain after the loop (trailing parallel tasks not capped by a
+   serial task), they form the final group.
+
+**Examples:**
+
+| Input task modes | Groups produced | Explanation |
+|---|---|---|
+| `[P, P, P, S]` | `[[P, P, P, S]]` | Three parallel tasks capped by one serial task form a single group |
+| `[P, P, S, P, P, S]` | `[[P, P, S], [P, P, S]]` | Two groups, each capped by a serial task |
+| `[S, S, S]` | `[[S], [S], [S]]` | Each serial task forms its own group (fully sequential) |
+| `[P, P, P]` | `[[P, P, P]]` | Trailing parallel tasks without a serial cap form one group |
+| `[P, S, P]` | `[[P, S], [P]]` | First serial caps the first group; trailing parallel starts a new one |
+| `[]` | `[]` | Empty input produces empty output |
+
+**Execution order guarantee:** Groups are processed sequentially (group N
+completes before group N+1 starts). Within a group, tasks are dispatched
+concurrently in batches of `--concurrency`. This means serial tasks act as
+synchronization barriers: a serial task ensures all preceding parallel tasks
+in its group complete before the next group begins.
+
+See [Orchestrator — Concurrency Model](../cli-orchestration/orchestrator.md#concurrency-model)
+for how the orchestrator uses these groups.
+
+Defined at `src/parser.ts:146-171`.
 
 ## Internal constants
 
@@ -215,10 +269,13 @@ behavior:
 | `UNCHECKED_RE` | `/^(\s*[-*]\s)\[ \]\s+(.+)$/` | Matches an unchecked task line. Group 1 captures the prefix (whitespace + marker), group 2 captures the task text. |
 | `CHECKED_RE` | `/^(\s*[-*]\s)\[[xX]\]\s+/` | Matches a checked task line. Used by test expectations but not by the core parse logic. |
 | `CHECKED_SUB` | `"$1[x] $2"` | Replacement template that converts unchecked to checked using backreferences from `UNCHECKED_RE`. |
+| `MODE_PREFIX_RE` | `/^\(([PS])\)\s+/` | Matches a `(P)` or `(S)` prefix at the start of extracted task text. Group 1 captures the mode letter. `P` maps to `"parallel"`, `S` maps to `"serial"`. The matched prefix is stripped from the `text` field. |
 
-Defined at `src/parser.ts:31-33`. See
+Defined at `src/parser.ts:33-36`. See
 [Markdown Syntax Reference](./markdown-syntax.md#how-the-checked_sub-replacement-works)
-for a detailed explanation.
+for a detailed explanation of the replacement pattern and
+[Mode Prefixes](./markdown-syntax.md#parallel-and-serial-mode-prefixes) for the
+`(P)`/`(S)` prefix specification.
 
 ## Integration: Node.js File System (fs/promises)
 
@@ -226,9 +283,9 @@ The parser uses `readFile` and `writeFile` from `node:fs/promises`:
 
 | Function | Used in | Purpose |
 |---|---|---|
-| `readFile(path, "utf-8")` | `parseTaskFile` (`src/parser.ts:92`) | Read task file content |
-| `readFile(path, "utf-8")` | `markTaskComplete` (`src/parser.ts:100`) | Re-read file for freshness |
-| `writeFile(path, data, "utf-8")` | `markTaskComplete` (`src/parser.ts:120`) | Write updated file content |
+| `readFile(path, "utf-8")` | `parseTaskFile` (`src/parser.ts:105`) | Read task file content |
+| `readFile(path, "utf-8")` | `markTaskComplete` (`src/parser.ts:113`) | Re-read file for freshness |
+| `writeFile(path, data, "utf-8")` | `markTaskComplete` (`src/parser.ts:133`) | Write updated file content |
 
 **Key characteristics from the [Node.js documentation](https://nodejs.org/api/fs.html#promises-api):**
 

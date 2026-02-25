@@ -17,13 +17,13 @@ non-watch mode.
 ### Parser tests in isolation
 
 ```bash
-npx vitest run src/parser.test.ts
+npx vitest run src/tests/parser.test.ts
 ```
 
 Or in watch mode for development:
 
 ```bash
-npx vitest src/parser.test.ts
+npx vitest src/tests/parser.test.ts
 ```
 
 ### Test runner configuration
@@ -42,7 +42,7 @@ The `package.json` defines two test scripts:
 
 ## Test suite structure
 
-The test file (`src/parser.test.ts`) is organized into four `describe` blocks
+The test file (`src/tests/parser.test.ts`) is organized into five `describe` blocks
 covering each public function:
 
 ### parseTaskContent (pure, no I/O)
@@ -108,6 +108,26 @@ These tests verify the filtering logic that produces planner-ready context.
 | preserves asterisk tasks of other types | Non-checkbox `*` list items survive |
 | produces a realistic filtered context | Integration test with multi-section file |
 
+### groupTasksByMode
+
+These tests verify the execution group partitioning logic.
+
+| Test | What it verifies |
+|---|---|
+| returns empty array for empty input | Edge case: empty input |
+| groups a lone serial task as a solo group | Single serial task |
+| groups a lone parallel task as a solo group | Single parallel task |
+| accumulates consecutive parallel tasks into one group | `[P,P,P]` → `[[P,P,P]]` |
+| serial task caps the current group | `[P,S]` → `[[P,S]]` |
+| correct groups for P S S P P P pattern | Mixed grouping |
+| all-serial tasks as individual solo groups | `[S,S,S]` → `[[S],[S],[S]]` |
+| treats undefined mode as serial | Default mode behavior |
+| preserves task order within groups | Index ordering |
+| handles serial at start followed by parallel | `[S,P,P]` → `[[S],[P,P]]` |
+
+For the detailed grouping algorithm and examples, see
+[Parser Tests (detailed)](../testing/parser-tests.md#grouptasksbymode-10-tests).
+
 ## Temporary file cleanup
 
 Tests that perform file I/O use the following pattern for cleanup:
@@ -147,7 +167,8 @@ When adding tests for the parser:
 2. **File I/O tests** go in the `parseTaskFile` or `markTaskComplete` blocks.
    Follow the `mkdtemp`/`afterEach` cleanup pattern.
 3. **Context filtering tests** go in the `buildTaskContext` block.
-4. **Negative tests** (invalid syntax that should NOT match) are important for
+4. **Grouping logic tests** go in the `groupTasksByMode` block.
+5. **Negative tests** (invalid syntax that should NOT match) are important for
    documenting the parser's rejection criteria. Add them to the `parseTaskContent`
    block.
 
@@ -159,3 +180,20 @@ When adding tests for the parser:
 - [API Reference](./api-reference.md) -- function contracts that the tests verify
 - [Architecture & Concurrency](./architecture-and-concurrency.md) -- concurrency
   concerns and the read-modify-write pattern tested by `markTaskComplete` tests
+
+### Project-wide test documentation
+
+This page covers only the parser tests. For documentation of the full test
+suite -- including configuration, formatting, and spec generator tests -- see
+the [Testing section](../testing/overview.md):
+
+- [Test suite overview](../testing/overview.md) -- framework, patterns, and
+  coverage map for all test files
+- [Parser tests (detailed)](../testing/parser-tests.md) -- comprehensive
+  breakdown of all 62 parser tests including mode extraction and grouping
+- [Configuration tests](../testing/config-tests.md) -- config I/O, validation,
+  merge precedence, and `handleConfigCommand` tests
+- [Format utility tests](../testing/format-tests.md) -- `elapsed()` duration
+  formatting tests
+- [Spec generator tests](../testing/spec-generator-tests.md) -- spec pipeline
+  input classification, prompt construction, validation, and content extraction

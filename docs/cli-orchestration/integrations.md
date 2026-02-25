@@ -342,16 +342,72 @@ for the full impact assessment.
 
 ### Signal handling
 
-There is currently **no signal handling** in the dispatch codebase.
-`SIGINT` (Ctrl+C) and `SIGTERM` cause immediate process termination without
-cleanup. This can leave:
+Dispatch installs `SIGINT` and `SIGTERM` handlers at `src/cli.ts:242-252`
+that call `runCleanup()` from the [cleanup registry](../shared-types/cleanup.md)
+before exiting. This ensures provider server processes are stopped on Ctrl+C
+or container shutdown.
 
-- Orphaned provider server processes (OpenCode or Copilot CLI servers).
-- Partially modified markdown files (if a task was mid-mutation).
-- Unstaged or uncommitted git changes.
+| Signal | Exit code | Trigger |
+|--------|-----------|---------|
+| SIGINT | 130 | Ctrl+C or `kill -2` |
+| SIGTERM | 143 | `kill <pid>`, container stop, process manager |
 
-See [TUI — Signal handling](tui.md#signal-handling) for a recommended
-implementation.
+Additionally, the `.catch()` handler on the `main()` promise
+(`src/cli.ts:304-307`) calls `runCleanup()` before `process.exit(1)` to
+handle unhandled exceptions.
+
+For full details on exit codes, double-signal behavior, hung shutdown
+troubleshooting, and unhandleable signals, see
+[Process Signals integration](../shared-types/integrations.md#nodejs-process-signals-sigint-sigterm).
+
+---
+
+## Process cleanup registry
+
+**Module**: `src/cleanup.ts` (35 lines)
+**Used in**: `src/agents/orchestrator.ts:17,151`, `src/cli.ts` (signal and
+error handlers)
+
+The cleanup registry is a simple module that allows sub-modules (orchestrator,
+spec-generator) to register their provider's `cleanup()` function at boot time.
+The CLI's signal handlers and error handler drain the registry before exiting,
+ensuring provider resources are released even when the orchestrator's own error
+path doesn't call `instance.cleanup()`.
+
+### API
+
+| Export | Signature | Description |
+|--------|-----------|-------------|
+| `registerCleanup` | `(fn: () => Promise<void>) => void` | Adds a cleanup function to the registry |
+| `runCleanup` | `() => Promise<void>` | Invokes all registered functions, then clears the registry |
+
+### Internal design
+
+- **Storage**: A module-level `Array<() => Promise<void>>`.
+- **Drain behavior**: `runCleanup()` calls `cleanups.splice(0)` to atomically
+  take all functions from the array, then invokes them sequentially in
+  registration order.
+- **Error handling**: Each function is called in a `try/catch`. Errors are
+  silently swallowed to prevent cleanup failures from masking the original
+  error or blocking process exit.
+- **Idempotent**: Because `splice(0)` empties the array, calling `runCleanup()`
+  multiple times is harmless — the second call finds an empty array and returns
+  immediately.
+
+### Usage in the orchestrator
+
+```
+const instance = await bootProvider(provider, { url: serverUrl, cwd });
+registerCleanup(() => instance.cleanup());
+```
+
+This registration happens at `src/agents/orchestrator.ts:151`, immediately after
+the provider is booted. It ensures that even if an unhandled error propagates
+past the orchestrator's `try/catch`, the CLI's top-level error handler can still
+clean up the provider by calling `runCleanup()`.
+
+See the [Orchestrator cleanup documentation](orchestrator.md#process-level-cleanup-via-registercleanup)
+for how this interacts with the orchestrator's own error recovery.
 
 ## Related documentation
 

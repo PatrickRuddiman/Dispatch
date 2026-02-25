@@ -54,6 +54,82 @@ verified by the negative test cases in `src/parser.test.ts:182-196`:
 | No space after checkbox | `- [ ]Task` | Requires `\s+` between `]` and text |
 | Empty task text | `- [ ] ` | The `.+` requires at least one character |
 
+## Parallel and serial mode prefixes
+
+Tasks can be annotated with a `(P)` or `(S)` prefix to control whether they
+execute in parallel or serial within the dispatch pipeline. This prefix appears
+immediately after the checkbox and before the task description.
+
+### Regex definition
+
+The mode prefix is parsed by `MODE_PREFIX_RE` defined at `src/parser.ts:36`:
+
+```
+MODE_PREFIX_RE = /^\(([PS])\)\s+/
+```
+
+This regex is applied to the **extracted task text** (group 2 of `UNCHECKED_RE`)
+after trimming, not to the raw line. It matches a literal `(`, a single letter
+`P` or `S`, a literal `)`, followed by one or more spaces.
+
+### Syntax
+
+| Format | Example | Resulting `mode` | Resulting `text` |
+|---|---|---|---|
+| Parallel prefix | `- [ ] (P) Run tests` | `"parallel"` | `"Run tests"` |
+| Serial prefix | `- [ ] (S) Deploy to staging` | `"serial"` | `"Deploy to staging"` |
+| No prefix | `- [ ] Fix the login bug` | `"serial"` (default) | `"Fix the login bug"` |
+| Lowercase (not matched) | `- [ ] (p) Run tests` | `"serial"` (default) | `"(p) Run tests"` |
+
+**Key behaviors:**
+
+- The prefix is **case-sensitive**: only uppercase `(P)` and `(S)` are
+  recognized. Lowercase `(p)` or `(s)` is treated as part of the task text.
+- The prefix is **stripped** from the `text` field. The stored `text` does not
+  include `(P)` or `(S)`.
+- When no prefix is present, the task defaults to `mode: "serial"`.
+- A space is required between the closing `)` and the task description.
+
+### How mode prefixes affect execution
+
+The `mode` field drives the
+[`groupTasksByMode()`](./api-reference.md#grouptasksbymode) algorithm, which
+groups consecutive tasks into execution batches:
+
+- **Parallel** (`(P)`) tasks accumulate in the current group. They can run
+  concurrently with other tasks in the same group (up to `--concurrency`).
+- **Serial** (`(S)` or no prefix) tasks cap the current group and start a new
+  one. The orchestrator waits for the entire group to complete before starting
+  the next group.
+
+### Example task file with mode prefixes
+
+```markdown
+# Build Pipeline Tasks
+
+- [ ] (P) Run unit tests
+- [ ] (P) Run integration tests
+- [ ] (P) Run linting checks
+- [ ] (S) Merge results and generate report
+- [ ] (P) Deploy to staging
+- [ ] (P) Run smoke tests
+- [ ] Notify team on Slack
+```
+
+This produces three execution groups:
+
+1. **Group 1** (4 tasks): Run unit tests, Run integration tests, Run linting
+   checks, Merge results and generate report -- the first three run in parallel
+   (up to `--concurrency`), the serial task caps the group.
+2. **Group 2** (2 tasks): Deploy to staging, Run smoke tests -- both run in
+   parallel within the group.
+3. **Group 3** (1 task): Notify team on Slack -- serial, runs alone since the
+   trailing parallel tasks in group 2 were flushed, and this task (with no
+   prefix, defaulting to serial) forms its own group.
+
+See [Orchestrator — Concurrency Model](../cli-orchestration/orchestrator.md#concurrency-model)
+for how the orchestrator processes these groups.
+
 ## How the CHECKED_SUB replacement works
 
 When `markTaskComplete` converts a task, it uses `String.replace` with the

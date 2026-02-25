@@ -8,12 +8,14 @@ types and functions.
 
 ## What it does
 
-The parser module (`src/parser.ts`) provides four core capabilities:
+The parser module (`src/parser.ts`) provides five core capabilities:
 
 1. **Parse markdown content** into structured `Task` and `TaskFile` objects
-2. **Read task files from disk** with automatic UTF-8 decoding
-3. **Build filtered context** for the planner agent, stripping sibling tasks
-4. **Mark tasks complete** by performing targeted line-level mutation of the
+2. **Extract execution mode** from optional `(P)`/`(S)` prefixes on task text,
+   enabling parallel and serial execution control
+3. **Group tasks by mode** into ordered execution batches via `groupTasksByMode`
+4. **Build filtered context** for the planner agent, stripping sibling tasks
+5. **Mark tasks complete** by performing targeted line-level mutation of the
    source file
 
 ## Why it exists
@@ -32,6 +34,8 @@ The parser produces data that flows through the entire Dispatch pipeline:
 flowchart LR
     MD["Markdown Files<br/>*.md"] -->|readFile| PF["parseTaskFile"]
     PF -->|TaskFile| ORCH["Orchestrator"]
+    ORCH -->|Task[]| GTM["groupTasksByMode"]
+    GTM -->|Task[][]| BATCH["Batch Dispatch"]
     ORCH -->|Task + content| BTC["buildTaskContext"]
     BTC -->|filtered markdown| PLAN["Planner"]
     PLAN -->|execution plan| DISP["Dispatcher"]
@@ -45,8 +49,8 @@ flowchart LR
 
 | Consumer | Imports | Usage |
 |---|---|---|
-| Orchestrator (`src/orchestrator.ts`) | `parseTaskFile`, `markTaskComplete`, `buildTaskContext`, `Task`, `TaskFile` | Parses all task files, builds planner context, marks tasks done after execution |
-| Planner (`src/planner.ts`) | `Task` | Receives a `Task` object and optional filtered file context to build an execution plan |
+| Orchestrator (`src/agents/orchestrator.ts`) | `parseTaskFile`, `markTaskComplete`, `buildTaskContext`, `groupTasksByMode`, `Task`, `TaskFile` | Parses all task files, groups tasks by mode, builds planner context, marks tasks done after execution |
+| Planner (`src/agents/planner.ts`) | `Task` | Receives a `Task` object and optional filtered file context to build an execution plan |
 | Dispatcher (`src/dispatcher.ts`) | `Task` | Receives a `Task` to build execution prompts for the agent backend |
 | TUI (`src/tui.ts`) | `Task` | Displays task text and status in the real-time terminal dashboard |
 | Git (`src/git.ts`) | `Task` | Uses task text to build conventional commit messages |

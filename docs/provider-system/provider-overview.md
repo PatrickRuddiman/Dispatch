@@ -22,6 +22,7 @@ while the rest of the pipeline remains agnostic.
 | `src/providers/index.ts` | Provider registry -- maps names to boot functions |
 | `src/providers/opencode.ts` | OpenCode backend implementation |
 | `src/providers/copilot.ts` | GitHub Copilot backend implementation |
+| `src/cleanup.ts` | Process-level cleanup registry for session leak prevention |
 
 ## The ProviderInstance interface
 
@@ -51,6 +52,7 @@ sequenceDiagram
     Reg->>Prov: boot(opts)
     Prov-->>Reg: ProviderInstance
     Reg-->>Orch: ProviderInstance
+    Orch->>Orch: registerCleanup(() => instance.cleanup())
 
     loop For each task
         Orch->>Plan: planTask(instance, task, cwd)
@@ -69,6 +71,46 @@ sequenceDiagram
     end
 
     Orch->>Prov: cleanup()
+    Note over Orch: cleanup registry also calls cleanup() on signal exit
+```
+
+### Prompt dispatch state machine
+
+The following state machine shows the lifecycle of a single prompt dispatch
+through the provider layer, covering both the synchronous (Copilot) and
+asynchronous (OpenCode) paths:
+
+```mermaid
+stateDiagram-v2
+    [*] --> SessionCreating: createSession()
+    SessionCreating --> SessionReady: session ID returned
+    SessionCreating --> Failed: createSession() throws
+
+    SessionReady --> PromptSending: prompt(sessionId, text)
+
+    state PromptSending {
+        [*] --> SyncPath: Copilot
+        [*] --> AsyncPath: OpenCode
+
+        SyncPath --> WaitingForResponse: sendAndWait()
+        WaitingForResponse --> ResponseReceived: event returned
+
+        AsyncPath --> FireAndForget: promptAsync()
+        FireAndForget --> SSESubscribed: 204 accepted
+        SSESubscribed --> FilteringEvents: for await (event)
+        FilteringEvents --> FilteringEvents: wrong session / streaming delta
+        FilteringEvents --> FetchingMessages: session.idle
+        FilteringEvents --> ErrorState: session.error
+        FetchingMessages --> ResponseReceived: messages fetched
+    }
+
+    ResponseReceived --> ExtractingText: extract content
+    ExtractingText --> Success: non-null string
+    ExtractingText --> NullResponse: no text content
+    ErrorState --> Failed: throw Error
+    NullResponse --> Failed: "No response from agent"
+    Success --> [*]
+    Failed --> [*]
 ```
 
 ## The provider registry
@@ -124,7 +166,7 @@ Provider selection flows from the user through the CLI to the orchestrator:
 3. The validated `ProviderName` is passed to `orchestrate()` in the options object
    (`src/orchestrator.ts:42`), which defaults to `"opencode"`.
 4. The orchestrator calls `bootProvider(provider, { url: serverUrl, cwd })` at
-   `src/orchestrator.ts:100`.
+   `src/orchestrator.ts:150`.
 
 Users can override the default at the CLI level:
 
@@ -172,7 +214,7 @@ retry.
 ## Session isolation model
 
 Each task gets its own session, created by the [planner](../planning-and-dispatch/planner.md) and the [dispatcher](../planning-and-dispatch/dispatcher.md)
-independently (`src/planner.ts:38`, `src/dispatcher.ts:29`). These modules
+independently (`src/planner.ts:38`, `src/dispatcher.ts:31`). These modules
 receive the `ProviderInstance` as a parameter and create their own sessions --
 they never share session IDs.
 
@@ -189,28 +231,94 @@ Session isolation guarantees:
 This model is appropriate for the dispatch use case, where tasks operate on the
 same codebase but should not confuse the agent by mixing conversation contexts.
 
-## Cleanup and in-flight sessions
+## Cleanup and resource management
 
-The `cleanup()` contract in `src/provider.ts:47-51` states that cleanup should
-tear down servers and release resources, and should be safe to call multiple times.
+### The cleanup registry
+
+The process-level cleanup registry (`src/cleanup.ts`) provides a safety net for
+resource cleanup on abnormal exit. It works as follows:
+
+1. When the orchestrator boots a provider, it immediately registers the
+   provider's `cleanup()` function with the registry:
+   `registerCleanup(() => instance.cleanup())` (`src/agents/orchestrator.ts:151`).
+2. On **normal completion**, the orchestrator calls `instance.cleanup()` directly
+   on the success path.
+3. On **signal exit** (SIGINT, SIGTERM, unhandled error), the CLI's signal
+   handlers call `runCleanup()` from `src/cleanup.ts`, which drains the registry
+   and invokes all registered cleanup functions.
+4. After draining, the registry is cleared (`cleanups.splice(0)`), so repeated
+   calls to `runCleanup()` are harmless.
+
+This dual-path design (explicit cleanup + registry safety net) means provider
+cleanup functions can be called twice: once explicitly by the orchestrator and
+once by the signal handler. This is why idempotency matters.
+
+### Session leak prevention
+
+Without the cleanup registry, a SIGINT during task dispatch would kill the
+process without stopping the spawned server (OpenCode) or the CLI child process
+(Copilot). The registry ensures these external processes are terminated even on
+abnormal exit.
+
+The registry also handles the case where `bootProvider` succeeds but an error
+occurs before the orchestrator reaches its explicit cleanup call. Since
+registration happens immediately after boot, the safety net is active for the
+entire dispatch run.
+
+### Cleanup and in-flight sessions
 
 **What happens if `cleanup()` is called while a prompt is in flight?**
 
-- **Copilot provider** (`src/providers/copilot.ts:51-60`): Calls `destroy()` on
+- **Copilot provider** (`src/providers/copilot.ts:78-88`): Calls `destroy()` on
   all tracked sessions, then `client.stop()`. If `sendAndWait()` is pending on a
   session, destroying that session will cause the pending promise to reject (or
   resolve with no data, depending on the SDK's internal behavior). The `.catch(() => {})`
   on each destroy call swallows errors from sessions that may have already
   completed.
-- **OpenCode provider** (`src/providers/opencode.ts:63-65`): Calls
+- **OpenCode provider** (`src/providers/opencode.ts:166-171`): Calls
   `stopServer?.()` (which invokes `oc.server.close()`). The underlying HTTP
-  server shuts down, which will cause any in-flight `client.session.prompt()` calls
-  to fail with a connection error.
+  server shuts down, which will cause the SSE stream to disconnect and the
+  subsequent message fetch to fail with a connection error.
 
 In practice, `cleanup()` is only called after all task dispatches have completed
-(`src/orchestrator.ts:165`), so in-flight prompts during cleanup should not occur
-under normal operation. However, if the [orchestrator's](../cli-orchestration/orchestrator.md) `try/catch` fires due to
-an unhandled error, cleanup does not run -- the process simply exits.
+(`src/agents/orchestrator.ts:165`), so in-flight prompts during cleanup should
+not occur under normal operation.
+
+### Cleanup idempotency comparison
+
+The two providers handle double-cleanup differently:
+
+| Aspect | OpenCode | Copilot |
+|--------|----------|---------|
+| Idempotency guard | `cleaned` boolean flag (`src/providers/opencode.ts:35`) | None |
+| Second call behavior | Returns immediately (no-op) | Re-iterates empty session map, calls `client.stop()` again |
+| Safety of double-call | Guaranteed safe by guard | Safe in practice due to error swallowing (`.catch(() => {})`) |
+| Resource at risk | Spawned HTTP server (`server.close()`) | CLI child process (`client.stop()`) |
+
+The OpenCode provider's `cleaned` flag is a defensive pattern that prevents
+calling `server.close()` on an already-closed server. The Copilot provider
+achieves equivalent safety through error swallowing, though adding an explicit
+guard would make the intent clearer.
+
+Both approaches are safe for the current codebase. The difference is stylistic
+rather than functional.
+
+## Prompt model comparison
+
+The two backends use fundamentally different prompt execution models:
+
+| Aspect | OpenCode | Copilot |
+|--------|----------|---------|
+| Prompt method | `promptAsync()` + SSE events | `sendAndWait()` |
+| Execution model | Asynchronous (fire-and-forget + event stream) | Synchronous (blocking call) |
+| HTTP timeout risk | None (204 returns immediately) | Managed by JSON-RPC layer |
+| Progress visibility | Streaming deltas via SSE events | None until completion |
+| Failure detection | `session.error` event or SSE disconnect | Promise rejection |
+| Resource overhead | SSE connection + AbortController per prompt | Single blocking call |
+
+See [OpenCode async prompt model](./opencode-backend.md#asynchronous-prompt-model)
+and [Copilot synchronous model](./copilot-backend.md#synchronous-prompt-model)
+for implementation details.
 
 ## Prompt timeouts and cancellation
 
@@ -219,9 +327,9 @@ or cancellation mechanism for `prompt()` calls:
 
 - The `prompt()` signature returns `Promise<string | null>` with no timeout
   parameter.
-- The OpenCode SDK's `client.session.prompt()` blocks until the agent completes.
-  The SDK's `createOpencode()` accepts a `timeout` option (default 5000ms) for
-  *server startup*, but not for individual prompts.
+- The OpenCode provider's SSE stream will wait indefinitely for a `session.idle`
+  or `session.error` event. The SDK's `createOpencode()` accepts a `timeout`
+  option (default 5000ms) for *server startup*, but not for individual prompts.
 - The Copilot SDK's `session.sendAndWait()` blocks until the agent produces a
   completion event. The SDK does not expose a timeout parameter.
 
@@ -236,12 +344,12 @@ The two backends produce responses in different formats, which the provider
 implementations normalize to `string | null`:
 
 - **Copilot**: `session.sendAndWait()` returns an event object. The provider
-  extracts `event.data?.content` (`src/providers/copilot.ts:47-48`), which is a
+  extracts `event.data?.content` (`src/providers/copilot.ts:69`), which is a
   plain string.
-- **OpenCode**: `client.session.prompt()` returns a response with a `parts` array
-  of `Part` objects. The provider filters for `TextPart` objects (those with
-  `type: "text"`) and joins their `.text` fields with newlines
-  (`src/providers/opencode.ts:57-60`). The multi-part design supports future
+- **OpenCode**: The provider fetches session messages after `session.idle`, finds
+  the last assistant message, filters its `parts` array for `TextPart` objects
+  (those with `type: "text"`), and joins their `.text` fields with newlines
+  (`src/providers/opencode.ts:154-157`). The multi-part design supports
   non-text parts (images, tool calls, structured output), but dispatch only uses
   the text content.
 

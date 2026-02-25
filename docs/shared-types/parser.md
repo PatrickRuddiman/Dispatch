@@ -62,8 +62,8 @@ Represents a parsed markdown file:
 
 ## Source references
 
-- `src/parser.ts` — Full parser implementation (121 lines)
-- `src/parser.test.ts` — Comprehensive test suite (607 lines, 25+ test cases)
+- `src/parser.ts` — Full parser implementation (171 lines)
+- `src/tests/parser.test.ts` — Comprehensive test suite (995 lines, 62 tests)
 
 ## Detailed documentation
 
