@@ -152,6 +152,9 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
         if (serverUrl) {
           tui.state.serverUrl = serverUrl;
         }
+        if (instance.model) {
+          tui.state.model = instance.model;
+        }
 
         // ── 4. Boot planner agent (unless --no-plan) ────────────────
         const planner = noPlan ? null : await bootPlanner({ provider: instance, cwd });

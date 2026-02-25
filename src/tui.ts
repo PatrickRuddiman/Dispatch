@@ -24,6 +24,8 @@ export interface TuiState {
   serverUrl?: string;
   /** Active provider name — shown in the booting phase */
   provider?: string;
+  /** Model identifier reported by the provider, if available */
+  model?: string;
 }
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -108,6 +110,15 @@ function render(state: TuiState): string {
   // ── Header ──────────────────────────────────────────────────
   lines.push("");
   lines.push(chalk.bold.white("  ⚡ dispatch") + chalk.dim(` — AI task orchestration`));
+
+  // Show provider/model info when available
+  if (state.provider) {
+    const providerInfo = state.model
+      ? `  provider: ${state.provider} · model: ${state.model}`
+      : `  provider: ${state.provider}`;
+    lines.push(chalk.dim(providerInfo));
+  }
+
   lines.push(chalk.dim("  ─".repeat(24)));
 
   // ── Phase + Timer ───────────────────────────────────────────
