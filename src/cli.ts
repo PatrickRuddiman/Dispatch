@@ -31,6 +31,7 @@ import type { ProviderName } from "./provider.js";
 import type { IssueSourceName } from "./issue-fetcher.js";
 import { PROVIDER_NAMES } from "./providers/index.js";
 import { ISSUE_SOURCE_NAMES } from "./issue-fetchers/index.js";
+import { handleConfigCommand } from "./config.js";
 
 const HELP = `
   dispatch — AI agent orchestration CLI
@@ -176,7 +177,15 @@ function parseArgs(argv: string[]): CliArgs {
 }
 
 async function main() {
-  const args = parseArgs(process.argv.slice(2));
+  const rawArgv = process.argv.slice(2);
+
+  // ── Config subcommand — must run before parseArgs ──────────
+  if (rawArgv[0] === "config") {
+    await handleConfigCommand(rawArgv.slice(1));
+    process.exit(0);
+  }
+
+  const args = parseArgs(rawArgv);
 
   // Enable verbose logging before anything else
   log.verbose = args.verbose;
