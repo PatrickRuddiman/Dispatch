@@ -105,7 +105,7 @@ Both new functions (`extractSpecContent` and `validateSpecStructure`) must be ex
 
 - [ ] (P) Create the `validateSpecStructure()` function in `src/spec-generator.ts` — takes a string and checks for the expected structural markers (H1 heading at the start, `## Tasks` section with at least one `- [ ]` checkbox). Returns a structured result indicating whether the structure is valid with a reason if not. Uses `log.warn()` to surface issues. Export it for testing.
 
-- [ ] (S) Integrate post-processing into `generateSingleSpec()` — after verifying the file exists, read the content, run it through `extractSpecContent()`, validate with `validateSpecStructure()`, and write the cleaned content back to disk if it changed. Add `writeFile` to the imports from `node:fs/promises`. This must complete before `generateSingleSpec()` returns so the downstream `fetcher.update()` call in `generateSpecs()` reads clean content.
+- [x] (S) Integrate post-processing into `generateSingleSpec()` — after verifying the file exists, read the content, run it through `extractSpecContent()`, validate with `validateSpecStructure()`, and write the cleaned content back to disk if it changed. Add `writeFile` to the imports from `node:fs/promises`. This must complete before `generateSingleSpec()` returns so the downstream `fetcher.update()` call in `generateSpecs()` reads clean content.
 
 - [ ] (P) Strengthen the `buildSpecPrompt()` instructions — add explicit prohibitions against preamble, postamble, summaries, code-fence wrapping, and conversational text. Place these instructions near the role definition at the top of the prompt AND reiterate them near the Write tool / output section so they frame both the beginning and end of the AI agent's attention window.
 

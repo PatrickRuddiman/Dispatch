@@ -67,6 +67,114 @@ export function isIssueNumbers(input: string): boolean {
   return /^\d+(,\s*\d+)*$/.test(input);
 }
 
+/**
+ * Post-process raw spec file content written by the AI agent.
+ *
+ * Strips code-fence wrapping, preamble text before the first H1 heading,
+ * and postamble text after the last recognized spec section.  Returns the
+ * content unchanged when no recognizable spec structure is found.
+ *
+ * Pure function — no I/O, no side-effects.
+ */
+export function extractSpecContent(raw: string): string {
+  let content = raw;
+
+  // 1. Strip code-fence wrapping (``` or ```markdown around entire content)
+  const fenceMatch = content.match(/^\s*```(?:markdown)?\s*\n([\s\S]*?)\n\s*```\s*$/);
+  if (fenceMatch) {
+    content = fenceMatch[1];
+  }
+
+  // 2. Remove preamble — everything before the first H1 heading
+  const h1Index = content.search(/^# /m);
+  if (h1Index === -1) {
+    // No H1 found — return original content unchanged
+    return raw;
+  }
+  content = content.slice(h1Index);
+
+  // 3. Remove postamble — trim after the last recognized H2 section's content
+  const RECOGNIZED_H2 = new Set([
+    "## Context",
+    "## Why",
+    "## Approach",
+    "## Integration Points",
+    "## Tasks",
+    "## References",
+    "## Key Guidelines",
+  ]);
+
+  const lines = content.split("\n");
+  let lastRecognizedSectionEnd = lines.length;
+
+  // Walk backwards to find the last recognized H2 and its content extent
+  let foundLastRecognized = false;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const trimmed = lines[i].trimEnd();
+    if (trimmed.startsWith("## ")) {
+      if (RECOGNIZED_H2.has(trimmed)) {
+        // This is the last recognized H2 — everything up to end is the section content
+        foundLastRecognized = true;
+        break;
+      } else {
+        // Unrecognized H2 — this and everything after it is postamble
+        lastRecognizedSectionEnd = i;
+      }
+    }
+  }
+
+  if (foundLastRecognized || lastRecognizedSectionEnd < lines.length) {
+    // Trim trailing blank lines from the kept portion
+    let end = lastRecognizedSectionEnd;
+    while (end > 0 && lines[end - 1].trim() === "") {
+      end--;
+    }
+    content = lines.slice(0, end).join("\n");
+  }
+
+  // Ensure trailing newline
+  if (!content.endsWith("\n")) {
+    content += "\n";
+  }
+
+  return content;
+}
+
+export interface SpecValidationResult {
+  valid: boolean;
+  reason?: string;
+}
+
+/**
+ * Validate that spec content has the expected structural markers.
+ *
+ * Checks:
+ * - Content starts with an H1 heading (`# `)
+ * - Content contains a `## Tasks` section with at least one `- [ ]` checkbox
+ *
+ * Returns a structured result. This is a guardrail, not a gate — callers
+ * should log warnings but not fail the pipeline on invalid results.
+ */
+export function validateSpecStructure(content: string): SpecValidationResult {
+  const trimmed = content.trimStart();
+
+  if (!trimmed.startsWith("# ")) {
+    return { valid: false, reason: "Content does not start with an H1 heading (# )" };
+  }
+
+  // Check for ## Tasks section
+  if (!/^## Tasks\s*$/m.test(content)) {
+    return { valid: false, reason: "Missing ## Tasks section" };
+  }
+
+  // Check for at least one checkbox in the Tasks section
+  if (!/^-\s*\[ \]\s+/m.test(content)) {
+    return { valid: false, reason: "## Tasks section has no checkboxes (- [ ])" };
+  }
+
+  return { valid: true };
+}
+
 export interface SpecSummary {
   /** Total issues requested */
   total: number;
@@ -366,13 +474,30 @@ async function generateSingleSpec(
   log.debug(`Spec agent response (${response.length} chars)`);
 
   // Verify the agent wrote the file
+  let rawContent: string;
   try {
-    await readFile(outputPath, "utf-8");
+    rawContent = await readFile(outputPath, "utf-8");
   } catch {
     throw new Error(
       `Spec agent did not write the file to ${outputPath}. ` +
       `Agent response: ${response.slice(0, 300)}`
     );
+  }
+
+  // Post-process: extract clean spec content
+  const cleanedContent = extractSpecContent(rawContent);
+  log.debug(`Post-processed spec (${rawContent.length} → ${cleanedContent.length} chars)`);
+
+  // Validate structure
+  const validation = validateSpecStructure(cleanedContent);
+  if (!validation.valid) {
+    log.warn(`Spec validation warning for ${outputPath}: ${validation.reason}`);
+  }
+
+  // Write back only if content changed
+  if (cleanedContent !== rawContent) {
+    await writeFile(outputPath, cleanedContent, "utf-8");
+    log.debug(`Wrote cleaned spec back to ${outputPath}`);
   }
 }
 
