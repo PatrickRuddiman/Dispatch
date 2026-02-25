@@ -401,6 +401,145 @@ describe("parseTaskContent — mode extraction", () => {
       mode: "serial",
     });
   });
+
+  it("handles multiple spaces after (P) prefix", () => {
+    const md = "- [ ] (P)  Add feature with extra space";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0]).toMatchObject({
+      text: "Add feature with extra space",
+      mode: "parallel",
+    });
+  });
+
+  it("handles special characters in task text after (P) prefix", () => {
+    const md = [
+      "- [ ] (P) Fix the `user?.name ?? 'default'` pattern",
+      "- [ ] (S) Handle $PATH env variable",
+      "- [ ] (P) Add `src/utils/*.ts` glob support",
+    ].join("\n");
+
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks).toHaveLength(3);
+    expect(result.tasks[0]).toMatchObject({
+      text: "Fix the `user?.name ?? 'default'` pattern",
+      mode: "parallel",
+    });
+    expect(result.tasks[1]).toMatchObject({
+      text: "Handle $PATH env variable",
+      mode: "serial",
+    });
+    expect(result.tasks[2]).toMatchObject({
+      text: "Add `src/utils/*.ts` glob support",
+      mode: "parallel",
+    });
+  });
+
+  it("preserves parentheses in task text after mode prefix is stripped", () => {
+    const md = "- [ ] (P) Refactor the (legacy) authentication module";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({
+      text: "Refactor the (legacy) authentication module",
+      mode: "parallel",
+    });
+  });
+
+  it("extracts mode from asterisk list markers", () => {
+    const md = [
+      "* [ ] (P) Parallel with asterisk",
+      "* [ ] (S) Serial with asterisk",
+    ].join("\n");
+
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({ text: "Parallel with asterisk", mode: "parallel" });
+    expect(result.tasks[1]).toMatchObject({ text: "Serial with asterisk", mode: "serial" });
+  });
+
+  it("only strips the first mode prefix when multiple are present", () => {
+    const md = "- [ ] (P) (S) ambiguous double prefix";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({
+      text: "(S) ambiguous double prefix",
+      mode: "parallel",
+    });
+  });
+
+  it("handles inline markdown formatting after mode prefix", () => {
+    const md = [
+      "- [ ] (P) Create **bold** feature",
+      "- [ ] (S) Add [link](http://example.com) docs",
+      "- [ ] (P) Use _italic_ emphasis here",
+    ].join("\n");
+
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({
+      text: "Create **bold** feature",
+      mode: "parallel",
+    });
+    expect(result.tasks[1]).toMatchObject({
+      text: "Add [link](http://example.com) docs",
+      mode: "serial",
+    });
+    expect(result.tasks[2]).toMatchObject({
+      text: "Use _italic_ emphasis here",
+      mode: "parallel",
+    });
+  });
+
+  it("assigns serial mode to all untagged tasks in a mixed file", () => {
+    const md = [
+      "# Tasks",
+      "",
+      "- [ ] (P) Tagged parallel",
+      "- [ ] First untagged",
+      "- [ ] Second untagged",
+      "- [ ] (S) Tagged serial",
+      "- [ ] Third untagged",
+    ].join("\n");
+
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks).toHaveLength(5);
+    expect(result.tasks[0].mode).toBe("parallel");
+    expect(result.tasks[1].mode).toBe("serial");
+    expect(result.tasks[2].mode).toBe("serial");
+    expect(result.tasks[3].mode).toBe("serial");
+    expect(result.tasks[4].mode).toBe("serial");
+  });
+
+  it("handles tab character after mode prefix", () => {
+    const md = "- [ ] (P)\tTab-separated task";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({
+      text: "Tab-separated task",
+      mode: "parallel",
+    });
+  });
+
+  it("does not extract mode when (P) or (S) appears mid-text", () => {
+    const md = [
+      "- [ ] Run the (P) optimization pass",
+      "- [ ] Check the (S) synchronization flag",
+    ].join("\n");
+
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({
+      text: "Run the (P) optimization pass",
+      mode: "serial",
+    });
+    expect(result.tasks[1]).toMatchObject({
+      text: "Check the (S) synchronization flag",
+      mode: "serial",
+    });
+  });
+
+  it("handles long task descriptions with special punctuation after prefix", () => {
+    const md = "- [ ] (P) Refactor `src/agents/orchestrator.ts` — replace the flat dispatch loop with group-aware execution (see #5 for details)";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({
+      text: "Refactor `src/agents/orchestrator.ts` — replace the flat dispatch loop with group-aware execution (see #5 for details)",
+      mode: "parallel",
+    });
+  });
 });
 
 // ─── parseTaskFile (with file I/O) ───────────────────────────────────
