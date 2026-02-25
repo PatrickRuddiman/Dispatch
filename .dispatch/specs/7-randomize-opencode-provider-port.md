@@ -107,7 +107,7 @@ The `orchestrate()` method in `src/agents/orchestrator.ts` has a `catch` block t
 
 - [x] (S) Register process signal handlers for graceful shutdown -- In `src/cli.ts`, add `SIGINT` and `SIGTERM` handlers that ensure the spawned provider server is cleaned up before the process exits. This requires making a cleanup function accessible to signal handlers -- either via a module-level cleanup registry or by restructuring `main()` so the provider's cleanup is reachable at the top level. The handlers should exit with conventional Unix codes (130 for SIGINT, 143 for SIGTERM). The `main().catch()` error handler should also invoke cleanup before exiting. The mechanism must allow sub-modules (`orchestrate()`, `generateSpecs()`) to register their provider's cleanup function when the provider boots. Use `log.debug()` for any trace output about signal handling.
 
-- [ ] (S) Verify the fix end-to-end -- Confirm the project builds cleanly (`npm run build`), passes type checking (`npm run typecheck`), and passes existing tests (`npm run test`). Ensure the changes do not break any existing behavior.
+- [x] (S) Verify the fix end-to-end -- Confirm the project builds cleanly (`npm run build`), passes type checking (`npm run typecheck`), and passes existing tests (`npm run test`). Ensure the changes do not break any existing behavior.
 
 ## References
 
