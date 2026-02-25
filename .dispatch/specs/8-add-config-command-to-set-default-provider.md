@@ -122,7 +122,7 @@ Add `src/config.test.ts` following the established conventions in `src/parser.te
 
 - [x] **Update `HELP` string and examples** — Add a `Config:` section to the `HELP` constant documenting `dispatch config set|get|list|reset|path` with brief descriptions. Add `dispatch config set provider copilot`, `dispatch config list`, and `dispatch config reset` to the Examples section. Follow the existing 2-space indent and aligned-column formatting.
 
-- [ ] **Add `src/config.test.ts` with Vitest tests** — Cover: loading a missing/empty/valid/corrupt config file, saving and round-tripping config, directory auto-creation on save, validation of keys and values against registries, concurrency validation, merge precedence (CLI > config > default for each configurable field), and the set/get/list/reset/path operations including error cases. Use tmpdir isolation with `"dispatch-test-"` prefix and `afterEach` cleanup. Follow all conventions from `src/parser.test.ts`.
+- [x] **Add `src/config.test.ts` with Vitest tests** — Cover: loading a missing/empty/valid/corrupt config file, saving and round-tripping config, directory auto-creation on save, validation of keys and values against registries, concurrency validation, merge precedence (CLI > config > default for each configurable field), and the set/get/list/reset/path operations including error cases. Use tmpdir isolation with `"dispatch-test-"` prefix and `afterEach` cleanup. Follow all conventions from `src/parser.test.ts`.
 
 ## References
 
