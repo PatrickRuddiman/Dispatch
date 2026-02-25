@@ -188,7 +188,8 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
         try {
           log.info(`Generating spec for #${id}: ${details!.title}...`);
 
-          await generateSingleSpec(instance, details!, cwd, filepath);
+          const prompt = buildSpecPrompt(details!, cwd, filepath);
+          await generateSingleSpec(instance, prompt, filepath);
           log.success(`Spec written: ${filepath}`);
 
           // Push spec content back to the issue tracker
@@ -245,19 +246,18 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
 /**
  * Instruct the AI agent to generate and write a single spec file to disk.
  *
- * The agent is given the exact output path and told to write the spec
- * directly using its file tools. We then verify the file exists.
+ * The agent is given a pre-built prompt and the exact output path, and is
+ * expected to write the spec directly using its file tools. We then verify
+ * the file exists.
  *
  * @throws if the agent session errors or the file is not present after the session
  */
 async function generateSingleSpec(
   instance: ProviderInstance,
-  issue: IssueDetails,
-  cwd: string,
+  prompt: string,
   outputPath: string
 ): Promise<void> {
   const sessionId = await instance.createSession();
-  const prompt = buildSpecPrompt(issue, cwd, outputPath);
   log.debug(`Spec prompt built (${prompt.length} chars)`);
 
   const response = await instance.prompt(sessionId, prompt);
