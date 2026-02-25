@@ -130,7 +130,7 @@ Add comprehensive tests following the existing Vitest conventions in `src/parser
 
 - [x] (S) Add Vitest tests for `(P)`/`(S)` mode extraction in the parser — covering correct mode assignment, prefix stripping from `task.text`, default serial behavior for untagged tasks, whitespace variations, and edge cases with special characters after the prefix
 
-- [ ] (S) Add Vitest tests for `groupTasksByMode` — covering the core grouping algorithm with sequences like `P,S,S,P,P,P`, empty input, all-parallel, all-serial, single task, and verifying group boundaries match the specification
+- [x] (S) Add Vitest tests for `groupTasksByMode` — covering the core grouping algorithm with sequences like `P,S,S,P,P,P`, empty input, all-parallel, all-serial, single task, and verifying group boundaries match the specification
 
 ## References
 
