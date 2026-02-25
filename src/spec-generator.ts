@@ -140,8 +140,10 @@ export function extractSpecContent(raw: string): string {
   return content;
 }
 
-export interface SpecValidationResult {
+export interface ValidationResult {
+  /** Whether the spec content has valid structure */
   valid: boolean;
+  /** Human-readable reason when validation fails */
   reason?: string;
 }
 
@@ -149,27 +151,37 @@ export interface SpecValidationResult {
  * Validate that spec content has the expected structural markers.
  *
  * Checks:
- * - Content starts with an H1 heading (`# `)
- * - Content contains a `## Tasks` section with at least one `- [ ]` checkbox
+ * 1. Content starts with an H1 heading (`# `)
+ * 2. Contains a `## Tasks` section with at least one `- [ ]` checkbox
  *
- * Returns a structured result. This is a guardrail, not a gate — callers
- * should log warnings but not fail the pipeline on invalid results.
+ * This is a guardrail, not a gate — validation failures are warned but
+ * do not block the pipeline. Returns a structured result so callers can
+ * act on it.
  */
-export function validateSpecStructure(content: string): SpecValidationResult {
+export function validateSpecStructure(content: string): ValidationResult {
   const trimmed = content.trimStart();
 
+  // Check 1: Must start with an H1 heading
   if (!trimmed.startsWith("# ")) {
-    return { valid: false, reason: "Content does not start with an H1 heading (# )" };
+    const reason = "Spec does not start with an H1 heading (expected \"# \")";
+    log.warn(reason);
+    return { valid: false, reason };
   }
 
-  // Check for ## Tasks section
-  if (!/^## Tasks\s*$/m.test(content)) {
-    return { valid: false, reason: "Missing ## Tasks section" };
+  // Check 2: Must contain a ## Tasks section
+  const tasksIndex = content.search(/^## Tasks\s*$/m);
+  if (tasksIndex === -1) {
+    const reason = "Spec is missing a \"## Tasks\" section";
+    log.warn(reason);
+    return { valid: false, reason };
   }
 
-  // Check for at least one checkbox in the Tasks section
-  if (!/^-\s*\[ \]\s+/m.test(content)) {
-    return { valid: false, reason: "## Tasks section has no checkboxes (- [ ])" };
+  // Check 3: Must have at least one checkbox after ## Tasks
+  const afterTasks = content.slice(tasksIndex);
+  if (!/- \[ \]/.test(afterTasks)) {
+    const reason = "\"## Tasks\" section contains no unchecked tasks (expected at least one \"- [ ]\")";
+    log.warn(reason);
+    return { valid: false, reason };
   }
 
   return { valid: true };

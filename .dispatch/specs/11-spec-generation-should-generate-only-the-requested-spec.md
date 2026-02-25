@@ -103,7 +103,7 @@ Both new functions (`extractSpecContent` and `validateSpecStructure`) must be ex
 
 - [ ] (P) Create the `extractSpecContent()` pure function in `src/spec-generator.ts` — takes a raw string, strips code-fence wrapping, removes preamble before the first H1 heading, and removes postamble after the last recognized spec section. Returns the cleaned string. Must handle already-clean content as a no-op and return unrecognizable content as-is. Export it for testing.
 
-- [ ] (P) Create the `validateSpecStructure()` function in `src/spec-generator.ts` — takes a string and checks for the expected structural markers (H1 heading at the start, `## Tasks` section with at least one `- [ ]` checkbox). Returns a structured result indicating whether the structure is valid with a reason if not. Uses `log.warn()` to surface issues. Export it for testing.
+- [x] (P) Create the `validateSpecStructure()` function in `src/spec-generator.ts` — takes a string and checks for the expected structural markers (H1 heading at the start, `## Tasks` section with at least one `- [ ]` checkbox). Returns a structured result indicating whether the structure is valid with a reason if not. Uses `log.warn()` to surface issues. Export it for testing.
 
 - [x] (S) Integrate post-processing into `generateSingleSpec()` — after verifying the file exists, read the content, run it through `extractSpecContent()`, validate with `validateSpecStructure()`, and write the cleaned content back to disk if it changed. Add `writeFile` to the imports from `node:fs/promises`. This must complete before `generateSingleSpec()` returns so the downstream `fetcher.update()` call in `generateSpecs()` reads clean content.
 

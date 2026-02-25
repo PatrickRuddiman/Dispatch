@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isIssueNumbers, buildFileSpecPrompt } from "./spec-generator.js";
+import { isIssueNumbers, buildFileSpecPrompt, validateSpecStructure } from "./spec-generator.js";
 
 describe("isIssueNumbers", () => {
   it("returns true for a single issue number", () => {
@@ -208,5 +208,176 @@ describe("buildFileSpecPrompt", () => {
     expect(result).toContain("**Keep tasks atomic and ordered.**");
     expect(result).toContain("**Tag every task with `(P)` or `(S)`.**");
     expect(result).toContain("**Keep the markdown clean**");
+  });
+});
+
+describe("validateSpecStructure", () => {
+  it("returns valid for a well-formed spec", () => {
+    const content = [
+      "# My Feature (#42)",
+      "",
+      "> Summary of the feature",
+      "",
+      "## Context",
+      "",
+      "Some context here.",
+      "",
+      "## Tasks",
+      "",
+      "- [ ] (P) First task",
+      "- [ ] (S) Second task",
+    ].join("\n");
+
+    const result = validateSpecStructure(content);
+    expect(result).toEqual({ valid: true });
+  });
+
+  it("returns invalid when content does not start with H1 heading", () => {
+    const content = [
+      "Some preamble text",
+      "",
+      "# My Feature (#42)",
+      "",
+      "## Tasks",
+      "",
+      "- [ ] A task",
+    ].join("\n");
+
+    const result = validateSpecStructure(content);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain("H1 heading");
+  });
+
+  it("returns invalid when ## Tasks section is missing", () => {
+    const content = [
+      "# My Feature (#42)",
+      "",
+      "## Context",
+      "",
+      "Some context.",
+      "",
+      "## Approach",
+      "",
+      "Some approach.",
+    ].join("\n");
+
+    const result = validateSpecStructure(content);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain("## Tasks");
+  });
+
+  it("returns invalid when ## Tasks section has no checkboxes", () => {
+    const content = [
+      "# My Feature (#42)",
+      "",
+      "## Tasks",
+      "",
+      "Some text but no actual task checkboxes.",
+    ].join("\n");
+
+    const result = validateSpecStructure(content);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain("no unchecked tasks");
+  });
+
+  it("returns valid when content has leading whitespace before H1", () => {
+    const content = [
+      "",
+      "  ",
+      "# My Feature (#42)",
+      "",
+      "## Tasks",
+      "",
+      "- [ ] A task",
+    ].join("\n");
+
+    const result = validateSpecStructure(content);
+    expect(result).toEqual({ valid: true });
+  });
+
+  it("returns invalid for empty content", () => {
+    const result = validateSpecStructure("");
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain("H1 heading");
+  });
+
+  it("returns invalid for conversational AI response content", () => {
+    const content = "The spec file has been written to .dispatch/specs/10-feature.md";
+
+    const result = validateSpecStructure(content);
+    expect(result.valid).toBe(false);
+  });
+
+  it("does not count checkboxes that appear before ## Tasks", () => {
+    const content = [
+      "# My Feature (#42)",
+      "",
+      "## Context",
+      "",
+      "- [ ] This checkbox is in context, not tasks",
+      "",
+      "## Tasks",
+      "",
+      "No checkboxes in the tasks section.",
+    ].join("\n");
+
+    const result = validateSpecStructure(content);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain("no unchecked tasks");
+  });
+
+  it("returns valid with a single checkbox in Tasks section", () => {
+    const content = [
+      "# Minimal Spec",
+      "",
+      "## Tasks",
+      "",
+      "- [ ] The only task",
+    ].join("\n");
+
+    const result = validateSpecStructure(content);
+    expect(result).toEqual({ valid: true });
+  });
+
+  it("returns valid when checked and unchecked tasks coexist", () => {
+    const content = [
+      "# My Feature",
+      "",
+      "## Tasks",
+      "",
+      "- [x] Already done",
+      "- [ ] Still pending",
+    ].join("\n");
+
+    const result = validateSpecStructure(content);
+    expect(result).toEqual({ valid: true });
+  });
+
+  it("returns invalid when ## Tasks is a substring of another heading", () => {
+    const content = [
+      "# My Feature",
+      "",
+      "## Tasks and Notes",
+      "",
+      "- [ ] A task",
+    ].join("\n");
+
+    const result = validateSpecStructure(content);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain("## Tasks");
+  });
+
+  it("does not have a reason property when valid", () => {
+    const content = [
+      "# Valid Spec",
+      "",
+      "## Tasks",
+      "",
+      "- [ ] Do something",
+    ].join("\n");
+
+    const result = validateSpecStructure(content);
+    expect(result.valid).toBe(true);
+    expect(result.reason).toBeUndefined();
   });
 });
