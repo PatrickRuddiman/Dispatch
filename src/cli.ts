@@ -28,9 +28,9 @@ import { generateSpecs, defaultConcurrency } from "./spec-generator.js";
 import { log } from "./logger.js";
 import { runCleanup } from "./cleanup.js";
 import type { ProviderName } from "./provider.js";
-import type { IssueSourceName } from "./issue-fetcher.js";
+import type { DatasourceName } from "./datasource.js";
 import { PROVIDER_NAMES } from "./providers/index.js";
-import { ISSUE_SOURCE_NAMES } from "./issue-fetchers/index.js";
+import { DATASOURCE_NAMES } from "./datasources/index.js";
 import { handleConfigCommand, loadConfig } from "./config.js";
 
 const HELP = `
@@ -51,7 +51,7 @@ const HELP = `
 
   Spec options:
     --spec <value>         Comma-separated issue numbers or glob pattern for local .md files
-    --source <name>        Issue source: ${ISSUE_SOURCE_NAMES.join(", ")} (auto-detected from git remote)
+    --source <name>        Issue source: ${DATASOURCE_NAMES.join(", ")} (auto-detected from git remote)
     --org <url>            Azure DevOps organization URL
     --project <name>       Azure DevOps project name
     --output-dir <dir>     Output directory for specs (default: .dispatch/specs)
@@ -99,7 +99,7 @@ interface CliArgs {
   verbose: boolean;
   // Spec mode
   spec?: string;
-  issueSource?: IssueSourceName;
+  issueSource?: DatasourceName;
   org?: string;
   project?: string;
   outputDir?: string;
@@ -145,13 +145,13 @@ function parseArgs(argv: string[]): [CliArgs, Set<string>] {
     } else if (arg === "--source") {
       i++;
       const val = argv[i];
-      if (!ISSUE_SOURCE_NAMES.includes(val as IssueSourceName)) {
+      if (!DATASOURCE_NAMES.includes(val as DatasourceName)) {
         log.error(
-          `Unknown issue source "${val}". Available: ${ISSUE_SOURCE_NAMES.join(", ")}`
+          `Unknown source "${val}". Available: ${DATASOURCE_NAMES.join(", ")}`
         );
         process.exit(1);
       }
-      args.issueSource = val as IssueSourceName;
+      args.issueSource = val as DatasourceName;
       explicitFlags.add("issueSource");
     } else if (arg === "--org") {
       i++;
@@ -259,6 +259,31 @@ async function main() {
   if (args.version) {
     console.log("dispatch v0.1.0");
     process.exit(0);
+  }
+
+  // ── Mandatory config validation ────────────────────────────
+  const providerConfigured =
+    explicitFlags.has("provider") || config.provider !== undefined;
+  const sourceConfigured =
+    explicitFlags.has("issueSource") || config.source !== undefined;
+
+  if (!providerConfigured || !sourceConfigured) {
+    const missing: string[] = [];
+    if (!providerConfigured) missing.push("provider");
+    if (!sourceConfigured) missing.push("source");
+
+    log.error(
+      `Missing required configuration: ${missing.join(", ")}`
+    );
+    log.dim("  Configure defaults with:");
+    if (!providerConfigured) {
+      log.dim("    dispatch config set provider <name>");
+    }
+    if (!sourceConfigured) {
+      log.dim("    dispatch config set source <name>");
+    }
+    log.dim("  Or pass them as CLI flags: --provider <name> --source <name>");
+    process.exit(1);
   }
 
   // ── Spec mode ──────────────────────────────────────────────
