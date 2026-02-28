@@ -197,6 +197,42 @@ export function validateSpecStructure(content: string): ValidationResult {
   return { valid: true };
 }
 
+/**
+ * Resolve the datasource name for a spec-generation run.
+ *
+ * Priority:
+ *   1. Explicit `issueSource` (from --source flag) — always wins.
+ *   2. Non-issue-number input (glob / file path) — defaults to `"md"`.
+ *   3. Issue numbers with no explicit source — auto-detect from the git remote.
+ *
+ * Returns `null` when auto-detection is attempted but fails (caller should abort).
+ */
+export async function resolveSource(
+  issues: string,
+  issueSource: DatasourceName | undefined,
+  cwd: string
+): Promise<DatasourceName | null> {
+  if (issueSource) {
+    return issueSource;
+  }
+  if (!isIssueNumbers(issues)) {
+    return "md";
+  }
+  log.info("Detecting datasource from git remote...");
+  const detected = await detectDatasource(cwd);
+  if (!detected) {
+    log.error(
+      `Could not detect datasource from the repository remote URL.\n` +
+      `  Supported sources: ${DATASOURCE_NAMES.join(", ")}\n` +
+      `  Use --source <name> to specify explicitly, or ensure the git remote\n` +
+      `  points to a supported platform (github.com, dev.azure.com).`
+    );
+    return null;
+  }
+  log.info(`Detected datasource: ${detected}`);
+  return detected;
+}
+
 export interface SpecSummary {
   /** Total issues requested */
   total: number;
@@ -230,26 +266,9 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
   const pipelineStart = Date.now();
 
   // ── Resolve datasource ─────────────────────────────────────
-  let source = opts.issueSource;
+  const source = await resolveSource(issues, opts.issueSource, cwd);
   if (!source) {
-    if (!isIssueNumbers(issues)) {
-      // File paths / globs default to the local markdown datasource
-      source = "md";
-    } else {
-      log.info("Detecting datasource from git remote...");
-      const detected = await detectDatasource(cwd);
-      if (!detected) {
-        log.error(
-          `Could not detect datasource from the repository remote URL.\n` +
-          `  Supported sources: ${DATASOURCE_NAMES.join(", ")}\n` +
-          `  Use --source <name> to specify explicitly, or ensure the git remote\n` +
-          `  points to a supported platform (github.com, dev.azure.com).`
-        );
-        return { total: 0, generated: 0, failed: 0, files: [], durationMs: Date.now() - pipelineStart, fileDurationsMs: {} };
-      }
-      source = detected;
-      log.info(`Detected datasource: ${source}`);
-    }
+    return { total: 0, generated: 0, failed: 0, files: [], durationMs: Date.now() - pipelineStart, fileDurationsMs: {} };
   }
 
   const datasource = getDatasource(source);

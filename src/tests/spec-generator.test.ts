@@ -1,5 +1,34 @@
 import { describe, it, expect } from "vitest";
-import { isIssueNumbers, buildFileSpecPrompt, validateSpecStructure, extractSpecContent } from "../spec-generator.js";
+import { isIssueNumbers, buildFileSpecPrompt, validateSpecStructure, extractSpecContent, resolveSource } from "../spec-generator.js";
+
+describe("resolveSource", () => {
+  const CWD = "/tmp/fake-repo";
+
+  it("returns the explicit issueSource when provided with a glob input", async () => {
+    const result = await resolveSource("drafts/*.md", "github", CWD);
+    expect(result).toBe("github");
+  });
+
+  it("returns the explicit issueSource when provided with an azdevops source", async () => {
+    const result = await resolveSource("drafts/*.md", "azdevops", CWD);
+    expect(result).toBe("azdevops");
+  });
+
+  it("returns the explicit issueSource when provided in tracker mode", async () => {
+    const result = await resolveSource("1,2,3", "github", CWD);
+    expect(result).toBe("github");
+  });
+
+  it("defaults to 'md' when no issueSource is provided and input is a glob", async () => {
+    const result = await resolveSource("drafts/*.md", undefined, CWD);
+    expect(result).toBe("md");
+  });
+
+  it("defaults to 'md' when no issueSource is provided and input is a bare filename", async () => {
+    const result = await resolveSource("my-spec.md", undefined, CWD);
+    expect(result).toBe("md");
+  });
+});
 
 describe("isIssueNumbers", () => {
   it("returns true for a single issue number", () => {
