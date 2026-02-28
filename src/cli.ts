@@ -7,10 +7,10 @@
  *
  * Spec mode:
  *   dispatch --spec 1,2,3        Generate spec files from issues
- *   dispatch --spec "drafts/*.md" Generate specs from local markdown files
+ *   dispatch --spec "drafts/*.md" Generate specs from local markdown files in the configured datasource
  *
  * Options:
- *   --spec <value>      Issue numbers (comma-separated) or glob pattern for local .md files
+ *   --spec <value>      Issue numbers (comma-separated) or glob pattern for .md files (creates specs in configured datasource)
  *   --source <name>     Issue source: github, azdevops (auto-detected from remote)
  *   --org <url>         Azure DevOps organization URL
  *   --project <name>    Azure DevOps project name
@@ -39,7 +39,7 @@ const HELP = `
   Usage:
     dispatch [issue-id...]           Dispatch specific issues (or all open issues if none given)
     dispatch --spec <ids>            Generate spec files from issues
-    dispatch --spec <glob>           Generate specs from local markdown files
+    dispatch --spec <glob>           Generate specs from local markdown files in the configured datasource
 
   Dispatch options:
     --dry-run              List tasks without dispatching
@@ -50,7 +50,7 @@ const HELP = `
     --cwd <dir>            Working directory (default: cwd)
 
   Spec options:
-    --spec <value>         Comma-separated issue numbers or glob pattern for local .md files
+    --spec <value>         Comma-separated issue numbers or glob pattern for .md files (creates specs in configured datasource)
     --source <name>        Issue source: ${DATASOURCE_NAMES.join(", ")} (auto-detected from git remote)
     --org <url>            Azure DevOps organization URL
     --project <name>       Azure DevOps project name
@@ -81,6 +81,7 @@ const HELP = `
     dispatch --spec 42,43 --source github --provider copilot
     dispatch --spec 100,200 --source azdevops --org https://dev.azure.com/myorg --project MyProject
     dispatch --spec "drafts/*.md"
+    dispatch --spec "drafts/*.md" --source github
     dispatch --spec "./my-feature.md" --provider copilot
     dispatch config set provider copilot
     dispatch config list
