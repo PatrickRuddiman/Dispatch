@@ -235,6 +235,10 @@ export interface SpecSummary {
   failed: number;
   /** Paths of generated spec files */
   files: string[];
+  /** Issue numbers created or updated during spec generation (empty when datasource is md) */
+  issueNumbers: string[];
+  /** Dispatch identifiers for the "Run these specs with" hint (issue numbers or file paths) */
+  identifiers?: string[];
   /** Total pipeline wall-clock duration in milliseconds */
   durationMs: number;
   /** Per-file generation durations in milliseconds (filepath → ms) */

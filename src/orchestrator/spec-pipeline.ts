@@ -149,6 +149,8 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
   await mkdir(outputDir, { recursive: true });
 
   const generatedFiles: string[] = [];
+  const issueNumbers: string[] = [];
+  const dispatchIdentifiers: string[] = [];
   let failed = items.filter((i) => i.details === null).length;
   const fileDurationsMs: Record<string, number> = {};
 
@@ -197,18 +199,25 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
           fileDurationsMs[filepath] = specDuration;
           log.success(`Spec written: ${filepath} (${elapsed(specDuration)})`);
 
+          // Determine the dispatch identifier for "Run these specs with" output
+          let identifier = filepath; // default: local file path (md datasource)
+
           // Push spec content back to the datasource
           try {
             if (isTrackerMode) {
               // Tracker mode: update the existing issue with the generated spec
               await datasource.update(id, details!.title, result.content, fetchOpts);
               log.success(`Updated issue #${id} with spec content`);
+              identifier = id;
+              issueNumbers.push(id);
             } else if (datasource.name !== "md") {
               // File/glob mode with tracker datasource: create a new issue and delete the local file
               const created = await datasource.create(details!.title, result.content, fetchOpts);
               log.success(`Created issue #${created.number} from ${filepath}`);
               await unlink(filepath);
               log.success(`Deleted local spec ${filepath} (now tracked as issue #${created.number})`);
+              identifier = created.number;
+              issueNumbers.push(created.number);
             }
             // md datasource + file/glob mode: file already written in-place, nothing to do
           } catch (err) {
@@ -217,7 +226,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
             log.warn(`Could not sync ${label} to datasource: ${message}`);
           }
 
-          return filepath;
+          return { filepath, identifier };
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           log.error(`Failed to generate spec for ${isTrackerMode ? `#${id}` : filepath}: ${message}`);
@@ -229,7 +238,8 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
 
     for (const result of batchResults) {
       if (result !== null) {
-        generatedFiles.push(result);
+        generatedFiles.push(result.filepath);
+        dispatchIdentifiers.push(result.identifier);
       } else {
         failed++;
       }
@@ -247,10 +257,11 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
 
   if (generatedFiles.length > 0) {
     log.dim(`\n  Run these specs with:`);
-    if (isTrackerMode) {
-      log.dim(`    dispatch "${outputDir}/*.md"\n`);
+    const allNumeric = dispatchIdentifiers.every((id) => /^\d+$/.test(id));
+    if (allNumeric) {
+      log.dim(`    dispatch ${dispatchIdentifiers.join(",")}\n`);
     } else {
-      log.dim(`    dispatch ${generatedFiles.map((f) => '"' + f + '"').join(" ")}\n`);
+      log.dim(`    dispatch ${dispatchIdentifiers.map((f) => '"' + f + '"').join(" ")}\n`);
     }
   }
 
@@ -259,6 +270,8 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     generated: generatedFiles.length,
     failed,
     files: generatedFiles,
+    issueNumbers,
+    identifiers: dispatchIdentifiers,
     durationMs: totalDuration,
     fileDurationsMs,
   };
