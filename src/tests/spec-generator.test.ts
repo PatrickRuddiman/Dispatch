@@ -30,8 +30,29 @@ vi.mock("../logger.js", () => ({
   },
 }));
 
+vi.mock("glob", () => ({
+  glob: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("../cleanup.js", () => ({
+  registerCleanup: vi.fn(),
+}));
+
+vi.mock("../providers/index.js", () => ({
+  bootProvider: vi.fn(),
+  PROVIDER_NAMES: ["opencode", "copilot"],
+}));
+
+vi.mock("../format.js", () => ({
+  elapsed: vi.fn().mockReturnValue("0ms"),
+}));
+
 import { mkdir, readFile, writeFile, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { log } from "../logger.js";
+import { glob as globFn } from "glob";
+import { bootProvider } from "../providers/index.js";
+import { runSpecPipeline } from "../orchestrator/spec-pipeline.js";
 
 function createMockProvider(overrides?: Partial<ProviderInstance>): ProviderInstance {
   return {
@@ -1121,5 +1142,214 @@ describe("SpecAgent generate", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("raw string error");
+  });
+});
+
+// ─── spec output formatting (runSpecPipeline log output) ─────────────
+
+describe("spec output formatting", () => {
+  const CWD = "/tmp/test-project";
+  const OUTPUT_DIR = "/tmp/test-project/.dispatch/specs";
+
+  const VALID_SPEC = [
+    "# My Feature (#42)",
+    "",
+    "> Summary of the feature",
+    "",
+    "## Context",
+    "",
+    "Some context here.",
+    "",
+    "## Tasks",
+    "",
+    "- [ ] (P) First task",
+    "- [ ] (S) Second task",
+  ].join("\n");
+
+  function createMockDatasource(name: "github" | "azdevops" | "md", overrides?: Record<string, unknown>) {
+    return {
+      name,
+      list: vi.fn().mockResolvedValue([]),
+      fetch: vi.fn().mockResolvedValue({
+        number: "42",
+        title: "My Feature",
+        body: "Feature body",
+        labels: [],
+        state: "open",
+        url: "https://github.com/org/repo/issues/42",
+        comments: [],
+        acceptanceCriteria: "",
+      }),
+      update: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+      create: vi.fn().mockResolvedValue({
+        number: "99",
+        title: "My Feature",
+        body: "Spec content",
+        labels: [],
+        state: "open",
+        url: "https://github.com/org/repo/issues/99",
+        comments: [],
+        acceptanceCriteria: "",
+      }),
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.mocked(mkdir).mockResolvedValue(undefined);
+    vi.mocked(writeFile).mockResolvedValue(undefined);
+    vi.mocked(unlink).mockResolvedValue(undefined);
+    vi.mocked(readFile).mockResolvedValue(VALID_SPEC);
+    vi.mocked(randomUUID).mockReturnValue("test-uuid-1234" as `${string}-${string}-${string}-${string}-${string}`);
+
+    // bootProvider returns a mock provider whose prompt triggers the spec agent
+    // to write valid content
+    vi.mocked(bootProvider).mockResolvedValue({
+      name: "mock",
+      model: "mock-model",
+      createSession: vi.fn().mockResolvedValue("session-1"),
+      prompt: vi.fn().mockResolvedValue("done"),
+      cleanup: vi.fn().mockResolvedValue(undefined),
+    });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("shows issue numbers in dispatch command for tracker mode (github)", async () => {
+    const mockDs = createMockDatasource("github");
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue("github");
+
+    await runSpecPipeline({
+      issues: "1,2,3",
+      issueSource: "github",
+      provider: "opencode",
+      cwd: CWD,
+      outputDir: OUTPUT_DIR,
+      concurrency: 10,
+    });
+
+    const dimCalls = vi.mocked(log.dim).mock.calls.map((c) => c[0]);
+    const runLine = dimCalls.find((msg) => typeof msg === "string" && msg.includes("dispatch"));
+
+    expect(runLine).toBeDefined();
+    // Should show issue numbers, not a glob path
+    expect(runLine).toContain("dispatch 1,2,3");
+    expect(runLine).not.toContain("*.md");
+  });
+
+  it("shows issue numbers in dispatch command for tracker mode (azdevops)", async () => {
+    const mockDs = createMockDatasource("azdevops");
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue("azdevops");
+
+    await runSpecPipeline({
+      issues: "100,200",
+      issueSource: "azdevops",
+      provider: "opencode",
+      cwd: CWD,
+      outputDir: OUTPUT_DIR,
+      concurrency: 10,
+    });
+
+    const dimCalls = vi.mocked(log.dim).mock.calls.map((c) => c[0]);
+    const runLine = dimCalls.find((msg) => typeof msg === "string" && msg.includes("dispatch"));
+
+    expect(runLine).toBeDefined();
+    expect(runLine).toContain("dispatch 100,200");
+  });
+
+  it("shows created issue numbers in dispatch command for file/glob mode with tracker datasource", async () => {
+    const mockDs = createMockDatasource("github", {
+      create: vi.fn()
+        .mockResolvedValueOnce({
+          number: "55",
+          title: "Feature A",
+          body: "content",
+          labels: [],
+          state: "open",
+          url: "https://github.com/org/repo/issues/55",
+          comments: [],
+          acceptanceCriteria: "",
+        })
+        .mockResolvedValueOnce({
+          number: "56",
+          title: "Feature B",
+          body: "content",
+          labels: [],
+          state: "open",
+          url: "https://github.com/org/repo/issues/56",
+          comments: [],
+          acceptanceCriteria: "",
+        }),
+    });
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue("github");
+    vi.mocked(globFn).mockResolvedValue(["/tmp/test-project/drafts/a.md", "/tmp/test-project/drafts/b.md"] as any);
+
+    await runSpecPipeline({
+      issues: "drafts/*.md",
+      issueSource: "github",
+      provider: "opencode",
+      cwd: CWD,
+      outputDir: OUTPUT_DIR,
+      concurrency: 10,
+    });
+
+    const dimCalls = vi.mocked(log.dim).mock.calls.map((c) => c[0]);
+    const runLine = dimCalls.find((msg) => typeof msg === "string" && msg.includes("dispatch"));
+
+    expect(runLine).toBeDefined();
+    // Should show newly created issue numbers, not file paths
+    expect(runLine).toContain("55");
+    expect(runLine).toContain("56");
+    expect(runLine).not.toContain("drafts/a.md");
+    expect(runLine).not.toContain("drafts/b.md");
+  });
+
+  it("shows file paths in dispatch command for file/glob mode with md datasource", async () => {
+    const mockDs = createMockDatasource("md");
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
+    vi.mocked(globFn).mockResolvedValue(["/tmp/test-project/drafts/feature.md"] as any);
+
+    await runSpecPipeline({
+      issues: "drafts/*.md",
+      issueSource: "md",
+      provider: "opencode",
+      cwd: CWD,
+      outputDir: OUTPUT_DIR,
+      concurrency: 10,
+    });
+
+    const dimCalls = vi.mocked(log.dim).mock.calls.map((c) => c[0]);
+    const runLine = dimCalls.find((msg) => typeof msg === "string" && msg.includes("dispatch"));
+
+    expect(runLine).toBeDefined();
+    // Should show file paths for md datasource
+    expect(runLine).toContain("/tmp/test-project/drafts/feature.md");
+  });
+
+  it("shows single issue number for tracker mode with one issue", async () => {
+    const mockDs = createMockDatasource("github");
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+
+    await runSpecPipeline({
+      issues: "42",
+      issueSource: "github",
+      provider: "opencode",
+      cwd: CWD,
+      outputDir: OUTPUT_DIR,
+      concurrency: 10,
+    });
+
+    const dimCalls = vi.mocked(log.dim).mock.calls.map((c) => c[0]);
+    const runLine = dimCalls.find((msg) => typeof msg === "string" && msg.includes("dispatch"));
+
+    expect(runLine).toBeDefined();
+    expect(runLine).toContain("dispatch 42");
   });
 });
