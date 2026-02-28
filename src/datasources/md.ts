@@ -10,7 +10,7 @@
 
 import { readFile, writeFile, readdir, mkdir, rename } from "node:fs/promises";
 import { join, parse as parsePath } from "node:path";
-import type { Datasource, IssueDetails, IssueFetchOptions } from "../datasource.js";
+import type { Datasource, IssueDetails, IssueFetchOptions } from "./interface.js";
 
 /** Default directory for markdown specs, relative to cwd. */
 const DEFAULT_DIR = ".dispatch/specs";

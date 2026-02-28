@@ -12,7 +12,7 @@ import { mkdir, readFile, unlink } from "node:fs/promises";
 import { glob } from "glob";
 import type { SpecOptions, SpecSummary } from "../spec-generator.js";
 import { isIssueNumbers, resolveSource, defaultConcurrency } from "../spec-generator.js";
-import type { IssueDetails, IssueFetchOptions } from "../datasource.js";
+import type { IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
 import { getDatasource } from "../datasources/index.js";
 import { extractTitle } from "../datasources/md.js";
 import { bootProvider } from "../providers/index.js";

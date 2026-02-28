@@ -11,10 +11,11 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { Datasource, DatasourceName } from "../datasource.js";
+import type { Datasource, DatasourceName } from "./interface.js";
 import { datasource as githubDatasource } from "./github.js";
 import { datasource as azdevopsDatasource } from "./azdevops.js";
 import { datasource as mdDatasource } from "./md.js";
+export type { Datasource, DatasourceName, IssueDetails, IssueFetchOptions } from "./interface.js";
 
 const exec = promisify(execFile);
 

@@ -13,10 +13,10 @@ import { boot as bootExecutor } from "../agents/executor.js";
 import { log } from "../logger.js";
 import { registerCleanup } from "../cleanup.js";
 import { createTui } from "../tui.js";
-import type { ProviderName } from "../provider.js";
+import type { ProviderName } from "../providers/interface.js";
 import { bootProvider } from "../providers/index.js";
 import { getDatasource } from "../datasources/index.js";
-import type { DatasourceName, IssueDetails, IssueFetchOptions } from "../datasource.js";
+import type { DatasourceName, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
 import type { OrchestrateRunOptions, DispatchSummary } from "../agents/orchestrator.js";
 import {
   fetchItemsById,

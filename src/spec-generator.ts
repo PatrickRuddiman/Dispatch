@@ -19,9 +19,9 @@
  */
 
 import { cpus, freemem } from "node:os";
-import type { DatasourceName } from "./datasource.js";
+import type { DatasourceName } from "./datasources/interface.js";
 import { getDatasource, detectDatasource, DATASOURCE_NAMES } from "./datasources/index.js";
-import type { ProviderName } from "./provider.js";
+import type { ProviderName } from "./providers/interface.js";
 import { log } from "./logger.js";
 
 export interface SpecOptions {

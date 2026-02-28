@@ -10,8 +10,8 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { Datasource } from "../datasource.js";
-import type { IssueDetails, IssueFetchOptions } from "../datasource.js";
+import type { Datasource } from "./interface.js";
+import type { IssueDetails, IssueFetchOptions } from "./interface.js";
 
 const exec = promisify(execFile);
 

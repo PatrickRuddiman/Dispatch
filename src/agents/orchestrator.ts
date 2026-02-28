@@ -4,8 +4,8 @@
 
 import type { DispatchResult } from "../dispatcher.js";
 import type { AgentBootOptions } from "../agent.js";
-import type { ProviderName } from "../provider.js";
-import type { DatasourceName } from "../datasource.js";
+import type { ProviderName } from "../providers/interface.js";
+import type { DatasourceName } from "../datasources/interface.js";
 import type { SpecOptions, SpecSummary } from "../spec-generator.js";
 import { defaultConcurrency } from "../spec-generator.js";
 import { resolveCliConfig } from "../orchestrator/cli-config.js";

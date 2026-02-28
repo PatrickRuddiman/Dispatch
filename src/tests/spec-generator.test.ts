@@ -3,7 +3,7 @@ import { isIssueNumbers, validateSpecStructure, extractSpecContent, resolveSourc
 import { buildFileSpecPrompt, boot } from "../agents/spec.js";
 import * as datasourcesIndex from "../datasources/index.js";
 import type { ProviderInstance } from "../provider.js";
-import type { IssueDetails } from "../datasource.js";
+import type { IssueDetails } from "../datasources/interface.js";
 
 vi.mock("node:fs/promises", () => ({
   mkdir: vi.fn().mockResolvedValue(undefined),

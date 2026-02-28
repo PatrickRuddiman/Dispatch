@@ -7,7 +7,7 @@
  */
 
 import { getDatasource, detectDatasource, DATASOURCE_NAMES } from "../datasources/index.js";
-import type { Datasource } from "../datasource.js";
+import type { Datasource } from "../datasources/interface.js";
 import type { IssueSourceName, IssueFetcher } from "../issue-fetcher.js";
 
 /**

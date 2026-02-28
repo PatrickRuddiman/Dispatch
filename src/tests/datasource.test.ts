@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { writeFile, mkdtemp, rm, readFile, mkdir, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { DatasourceName } from "../datasource.js";
+import type { DatasourceName } from "../datasources/interface.js";
 import { DATASOURCE_NAMES, getDatasource } from "../datasources/index.js";
 import { validateConfigValue } from "../config.js";
 

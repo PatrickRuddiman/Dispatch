@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parseIssueFilename } from "../agents/orchestrator.js";
 import { markTaskComplete, type Task } from "../parser.js";
-import type { Datasource, IssueDetails, IssueFetchOptions } from "../datasource.js";
+import type { Datasource, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
 
 // ─── parseIssueFilename re-export ───────────────────────────────────
 

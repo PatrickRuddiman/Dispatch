@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { log } from "../logger.js";
 import { getDatasource, detectDatasource } from "../datasources/index.js";
-import type { Datasource, DatasourceName, IssueDetails, IssueFetchOptions } from "../datasource.js";
+import type { Datasource, DatasourceName, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
 import type { TaskFile } from "../parser.js";
 import type { DispatchResult } from "../dispatcher.js";
 

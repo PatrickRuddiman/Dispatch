@@ -8,7 +8,7 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { Datasource, IssueDetails, IssueFetchOptions } from "../datasource.js";
+import type { Datasource, IssueDetails, IssueFetchOptions } from "./interface.js";
 
 const exec = promisify(execFile);
 

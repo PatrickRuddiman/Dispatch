@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { readFile, rm } from "node:fs/promises";
 import { join, basename } from "node:path";
-import type { Datasource, IssueDetails, IssueFetchOptions } from "../datasource.js";
+import type { Datasource, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
 
 vi.mock("../logger.js", () => ({
   log: {
