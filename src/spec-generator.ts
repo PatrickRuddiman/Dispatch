@@ -201,11 +201,10 @@ export function validateSpecStructure(content: string): ValidationResult {
  * Resolve the datasource name for a spec-generation run.
  *
  * Priority:
- *   1. Explicit `issueSource` (from --source flag) — always wins.
- *   2. Non-issue-number input (glob / file path) — defaults to `"md"`.
- *   3. Issue numbers with no explicit source — auto-detect from the git remote.
- *
- * Returns `null` when auto-detection is attempted but fails (caller should abort).
+ *   1. Explicit `issueSource` (from --source flag or config) — always wins.
+ *   2. Auto-detect from the git remote URL.
+ *   3. For glob/file inputs, fall back to `"md"` when auto-detection fails.
+ *   4. For issue-number inputs, return `null` when auto-detection fails (caller should abort).
  */
 export async function resolveSource(
   issues: string,
@@ -215,22 +214,22 @@ export async function resolveSource(
   if (issueSource) {
     return issueSource;
   }
+  log.info("Detecting datasource from git remote...");
+  const detected = await detectDatasource(cwd);
+  if (detected) {
+    log.info(`Detected datasource: ${detected}`);
+    return detected;
+  }
   if (!isIssueNumbers(issues)) {
     return "md";
   }
-  log.info("Detecting datasource from git remote...");
-  const detected = await detectDatasource(cwd);
-  if (!detected) {
-    log.error(
-      `Could not detect datasource from the repository remote URL.\n` +
-      `  Supported sources: ${DATASOURCE_NAMES.join(", ")}\n` +
-      `  Use --source <name> to specify explicitly, or ensure the git remote\n` +
-      `  points to a supported platform (github.com, dev.azure.com).`
-    );
-    return null;
-  }
-  log.info(`Detected datasource: ${detected}`);
-  return detected;
+  log.error(
+    `Could not detect datasource from the repository remote URL.\n` +
+    `  Supported sources: ${DATASOURCE_NAMES.join(", ")}\n` +
+    `  Use --source <name> to specify explicitly, or ensure the git remote\n` +
+    `  points to a supported platform (github.com, dev.azure.com).`
+  );
+  return null;
 }
 
 export interface SpecSummary {

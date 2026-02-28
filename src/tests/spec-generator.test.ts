@@ -19,13 +19,34 @@ describe("resolveSource", () => {
     expect(result).toBe("github");
   });
 
-  it("defaults to 'md' when no issueSource is provided and input is a glob", async () => {
+  it("falls back to 'md' when no issueSource is provided and auto-detection fails for a glob", async () => {
     const result = await resolveSource("drafts/*.md", undefined, CWD);
     expect(result).toBe("md");
   });
 
-  it("defaults to 'md' when no issueSource is provided and input is a bare filename", async () => {
+  it("falls back to 'md' when no issueSource is provided and auto-detection fails for a bare filename", async () => {
     const result = await resolveSource("my-spec.md", undefined, CWD);
+    expect(result).toBe("md");
+  });
+
+  it("returns null when no issueSource is provided and auto-detection fails for issue numbers", async () => {
+    const result = await resolveSource("1,2,3", undefined, CWD);
+    expect(result).toBeNull();
+  });
+
+  it("attempts auto-detection for glob inputs before falling back to md", async () => {
+    // Using the real project CWD where a git remote exists (github.com)
+    const result = await resolveSource("drafts/*.md", undefined, process.cwd());
+    expect(result).toBe("github");
+  });
+
+  it("returns the explicit issueSource even when auto-detection would succeed", async () => {
+    const result = await resolveSource("drafts/*.md", "azdevops", process.cwd());
+    expect(result).toBe("azdevops");
+  });
+
+  it("returns the explicit md source when provided for issue numbers", async () => {
+    const result = await resolveSource("1,2,3", "md", CWD);
     expect(result).toBe("md");
   });
 });
