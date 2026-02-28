@@ -16,7 +16,7 @@
 
 import type { ProviderInstance } from "./provider.js";
 
-export type AgentName = "planner" | "executor";
+export type AgentName = "planner" | "executor" | "spec";
 
 /**
  * Options passed when booting any agent.

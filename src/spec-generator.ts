@@ -18,11 +18,11 @@
  * implementation planning for each individual task.
  */
 
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { cpus, freemem } from "node:os";
-import type { ProviderInstance } from "./provider.js";
 import type { IssueDetails, IssueFetchOptions, DatasourceName } from "./datasource.js";
+import { boot as bootSpecAgent } from "./agents/spec.js";
 import { getDatasource, detectDatasource, DATASOURCE_NAMES } from "./datasources/index.js";
 import { extractTitle } from "./datasources/md.js";
 import type { ProviderName } from "./provider.js";
@@ -367,6 +367,9 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
   registerCleanup(() => instance.cleanup());
   log.debug(`Provider booted in ${elapsed(Date.now() - bootStart)}`);
 
+  // ── Boot spec agent ─────────────────────────────────────────
+  const specAgent = await bootSpecAgent({ provider: instance, cwd });
+
   // ── Generate spec for each item (parallel batches) ──────────
   await mkdir(outputDir, { recursive: true });
 
@@ -403,26 +406,31 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
         try {
           log.info(`Generating spec for ${isTrackerMode ? `#${id}` : filepath}: ${details!.title}...`);
 
-          // Build the appropriate prompt
-          const prompt = isTrackerMode
-            ? buildSpecPrompt(details!, cwd, filepath)
-            : buildFileSpecPrompt(filepath, details!.body, cwd);
+          const result = await specAgent.generate({
+            issue: isTrackerMode ? details! : undefined,
+            filePath: isTrackerMode ? undefined : id,
+            fileContent: isTrackerMode ? undefined : details!.body,
+            cwd,
+            outputPath: filepath,
+          });
 
-          await generateSingleSpec(instance, prompt, filepath);
+          if (!result.success) {
+            throw new Error(result.error ?? "Spec generation failed");
+          }
+
           const specDuration = Date.now() - specStart;
           fileDurationsMs[filepath] = specDuration;
           log.success(`Spec written: ${filepath} (${elapsed(specDuration)})`);
 
           // Push spec content back to the datasource
           try {
-            const specContent = await readFile(filepath, "utf-8");
             if (isTrackerMode) {
               // Tracker mode: update the existing issue with the generated spec
-              await datasource.update(id, details!.title, specContent, fetchOpts);
+              await datasource.update(id, details!.title, result.content, fetchOpts);
               log.success(`Updated issue #${id} with spec content`);
             } else if (datasource.name !== "md") {
               // File/glob mode with tracker datasource: create a new issue and delete the local file
-              const created = await datasource.create(details!.title, specContent, fetchOpts);
+              const created = await datasource.create(details!.title, result.content, fetchOpts);
               log.success(`Created issue #${created.number} from ${filepath}`);
               await unlink(filepath);
               log.success(`Deleted local spec ${filepath} (now tracked as issue #${created.number})`);
@@ -454,6 +462,7 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
   }
 
   // ── Cleanup ─────────────────────────────────────────────────
+  await specAgent.cleanup();
   await instance.cleanup();
 
   const totalDuration = Date.now() - pipelineStart;
@@ -480,342 +489,3 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
   };
 }
 
-/**
- * Instruct the AI agent to generate and write a single spec file to disk.
- *
- * The agent is given a pre-built prompt and the exact output path, and is
- * expected to write the spec directly using its file tools. We then verify
- * the file exists.
- *
- * @throws if the agent session errors or the file is not present after the session
- */
-async function generateSingleSpec(
-  instance: ProviderInstance,
-  prompt: string,
-  outputPath: string
-): Promise<void> {
-  const sessionId = await instance.createSession();
-  log.debug(`Spec prompt built (${prompt.length} chars)`);
-
-  const response = await instance.prompt(sessionId, prompt);
-
-  if (response === null) {
-    throw new Error("AI agent returned no response");
-  }
-
-  log.debug(`Spec agent response (${response.length} chars)`);
-
-  // Verify the agent wrote the file
-  let rawContent: string;
-  try {
-    rawContent = await readFile(outputPath, "utf-8");
-  } catch {
-    throw new Error(
-      `Spec agent did not write the file to ${outputPath}. ` +
-      `Agent response: ${response.slice(0, 300)}`
-    );
-  }
-
-  // Post-process: extract clean spec content
-  const cleanedContent = extractSpecContent(rawContent);
-  log.debug(`Post-processed spec (${rawContent.length} → ${cleanedContent.length} chars)`);
-
-  // Validate structure
-  const validation = validateSpecStructure(cleanedContent);
-  if (!validation.valid) {
-    log.warn(`Spec validation warning for ${outputPath}: ${validation.reason}`);
-  }
-
-  // Write back only if content changed
-  if (cleanedContent !== rawContent) {
-    await writeFile(outputPath, cleanedContent, "utf-8");
-    log.debug(`Wrote cleaned spec back to ${outputPath}`);
-  }
-}
-
-/**
- * Build the prompt that instructs the AI agent to explore the codebase,
- * understand the issue, and write a high-level markdown spec file to disk.
- *
- * The agent is responsible for writing the file — this is not a completion
- * API call. The output emphasises WHAT needs to change, WHY it needs to
- * change, and HOW it fits into the existing project — but deliberately
- * avoids low-level implementation specifics (exact code, line numbers,
- * diffs). A dedicated planner agent handles that granularity per-task at
- * dispatch time.
- */
-function buildSpecPrompt(issue: IssueDetails, cwd: string, outputPath: string): string {
-  const sections: string[] = [
-    `You are a **spec agent**. Your job is to explore the codebase, understand the issue below, and write a high-level **markdown spec file** to disk that will drive an automated implementation pipeline.`,
-    ``,
-    `**Important:** This file will be consumed by a two-stage pipeline:`,
-    `1. A **planner agent** reads each task together with the prose context in this file, then explores the codebase to produce a detailed, line-level implementation plan.`,
-    `2. A **coder agent** follows that detailed plan to make the actual code changes.`,
-    ``,
-    `Because the planner agent handles low-level details, your spec must stay **high-level and strategic**. Focus on the WHAT, WHY, and HOW — not exact code or line numbers.`,
-    ``,
-    `**CRITICAL — Output constraints (read carefully):**`,
-    `The file you write must contain ONLY the structured spec content described below. You MUST NOT include:`,
-    `- **No preamble:** Do not add any text before the H1 heading (e.g., "Here's the spec:", "I've written the spec file to...")`,
-    `- **No postamble:** Do not add any text after the last spec section (e.g., "Let me know if you'd like changes", "Here's a summary of...")`,
-    `- **No summaries:** Do not append a summary or recap of what you wrote`,
-    `- **No code fences:** Do not wrap the spec content in \`\`\`markdown ... \`\`\` or any other code fence`,
-    `- **No conversational text:** Do not include any explanations, commentary, or dialogue — the file is consumed by an automated pipeline, not a human`,
-    `The file content must start with \`# \` (the H1 heading) and contain nothing before or after the structured spec sections.`,
-    ``,
-    `## Issue Details`,
-    ``,
-    `- **Number:** #${issue.number}`,
-    `- **Title:** ${issue.title}`,
-    `- **State:** ${issue.state}`,
-    `- **URL:** ${issue.url}`,
-  ];
-
-  if (issue.labels.length > 0) {
-    sections.push(`- **Labels:** ${issue.labels.join(", ")}`);
-  }
-
-  if (issue.body) {
-    sections.push(``, `### Description`, ``, issue.body);
-  }
-
-  if (issue.acceptanceCriteria) {
-    sections.push(``, `### Acceptance Criteria`, ``, issue.acceptanceCriteria);
-  }
-
-  if (issue.comments.length > 0) {
-    sections.push(``, `### Discussion`, ``);
-    for (const comment of issue.comments) {
-      sections.push(comment, ``);
-    }
-  }
-
-  sections.push(
-    ``,
-    `## Working Directory`,
-    ``,
-    `\`${cwd}\``,
-    ``,
-    `## Instructions`,
-    ``,
-    `1. **Explore the codebase** — read relevant files, search for symbols, understand the project structure, language, frameworks, conventions, and patterns. Identify the tech stack (languages, package managers, frameworks, test runners) so your spec aligns with the project's actual standards.`,
-    ``,
-    `2. **Understand the issue** — analyze the issue description, acceptance criteria, and discussion comments to fully understand what needs to be done and why.`,
-    ``,
-    `3. **Research the approach** — look up relevant documentation, libraries, and patterns. Consider how the change integrates with the existing architecture, standards, and technologies already in use. For example, if the project is TypeScript, do not propose a Python solution; if it uses Vitest, do not suggest Jest.`,
-    ``,
-    `4. **Identify integration points** — determine which existing modules, interfaces, patterns, and conventions the implementation must align with. Note the key files and modules involved, but do NOT prescribe exact code changes — the planner agent will handle that.`,
-    ``,
-    `5. **DO NOT make any code changes** — you are only producing a spec, not implementing.`,
-    ``,
-    `## Output`,
-    ``,
-    `Write the complete spec as a markdown file to this exact path:`,
-    ``,
-    `\`${outputPath}\``,
-    ``,
-    `Use your Write tool to save the file. The file content MUST begin with the H1 heading — no preamble, no code fences, no conversational text before it. Do not add any text after the final spec section — no postamble, no summary, no commentary. The file must follow this structure exactly:`,
-    ``,
-    `# <Issue title> (#<number>)`,
-    ``,
-    `> <One-line summary: what this issue achieves and why it matters>`,
-    ``,
-    `## Context`,
-    ``,
-    `<Describe the relevant parts of the codebase: key modules, directory structure,`,
-    `language/framework, and architectural patterns. Name specific files and modules`,
-    `that are involved so the planner agent knows where to look, but do not include`,
-    `code snippets or line-level details.>`,
-    ``,
-    `## Why`,
-    ``,
-    `<Explain the motivation — why this change is needed, what problem it solves,`,
-    `what user or system benefit it provides. Pull from the issue description,`,
-    `acceptance criteria, and discussion.>`,
-    ``,
-    `## Approach`,
-    ``,
-    `<High-level description of the implementation strategy. Explain the overall`,
-    `approach, which patterns to follow, what to extend vs. create new, and how`,
-    `the change fits into the existing architecture. Mention relevant standards,`,
-    `technologies, and conventions the implementation MUST align with.>`,
-    ``,
-    `## Integration Points`,
-    ``,
-    `<List the specific modules, interfaces, configurations, and conventions that`,
-    `the implementation must integrate with. For example: existing provider`,
-    `interfaces to implement, CLI argument patterns to follow, test framework`,
-    `and conventions to match, build system requirements, etc.>`,
-    ``,
-    `## Tasks`,
-    ``,
-    `Each task MUST be prefixed with an execution-mode tag:`,
-    ``,
-    `- \`(P)\` — **Parallel-safe.** This task has no dependency on the output of a prior task and can run concurrently with other \`(P)\` tasks.`,
-    `- \`(S)\` — **Serial / dependent.** This task depends on a prior task's output or modifies shared state that conflicts with concurrent work. It acts as a barrier: all preceding tasks complete before it starts, and it completes before subsequent tasks begin.`,
-    ``,
-    `**Default to \`(P)\`.** Most tasks are independent (e.g., adding a function in one module, writing tests in another). Only use \`(S)\` when a task genuinely depends on the result of a prior task (e.g., "refactor module X" followed by "update callers of module X").`,
-    ``,
-    `If a task has no \`(P)\` or \`(S)\` prefix, the system treats it as serial, so always tag explicitly.`,
-    ``,
-    `Example:`,
-    ``,
-    `- [ ] (P) Add validation helper to the form utils module`,
-    `- [ ] (P) Add unit tests for the new validation helper`,
-    `- [ ] (S) Refactor the form component to use the new validation helper`,
-    `- [ ] (P) Update documentation for the form utils module`,
-    ``,
-    ``,
-    `## References`,
-    ``,
-    `- <Links to relevant docs, related issues, or external resources>`,
-    ``,
-    `## Key Guidelines`,
-    ``,
-    `- **Stay high-level.** Do NOT include code snippets, exact line numbers, diffs, or step-by-step coding instructions. A dedicated planner agent will produce those details for each task at execution time.`,
-    `- **Respect the project's stack.** Your spec must align with the languages, frameworks, libraries, test tools, and conventions already in use. Never suggest technologies that conflict with the existing project.`,
-    `- **Explain WHAT, WHY, and HOW (strategically).** Each task should say what needs to happen, why it's needed, and which part of the codebase it touches — but leave the tactical "how" to the planner agent.`,
-    `- **Detail integration points.** The prose sections (Context, Approach, Integration Points) are critical — they tell the planner agent where to look and what constraints to respect.`,
-    `- **Keep tasks atomic and ordered.** Each \`- [ ]\` task must be a single, clear unit of work. Order them so dependencies come first.`,
-    `- **Tag every task with \`(P)\` or \`(S)\`.** Default to \`(P)\` (parallel) unless the task depends on a prior task's output. Group related serial dependencies together and prefer parallelism to maximize throughput.`,
-    `- **Embed commit instructions within task descriptions.** You control when commits happen. Instead of creating standalone commit tasks (which would fail — each task runs in an isolated agent session), include commit instructions at the end of implementation task descriptions at logical boundaries. For example: "Implement the validation helper and commit with a conventional commit message." Group related changes into a single commit where it makes logical sense, and use the project's conventional commit types: \`feat\`, \`fix\`, \`docs\`, \`refactor\`, \`test\`, \`chore\`, \`style\`, \`perf\`, \`ci\`. Not every task needs a commit instruction — use your judgment to place them at logical boundaries.`,
-    `- **Keep the markdown clean** — it will be parsed by an automated tool.`,
-  );
-
-  return sections.join("\n");
-}
-
-/**
- * Build a spec prompt from a local markdown file instead of an issue-tracker
- * issue.  The title is extracted from the first `# Heading` in the content,
- * falling back to the filename without extension.  The file content serves as
- * the description.  The output path is the source file itself (in-place
- * overwrite).
- *
- * The output-format instructions, spec structure template, (P)/(S) tagging
- * rules, and agent guidelines are identical to those in `buildSpecPrompt()`.
- */
-export function buildFileSpecPrompt(filePath: string, content: string, cwd: string): string {
-  const title = extractTitle(content, filePath);
-
-  const sections: string[] = [
-    `You are a **spec agent**. Your job is to explore the codebase, understand the content below, and write a high-level **markdown spec file** to disk that will drive an automated implementation pipeline.`,
-    ``,
-    `**Important:** This file will be consumed by a two-stage pipeline:`,
-    `1. A **planner agent** reads each task together with the prose context in this file, then explores the codebase to produce a detailed, line-level implementation plan.`,
-    `2. A **coder agent** follows that detailed plan to make the actual code changes.`,
-    ``,
-    `Because the planner agent handles low-level details, your spec must stay **high-level and strategic**. Focus on the WHAT, WHY, and HOW — not exact code or line numbers.`,
-    ``,
-    `**CRITICAL — Output constraints (read carefully):**`,
-    `The file you write must contain ONLY the structured spec content described below. You MUST NOT include:`,
-    `- **No preamble:** Do not add any text before the H1 heading (e.g., "Here's the spec:", "I've written the spec file to...")`,
-    `- **No postamble:** Do not add any text after the last spec section (e.g., "Let me know if you'd like changes", "Here's a summary of...")`,
-    `- **No summaries:** Do not append a summary or recap of what you wrote`,
-    `- **No code fences:** Do not wrap the spec content in \`\`\`markdown ... \`\`\` or any other code fence`,
-    `- **No conversational text:** Do not include any explanations, commentary, or dialogue — the file is consumed by an automated pipeline, not a human`,
-    `The file content must start with \`# \` (the H1 heading) and contain nothing before or after the structured spec sections.`,
-    ``,
-    `## File Details`,
-    ``,
-    `- **Title:** ${title}`,
-    `- **Source file:** ${filePath}`,
-  ];
-
-  if (content) {
-    sections.push(``, `### Content`, ``, content);
-  }
-
-  sections.push(
-    ``,
-    `## Working Directory`,
-    ``,
-    `\`${cwd}\``,
-    ``,
-    `## Instructions`,
-    ``,
-    `1. **Explore the codebase** — read relevant files, search for symbols, understand the project structure, language, frameworks, conventions, and patterns. Identify the tech stack (languages, package managers, frameworks, test runners) so your spec aligns with the project's actual standards.`,
-    ``,
-    `2. **Understand the content** — analyze the file content to fully understand what needs to be done and why.`,
-    ``,
-    `3. **Research the approach** — look up relevant documentation, libraries, and patterns. Consider how the change integrates with the existing architecture, standards, and technologies already in use. For example, if the project is TypeScript, do not propose a Python solution; if it uses Vitest, do not suggest Jest.`,
-    ``,
-    `4. **Identify integration points** — determine which existing modules, interfaces, patterns, and conventions the implementation must align with. Note the key files and modules involved, but do NOT prescribe exact code changes — the planner agent will handle that.`,
-    ``,
-    `5. **DO NOT make any code changes** — you are only producing a spec, not implementing.`,
-    ``,
-    `## Output`,
-    ``,
-    `Write the complete spec as a markdown file to this exact path:`,
-    ``,
-    `\`${filePath}\``,
-    ``,
-    `Use your Write tool to save the file. The file content MUST begin with the H1 heading — no preamble, no code fences, no conversational text before it. Do not add any text after the final spec section — no postamble, no summary, no commentary. The file must follow this structure exactly:`,
-    ``,
-    `# <Title>`,
-    ``,
-    `> <One-line summary: what this achieves and why it matters>`,
-    ``,
-    `## Context`,
-    ``,
-    `<Describe the relevant parts of the codebase: key modules, directory structure,`,
-    `language/framework, and architectural patterns. Name specific files and modules`,
-    `that are involved so the planner agent knows where to look, but do not include`,
-    `code snippets or line-level details.>`,
-    ``,
-    `## Why`,
-    ``,
-    `<Explain the motivation — why this change is needed, what problem it solves,`,
-    `what user or system benefit it provides. Pull from the file content.>`,
-    ``,
-    `## Approach`,
-    ``,
-    `<High-level description of the implementation strategy. Explain the overall`,
-    `approach, which patterns to follow, what to extend vs. create new, and how`,
-    `the change fits into the existing architecture. Mention relevant standards,`,
-    `technologies, and conventions the implementation MUST align with.>`,
-    ``,
-    `## Integration Points`,
-    ``,
-    `<List the specific modules, interfaces, configurations, and conventions that`,
-    `the implementation must integrate with. For example: existing provider`,
-    `interfaces to implement, CLI argument patterns to follow, test framework`,
-    `and conventions to match, build system requirements, etc.>`,
-    ``,
-    `## Tasks`,
-    ``,
-    `Each task MUST be prefixed with an execution-mode tag:`,
-    ``,
-    `- \`(P)\` — **Parallel-safe.** This task has no dependency on the output of a prior task and can run concurrently with other \`(P)\` tasks.`,
-    `- \`(S)\` — **Serial / dependent.** This task depends on a prior task's output or modifies shared state that conflicts with concurrent work. It acts as a barrier: all preceding tasks complete before it starts, and it completes before subsequent tasks begin.`,
-    ``,
-    `**Default to \`(P)\`.** Most tasks are independent (e.g., adding a function in one module, writing tests in another). Only use \`(S)\` when a task genuinely depends on the result of a prior task (e.g., "refactor module X" followed by "update callers of module X").`,
-    ``,
-    `If a task has no \`(P)\` or \`(S)\` prefix, the system treats it as serial, so always tag explicitly.`,
-    ``,
-    `Example:`,
-    ``,
-    `- [ ] (P) Add validation helper to the form utils module`,
-    `- [ ] (P) Add unit tests for the new validation helper`,
-    `- [ ] (S) Refactor the form component to use the new validation helper`,
-    `- [ ] (P) Update documentation for the form utils module`,
-    ``,
-    ``,
-    `## References`,
-    ``,
-    `- <Links to relevant docs, related issues, or external resources>`,
-    ``,
-    `## Key Guidelines`,
-    ``,
-    `- **Stay high-level.** Do NOT include code snippets, exact line numbers, diffs, or step-by-step coding instructions. A dedicated planner agent will produce those details for each task at execution time.`,
-    `- **Respect the project's stack.** Your spec must align with the languages, frameworks, libraries, test tools, and conventions already in use. Never suggest technologies that conflict with the existing project.`,
-    `- **Explain WHAT, WHY, and HOW (strategically).** Each task should say what needs to happen, why it's needed, and which part of the codebase it touches — but leave the tactical "how" to the planner agent.`,
-    `- **Detail integration points.** The prose sections (Context, Approach, Integration Points) are critical — they tell the planner agent where to look and what constraints to respect.`,
-    `- **Keep tasks atomic and ordered.** Each \`- [ ]\` task must be a single, clear unit of work. Order them so dependencies come first.`,
-    `- **Tag every task with \`(P)\` or \`(S)\`.** Default to \`(P)\` (parallel) unless the task depends on a prior task's output. Group related serial dependencies together and prefer parallelism to maximize throughput.`,
-    `- **Embed commit instructions within task descriptions.** You control when commits happen. Instead of creating standalone commit tasks (which would fail — each task runs in an isolated agent session), include commit instructions at the end of implementation task descriptions at logical boundaries. For example: "Implement the validation helper and commit with a conventional commit message." Group related changes into a single commit where it makes logical sense, and use the project's conventional commit types: \`feat\`, \`fix\`, \`docs\`, \`refactor\`, \`test\`, \`chore\`, \`style\`, \`perf\`, \`ci\`. Not every task needs a commit instruction — use your judgment to place them at logical boundaries.`,
-    `- **Keep the markdown clean** — it will be parsed by an automated tool.`,
-  );
-
-  return sections.join("\n");
-}

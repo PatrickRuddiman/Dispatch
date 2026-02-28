@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { isIssueNumbers, buildFileSpecPrompt, validateSpecStructure, extractSpecContent, resolveSource } from "../spec-generator.js";
+import { isIssueNumbers, validateSpecStructure, extractSpecContent, resolveSource } from "../spec-generator.js";
+import { buildFileSpecPrompt } from "../agents/spec.js";
 import * as datasourcesIndex from "../datasources/index.js";
 
 describe("resolveSource", () => {
