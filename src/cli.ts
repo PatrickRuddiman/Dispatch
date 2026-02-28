@@ -1,29 +1,16 @@
 /**
  * CLI entry point for `dispatch`.
  *
- * Usage:
- *   dispatch <glob>              Dispatch tasks matching the glob pattern
- *   dispatch tasks/**\/*.md       Common usage — process task files
+ * This module is a thin argument-parsing shell. It parses CLI arguments,
+ * boots the orchestrator, delegates all workflow logic (config loading,
+ * validation, pipeline selection) to the orchestrator's `runFromCli()`
+ * method, and exits based on the result.
  *
- * Spec mode:
- *   dispatch --spec 1,2,3        Generate spec files from issues
- *   dispatch --spec "drafts/*.md" Generate specs from local markdown files in the configured datasource
- *
- * Options:
- *   --spec <value>      Issue numbers (comma-separated) or glob pattern for .md files (creates specs in configured datasource)
- *   --source <name>     Issue source: github, azdevops (auto-detected from remote)
- *   --org <url>         Azure DevOps organization URL
- *   --project <name>    Azure DevOps project name
- *   --output-dir <dir>  Output directory for generated specs (default: .dispatch/specs)
- *   --dry-run           List tasks without executing
- *   --concurrency N     Max parallel dispatches (default: 1)
- *   --provider NAME     Agent backend: opencode, copilot (default: opencode)
- *   --server-url URL    Connect to a running provider server
- *   --help              Show usage information
+ * Process-level concerns (signal handlers, config subcommand) remain here.
  */
 
 import { resolve } from "node:path";
-import { bootOrchestrator } from "./agents/index.js";
+import { bootOrchestrator, type RawCliArgs } from "./agents/index.js";
 import { log } from "./logger.js";
 import { runCleanup } from "./cleanup.js";
 import type { ProviderName } from "./provider.js";
@@ -87,28 +74,14 @@ const HELP = `
     dispatch config reset
 `.trimStart();
 
-interface CliArgs {
-  issueIds: string[];
-  dryRun: boolean;
-  noPlan: boolean;
-  /** undefined means "use mode-specific default" */
-  concurrency?: number;
-  provider: ProviderName;
-  serverUrl?: string;
-  cwd: string;
+/** Parsed CLI arguments including shell-only flags (help, version). */
+interface ParsedArgs extends Omit<RawCliArgs, "explicitFlags"> {
   help: boolean;
   version: boolean;
-  verbose: boolean;
-  // Spec mode
-  spec?: string | string[];
-  issueSource?: DatasourceName;
-  org?: string;
-  project?: string;
-  outputDir?: string;
 }
 
-function parseArgs(argv: string[]): [CliArgs, Set<string>] {
-  const args: CliArgs = {
+function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
+  const args: ParsedArgs = {
     issueIds: [],
     dryRun: false,
     noPlan: false,
@@ -251,22 +224,8 @@ async function main() {
 
   // ── Delegate to orchestrator ───────────────────────────────
   const orchestrator = await bootOrchestrator({ cwd: args.cwd });
-  const summary = await orchestrator.runFromCli({
-    issueIds: args.issueIds,
-    dryRun: args.dryRun,
-    noPlan: args.noPlan,
-    concurrency: args.concurrency,
-    provider: args.provider,
-    serverUrl: args.serverUrl,
-    cwd: args.cwd,
-    verbose: args.verbose,
-    spec: args.spec,
-    issueSource: args.issueSource,
-    org: args.org,
-    project: args.project,
-    outputDir: args.outputDir,
-    explicitFlags,
-  });
+  const { help: _, version: __, ...rawArgs } = args;
+  const summary = await orchestrator.runFromCli({ ...rawArgs, explicitFlags });
 
   // Determine exit code from summary
   const failed = "failed" in summary ? summary.failed : 0;
