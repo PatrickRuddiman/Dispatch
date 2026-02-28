@@ -9,7 +9,7 @@
  */
 
 import { basename, join } from "node:path";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { parseTaskFile, markTaskComplete, buildTaskContext, groupTasksByMode, type TaskFile } from "../parser.js";
 import { dispatchTask, type DispatchResult } from "../dispatcher.js";
@@ -230,6 +230,22 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
 
                 if (result.success) {
                   await markTaskComplete(task);
+
+                  // Sync checked-off state back to the datasource
+                  try {
+                    const parsed = parseIssueFilename(task.file);
+                    if (parsed) {
+                      const updatedContent = await readFile(task.file, "utf-8");
+                      const details = issueDetailsByFile.get(task.file);
+                      const title = details?.title ?? parsed.slug;
+                      await datasource.update(parsed.issueId, title, updatedContent, fetchOpts);
+                      log.success(`Synced task completion to issue #${parsed.issueId}`);
+                    }
+                  } catch (err) {
+                    const message = err instanceof Error ? err.message : String(err);
+                    log.warn(`Could not sync task completion to datasource: ${message}`);
+                  }
+
                   tuiTask.status = "done";
                   tuiTask.elapsed = Date.now() - startTime;
                   completed++;
