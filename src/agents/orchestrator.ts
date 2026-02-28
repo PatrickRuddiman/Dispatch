@@ -11,26 +11,25 @@
 import { basename, join } from "node:path";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { glob } from "glob";
-import { parseTaskFile, markTaskComplete, buildTaskContext, groupTasksByMode, type Task, type TaskFile } from "../parser.js";
+import { parseTaskFile, markTaskComplete, buildTaskContext, groupTasksByMode, type TaskFile } from "../parser.js";
 import { dispatchTask, type DispatchResult } from "../dispatcher.js";
 import { boot as bootPlanner } from "./planner.js";
 import { log } from "../logger.js";
 import { registerCleanup } from "../cleanup.js";
-import { createTui, type TaskState } from "../tui.js";
+import { createTui } from "../tui.js";
 import type { Agent, AgentBootOptions } from "../agent.js";
 import type { ProviderName } from "../provider.js";
 import { bootProvider } from "../providers/index.js";
 import { getDatasource, detectDatasource } from "../datasources/index.js";
-import type { DatasourceName, IssueFetchOptions } from "../datasource.js";
+import type { Datasource, DatasourceName, IssueDetails, IssueFetchOptions } from "../datasource.js";
 
 /**
  * Runtime options passed to `orchestrate()` — these control what gets
  * dispatched and how, separate from the agent's boot-time configuration.
  */
 export interface OrchestrateRunOptions {
-  /** Glob pattern(s) for task files */
-  pattern: string[];
+  /** Issue IDs to dispatch (empty = all open issues from datasource) */
+  issueIds: string[];
   /** Max parallel dispatches */
   concurrency: number;
   /** List tasks without executing */
@@ -84,7 +83,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
 
     async orchestrate(runOpts: OrchestrateRunOptions): Promise<DispatchSummary> {
       const {
-        pattern,
+        issueIds,
         concurrency,
         dryRun,
         serverUrl,
@@ -97,7 +96,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
 
       // Dry-run mode uses simple log output
       if (dryRun) {
-        return dryRunMode(pattern, cwd, source, org, project);
+        return dryRunMode(issueIds, cwd, source, org, project);
       }
 
       // ── Start TUI ───────────────────────────────────────────────
@@ -107,58 +106,29 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
       try {
         // ── 1. Discover task files ──────────────────────────────────
         tui.state.phase = "discovering";
-        let files: string[];
 
-        const useDatasource = source && pattern.length === 0;
-
-        if (useDatasource) {
-          // Datasource-based discovery: list work items, fetch to temp dir
-          const datasource = getDatasource(source);
-          const fetchOpts: IssueFetchOptions = { cwd, org, project };
-          const items = await datasource.list(fetchOpts);
-
-          if (items.length === 0) {
-            tui.state.phase = "done";
-            tui.stop();
-            log.warn("No work items found from datasource: " + source);
-            return { total: 0, completed: 0, failed: 0, skipped: 0, results: [] };
-          }
-
-          // Fetch each item to a temp directory as a markdown file
-          const tempDir = await mkdtemp(join(tmpdir(), "dispatch-"));
-          files = [];
-
-          for (const item of items) {
-            const slug = item.title
-              .toLowerCase()
-              .replace(/[^a-z0-9]+/g, "-")
-              .replace(/^-|-$/g, "")
-              .slice(0, 60);
-            const filename = `${item.number}-${slug}.md`;
-            const filepath = join(tempDir, filename);
-            await writeFile(filepath, item.body, "utf-8");
-            files.push(filepath);
-          }
-        } else {
-          // Glob-based discovery (existing behavior)
-          files = await glob(pattern, { cwd, absolute: true });
-        }
-
-        if (files.length === 0) {
+        if (!source) {
           tui.state.phase = "done";
           tui.stop();
-          log.warn("No files matched the pattern(s): " + pattern.join(", "));
+          log.error("No datasource configured. Use --source or run: dispatch config set source <name>");
           return { total: 0, completed: 0, failed: 0, skipped: 0, results: [] };
         }
 
-        // Sort numerically by leading digits in filename (e.g. "6-foo.md" before "11-bar.md")
-        files.sort((a, b) => {
-          const numA = parseInt(basename(a).match(/^(\d+)/)?.[1] ?? "0", 10);
-          const numB = parseInt(basename(b).match(/^(\d+)/)?.[1] ?? "0", 10);
-          if (numA !== numB) return numA - numB;
-          return a.localeCompare(b);
-        });
+        const datasource = getDatasource(source);
+        const fetchOpts: IssueFetchOptions = { cwd, org, project };
+        const items = issueIds.length > 0
+          ? await fetchItemsById(issueIds, datasource, fetchOpts)
+          : await datasource.list(fetchOpts);
 
+        if (items.length === 0) {
+          tui.state.phase = "done";
+          tui.stop();
+          const label = issueIds.length > 0 ? `issue(s) ${issueIds.join(", ")}` : `datasource: ${source}`;
+          log.warn("No work items found from " + label);
+          return { total: 0, completed: 0, failed: 0, skipped: 0, results: [] };
+        }
+
+        const files = await writeItemsToTempDir(items);
         tui.state.filesFound = files.length;
 
         // ── 2. Parse all tasks ──────────────────────────────────────
@@ -347,43 +317,49 @@ async function closeCompletedSpecIssues(
   }
 }
 
-async function dryRunMode(
-  pattern: string[],
-  cwd: string,
-  source?: DatasourceName,
-  org?: string,
-  project?: string,
-): Promise<DispatchSummary> {
-  let files: string[];
-
-  const useDatasource = source && pattern.length === 0;
-
-  if (useDatasource) {
-    const datasource = getDatasource(source);
-    const fetchOpts: IssueFetchOptions = { cwd, org, project };
-    const items = await datasource.list(fetchOpts);
-
-    if (items.length === 0) {
-      log.warn("No work items found from datasource: " + source);
-      return { total: 0, completed: 0, failed: 0, skipped: 0, results: [] };
+/**
+ * Fetch specific issues by ID from a datasource.
+ * Logs a warning and skips any ID that fails to fetch.
+ */
+async function fetchItemsById(
+  issueIds: string[],
+  datasource: Datasource,
+  fetchOpts: IssueFetchOptions,
+): Promise<IssueDetails[]> {
+  const ids = issueIds.flatMap((id) =>
+    id.split(",").map((s) => s.trim()).filter(Boolean)
+  );
+  const items = [];
+  for (const id of ids) {
+    try {
+      const item = await datasource.fetch(id, fetchOpts);
+      items.push(item);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn(`Could not fetch issue #${id}: ${message}`);
     }
+  }
+  return items;
+}
 
-    const tempDir = await mkdtemp(join(tmpdir(), "dispatch-"));
-    files = [];
+/**
+ * Write a list of IssueDetails to a temp directory as `{number}-{slug}.md` files.
+ * Returns the list of written file paths, sorted numerically by leading issue number.
+ */
+async function writeItemsToTempDir(items: IssueDetails[]): Promise<string[]> {
+  const tempDir = await mkdtemp(join(tmpdir(), "dispatch-"));
+  const files: string[] = [];
 
-    for (const item of items) {
-      const slug = item.title
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-|-$/g, "")
-        .slice(0, 60);
-      const filename = `${item.number}-${slug}.md`;
-      const filepath = join(tempDir, filename);
-      await writeFile(filepath, item.body, "utf-8");
-      files.push(filepath);
-    }
-  } else {
-    files = await glob(pattern, { cwd, absolute: true });
+  for (const item of items) {
+    const slug = item.title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 60);
+    const filename = `${item.number}-${slug}.md`;
+    const filepath = join(tempDir, filename);
+    await writeFile(filepath, item.body, "utf-8");
+    files.push(filepath);
   }
 
   files.sort((a, b) => {
@@ -393,10 +369,34 @@ async function dryRunMode(
     return a.localeCompare(b);
   });
 
-  if (files.length === 0) {
-    log.warn("No files matched the pattern(s): " + pattern.join(", "));
+  return files;
+}
+
+async function dryRunMode(
+  issueIds: string[],
+  cwd: string,
+  source?: DatasourceName,
+  org?: string,
+  project?: string,
+): Promise<DispatchSummary> {
+  if (!source) {
+    log.error("No datasource configured. Use --source or run: dispatch config set source <name>");
     return { total: 0, completed: 0, failed: 0, skipped: 0, results: [] };
   }
+
+  const datasource = getDatasource(source);
+  const fetchOpts: IssueFetchOptions = { cwd, org, project };
+  const items = issueIds.length > 0
+    ? await fetchItemsById(issueIds, datasource, fetchOpts)
+    : await datasource.list(fetchOpts);
+
+  if (items.length === 0) {
+    const label = issueIds.length > 0 ? `issue(s) ${issueIds.join(", ")}` : `datasource: ${source}`;
+    log.warn("No work items found from " + label);
+    return { total: 0, completed: 0, failed: 0, skipped: 0, results: [] };
+  }
+
+  const files = await writeItemsToTempDir(items);
 
   const taskFiles: TaskFile[] = [];
   for (const file of files) {

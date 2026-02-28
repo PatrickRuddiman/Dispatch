@@ -37,7 +37,7 @@ const HELP = `
   dispatch — AI agent orchestration CLI
 
   Usage:
-    dispatch <glob>                  Dispatch tasks from markdown files
+    dispatch [issue-id...]           Dispatch specific issues (or all open issues if none given)
     dispatch --spec <ids>            Generate spec files from issues
     dispatch --spec <glob>           Generate specs from local markdown files
 
@@ -71,10 +71,12 @@ const HELP = `
     Valid keys: provider, concurrency, source, org, project, serverUrl
 
   Examples:
-    dispatch "tasks/**/*.md"
-    dispatch "tasks/**/*.md" --provider copilot
-    dispatch "tasks/**/*.md" --dry-run
-    dispatch "tasks/**/*.md" --concurrency 3
+    dispatch 14
+    dispatch 14,15,16
+    dispatch 14 15 16
+    dispatch
+    dispatch 14 --dry-run
+    dispatch 14 --provider copilot
     dispatch --spec 42,43,44
     dispatch --spec 42,43 --source github --provider copilot
     dispatch --spec 100,200 --source azdevops --org https://dev.azure.com/myorg --project MyProject
@@ -86,7 +88,7 @@ const HELP = `
 `.trimStart();
 
 interface CliArgs {
-  pattern: string[];
+  issueIds: string[];
   dryRun: boolean;
   noPlan: boolean;
   /** undefined means "use mode-specific default" */
@@ -107,7 +109,7 @@ interface CliArgs {
 
 function parseArgs(argv: string[]): [CliArgs, Set<string>] {
   const args: CliArgs = {
-    pattern: [],
+    issueIds: [],
     dryRun: false,
     noPlan: false,
     provider: "opencode",
@@ -192,7 +194,7 @@ function parseArgs(argv: string[]): [CliArgs, Set<string>] {
       args.cwd = resolve(argv[i]);
       explicitFlags.add("cwd");
     } else if (!arg.startsWith("-")) {
-      args.pattern.push(arg);
+      args.issueIds.push(arg);
     } else {
       log.error(`Unknown option: ${arg}`);
       process.exit(1);
@@ -304,17 +306,9 @@ async function main() {
   }
 
   // ── Dispatch mode ──────────────────────────────────────────
-  if (!args.pattern.length) {
-    log.error("Missing glob pattern. Usage: dispatch <glob>");
-    log.dim('  Example: dispatch "tasks/**/*.md"');
-    log.dim("  Example: dispatch tasks/a.md tasks/b.md");
-    log.dim("  Or use:  dispatch --spec 1,2,3");
-    process.exit(1);
-  }
-
   const orchestrator = await bootOrchestrator({ cwd: args.cwd });
   const summary = await orchestrator.orchestrate({
-    pattern: args.pattern,
+    issueIds: args.issueIds,
     concurrency: args.concurrency ?? defaultConcurrency(),
     dryRun: args.dryRun,
     noPlan: args.noPlan,
