@@ -13,9 +13,39 @@
  *   4. Add the name to the `DatasourceName` union below
  */
 
-import type { IssueDetails, IssueFetchOptions } from "./issue-fetcher.js";
+/**
+ * Structured representation of a work item / issue from any tracker.
+ */
+export interface IssueDetails {
+  /** Issue / work-item number or ID */
+  number: string;
+  /** Title of the issue */
+  title: string;
+  /** Full description / body (may contain HTML or markdown) */
+  body: string;
+  /** Labels, tags, or categories */
+  labels: string[];
+  /** Current state (open, closed, active, resolved, etc.) */
+  state: string;
+  /** URL to the issue in the tracker's web UI */
+  url: string;
+  /** Discussion comments */
+  comments: string[];
+  /** Acceptance criteria (if the tracker supports it) */
+  acceptanceCriteria: string;
+}
 
-export type { IssueDetails, IssueFetchOptions } from "./issue-fetcher.js";
+/**
+ * Options passed when fetching an issue.
+ */
+export interface IssueFetchOptions {
+  /** Working directory (for CLI repo context) */
+  cwd?: string;
+  /** Organization URL (e.g. Azure DevOps org) */
+  org?: string;
+  /** Project name (e.g. Azure DevOps project) */
+  project?: string;
+}
 
 /** Valid datasource backend names. */
 export type DatasourceName = "github" | "azdevops" | "md";

@@ -11,7 +11,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Datasource } from "../datasource.js";
-import type { IssueDetails, IssueFetchOptions } from "../issue-fetcher.js";
+import type { IssueDetails, IssueFetchOptions } from "../datasource.js";
 
 const exec = promisify(execFile);
 

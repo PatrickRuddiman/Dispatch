@@ -1,64 +1,18 @@
 /**
- * GitHub issue fetcher — retrieves issues using the `gh` CLI.
+ * @deprecated This module is deprecated. Use `../datasources/github.js` instead.
  *
- * Requires:
- *   - `gh` CLI installed and authenticated
- *   - Working directory inside a GitHub repository (or GITHUB_REPOSITORY set)
+ * The GitHub issue fetcher has been replaced by the GitHub datasource.
+ * This file re-exports for backwards compatibility and will be removed
+ * in a future release.
  */
 
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import type { IssueFetcher, IssueDetails, IssueFetchOptions } from "../issue-fetcher.js";
+import { datasource } from "../datasources/github.js";
+import type { IssueFetcher } from "../issue-fetcher.js";
 
-const exec = promisify(execFile);
-
+/** @deprecated Use `datasource` from `../datasources/github.js` instead. */
 export const fetcher: IssueFetcher = {
-  name: "github",
-
-  async update(issueId: string, title: string, body: string, opts: IssueFetchOptions = {}): Promise<void> {
-    const cwd = opts.cwd || process.cwd();
-    await exec("gh", ["issue", "edit", issueId, "--title", title, "--body", body], { cwd });
-  },
-
-  async close(issueId: string, opts: IssueFetchOptions = {}): Promise<void> {
-    const cwd = opts.cwd || process.cwd();
-    await exec("gh", ["issue", "close", issueId], { cwd });
-  },
-
-  async fetch(issueId: string, opts: IssueFetchOptions = {}): Promise<IssueDetails> {
-    const cwd = opts.cwd || process.cwd();
-
-    const { stdout } = await exec(
-      "gh",
-      [
-        "issue",
-        "view",
-        issueId,
-        "--json",
-        "number,title,body,labels,state,url,comments",
-      ],
-      { cwd }
-    );
-
-    const issue = JSON.parse(stdout);
-
-    const comments: string[] = [];
-    if (issue.comments && Array.isArray(issue.comments)) {
-      for (const c of issue.comments) {
-        const author = c.author?.login ?? "unknown";
-        comments.push(`**${author}:** ${c.body}`);
-      }
-    }
-
-    return {
-      number: String(issue.number),
-      title: issue.title ?? "",
-      body: issue.body ?? "",
-      labels: (issue.labels ?? []).map((l: { name: string }) => l.name),
-      state: issue.state ?? "OPEN",
-      url: issue.url ?? "",
-      comments,
-      acceptanceCriteria: "",
-    };
-  },
+  name: datasource.name,
+  fetch: datasource.fetch.bind(datasource),
+  update: datasource.update.bind(datasource),
+  close: datasource.close.bind(datasource),
 };
