@@ -3,7 +3,7 @@
  */
 
 import type { DispatchResult } from "../dispatcher.js";
-import type { AgentBootOptions } from "../agent.js";
+import type { AgentBootOptions } from "./interface.js";
 import type { ProviderName } from "../providers/interface.js";
 import type { DatasourceName } from "../datasources/interface.js";
 import type { SpecOptions, SpecSummary } from "../spec-generator.js";

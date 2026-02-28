@@ -4,10 +4,10 @@
  * To add a new agent:
  *   1. Create `src/agents/<name>.ts` exporting an async `boot()` function
  *   2. Import and register it in the `AGENTS` map below
- *   3. Add the name to the `AgentName` union in `src/agent.ts`
+ *   3. Add the name to the `AgentName` union in `src/agents/interface.ts`
  */
 
-import type { AgentName, Agent, AgentBootOptions } from "../agent.js";
+import type { AgentName, Agent, AgentBootOptions } from "./interface.js";
 import { boot as bootPlanner, type PlannerAgent } from "./planner.js";
 import { boot as bootExecutor, type ExecutorAgent } from "./executor.js";
 import { boot as bootSpec, type SpecAgent } from "./spec.js";
@@ -68,3 +68,4 @@ export type {
   DispatchRunOptions,
   SpecRunOptions,
 };
+export type { AgentName, Agent, AgentBootOptions } from "./interface.js";

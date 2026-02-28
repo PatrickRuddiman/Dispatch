@@ -7,7 +7,7 @@
  * is treated as authoritative input from the orchestrator.
  */
 
-import type { Agent, AgentBootOptions } from "../agent.js";
+import type { Agent, AgentBootOptions } from "./interface.js";
 import type { Task } from "../parser.js";
 import { markTaskComplete } from "../parser.js";
 import { dispatchTask, type DispatchResult } from "../dispatcher.js";

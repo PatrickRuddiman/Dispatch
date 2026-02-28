@@ -12,7 +12,7 @@
 import { mkdir, readFile, writeFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { Agent, AgentBootOptions } from "../agent.js";
+import type { Agent, AgentBootOptions } from "./interface.js";
 import type { IssueDetails } from "../datasources/interface.js";
 import { extractSpecContent, validateSpecStructure } from "../spec-generator.js";
 import { extractTitle } from "../datasources/md.js";

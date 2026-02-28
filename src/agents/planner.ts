@@ -8,7 +8,7 @@
  * to make precise edits.
  */
 
-import type { Agent, AgentBootOptions } from "../agent.js";
+import type { Agent, AgentBootOptions } from "./interface.js";
 import type { Task } from "../parser.js";
 
 export interface PlanResult {
