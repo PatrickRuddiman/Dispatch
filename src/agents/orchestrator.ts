@@ -273,6 +273,19 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
 }
 
 /**
+ * Parse an issue ID and slug from a `<id>-<slug>.md` filename.
+ *
+ * Returns the numeric issue ID and slug, or `null` if the filename
+ * does not match the expected `<id>-<slug>.md` pattern.
+ */
+export function parseIssueFilename(filePath: string): { issueId: string; slug: string } | null {
+  const filename = basename(filePath);
+  const match = /^(\d+)-(.+)\.md$/.exec(filename);
+  if (!match) return null;
+  return { issueId: match[1], slug: match[2] };
+}
+
+/**
  * For each spec file where all tasks completed successfully, extract the
  * issue number from the filename (`<id>-<slug>.md`) and close the originating
  * issue on the tracker.
@@ -310,11 +323,11 @@ async function closeCompletedSpecIssues(
     if (!allSucceeded) continue;
 
     // Extract the issue ID from the filename: "<id>-<slug>.md"
-    const filename = basename(taskFile.path);
-    const match = /^(\d+)-/.exec(filename);
-    if (!match) continue;
+    const parsed = parseIssueFilename(taskFile.path);
+    if (!parsed) continue;
 
-    const issueId = match[1];
+    const { issueId } = parsed;
+    const filename = basename(taskFile.path);
     try {
       await datasource.close(issueId, fetchOpts);
       log.success(`Closed issue #${issueId} (all tasks in ${filename} completed)`);
