@@ -56,6 +56,14 @@ export interface DispatchSummary {
   results: DispatchResult[];
 }
 
+/** Result of writing issue items to a temp directory. */
+interface WriteItemsResult {
+  /** Sorted list of written file paths */
+  files: string[];
+  /** Mapping from file path to the original IssueDetails */
+  issueDetailsByFile: Map<string, IssueDetails>;
+}
+
 /**
  * A booted orchestrator agent that coordinates the full dispatch pipeline.
  *
@@ -128,7 +136,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
           return { total: 0, completed: 0, failed: 0, skipped: 0, results: [] };
         }
 
-        const files = await writeItemsToTempDir(items);
+        const { files, issueDetailsByFile } = await writeItemsToTempDir(items);
         tui.state.filesFound = files.length;
 
         // ── 2. Parse all tasks ──────────────────────────────────────
@@ -344,11 +352,12 @@ async function fetchItemsById(
 
 /**
  * Write a list of IssueDetails to a temp directory as `{number}-{slug}.md` files.
- * Returns the list of written file paths, sorted numerically by leading issue number.
+ * Returns the sorted file paths and a mapping from each path to its original IssueDetails.
  */
-async function writeItemsToTempDir(items: IssueDetails[]): Promise<string[]> {
+async function writeItemsToTempDir(items: IssueDetails[]): Promise<WriteItemsResult> {
   const tempDir = await mkdtemp(join(tmpdir(), "dispatch-"));
   const files: string[] = [];
+  const issueDetailsByFile = new Map<string, IssueDetails>();
 
   for (const item of items) {
     const slug = item.title
@@ -360,6 +369,7 @@ async function writeItemsToTempDir(items: IssueDetails[]): Promise<string[]> {
     const filepath = join(tempDir, filename);
     await writeFile(filepath, item.body, "utf-8");
     files.push(filepath);
+    issueDetailsByFile.set(filepath, item);
   }
 
   files.sort((a, b) => {
@@ -369,7 +379,7 @@ async function writeItemsToTempDir(items: IssueDetails[]): Promise<string[]> {
     return a.localeCompare(b);
   });
 
-  return files;
+  return { files, issueDetailsByFile };
 }
 
 async function dryRunMode(
@@ -396,7 +406,7 @@ async function dryRunMode(
     return { total: 0, completed: 0, failed: 0, skipped: 0, results: [] };
   }
 
-  const files = await writeItemsToTempDir(items);
+  const { files } = await writeItemsToTempDir(items);
 
   const taskFiles: TaskFile[] = [];
   for (const file of files) {
