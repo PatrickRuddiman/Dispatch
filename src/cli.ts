@@ -320,6 +320,9 @@ async function main() {
     noPlan: args.noPlan,
     provider: args.provider,
     serverUrl: args.serverUrl,
+    source: args.issueSource,
+    org: args.org,
+    project: args.project,
   });
   await orchestrator.cleanup();
 

@@ -8,7 +8,9 @@
  *   6. Mark complete in markdown
  */
 
-import { basename } from "node:path";
+import { basename, join } from "node:path";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { glob } from "glob";
 import { parseTaskFile, markTaskComplete, buildTaskContext, groupTasksByMode, type Task, type TaskFile } from "../parser.js";
 import { dispatchTask, type DispatchResult } from "../dispatcher.js";
@@ -19,7 +21,8 @@ import { createTui, type TaskState } from "../tui.js";
 import type { Agent, AgentBootOptions } from "../agent.js";
 import type { ProviderName } from "../provider.js";
 import { bootProvider } from "../providers/index.js";
-import { detectIssueSource, getIssueFetcher } from "../issue-fetchers/index.js";
+import { getDatasource, detectDatasource } from "../datasources/index.js";
+import type { DatasourceName, IssueFetchOptions } from "../datasource.js";
 
 /**
  * Runtime options passed to `orchestrate()` — these control what gets
@@ -38,6 +41,12 @@ export interface OrchestrateRunOptions {
   provider?: ProviderName;
   /** URL of a running provider server */
   serverUrl?: string;
+  /** Configured datasource name (e.g. "github", "azdevops", "md") */
+  source?: DatasourceName;
+  /** Azure DevOps organization URL */
+  org?: string;
+  /** Azure DevOps project name */
+  project?: string;
 }
 
 export interface DispatchSummary {
@@ -81,11 +90,14 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
         serverUrl,
         noPlan,
         provider = "opencode",
+        source,
+        org,
+        project,
       } = runOpts;
 
       // Dry-run mode uses simple log output
       if (dryRun) {
-        return dryRunMode(pattern, cwd);
+        return dryRunMode(pattern, cwd, source, org, project);
       }
 
       // ── Start TUI ───────────────────────────────────────────────
@@ -95,7 +107,42 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
       try {
         // ── 1. Discover task files ──────────────────────────────────
         tui.state.phase = "discovering";
-        const files = await glob(pattern, { cwd, absolute: true });
+        let files: string[];
+
+        const useDatasource = source && pattern.length === 0;
+
+        if (useDatasource) {
+          // Datasource-based discovery: list work items, fetch to temp dir
+          const datasource = getDatasource(source);
+          const fetchOpts: IssueFetchOptions = { cwd, org, project };
+          const items = await datasource.list(fetchOpts);
+
+          if (items.length === 0) {
+            tui.state.phase = "done";
+            tui.stop();
+            log.warn("No work items found from datasource: " + source);
+            return { total: 0, completed: 0, failed: 0, skipped: 0, results: [] };
+          }
+
+          // Fetch each item to a temp directory as a markdown file
+          const tempDir = await mkdtemp(join(tmpdir(), "dispatch-"));
+          files = [];
+
+          for (const item of items) {
+            const slug = item.title
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, "-")
+              .replace(/^-|-$/g, "")
+              .slice(0, 60);
+            const filename = `${item.number}-${slug}.md`;
+            const filepath = join(tempDir, filename);
+            await writeFile(filepath, item.body, "utf-8");
+            files.push(filepath);
+          }
+        } else {
+          // Glob-based discovery (existing behavior)
+          files = await glob(pattern, { cwd, absolute: true });
+        }
 
         if (files.length === 0) {
           tui.state.phase = "done";
@@ -103,6 +150,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
           log.warn("No files matched the pattern(s): " + pattern.join(", "));
           return { total: 0, completed: 0, failed: 0, skipped: 0, results: [] };
         }
+
         // Sort numerically by leading digits in filename (e.g. "6-foo.md" before "11-bar.md")
         files.sort((a, b) => {
           const numA = parseInt(basename(a).match(/^(\d+)/)?.[1] ?? "0", 10);
@@ -223,7 +271,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
         }
 
         // ── 6. Close originating issues for completed spec files ────
-        await closeCompletedSpecIssues(taskFiles, results, cwd);
+        await closeCompletedSpecIssues(taskFiles, results, cwd, source, org, project);
 
         // ── 7. Cleanup ──────────────────────────────────────────────
         await planner?.cleanup();
@@ -254,19 +302,26 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
 async function closeCompletedSpecIssues(
   taskFiles: TaskFile[],
   results: DispatchResult[],
-  cwd: string
+  cwd: string,
+  source?: DatasourceName,
+  org?: string,
+  project?: string,
 ): Promise<void> {
-  // Detect the issue source — skip silently if not in a supported repo
-  const source = await detectIssueSource(cwd);
-  if (!source) return;
+  // Resolve the datasource — use explicit source or auto-detect
+  let datasourceName = source;
+  if (!datasourceName) {
+    datasourceName = await detectDatasource(cwd) ?? undefined;
+  }
+  if (!datasourceName) return;
 
-  const fetcher = getIssueFetcher(source);
-  if (!fetcher.close) return;
+  const datasource = getDatasource(datasourceName);
 
   // Build a set of tasks that succeeded
   const succeededTasks = new Set(
     results.filter((r) => r.success).map((r) => r.task)
   );
+
+  const fetchOpts: IssueFetchOptions = { cwd, org, project };
 
   for (const taskFile of taskFiles) {
     const fileTasks = taskFile.tasks;
@@ -283,7 +338,7 @@ async function closeCompletedSpecIssues(
 
     const issueId = match[1];
     try {
-      await fetcher.close(issueId, { cwd });
+      await datasource.close(issueId, fetchOpts);
       log.success(`Closed issue #${issueId} (all tasks in ${filename} completed)`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -294,9 +349,43 @@ async function closeCompletedSpecIssues(
 
 async function dryRunMode(
   pattern: string[],
-  cwd: string
+  cwd: string,
+  source?: DatasourceName,
+  org?: string,
+  project?: string,
 ): Promise<DispatchSummary> {
-  const files = await glob(pattern, { cwd, absolute: true });
+  let files: string[];
+
+  const useDatasource = source && pattern.length === 0;
+
+  if (useDatasource) {
+    const datasource = getDatasource(source);
+    const fetchOpts: IssueFetchOptions = { cwd, org, project };
+    const items = await datasource.list(fetchOpts);
+
+    if (items.length === 0) {
+      log.warn("No work items found from datasource: " + source);
+      return { total: 0, completed: 0, failed: 0, skipped: 0, results: [] };
+    }
+
+    const tempDir = await mkdtemp(join(tmpdir(), "dispatch-"));
+    files = [];
+
+    for (const item of items) {
+      const slug = item.title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 60);
+      const filename = `${item.number}-${slug}.md`;
+      const filepath = join(tempDir, filename);
+      await writeFile(filepath, item.body, "utf-8");
+      files.push(filepath);
+    }
+  } else {
+    files = await glob(pattern, { cwd, absolute: true });
+  }
+
   files.sort((a, b) => {
     const numA = parseInt(basename(a).match(/^(\d+)/)?.[1] ?? "0", 10);
     const numB = parseInt(basename(b).match(/^(\d+)/)?.[1] ?? "0", 10);
