@@ -11,7 +11,14 @@ import type { AgentName, Agent, AgentBootOptions } from "../agent.js";
 import { boot as bootPlanner, type PlannerAgent } from "./planner.js";
 import { boot as bootExecutor, type ExecutorAgent } from "./executor.js";
 import { boot as bootSpec, type SpecAgent } from "./spec.js";
-import { boot as bootOrchestrator, type OrchestratorAgent } from "./orchestrator.js";
+import {
+  boot as bootOrchestrator,
+  type OrchestratorAgent,
+  type UnifiedRunOptions,
+  type RunResult,
+  type DispatchRunOptions,
+  type SpecRunOptions,
+} from "./orchestrator.js";
 
 type BootFn = (opts: AgentBootOptions) => Promise<Agent>;
 
@@ -49,4 +56,13 @@ export async function bootAgent(
  * Prefer these over the generic `bootAgent()` when you know the role at compile time.
  */
 export { bootPlanner, bootExecutor, bootOrchestrator, bootSpec };
-export type { PlannerAgent, ExecutorAgent, OrchestratorAgent, SpecAgent };
+export type {
+  PlannerAgent,
+  ExecutorAgent,
+  OrchestratorAgent,
+  SpecAgent,
+  UnifiedRunOptions,
+  RunResult,
+  DispatchRunOptions,
+  SpecRunOptions,
+};
