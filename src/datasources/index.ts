@@ -5,30 +5,23 @@
  * To add a new datasource:
  *   1. Create `src/datasources/<name>.ts` exporting a `datasource` object
  *   2. Import and register it in the `DATASOURCES` map below
- *   3. Add the name to the `DatasourceName` type
+ *   3. Add the name to the `DatasourceName` type in `src/datasource.ts`
  *   4. Add a URL pattern to `detectDatasource` if auto-detection is possible
  */
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { IssueSourceName, IssueFetcher } from "../issue-fetcher.js";
-import { fetcher as githubFetcher } from "../issue-fetchers/github.js";
-import { fetcher as azdevopsFetcher } from "../issue-fetchers/azdevops.js";
+import type { Datasource, DatasourceName } from "../datasource.js";
+import { datasource as githubDatasource } from "./github.js";
+import { datasource as azdevopsDatasource } from "./azdevops.js";
+import { datasource as mdDatasource } from "./md.js";
 
 const exec = promisify(execFile);
 
-/**
- * Supported datasource names.
- *
- * For now this mirrors `IssueSourceName` while the datasource abstraction
- * is being built out. It will diverge once new datasource types (e.g. "md")
- * are added.
- */
-export type DatasourceName = IssueSourceName;
-
-const DATASOURCES: Record<DatasourceName, IssueFetcher> = {
-  github: githubFetcher,
-  azdevops: azdevopsFetcher,
+const DATASOURCES: Partial<Record<DatasourceName, Datasource>> = {
+  github: githubDatasource,
+  azdevops: azdevopsDatasource,
+  md: mdDatasource,
 };
 
 /**
@@ -41,7 +34,7 @@ export const DATASOURCE_NAMES = Object.keys(DATASOURCES) as DatasourceName[];
  *
  * @throws if the datasource name is not registered.
  */
-export function getDatasource(name: DatasourceName): IssueFetcher {
+export function getDatasource(name: DatasourceName): Datasource {
   const datasource = DATASOURCES[name];
   if (!datasource) {
     throw new Error(
