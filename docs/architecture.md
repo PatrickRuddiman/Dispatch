@@ -38,12 +38,13 @@ small, well-defined units of work. dispatch-tasks solves three problems:
 ## System topology
 
 The diagram below shows every module in the source tree and how they relate.
-The CLI validates input and delegates to either the orchestrator (dispatch mode)
-or the spec generator (spec mode). In dispatch mode, the orchestrator drives a
-seven-stage pipeline through the parser, provider, planner, executor, and
-issue-fetcher modules. In spec mode, the spec generator drives a five-stage
-pipeline through the issue fetchers and provider. The TUI and logger provide
-output for interactive and non-interactive contexts respectively.
+The CLI is a thin argument-parsing shell that delegates entirely to the
+orchestrator. The orchestrator is the single pipeline controller for all
+workflow modes: in dispatch mode it drives a seven-stage pipeline through the
+parser, provider, planner, executor, and issue-fetcher modules; in spec mode
+it drives a five-stage pipeline through the issue fetchers, provider, and
+spec-generation utilities. The TUI and logger provide output for interactive
+and non-interactive contexts respectively.
 
 ```mermaid
 graph TD
@@ -57,8 +58,8 @@ graph TD
         LOG["logger.ts<br/>Structured logging"]
     end
 
-    subgraph "Spec Generation"
-        SPECGEN["spec-generator.ts<br/>Spec pipeline controller"]
+    subgraph "Spec Utilities"
+        SPECGEN["spec-generator.ts<br/>Spec utilities &amp; types"]
         IFETCH["issue-fetcher.ts<br/>IssueFetcher interface"]
         GFETCH["issue-fetchers/github.ts<br/>GitHub fetcher"]
         AFETCH["issue-fetchers/azdevops.ts<br/>Azure DevOps fetcher"]
@@ -94,7 +95,6 @@ graph TD
     end
 
     CLI --> ORCH
-    CLI --> SPECGEN
     ORCH --> TUI
     ORCH --> LOG
     ORCH --> PARSER
@@ -103,11 +103,9 @@ graph TD
     EXECUTOR --> DISPATCH
     ORCH --> GIT
     ORCH --> REG
+    ORCH --> SPECGEN
+    ORCH --> FETCHREG
 
-    SPECGEN --> FETCHREG
-    SPECGEN --> REG
-    SPECGEN --> IFACE
-    SPECGEN --> FS
     FETCHREG --> GFETCH
     FETCHREG --> AFETCH
     FETCHREG --> GITCLI
@@ -162,10 +160,11 @@ then an executor prompt), see the
 
 ## Spec generation pipeline
 
-When invoked with `--spec <ids>`, the CLI bypasses the orchestrator entirely
-and delegates to `generateSpecs()` in `src/spec-generator.ts`. This pipeline
-converts issue tracker items into high-level markdown spec files that can later
-be fed into dispatch mode.
+When invoked with `--spec <ids>`, the orchestrator's `generateSpecs()` method
+runs the spec-generation pipeline. The `src/spec-generator.ts` module provides
+utility functions (prompt builders, validators, source resolution) but the
+orchestrator drives the pipeline stages. This converts issue tracker items into
+high-level markdown spec files that can later be fed into dispatch mode.
 
 ```mermaid
 flowchart LR
@@ -182,19 +181,19 @@ flowchart LR
 | Detect | `src/issue-fetchers/index.ts` | If `--source` is not given, `detectIssueSource()` runs `git remote get-url origin` and matches the URL against regex patterns for supported platforms (GitHub, Azure DevOps). Supports both SSH and HTTPS remote formats. |
 | Fetch | `src/issue-fetchers/github.ts` or `azdevops.ts` | Each issue number is fetched sequentially via the platform's CLI tool (`gh` or `az`). The result is normalized into an `IssueDetails` object. Failed fetches are recorded but do not abort the pipeline. |
 | Boot | `src/providers/index.ts` | Same `bootProvider` call as dispatch mode — starts or connects to the AI backend. |
-| Generate | `src/spec-generator.ts` | For each successfully fetched issue, a fresh AI session is created, the issue details are wrapped in a ~115-line prompt instructing the AI to explore the codebase and produce a high-level spec, and the response is captured. Issues are processed sequentially, not in parallel. |
-| Write | `src/spec-generator.ts` | The AI response is written to `<output-dir>/<id>-<slug>.md`. The slug is the lowercased, sanitized title truncated to 60 characters. The output directory (default `.dispatch/specs`) is created with `mkdir -p` semantics. |
+| Generate | `src/agents/orchestrator.ts` | For each successfully fetched issue, a fresh AI session is created, the issue details are wrapped in a prompt instructing the AI to explore the codebase and produce a high-level spec, and the response is captured. Issues are processed in configurable batch concurrency. |
+| Write | `src/agents/orchestrator.ts` | The AI response is written to `<output-dir>/<id>-<slug>.md`. The slug is the lowercased, sanitized title truncated to 60 characters. The output directory (default `.dispatch/specs`) is created with `mkdir -p` semantics. |
 
 ### Key differences from dispatch mode
 
 | Aspect | Dispatch mode | Spec mode |
 |--------|--------------|-----------|
 | Input | Markdown task files (via glob) | Issue numbers (via `--spec`) |
-| Pipeline controller | `orchestrator.ts` | `spec-generator.ts` |
+| Pipeline controller | `orchestrator.ts` | `orchestrator.ts` (using utilities from `spec-generator.ts`) |
 | AI interaction | Planner + executor per task | Single spec-generation prompt per issue |
 | Output | Modified markdown + git commits | New spec files on disk |
-| Concurrency | Configurable (`--concurrency`) | Sequential only |
-| Provider cleanup | Called on success path only (gap) | Always called after generation |
+| Concurrency | Configurable (`--concurrency`) | Configurable (`--concurrency`) |
+| Provider cleanup | Via `registerCleanup()` at boot | Via `registerCleanup()` at boot |
 
 For the complete spec generation documentation, see the
 [Spec Generation overview](spec-generation/overview.md).
@@ -540,8 +539,9 @@ See the [Shared Types overview](shared-types/overview.md) and the
 
 ### [CLI & Orchestration](cli-orchestration/overview.md)
 
-The entry point and pipeline controller. Parses arguments, drives the
-seven-stage pipeline, and provides visual feedback.
+The entry point and centralized pipeline controller. The CLI parses arguments
+and delegates to the orchestrator, which drives all workflow pipelines
+(dispatch and spec generation) and provides visual feedback.
 
 - [CLI argument parser](cli-orchestration/cli.md)
 - [Orchestrator pipeline](cli-orchestration/orchestrator.md)
