@@ -29,7 +29,7 @@ function resolveDir(opts?: IssueFetchOptions): string {
  * Extract a title from markdown content.
  * Looks for the first `# Heading` line; falls back to the filename.
  */
-function extractTitle(content: string, filename: string): string {
+export function extractTitle(content: string, filename: string): string {
   const match = content.match(/^#\s+(.+)$/m);
   return match ? match[1].trim() : parsePath(filename).name;
 }

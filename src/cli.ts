@@ -101,7 +101,7 @@ interface CliArgs {
   version: boolean;
   verbose: boolean;
   // Spec mode
-  spec?: string;
+  spec?: string | string[];
   issueSource?: DatasourceName;
   org?: string;
   project?: string;
@@ -143,7 +143,13 @@ function parseArgs(argv: string[]): [CliArgs, Set<string>] {
       explicitFlags.add("verbose");
     } else if (arg === "--spec") {
       i++;
-      args.spec = argv[i];
+      const specs: string[] = [];
+      while (i < argv.length && !argv[i].startsWith("--")) {
+        specs.push(argv[i]);
+        i++;
+      }
+      i--; // outer loop will i++
+      args.spec = specs.length === 1 ? specs[0] : specs;
       explicitFlags.add("spec");
     } else if (arg === "--source") {
       i++;
