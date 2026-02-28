@@ -104,30 +104,25 @@ export const datasource: Datasource = {
   async create(title: string, body: string, opts: IssueFetchOptions = {}): Promise<IssueDetails> {
     const cwd = opts.cwd || process.cwd();
 
+    // gh issue create outputs the URL of the created issue on stdout.
+    // It does not support --json (unlike gh issue view / gh issue list).
     const { stdout } = await exec(
       "gh",
-      [
-        "issue",
-        "create",
-        "--title",
-        title,
-        "--body",
-        body,
-        "--json",
-        "number,title,body,labels,state,url",
-      ],
+      ["issue", "create", "--title", title, "--body", body],
       { cwd }
     );
 
-    const issue = JSON.parse(stdout);
+    const url = stdout.trim();
+    const match = url.match(/\/issues\/(\d+)$/);
+    const number = match ? match[1] : "0";
 
     return {
-      number: String(issue.number),
-      title: issue.title ?? title,
-      body: issue.body ?? body,
-      labels: (issue.labels ?? []).map((l: { name: string }) => l.name),
-      state: issue.state ?? "OPEN",
-      url: issue.url ?? "",
+      number,
+      title,
+      body,
+      labels: [],
+      state: "open",
+      url,
       comments: [],
       acceptanceCriteria: "",
     };
