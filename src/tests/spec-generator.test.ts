@@ -86,6 +86,12 @@ describe("resolveSource", () => {
     expect(spy).toHaveBeenCalledWith(CWD);
     expect(result).toBeNull();
   });
+
+  it("returns 'md' for an array of file paths when auto-detection returns null", async () => {
+    vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
+    const result = await resolveSource(["/path/to/spec1.md", "/path/to/spec2.md"], undefined, CWD);
+    expect(result).toBe("md");
+  });
 });
 
 describe("isIssueNumbers", () => {
@@ -176,6 +182,14 @@ describe("isIssueNumbers", () => {
   it("returns false for mixed numeric and alphabetic content", () => {
     expect(isIssueNumbers("42,foo")).toBe(false);
   });
+
+  it("returns false for an array of file paths", () => {
+    expect(isIssueNumbers(["/path/to/spec1.md", "/path/to/spec2.md"])).toBe(false);
+  });
+
+  it("returns false for an empty array", () => {
+    expect(isIssueNumbers([])).toBe(false);
+  });
 });
 
 describe("buildFileSpecPrompt", () => {
@@ -188,9 +202,15 @@ describe("buildFileSpecPrompt", () => {
     expect(typeof result).toBe("string");
   });
 
-  it("derives the title from the filename without extension", () => {
+  it("falls back to filename as title when no heading exists", () => {
     const result = buildFileSpecPrompt(FILE_PATH, CONTENT, CWD);
     expect(result).toContain("- **Title:** my-feature");
+  });
+
+  it("extracts title from first markdown heading", () => {
+    const headingContent = "# My Feature Title\n\nThis is the description.";
+    const result = buildFileSpecPrompt(FILE_PATH, headingContent, CWD);
+    expect(result).toContain("- **Title:** My Feature Title");
   });
 
   it("includes the source file path", () => {
@@ -282,8 +302,8 @@ describe("buildFileSpecPrompt", () => {
 
   it("handles a file path without .md extension", () => {
     const result = buildFileSpecPrompt("/home/user/drafts/feature.txt", CONTENT, CWD);
-    // basename("/home/user/drafts/feature.txt", ".md") yields "feature.txt"
-    expect(result).toContain("- **Title:** feature.txt");
+    // extractTitle falls back to parsePath().name which strips any extension
+    expect(result).toContain("- **Title:** feature");
   });
 
   it("includes all key guidelines", () => {

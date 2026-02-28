@@ -19,11 +19,12 @@
  */
 
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { cpus, freemem } from "node:os";
 import type { ProviderInstance } from "./provider.js";
 import type { IssueDetails, IssueFetchOptions, DatasourceName } from "./datasource.js";
 import { getDatasource, detectDatasource, DATASOURCE_NAMES } from "./datasources/index.js";
+import { extractTitle } from "./datasources/md.js";
 import type { ProviderName } from "./provider.js";
 import { bootProvider } from "./providers/index.js";
 import { log } from "./logger.js";
@@ -32,8 +33,8 @@ import { registerCleanup } from "./cleanup.js";
 import { glob } from "glob";
 
 export interface SpecOptions {
-  /** Comma-separated issue numbers, glob pattern, or "list" to use datasource.list() */
-  issues: string;
+  /** Comma-separated issue numbers, glob pattern(s), or "list" to use datasource.list() */
+  issues: string | string[];
   /** Explicit datasource override (auto-detected if omitted) */
   issueSource?: DatasourceName;
   /** AI agent backend */
@@ -65,7 +66,8 @@ export function defaultConcurrency(): number {
  * This is the branching point for the two spec-generation code paths:
  * issue-tracker mode vs. local-file/glob mode.
  */
-export function isIssueNumbers(input: string): boolean {
+export function isIssueNumbers(input: string | string[]): input is string {
+  if (Array.isArray(input)) return false;
   return /^\d+(,\s*\d+)*$/.test(input);
 }
 
@@ -207,7 +209,7 @@ export function validateSpecStructure(content: string): ValidationResult {
  *   4. For issue-number inputs, return `null` when auto-detection fails (caller should abort).
  */
 export async function resolveSource(
-  issues: string,
+  issues: string | string[],
   issueSource: DatasourceName | undefined,
   cwd: string
 ): Promise<DatasourceName | null> {
@@ -321,7 +323,7 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
     const files = await glob(issues, { cwd, absolute: true });
 
     if (files.length === 0) {
-      log.error(`No files matched the pattern "${issues}".`);
+      log.error(`No files matched the pattern "${Array.isArray(issues) ? issues.join(", ") : issues}".`);
       return { total: 0, generated: 0, failed: 0, files: [], durationMs: 0, fileDurationsMs: {} };
     }
 
@@ -331,7 +333,7 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
     for (const filePath of files) {
       try {
         const content = await readFile(filePath, "utf-8");
-        const title = basename(filePath, ".md");
+        const title = extractTitle(content, filePath);
         const details: IssueDetails = {
           number: filePath,
           title,
@@ -685,15 +687,16 @@ function buildSpecPrompt(issue: IssueDetails, cwd: string, outputPath: string): 
 
 /**
  * Build a spec prompt from a local markdown file instead of an issue-tracker
- * issue.  The filename (basename without extension) serves as the title, and
- * the file content serves as the description.  The output path is the source
- * file itself (in-place overwrite).
+ * issue.  The title is extracted from the first `# Heading` in the content,
+ * falling back to the filename without extension.  The file content serves as
+ * the description.  The output path is the source file itself (in-place
+ * overwrite).
  *
  * The output-format instructions, spec structure template, (P)/(S) tagging
  * rules, and agent guidelines are identical to those in `buildSpecPrompt()`.
  */
 export function buildFileSpecPrompt(filePath: string, content: string, cwd: string): string {
-  const title = basename(filePath, ".md");
+  const title = extractTitle(content, filePath);
 
   const sections: string[] = [
     `You are a **spec agent**. Your job is to explore the codebase, understand the content below, and write a high-level **markdown spec file** to disk that will drive an automated implementation pipeline.`,
