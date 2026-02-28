@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { isIssueNumbers, validateSpecStructure, extractSpecContent, resolveSource } from "../spec-generator.js";
 import { buildFileSpecPrompt, boot } from "../agents/spec.js";
 import * as datasourcesIndex from "../datasources/index.js";
-import type { ProviderInstance } from "../provider.js";
+import type { ProviderInstance } from "../providers/interface.js";
 import type { IssueDetails } from "../datasources/interface.js";
 
 vi.mock("node:fs/promises", () => ({

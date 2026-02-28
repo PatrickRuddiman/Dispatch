@@ -11,7 +11,7 @@
  */
 
 import { CopilotClient, type CopilotSession } from "@github/copilot-sdk";
-import type { ProviderInstance, ProviderBootOptions } from "../provider.js";
+import type { ProviderInstance, ProviderBootOptions } from "./interface.js";
 import { log } from "../logger.js";
 
 /**

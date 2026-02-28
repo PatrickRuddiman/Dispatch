@@ -14,7 +14,7 @@
  *   4. Add the name to the `AgentName` union below
  */
 
-import type { ProviderInstance } from "./provider.js";
+import type { ProviderInstance } from "./providers/interface.js";
 
 export type AgentName = "planner" | "executor" | "spec";
 

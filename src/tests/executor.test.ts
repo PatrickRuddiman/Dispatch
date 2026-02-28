@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Task } from "../parser.js";
-import type { ProviderInstance } from "../provider.js";
+import type { ProviderInstance } from "../providers/interface.js";
 import type { DispatchResult } from "../dispatcher.js";
 
 vi.mock("../dispatcher.js", () => ({

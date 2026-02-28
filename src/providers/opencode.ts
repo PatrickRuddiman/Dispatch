@@ -22,7 +22,7 @@ import {
   type TextPart,
   type Event as SdkEvent,
 } from "@opencode-ai/sdk";
-import type { ProviderInstance, ProviderBootOptions } from "../provider.js";
+import type { ProviderInstance, ProviderBootOptions } from "./interface.js";
 import { log } from "../logger.js";
 
 /**
