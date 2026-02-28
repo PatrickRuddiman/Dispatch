@@ -202,15 +202,28 @@ describe("buildFileSpecPrompt", () => {
     expect(typeof result).toBe("string");
   });
 
-  it("falls back to filename as title when no heading exists", () => {
+  it("extracts title from first H1 heading when content contains one", () => {
+    const headingContent = "# My Feature Title\n\nThis is the description.";
+    const result = buildFileSpecPrompt(FILE_PATH, headingContent, CWD);
+    expect(result).toContain("- **Title:** My Feature Title");
+  });
+
+  it("prefers the first H1 heading over the filename", () => {
+    const headingContent = "# Use First Heading as Title\n\nSome body text.";
+    const result = buildFileSpecPrompt("/home/user/drafts/some-other-name.md", headingContent, CWD);
+    expect(result).toContain("- **Title:** Use First Heading as Title");
+    expect(result).not.toContain("- **Title:** some-other-name");
+  });
+
+  it("falls back to filename as title when no H1 heading exists", () => {
     const result = buildFileSpecPrompt(FILE_PATH, CONTENT, CWD);
     expect(result).toContain("- **Title:** my-feature");
   });
 
-  it("extracts title from first markdown heading", () => {
-    const headingContent = "# My Feature Title\n\nThis is the description.";
-    const result = buildFileSpecPrompt(FILE_PATH, headingContent, CWD);
-    expect(result).toContain("- **Title:** My Feature Title");
+  it("falls back to filename when content has only H2 or lower headings", () => {
+    const noH1Content = "## Subheading Only\n\nNo top-level heading here.";
+    const result = buildFileSpecPrompt(FILE_PATH, noH1Content, CWD);
+    expect(result).toContain("- **Title:** my-feature");
   });
 
   it("includes the source file path", () => {
