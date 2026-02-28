@@ -396,11 +396,22 @@ export async function generateSpecs(opts: SpecOptions): Promise<SpecSummary> {
           // Push spec content back to the datasource
           try {
             const specContent = await readFile(filepath, "utf-8");
-            await datasource.update(id, details!.title, specContent, fetchOpts);
-            log.success(`Updated ${isTrackerMode ? `issue #${id}` : filepath} with spec content`);
+            if (isTrackerMode) {
+              // Tracker mode: update the existing issue with the generated spec
+              await datasource.update(id, details!.title, specContent, fetchOpts);
+              log.success(`Updated issue #${id} with spec content`);
+            } else if (datasource.name !== "md") {
+              // File/glob mode with tracker datasource: create a new issue and delete the local file
+              const created = await datasource.create(details!.title, specContent, fetchOpts);
+              log.success(`Created issue #${created.number} from ${filepath}`);
+              await unlink(filepath);
+              log.success(`Deleted local spec ${filepath} (now tracked as issue #${created.number})`);
+            }
+            // md datasource + file/glob mode: file already written in-place, nothing to do
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            log.warn(`Could not update ${isTrackerMode ? `issue #${id}` : filepath}: ${message}`);
+            const label = isTrackerMode ? `issue #${id}` : filepath;
+            log.warn(`Could not sync ${label} to datasource: ${message}`);
           }
 
           return filepath;
