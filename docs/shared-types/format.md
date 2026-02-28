@@ -68,16 +68,14 @@ None of these edge cases are likely in practice since callers pass
 
 ## Test coverage
 
-The test file (`src/tests/format.test.ts`, 34 lines) covers six categories:
+The test file (`src/tests/format.test.ts`, 34 lines) covers six categories
+including zero/sub-second edge cases, seconds-only formatting, minutes-and-seconds
+formatting, large durations (hour-scale), and fractional millisecond truncation.
+Tests use [Vitest](https://vitest.dev/) as described in the
+[Testing Overview](../testing/overview.md).
 
-| Test case | Input | Expected output |
-|-----------|-------|-----------------|
-| Zero milliseconds | `0` | `"0s"` |
-| Sub-second durations | `999` | `"0s"` |
-| Whole seconds | `1000`, `45000`, `59000` | `"1s"`, `"45s"`, `"59s"` |
-| Minutes and seconds | `60000`, `61000`, `133000` | `"1m 0s"`, `"1m 1s"`, `"2m 13s"` |
-| Large durations | `3600000`, `5400000` | `"60m 0s"`, `"90m 0s"` |
-| Fractional milliseconds | `1500`, `61999` | `"1s"`, `"1m 1s"` |
+See [Format Utility Tests](../testing/format-tests.md) for the full test
+breakdown.
 
 ## Usage in the codebase
 
@@ -96,3 +94,9 @@ The `elapsed()` function is imported by:
 - [Overview](./overview.md) -- Shared Interfaces & Utilities layer
 - [Logger](./logger.md) -- Terminal output that often displays elapsed times
 - [TUI](../cli-orchestration/tui.md) -- Primary consumer of `elapsed()`
+- [Format Utility Tests](../testing/format-tests.md) -- Detailed test
+  breakdown for `elapsed()` covering edge cases and large durations
+- [Spec Generation](../spec-generation/overview.md) -- Uses `elapsed()` for
+  logging generation duration
+- [Integrations](./integrations.md) -- Node.js operational details for the
+  shared layer

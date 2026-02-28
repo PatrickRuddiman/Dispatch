@@ -79,3 +79,9 @@ graph TD
   planner and dispatcher use the provider and parser contracts
 - [Provider Abstraction & Backends](../provider-system/provider-overview.md) --
   Concrete implementations of the ProviderInstance interface
+- [Spec Generation](../spec-generation/overview.md) -- The `--spec` pipeline
+  that uses cleanup, provider, and logger utilities
+- [Datasource System](../datasource-system/overview.md) -- Datasource
+  interface and registry that consumes shared types
+- [Testing Overview](../testing/overview.md) -- Project-wide test suite
+  covering config, format, parser, and spec-generator modules

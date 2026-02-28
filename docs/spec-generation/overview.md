@@ -11,7 +11,7 @@ main `dispatch` command.
 When a user runs `dispatch --spec 42,43,44`, the pipeline:
 
 1. **Detects the issue source** from the git remote URL, or accepts an explicit
-   `--source` flag.
+   `--source` flag. See [Datasource Auto-Detection](../datasource-system/overview.md#auto-detection).
 2. **Fetches each issue's details** via a pluggable
    [issue fetcher](../issue-fetching/overview.md) (`gh` CLI for GitHub,
    `az` CLI for Azure DevOps).
@@ -155,42 +155,17 @@ dispatch ".dispatch/specs/*.md"
 ## Issue source detection
 
 When `--source` is not provided, the spec generator calls
-`detectIssueSource(cwd)` to determine which issue tracker to use. This
-function:
+`detectIssueSource(cwd)` to auto-detect the issue tracker from the git
+`origin` remote URL. The function matches against known hostname patterns
+(github.com, dev.azure.com, visualstudio.com) and supports both SSH and HTTPS
+URL formats.
 
-1. Runs `git remote get-url origin` in the working directory.
-2. Tests the returned URL against patterns in order (first match wins):
+If detection fails (no pattern match, not a git repository, or no `origin`
+remote), all issues are marked as failed and the process exits with code `1`.
+Use `--source` to bypass auto-detection entirely.
 
-| Pattern | Detected source | Example URLs |
-|---------|----------------|-------------|
-| `/github\.com/i` | `github` | `https://github.com/owner/repo`, `git@github.com:owner/repo.git` |
-| `/dev\.azure\.com/i` | `azdevops` | `https://dev.azure.com/org/project` |
-| `/visualstudio\.com/i` | `azdevops` | `https://org.visualstudio.com/project` |
-
-3. Returns `null` if no pattern matches.
-
-**Both HTTPS and SSH URLs are supported.** The regex tests for the hostname
-string anywhere in the URL, so `git@github.com:owner/repo.git` matches
-`github.com` just as `https://github.com/owner/repo` does.
-
-### What happens when detection fails
-
-If the git remote URL does not match any known pattern and `--source` is not
-specified, `generateSpecs()` at `src/spec-generator.ts:88-95`:
-
-1. Logs a descriptive error message listing supported sources and suggesting
-   `--source`.
-2. Returns immediately with all issues marked as failed
-   (`{ total: N, generated: 0, failed: N, files: [] }`).
-3. The CLI exits with code `1`.
-
-Detection also fails (returns `null`) if:
-- The working directory is not a git repository.
-- No `origin` remote is configured.
-- The `git` command is not available on PATH.
-
-In all these cases, the same error message is displayed. Use `--source` to
-bypass auto-detection entirely.
+See [Datasource Auto-Detection](../datasource-system/overview.md#auto-detection)
+for the full pattern table, URL format support, and limitation details.
 
 ## Spec file output
 
@@ -434,10 +409,10 @@ code. Use the log output to determine which specific issues failed and why.
 
 Unlike the [dispatch orchestrator's cleanup gap](../cli-orchestration/orchestrator.md#the-cleanup-gap),
 the spec generator calls `instance.cleanup()` on the success path at
-`src/spec-generator.ts:163`. However, if an unhandled error occurs after the
-provider is booted (e.g., `mkdir` fails), the cleanup call may be skipped.
-The top-level `.catch()` handler in `src/cli.ts:218-220` will catch the error
-and exit, potentially leaving orphaned provider processes.
+`src/spec-generator.ts:163`. The [cleanup registry](../shared-types/cleanup.md)
+provides a safety net: even if an unhandled error occurs after the
+provider is booted (e.g., `mkdir` fails), the top-level `.catch()` handler
+in `src/cli.ts:218-220` will drain the registry before exiting.
 
 ## CLI spec mode vs dispatch mode
 
@@ -473,13 +448,23 @@ but ignored in spec mode. The shared options (`--provider`, `--server-url`,
   integration, setup, and troubleshooting
 - [Azure DevOps Fetcher](../issue-fetching/azdevops-fetcher.md) -- Azure CLI
   integration, setup, and troubleshooting
+- [Datasource System](../datasource-system/overview.md) -- Datasource
+  interface, registry, and auto-detection underlying the fetchers
+- [GitHub Datasource](../datasource-system/github-datasource.md) -- The GitHub
+  datasource implementation used by the fetcher shim
+- [Datasource Integrations](../datasource-system/integrations.md) -- How
+  datasource integrations consume generated specs
 - [Integrations & Troubleshooting](./integrations.md) -- External dependencies,
   auth, and troubleshooting for the spec pipeline
 - [Provider Abstraction & Backends](../provider-system/provider-overview.md) --
   AI provider setup and session model
+- [Cleanup Registry](../shared-types/cleanup.md) -- How provider cleanup is
+  registered and drained on exit
 - [CLI Argument Parser](../cli-orchestration/cli.md) -- Full CLI option reference
   including `--spec` mode
 - [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) -- How
   generated spec files are consumed downstream
+- [Testing Overview](../testing/overview.md) -- Test coverage including
+  [spec generator tests](../testing/spec-generator-tests.md)
 - [Architecture Overview](../architecture.md) -- System-wide design and
   pipeline topology

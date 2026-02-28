@@ -277,7 +277,8 @@ The pipeline does **not** attempt to restart the provider or retry failed tasks.
 After a provider crash, the orchestrator calls `instance.cleanup()` during
 shutdown, which is designed to be safe to call even if the provider is already
 stopped. See [provider cleanup](../provider-system/provider-overview.md#cleanup-and-in-flight-sessions)
-for details.
+for details. The [cleanup registry](../shared-types/cleanup.md) ensures this
+teardown runs even if the process exits via signal or unhandled error.
 
 **Recovery**:
 
@@ -298,3 +299,9 @@ for details.
 - [OpenCode Backend](../provider-system/opencode-backend.md) -- OpenCode-specific troubleshooting
 - [Copilot Backend](../provider-system/copilot-backend.md) -- Copilot-specific authentication and troubleshooting
 - [CLI & Orchestration](../cli-orchestration/overview.md) -- CLI flags and orchestrator loop
+- [Cleanup Registry](../shared-types/cleanup.md) -- Process-level cleanup
+  that drains provider teardown on exit
+- [Testing Overview](../testing/overview.md) -- Test coverage (note: the
+  orchestrator, planner, dispatcher, and git modules are not unit tested)
+- [Datasource Integrations](../datasource-system/integrations.md) -- Similar
+  subprocess patterns used by the datasource layer

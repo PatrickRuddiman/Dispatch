@@ -99,7 +99,7 @@ only the task metadata and working directory.
 
 | Module | Responsibility | Source |
 |--------|---------------|--------|
-| `parser.ts` | Extract tasks from markdown; build filtered context; mark tasks complete | `src/parser.ts` — see [Task Parsing](../task-parsing/overview.md) |
+| `parser.ts` | Extract tasks from markdown; build filtered context; mark tasks complete | `src/parser.ts` — see [Task Parsing](../task-parsing/overview.md) and [API Reference](../task-parsing/api-reference.md) |
 | `planner.ts` | Run a read-only AI session to produce an execution plan | `src/planner.ts` — see [Planner Agent](./planner.md) |
 | `dispatcher.ts` | Send tasks to an AI agent in isolated sessions | `src/dispatcher.ts` — see [Dispatcher](./dispatcher.md) |
 | `git.ts` | Stage changes and create conventional commits | `src/git.ts` — see [Git Operations](./git.md) |
@@ -164,6 +164,19 @@ concurrency-related concerns.
 - [Integrations & Troubleshooting](./integrations.md) -- Provider system,
   Node.js child_process, fs operations
 - [CLI & Orchestration](../cli-orchestration/overview.md) -- Orchestrator loop and CLI flags
+- [CLI Argument Parser](../cli-orchestration/cli.md) -- `--no-plan`,
+  `--concurrency`, and `--dry-run` flag documentation
 - [Provider Abstraction](../provider-system/provider-overview.md) -- Provider interface and backends
+- [OpenCode Backend](../provider-system/opencode-backend.md) -- OpenCode
+  provider setup and async prompt model
+- [Copilot Backend](../provider-system/copilot-backend.md) -- Copilot
+  provider setup and synchronous prompt model
 - [Shared Interfaces & Utilities](../shared-types/overview.md) -- `Task`, `TaskFile`, and
   `ProviderInstance` type definitions
+- [Task Parsing API Reference](../task-parsing/api-reference.md) --
+  `parseTaskFile`, `buildTaskContext`, `markTaskComplete`, and `groupTasksByMode`
+  function contracts
+- [Spec Generation](../spec-generation/overview.md) -- How the spec pipeline
+  produces the markdown task files consumed by this pipeline
+- [Testing Overview](../testing/overview.md) -- Test suite structure (note:
+  planner, dispatcher, and git modules are not currently unit-tested)

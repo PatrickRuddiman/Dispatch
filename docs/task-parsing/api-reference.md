@@ -248,6 +248,9 @@ The algorithm iterates through tasks in order, accumulating them into groups:
 | `[P, S, P]` | `[[P, S], [P]]` | First serial caps the first group; trailing parallel starts a new one |
 | `[]` | `[]` | Empty input produces empty output |
 
+See [Parser Tests — groupTasksByMode](../testing/parser-tests.md#grouptasksbymode-10-tests)
+for the full test coverage of this algorithm.
+
 **Execution order guarantee:** Groups are processed sequentially (group N
 completes before group N+1 starts). Within a group, tasks are dispatched
 concurrently in batches of `--concurrency`. This means serial tasks act as
@@ -306,9 +309,13 @@ The parser uses `readFile` and `writeFile` from `node:fs/promises`:
 - [Architecture & Concurrency](./architecture-and-concurrency.md) -- I/O
   safety and race conditions
 - [Testing Guide](./testing-guide.md) -- how to run and extend tests
+- [Parser Tests (detailed)](../testing/parser-tests.md) -- comprehensive
+  breakdown of all 62 parser tests verifying these function contracts
 - [Shared Parser Types](../shared-types/parser.md) -- summary of types and
   functions from the shared-types perspective
 - [Task Context & Lifecycle](../planning-and-dispatch/task-context-and-lifecycle.md) --
   how the parser functions are used within the dispatch pipeline
 - [Orchestrator](../cli-orchestration/orchestrator.md) -- the primary consumer
   of `parseTaskFile`, `buildTaskContext`, and `markTaskComplete`
+- [Planning & Dispatch Overview](../planning-and-dispatch/overview.md) --
+  pipeline stages that consume parser output

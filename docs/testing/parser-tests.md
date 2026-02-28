@@ -10,7 +10,7 @@ see also the [parser testing guide](../task-parsing/testing-guide.md).
 ## What is tested
 
 The parser module is the foundational data extraction and mutation layer. It
-converts markdown checkbox syntax into structured `Task` and `TaskFile` objects,
+converts markdown checkbox syntax into structured [`Task`](../shared-types/parser.md) and [`TaskFile`](../shared-types/parser.md) objects,
 provides context filtering for planner agents, marks tasks as complete by
 mutating files, and groups tasks by execution mode. The test file covers all
 five public functions.
@@ -22,7 +22,7 @@ largest test file in the project.
 
 ### parseTaskContent — basic extraction (19 tests)
 
-Tests the core `parseTaskContent()` function, which is a **pure function** that
+Tests the core [`parseTaskContent()`](../task-parsing/api-reference.md#parsetaskcontent) function, which is a **pure function** that
 takes a markdown string and a file path, and returns a `TaskFile` object with
 extracted tasks and the original content.
 
@@ -118,7 +118,7 @@ flowchart TD
 
 ### parseTaskFile (1 test)
 
-Tests the `parseTaskFile()` function, which reads a markdown file from disk and
+Tests the [`parseTaskFile()`](../task-parsing/api-reference.md#parsetaskfile) function, which reads a markdown file from disk and
 delegates to `parseTaskContent()`.
 
 | Test | What it verifies |
@@ -131,7 +131,7 @@ This test creates a temporary file on disk, writes markdown content, calls
 
 ### markTaskComplete (4 tests)
 
-Tests the `markTaskComplete()` function, which performs an in-place file
+Tests the [`markTaskComplete()`](../task-parsing/api-reference.md#marktaskcomplete) function, which performs an in-place file
 mutation to replace `[ ]` with `[x]` at a specific line.
 
 | Test | What it verifies |
@@ -153,8 +153,8 @@ parsing and completion.
 
 ### buildTaskContext (8 tests)
 
-Tests the `buildTaskContext()` function, which produces filtered markdown
-content for planner agents by removing all unchecked tasks except the
+Tests the [`buildTaskContext()`](../task-parsing/api-reference.md#buildtaskcontext) function, which produces filtered markdown
+content for [planner agents](../planning-and-dispatch/overview.md) by removing all unchecked tasks except the
 current one.
 
 | Test | What it verifies |
@@ -179,7 +179,7 @@ current one.
 
 ### groupTasksByMode (10 tests)
 
-Tests the `groupTasksByMode()` function, which partitions a flat list of tasks
+Tests the [`groupTasksByMode()`](../task-parsing/api-reference.md#grouptasksbymode) function, which partitions a flat list of tasks
 into execution groups based on their `mode` field.
 
 **Grouping algorithm:**
@@ -235,4 +235,6 @@ creates a unique `/tmp/dispatch-test-*` directory and removes it in `afterEach`.
 - [Markdown syntax reference](../task-parsing/markdown-syntax.md) — accepted and rejected formats
 - [API reference](../task-parsing/api-reference.md) — function contracts verified by tests
 - [Architecture and concurrency](../task-parsing/architecture-and-concurrency.md) — concurrency concerns
+- [Shared parser types](../shared-types/parser.md) — `Task`, `TaskFile`, and exported function signatures
+- [Planning & Dispatch overview](../planning-and-dispatch/overview.md) — the planner and dispatcher that consume parser output
 - [Spec generator tests](spec-generator-tests.md) — `(P)`/`(S)` prefix instructions in prompts

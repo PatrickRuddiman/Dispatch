@@ -1,5 +1,13 @@
 # Adding a Fetcher
 
+> **Deprecated.** The `IssueFetcher` interface and the `src/issue-fetchers/`
+> registry described below are deprecated compatibility shims. New integrations
+> should implement the `Datasource` interface in `src/datasource.ts` and
+> register in `src/datasources/index.ts`. The `Datasource` interface is a
+> superset of `IssueFetcher`, adding `list()` and `create()` methods.
+> See the [Deprecated Compatibility Layer](../deprecated-compat/overview.md)
+> for the full interface comparison and migration guide.
+
 This guide walks through the steps required to add a new issue tracker
 integration (e.g., Jira, Linear, GitLab) to the issue fetching subsystem.
 
@@ -9,6 +17,13 @@ The issue fetching system uses a strategy pattern: each tracker has a fetcher
 module that implements the `IssueFetcher` interface and is registered in a
 central map. Adding a new tracker requires changes in three files and
 optionally a fourth for auto-detection.
+
+> **Note:** The instructions below reference the deprecated `IssueFetcher` path.
+> For new implementations, create a datasource module in `src/datasources/`
+> implementing the `Datasource` interface from `src/datasource.ts`, and register
+> it in the `DATASOURCES` map in `src/datasources/index.ts`. The deprecated
+> shim layer will automatically pick up any new datasource whose name is in the
+> `IssueSourceName` type (i.e., excludes `"md"`).
 
 ## Step-by-step checklist
 
@@ -199,6 +214,6 @@ free of implementation imports at the cost of manual synchronization.
   a CLI tool
 - [Azure DevOps Fetcher](./azdevops-fetcher.md) -- Reference implementation
   with optional comment fetching
-- [Integrations](./integrations.md) -- Subprocess patterns and error handling
+- [Integrations](../datasource-system/integrations.md) -- Subprocess patterns and error handling
 - [Adding a Provider](../provider-system/adding-a-provider.md) -- Analogous
   guide for the AI provider abstraction layer

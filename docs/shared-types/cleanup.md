@@ -28,7 +28,7 @@ method, these child processes can be left as orphans consuming system
 resources. The cleanup registry solves this by:
 
 - **Centralizing teardown responsibility.** Registration happens in the modules
-  that create resources (orchestrator, spec-generator), while draining happens
+  that create resources ([orchestrator](../cli-orchestration/orchestrator.md), [spec-generator](../spec-generation/overview.md)), while draining happens
   in the CLI's exit paths (signal handlers, error handler). Neither side needs
   to know about the other's internals.
 - **Making shutdown idempotent.** The `splice(0)` pattern empties the registry
@@ -289,3 +289,7 @@ This would give each cleanup function 5 seconds before the loop moves on.
   cleanup is registered
 - [Provider Abstraction](../provider-system/provider-overview.md) -- The
   `cleanup()` method on ProviderInstance
+- [Adding a Provider](../provider-system/adding-a-provider.md) -- Guide for
+  implementing cleanup idempotency in new providers
+- [Testing Overview](../testing/overview.md) -- Test coverage (note: the
+  cleanup registry is not unit tested)

@@ -134,8 +134,8 @@ The following production modules do not have corresponding test files:
 - `src/logger.ts` — structured logging
 - `src/providers/opencode.ts` — OpenCode backend
 - `src/providers/copilot.ts` — Copilot backend
-- `src/issue-fetchers/github.ts` — GitHub issue fetcher
-- `src/issue-fetchers/azdevops.ts` — Azure DevOps issue fetcher
+- `src/issue-fetchers/github.ts` — GitHub issue fetcher (delegates to [GitHub datasource](../datasource-system/github-datasource.md))
+- `src/issue-fetchers/azdevops.ts` — Azure DevOps issue fetcher (delegates to [Azure DevOps datasource](../datasource-system/azdevops-datasource.md))
 - `src/cli.ts` — CLI argument parser (integration-level only)
 
 These modules interact with external services (AI SDKs, git CLI, issue
@@ -144,9 +144,15 @@ infrastructure.
 
 ## Related documentation
 
-- [Configuration tests](config-tests.md) — `config.test.ts` detailed breakdown
-- [Format utility tests](format-tests.md) — `format.test.ts` detailed breakdown
-- [Parser tests](parser-tests.md) — `parser.test.ts` detailed breakdown
-- [Spec generator tests](spec-generator-tests.md) — `spec-generator.test.ts` detailed breakdown
-- [Parser testing guide](../task-parsing/testing-guide.md) — parser-specific testing patterns
-- [Architecture overview](../architecture.md) — system-wide context
+- [Configuration tests](config-tests.md) -- `config.test.ts` detailed breakdown
+- [Format utility tests](format-tests.md) -- `format.test.ts` detailed breakdown
+- [Parser tests](parser-tests.md) -- `parser.test.ts` detailed breakdown
+- [Spec generator tests](spec-generator-tests.md) -- `spec-generator.test.ts` detailed breakdown
+- [Parser testing guide](../task-parsing/testing-guide.md) -- parser-specific testing patterns
+- [Datasource testing](../datasource-system/testing.md) -- datasource-specific
+  test suite (markdown datasource, registry, and config validation)
+- [Shared Interfaces & Utilities](../shared-types/overview.md) -- the shared
+  types tested by config, format, and parser test files
+- [Spec Generation](../spec-generation/overview.md) -- the spec pipeline
+  tested by `spec-generator.test.ts`
+- [Architecture overview](../architecture.md) -- system-wide context

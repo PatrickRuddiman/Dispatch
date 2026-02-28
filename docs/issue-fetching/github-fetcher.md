@@ -1,5 +1,14 @@
 # GitHub Fetcher
 
+> **Deprecated.** The file `src/issue-fetchers/github.ts` is now a thin shim
+> that delegates all calls to the [GitHub datasource](../datasource-system/github-datasource.md) (`src/datasources/github.ts`) via `.bind()`. It
+> contains no business logic. The actual GitHub implementation lives in the
+> datasource layer. See the
+> [Deprecated Compatibility Layer](../deprecated-compat/overview.md) for
+> details. The prerequisites, field mappings, and troubleshooting guidance
+> below remain accurate because the underlying datasource uses the same
+> `gh` CLI commands.
+
 The GitHub fetcher (`src/issue-fetchers/github.ts`) retrieves issue details
 from GitHub repositories by shelling out to the
 [GitHub CLI (`gh`)](https://cli.github.com/manual/). It normalizes the JSON
@@ -234,12 +243,20 @@ git repository with a GitHub remote, the `gh` command fails.
   interface
 - [Azure DevOps Fetcher](./azdevops-fetcher.md) -- The alternative fetcher
   for Azure DevOps work items
-- [Integrations & Troubleshooting](./integrations.md) -- Subprocess behavior,
+- [GitHub Datasource](../datasource-system/github-datasource.md) -- The actual
+  implementation this shim delegates to
+- [Datasource Overview](../datasource-system/overview.md) -- Datasource
+  interface, registry, and auto-detection
+- [Integrations & Troubleshooting](../datasource-system/integrations.md) -- Subprocess behavior,
   timeouts, and error handling patterns
 - [Adding a Fetcher](./adding-a-fetcher.md) -- Guide for implementing new
   tracker integrations
 - [CLI argument parser](../cli-orchestration/cli.md) -- `--spec` and `--source`
   flag documentation
+- [Spec Generation](../spec-generation/overview.md) -- The `--spec` pipeline
+  that invokes issue fetchers
+- [Datasource Testing](../datasource-system/testing.md) -- Test coverage
+  (note: the GitHub datasource/fetcher has no unit tests)
 
 ## External references
 
