@@ -9,13 +9,14 @@
 
 import type { AgentName, Agent, AgentBootOptions } from "../agent.js";
 import { boot as bootPlanner, type PlannerAgent } from "./planner.js";
+import { boot as bootExecutor, type ExecutorAgent } from "./executor.js";
 import { boot as bootOrchestrator, type OrchestratorAgent } from "./orchestrator.js";
 
 type BootFn = (opts: AgentBootOptions) => Promise<Agent>;
 
 const AGENTS: Record<AgentName, BootFn> = {
   planner: bootPlanner,
-  orchestrator: bootOrchestrator,
+  executor: bootExecutor,
 };
 
 /**
@@ -45,5 +46,5 @@ export async function bootAgent(
  * Type-safe boot functions for specific agent roles.
  * Prefer these over the generic `bootAgent()` when you know the role at compile time.
  */
-export { bootPlanner, bootOrchestrator };
-export type { PlannerAgent, OrchestratorAgent };
+export { bootPlanner, bootExecutor, bootOrchestrator };
+export type { PlannerAgent, ExecutorAgent, OrchestratorAgent };

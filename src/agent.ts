@@ -16,14 +16,14 @@
 
 import type { ProviderInstance } from "./provider.js";
 
-export type AgentName = "planner" | "orchestrator";
+export type AgentName = "planner" | "executor";
 
 /**
  * Options passed when booting any agent.
  *
  * Not all agents require a provider — the orchestrator boots its own,
- * while the planner receives one from the orchestrator. Agents that
- * need a provider should validate its presence at boot time.
+ * while the planner and executor receive one from the orchestrator.
+ * Agents that need a provider should validate its presence at boot time.
  */
 export interface AgentBootOptions {
   /** Working directory */
@@ -39,7 +39,7 @@ export interface AgentBootOptions {
  * `orchestrate()`). The base provides identity and lifecycle management.
  */
 export interface Agent {
-  /** Human-readable agent name (e.g. "planner", "orchestrator") */
+  /** Human-readable agent name (e.g. "planner", "executor") */
   readonly name: string;
 
   /**

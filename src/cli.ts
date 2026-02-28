@@ -325,7 +325,6 @@ async function main() {
     org: args.org,
     project: args.project,
   });
-  await orchestrator.cleanup();
 
   process.exit(summary.failed > 0 ? 1 : 0);
 }

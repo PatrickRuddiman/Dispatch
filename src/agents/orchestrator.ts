@@ -1,23 +1,24 @@
 /**
- * Orchestrator agent — the core loop that drives the dispatch pipeline:
+ * Orchestrator — the core loop that drives the dispatch pipeline:
  *   1. Glob for task files
  *   2. Parse unchecked tasks
  *   3. Boot the selected provider (OpenCode, Copilot, etc.)
  *   4. Plan each task via a planner agent (optional)
- *   5. Dispatch each task in an isolated session
+ *   5. Execute each task via the executor agent
  *   6. Mark complete in markdown
  */
 
 import { basename, join } from "node:path";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { parseTaskFile, markTaskComplete, buildTaskContext, groupTasksByMode, type TaskFile } from "../parser.js";
-import { dispatchTask, type DispatchResult } from "../dispatcher.js";
+import { parseTaskFile, buildTaskContext, groupTasksByMode, type TaskFile } from "../parser.js";
+import type { DispatchResult } from "../dispatcher.js";
 import { boot as bootPlanner } from "./planner.js";
+import { boot as bootExecutor } from "./executor.js";
 import { log } from "../logger.js";
 import { registerCleanup } from "../cleanup.js";
 import { createTui } from "../tui.js";
-import type { Agent, AgentBootOptions } from "../agent.js";
+import type { AgentBootOptions } from "../agent.js";
 import type { ProviderName } from "../provider.js";
 import { bootProvider } from "../providers/index.js";
 import { getDatasource, detectDatasource } from "../datasources/index.js";
@@ -65,14 +66,12 @@ interface WriteItemsResult {
 }
 
 /**
- * A booted orchestrator agent that coordinates the full dispatch pipeline.
+ * A booted orchestrator that coordinates the full dispatch pipeline.
  *
- * To add a new orchestrator implementation:
- *   1. Create `src/agents/<name>.ts`
- *   2. Export an async `boot` function that returns an `OrchestratorAgent`
- *   3. Register it in `src/agents/index.ts`
+ * The orchestrator is not an agent — it is a standalone pipeline coordinator
+ * that boots and manages agents (planner, executor) internally.
  */
-export interface OrchestratorAgent extends Agent {
+export interface OrchestratorAgent {
   /**
    * Run the dispatch pipeline — discover tasks, optionally plan them,
    * execute via the provider, mark complete, and commit.
@@ -87,8 +86,6 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
   const { cwd } = opts;
 
   return {
-    name: "orchestrator",
-
     async orchestrate(runOpts: OrchestrateRunOptions): Promise<DispatchSummary> {
       const {
         issueIds,
@@ -184,6 +181,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
 
         // ── 4. Boot planner agent (unless --no-plan) ────────────────
         const planner = noPlan ? null : await bootPlanner({ provider: instance, cwd });
+        const executor = await bootExecutor({ provider: instance, cwd });
 
         // ── 5. Dispatch tasks ───────────────────────────────────────
         tui.state.phase = "dispatching";
@@ -224,13 +222,15 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
                   plan = planResult.prompt;
                 }
 
-                // ── Phase B: Execute ─────────────────────────────────
+                // ── Phase B: Execute via executor agent ──────────────
                 tuiTask.status = "running";
-                const result = await dispatchTask(instance, task, cwd, plan);
+                const execResult = await executor.execute({
+                  task,
+                  cwd,
+                  plan: plan ?? null,
+                });
 
-                if (result.success) {
-                  await markTaskComplete(task);
-
+                if (execResult.success) {
                   // Sync checked-off state back to the datasource
                   try {
                     const parsed = parseIssueFilename(task.file);
@@ -251,12 +251,12 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
                   completed++;
                 } else {
                   tuiTask.status = "failed";
-                  tuiTask.error = result.error;
+                  tuiTask.error = execResult.error;
                   tuiTask.elapsed = Date.now() - startTime;
                   failed++;
                 }
 
-                return result;
+                return execResult.dispatchResult;
               })
             );
 
@@ -268,6 +268,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
         await closeCompletedSpecIssues(taskFiles, results, cwd, source, org, project);
 
         // ── 7. Cleanup ──────────────────────────────────────────────
+        await executor.cleanup();
         await planner?.cleanup();
         await instance.cleanup();
 
@@ -279,11 +280,6 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
         tui.stop();
         throw err;
       }
-    },
-
-    async cleanup(): Promise<void> {
-      // Orchestrator has no persistent resources — provider and planner
-      // are created and cleaned up within each orchestrate() call
     },
   };
 }
