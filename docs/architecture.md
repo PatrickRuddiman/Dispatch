@@ -40,7 +40,7 @@ small, well-defined units of work. dispatch-tasks solves three problems:
 The diagram below shows every module in the source tree and how they relate.
 The CLI validates input and delegates to either the orchestrator (dispatch mode)
 or the spec generator (spec mode). In dispatch mode, the orchestrator drives a
-seven-stage pipeline through the parser, provider, planner, dispatcher, and
+seven-stage pipeline through the parser, provider, planner, executor, and
 issue-fetcher modules. In spec mode, the spec generator drives a five-stage
 pipeline through the issue fetchers and provider. The TUI and logger provide
 output for interactive and non-interactive contexts respectively.
@@ -71,7 +71,8 @@ graph TD
 
     subgraph "Planning & Dispatch"
         PLANNER["planner.ts<br/>Read-only exploration"]
-        DISPATCH["dispatcher.ts<br/>Task execution"]
+        EXECUTOR["executor.ts<br/>Task execution agent"]
+        DISPATCH["dispatcher.ts<br/>Prompt building &amp; dispatch"]
         GIT["git.ts<br/>Conventional commits"]
     end
 
@@ -98,7 +99,8 @@ graph TD
     ORCH --> LOG
     ORCH --> PARSER
     ORCH --> PLANNER
-    ORCH --> DISPATCH
+    ORCH --> EXECUTOR
+    EXECUTOR --> DISPATCH
     ORCH --> GIT
     ORCH --> REG
 
@@ -113,6 +115,7 @@ graph TD
     AFETCH --> AZCLI
 
     PLANNER --> IFACE
+    EXECUTOR --> IFACE
     DISPATCH --> IFACE
     REG --> OC
     REG --> CP
@@ -149,7 +152,7 @@ flowchart LR
 | Parse | `src/parser.ts` | Each file is read and regex-matched for `- [ ] ...` lines, producing `Task` and `TaskFile` objects. |
 | Boot | `src/providers/index.ts` | The selected provider (OpenCode or Copilot) is booted via the registry. Provider cleanup is registered with `registerCleanup()`. |
 | Group | `src/parser.ts` | `groupTasksByMode()` partitions tasks into contiguous groups of same-mode `(P)` or `(S)` tasks. |
-| Dispatch | `src/agents/orchestrator.ts`, `src/planner.ts`, `src/dispatcher.ts` | Per group (sequential): per task within group (batch-concurrent): optionally run the planner agent, then run the executor agent. |
+| Dispatch | `src/agents/orchestrator.ts`, `src/agents/planner.ts`, `src/agents/executor.ts` | Per group (sequential): per task within group (batch-concurrent): orchestrator calls `planner.plan()` then passes the plan to `executor.execute()`. |
 | Mutate | `src/parser.ts` | `markTaskComplete` re-reads the file, validates the target line, replaces `[ ]` with `[x]`, and writes back. |
 | Close | `src/agents/orchestrator.ts` | For each spec file where all tasks succeeded, extract issue ID from `<id>-<slug>.md` filename and close the issue on the tracker. |
 
@@ -231,6 +234,7 @@ sequenceDiagram
     participant Reg as providers/index.ts
     participant Prov as Provider (OpenCode / Copilot)
     participant Plan as planner.ts
+    participant Exec as executor.ts
     participant Disp as dispatcher.ts
 
     CLI->>Orch: orchestrate(opts)
@@ -239,19 +243,21 @@ sequenceDiagram
     Prov-->>Orch: ProviderInstance
 
     loop for each task
-        Orch->>Plan: planTask(instance, task)
+        Orch->>Plan: plan(task, fileContext)
         Plan->>Prov: createSession()
         Prov-->>Plan: sessionId
         Plan->>Prov: prompt(sessionId, plannerPrompt)
         Prov-->>Plan: plan text
         Plan-->>Orch: PlanResult
 
-        Orch->>Disp: dispatchTask(instance, task, plan)
+        Orch->>Exec: execute({ task, cwd, plan })
+        Exec->>Disp: dispatchTask(provider, task, cwd, plan)
         Disp->>Prov: createSession()
         Prov-->>Disp: sessionId
         Disp->>Prov: prompt(sessionId, executorPrompt)
         Prov-->>Disp: response
-        Disp-->>Orch: DispatchResult
+        Disp-->>Exec: DispatchResult
+        Exec-->>Orch: ExecuteResult
     end
 
     Orch->>Prov: cleanup()
@@ -300,7 +306,7 @@ map with compile-time string literal union keys and no runtime plugin discovery.
 | Registry | Key type | Location |
 |----------|----------|----------|
 | Providers | `ProviderName` (`"opencode" \| "copilot"`) | `src/providers/index.ts` |
-| Agents | `AgentName` (`"planner" \| "orchestrator"`) | `src/agents/index.ts` |
+| Agents | `AgentName` (`"planner" \| "executor" \| "spec"`) | `src/agents/index.ts` |
 | Issue fetchers | `IssueSourceName` (`"github" \| "azdevops"`) | `src/issue-fetchers/index.ts` |
 
 Each registry exports a `boot` or `get` function and a list of valid names for
@@ -491,8 +497,9 @@ data model consumed by every module in the pipeline. They are imported directly
 
 | Consumer | What it imports | How it uses it |
 |----------|----------------|----------------|
-| Orchestrator | `Task`, `TaskFile`, `parseTaskFile`, `markTaskComplete`, `buildTaskContext` | Drives the full lifecycle |
+| Orchestrator | `Task`, `TaskFile`, `parseTaskFile`, `buildTaskContext` | Drives the full lifecycle |
 | Planner | `Task` | Builds the planning prompt |
+| Executor | `Task`, `markTaskComplete` | Executes planned tasks and marks them complete |
 | Dispatcher | `Task` | Builds the execution prompt |
 | TUI | `Task` | Displays task text and status |
 | Git | `Task` | Builds conventional commit messages |
@@ -553,10 +560,11 @@ syntax into structured objects and writes completions back.
 
 ### [Planning & Dispatch Pipeline](planning-and-dispatch/overview.md)
 
-The core task execution engine. Plans tasks, dispatches them to agents,
-and records results via git.
+The core task execution engine. Plans tasks, executes them via the executor
+agent, and records results via git.
 
 - [Planner agent](planning-and-dispatch/planner.md)
+- [Executor agent](planning-and-dispatch/executor.md)
 - [Dispatcher](planning-and-dispatch/dispatcher.md)
 - [Git operations](planning-and-dispatch/git.md)
 - [Task context and lifecycle](planning-and-dispatch/task-context-and-lifecycle.md)
