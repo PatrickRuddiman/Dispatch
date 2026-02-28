@@ -24,7 +24,7 @@
 
 import { resolve } from "node:path";
 import { bootOrchestrator } from "./agents/index.js";
-import { generateSpecs, defaultConcurrency } from "./spec-generator.js";
+import { defaultConcurrency } from "./spec-generator.js";
 import { log } from "./logger.js";
 import { runCleanup } from "./cleanup.js";
 import type { ProviderName } from "./provider.js";
@@ -295,9 +295,12 @@ async function main() {
     process.exit(1);
   }
 
+  // ── Boot orchestrator ─────────────────────────────────────
+  const orchestrator = await bootOrchestrator({ cwd: args.cwd });
+
   // ── Spec mode ──────────────────────────────────────────────
   if (args.spec) {
-    const summary = await generateSpecs({
+    const summary = await orchestrator.generateSpecs({
       issues: args.spec,
       issueSource: args.issueSource,
       provider: args.provider,
@@ -313,7 +316,6 @@ async function main() {
   }
 
   // ── Dispatch mode ──────────────────────────────────────────
-  const orchestrator = await bootOrchestrator({ cwd: args.cwd });
   const summary = await orchestrator.orchestrate({
     issueIds: args.issueIds,
     concurrency: args.concurrency ?? defaultConcurrency(),
