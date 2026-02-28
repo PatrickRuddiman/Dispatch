@@ -24,14 +24,13 @@
 
 import { resolve } from "node:path";
 import { bootOrchestrator } from "./agents/index.js";
-import { defaultConcurrency } from "./spec-generator.js";
 import { log } from "./logger.js";
 import { runCleanup } from "./cleanup.js";
 import type { ProviderName } from "./provider.js";
 import type { DatasourceName } from "./datasource.js";
 import { PROVIDER_NAMES } from "./providers/index.js";
 import { DATASOURCE_NAMES } from "./datasources/index.js";
-import { handleConfigCommand, loadConfig } from "./config.js";
+import { handleConfigCommand } from "./config.js";
 
 const HELP = `
   dispatch — AI agent orchestration CLI
@@ -224,26 +223,6 @@ async function main() {
 
   const [args, explicitFlags] = parseArgs(rawArgv);
 
-  // ── Merge config-file defaults beneath CLI flags ───────────
-  const config = await loadConfig();
-
-  // Config key → CliArgs field mapping
-  const CONFIG_TO_CLI: Record<string, keyof typeof args> = {
-    provider: "provider",
-    concurrency: "concurrency",
-    source: "issueSource",
-    org: "org",
-    project: "project",
-    serverUrl: "serverUrl",
-  };
-
-  for (const [configKey, cliField] of Object.entries(CONFIG_TO_CLI)) {
-    const configValue = config[configKey as keyof typeof config];
-    if (configValue !== undefined && !explicitFlags.has(cliField)) {
-      (args as unknown as Record<string, unknown>)[cliField] = configValue;
-    }
-  }
-
   // Enable verbose logging before anything else
   log.verbose = args.verbose;
 
@@ -270,65 +249,28 @@ async function main() {
     process.exit(0);
   }
 
-  // ── Mandatory config validation ────────────────────────────
-  const providerConfigured =
-    explicitFlags.has("provider") || config.provider !== undefined;
-  const sourceConfigured =
-    explicitFlags.has("issueSource") || config.source !== undefined;
-
-  if (!providerConfigured || !sourceConfigured) {
-    const missing: string[] = [];
-    if (!providerConfigured) missing.push("provider");
-    if (!sourceConfigured) missing.push("source");
-
-    log.error(
-      `Missing required configuration: ${missing.join(", ")}`
-    );
-    log.dim("  Configure defaults with:");
-    if (!providerConfigured) {
-      log.dim("    dispatch config set provider <name>");
-    }
-    if (!sourceConfigured) {
-      log.dim("    dispatch config set source <name>");
-    }
-    log.dim("  Or pass them as CLI flags: --provider <name> --source <name>");
-    process.exit(1);
-  }
-
-  // ── Boot orchestrator ─────────────────────────────────────
+  // ── Delegate to orchestrator ───────────────────────────────
   const orchestrator = await bootOrchestrator({ cwd: args.cwd });
-
-  // ── Spec mode ──────────────────────────────────────────────
-  if (args.spec) {
-    const summary = await orchestrator.generateSpecs({
-      issues: args.spec,
-      issueSource: args.issueSource,
-      provider: args.provider,
-      serverUrl: args.serverUrl,
-      cwd: args.cwd,
-      outputDir: args.outputDir,
-      org: args.org,
-      project: args.project,
-      concurrency: args.concurrency,
-    });
-
-    process.exit(summary.failed > 0 ? 1 : 0);
-  }
-
-  // ── Dispatch mode ──────────────────────────────────────────
-  const summary = await orchestrator.orchestrate({
+  const summary = await orchestrator.runFromCli({
     issueIds: args.issueIds,
-    concurrency: args.concurrency ?? defaultConcurrency(),
     dryRun: args.dryRun,
     noPlan: args.noPlan,
+    concurrency: args.concurrency,
     provider: args.provider,
     serverUrl: args.serverUrl,
-    source: args.issueSource,
+    cwd: args.cwd,
+    verbose: args.verbose,
+    spec: args.spec,
+    issueSource: args.issueSource,
     org: args.org,
     project: args.project,
+    outputDir: args.outputDir,
+    explicitFlags,
   });
 
-  process.exit(summary.failed > 0 ? 1 : 0);
+  // Determine exit code from summary
+  const failed = "failed" in summary ? summary.failed : 0;
+  process.exit(failed > 0 ? 1 : 0);
 }
 
 main().catch(async (err) => {

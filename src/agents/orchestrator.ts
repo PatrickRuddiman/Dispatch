@@ -29,6 +29,7 @@ import { isIssueNumbers, resolveSource, defaultConcurrency } from "../spec-gener
 import { boot as bootSpecAgent } from "./spec.js";
 import { extractTitle } from "../datasources/md.js";
 import { elapsed } from "../format.js";
+import { loadConfig, type DispatchConfig } from "../config.js";
 
 /**
  * Runtime options passed to `orchestrate()` — these control what gets
@@ -37,8 +38,8 @@ import { elapsed } from "../format.js";
 export interface OrchestrateRunOptions {
   /** Issue IDs to dispatch (empty = all open issues from datasource) */
   issueIds: string[];
-  /** Max parallel dispatches */
-  concurrency: number;
+  /** Max parallel dispatches (uses defaultConcurrency() if omitted) */
+  concurrency?: number;
   /** List tasks without executing */
   dryRun: boolean;
   /** Skip the planner agent and dispatch tasks directly */
@@ -53,6 +54,29 @@ export interface OrchestrateRunOptions {
   org?: string;
   /** Azure DevOps project name */
   project?: string;
+}
+
+/**
+ * Raw CLI arguments passed to the orchestrator before config resolution.
+ * The orchestrator merges these with config-file defaults and validates
+ * that mandatory configuration (provider + source) is present.
+ */
+export interface RawCliArgs {
+  issueIds: string[];
+  dryRun: boolean;
+  noPlan: boolean;
+  concurrency?: number;
+  provider: ProviderName;
+  serverUrl?: string;
+  cwd: string;
+  verbose: boolean;
+  spec?: string | string[];
+  issueSource?: DatasourceName;
+  org?: string;
+  project?: string;
+  outputDir?: string;
+  /** Set of CLI flag names that were explicitly provided (vs. defaults) */
+  explicitFlags: Set<string>;
 }
 
 export interface DispatchSummary {
@@ -139,6 +163,14 @@ export interface OrchestratorAgent {
    * a single entry point.
    */
   run(opts: UnifiedRunOptions): Promise<RunResult>;
+
+  /**
+   * Entry point for the CLI — accepts raw parsed CLI arguments, loads
+   * and merges config-file defaults, validates mandatory configuration
+   * (provider + source), resolves default concurrency, and delegates
+   * to the appropriate pipeline.
+   */
+  runFromCli(args: RawCliArgs): Promise<RunResult>;
 }
 
 /**
@@ -596,6 +628,86 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
         default:
           throw new Error(`Unknown run mode: ${(opts as { mode: string }).mode}`);
       }
+    },
+
+    async runFromCli(args: RawCliArgs): Promise<RunResult> {
+      const { explicitFlags } = args;
+
+      // ── Load and merge config-file defaults beneath CLI flags ───
+      const config = await loadConfig();
+
+      // Config key → RawCliArgs field mapping
+      const CONFIG_TO_CLI: Record<string, keyof RawCliArgs> = {
+        provider: "provider",
+        concurrency: "concurrency",
+        source: "issueSource",
+        org: "org",
+        project: "project",
+        serverUrl: "serverUrl",
+      };
+
+      const merged = { ...args };
+      for (const [configKey, cliField] of Object.entries(CONFIG_TO_CLI)) {
+        const configValue = config[configKey as keyof DispatchConfig];
+        if (configValue !== undefined && !explicitFlags.has(cliField)) {
+          (merged as unknown as Record<string, unknown>)[cliField] = configValue;
+        }
+      }
+
+      // ── Mandatory config validation ────────────────────────────
+      const providerConfigured =
+        explicitFlags.has("provider") || config.provider !== undefined;
+      const sourceConfigured =
+        explicitFlags.has("issueSource") || config.source !== undefined;
+
+      if (!providerConfigured || !sourceConfigured) {
+        const missing: string[] = [];
+        if (!providerConfigured) missing.push("provider");
+        if (!sourceConfigured) missing.push("source");
+
+        log.error(
+          `Missing required configuration: ${missing.join(", ")}`
+        );
+        log.dim("  Configure defaults with:");
+        if (!providerConfigured) {
+          log.dim("    dispatch config set provider <name>");
+        }
+        if (!sourceConfigured) {
+          log.dim("    dispatch config set source <name>");
+        }
+        log.dim("  Or pass them as CLI flags: --provider <name> --source <name>");
+        process.exit(1);
+      }
+
+      // ── Enable verbose logging ─────────────────────────────────
+      log.verbose = merged.verbose;
+
+      // ── Delegate to the appropriate pipeline ───────────────────
+      if (merged.spec) {
+        return this.generateSpecs({
+          issues: merged.spec,
+          issueSource: merged.issueSource,
+          provider: merged.provider,
+          serverUrl: merged.serverUrl,
+          cwd: merged.cwd,
+          outputDir: merged.outputDir,
+          org: merged.org,
+          project: merged.project,
+          concurrency: merged.concurrency,
+        });
+      }
+
+      return this.orchestrate({
+        issueIds: merged.issueIds,
+        concurrency: merged.concurrency ?? defaultConcurrency(),
+        dryRun: merged.dryRun,
+        noPlan: merged.noPlan,
+        provider: merged.provider,
+        serverUrl: merged.serverUrl,
+        source: merged.issueSource,
+        org: merged.org,
+        project: merged.project,
+      });
     },
   };
 

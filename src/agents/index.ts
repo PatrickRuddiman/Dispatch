@@ -14,6 +14,7 @@ import { boot as bootSpec, type SpecAgent } from "./spec.js";
 import {
   boot as bootOrchestrator,
   type OrchestratorAgent,
+  type RawCliArgs,
   type UnifiedRunOptions,
   type RunResult,
   type DispatchRunOptions,
@@ -61,6 +62,7 @@ export type {
   ExecutorAgent,
   OrchestratorAgent,
   SpecAgent,
+  RawCliArgs,
   UnifiedRunOptions,
   RunResult,
   DispatchRunOptions,
