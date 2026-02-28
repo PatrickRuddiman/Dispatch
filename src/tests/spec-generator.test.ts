@@ -1,8 +1,15 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { isIssueNumbers, buildFileSpecPrompt, validateSpecStructure, extractSpecContent, resolveSource } from "../spec-generator.js";
+import * as datasourcesIndex from "../datasources/index.js";
 
 describe("resolveSource", () => {
   const CWD = "/tmp/fake-repo";
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // --- Explicit --source flag always wins (unchanged behavior) ---
 
   it("returns the explicit issueSource when provided with a glob input", async () => {
     const result = await resolveSource("drafts/*.md", "github", CWD);
@@ -19,35 +26,65 @@ describe("resolveSource", () => {
     expect(result).toBe("github");
   });
 
-  it("falls back to 'md' when no issueSource is provided and auto-detection fails for a glob", async () => {
+  // --- Glob input with no explicit source triggers auto-detection ---
+
+  it("attempts auto-detection when no issueSource is provided and input is a glob", async () => {
+    const spy = vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue("github");
+    const result = await resolveSource("drafts/*.md", undefined, CWD);
+    expect(spy).toHaveBeenCalledWith(CWD);
+    expect(result).toBe("github");
+  });
+
+  it("attempts auto-detection when no issueSource is provided and input is a bare filename", async () => {
+    const spy = vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue("azdevops");
+    const result = await resolveSource("my-spec.md", undefined, CWD);
+    expect(spy).toHaveBeenCalledWith(CWD);
+    expect(result).toBe("azdevops");
+  });
+
+  // --- Glob input falls back to "md" when auto-detection fails ---
+
+  it("falls back to 'md' when no issueSource is provided, input is a glob, and auto-detection returns null", async () => {
+    const spy = vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
+    const result = await resolveSource("drafts/*.md", undefined, CWD);
+    expect(spy).toHaveBeenCalledWith(CWD);
+    expect(result).toBe("md");
+  });
+
+  it("falls back to 'md' when no issueSource is provided, input is a bare filename, and auto-detection returns null", async () => {
+    const spy = vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
+    const result = await resolveSource("my-spec.md", undefined, CWD);
+    expect(spy).toHaveBeenCalledWith(CWD);
+    expect(result).toBe("md");
+  });
+
+  it("falls back to 'md' for glob input with fake cwd (no git remote)", async () => {
+    // No mock — uses real detectDatasource which returns null for /tmp/fake-repo
     const result = await resolveSource("drafts/*.md", undefined, CWD);
     expect(result).toBe("md");
   });
 
-  it("falls back to 'md' when no issueSource is provided and auto-detection fails for a bare filename", async () => {
-    const result = await resolveSource("my-spec.md", undefined, CWD);
+  // --- Glob input still respects explicit --source override ---
+
+  it("returns 'md' when explicitly provided as issueSource with a glob input", async () => {
+    const result = await resolveSource("drafts/*.md", "md", CWD);
     expect(result).toBe("md");
   });
 
-  it("returns null when no issueSource is provided and auto-detection fails for issue numbers", async () => {
-    const result = await resolveSource("1,2,3", undefined, CWD);
-    expect(result).toBeNull();
-  });
+  // --- Tracker mode (issue numbers) auto-detection still works ---
 
-  it("attempts auto-detection for glob inputs before falling back to md", async () => {
-    // Using the real project CWD where a git remote exists (github.com)
-    const result = await resolveSource("drafts/*.md", undefined, process.cwd());
+  it("attempts auto-detection for issue numbers when no issueSource is provided", async () => {
+    const spy = vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue("github");
+    const result = await resolveSource("1,2,3", undefined, CWD);
+    expect(spy).toHaveBeenCalledWith(CWD);
     expect(result).toBe("github");
   });
 
-  it("returns the explicit issueSource even when auto-detection would succeed", async () => {
-    const result = await resolveSource("drafts/*.md", "azdevops", process.cwd());
-    expect(result).toBe("azdevops");
-  });
-
-  it("returns the explicit md source when provided for issue numbers", async () => {
-    const result = await resolveSource("1,2,3", "md", CWD);
-    expect(result).toBe("md");
+  it("returns null for issue numbers when auto-detection fails", async () => {
+    const spy = vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
+    const result = await resolveSource("1,2,3", undefined, CWD);
+    expect(spy).toHaveBeenCalledWith(CWD);
+    expect(result).toBeNull();
   });
 });
 
