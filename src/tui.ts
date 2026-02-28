@@ -4,6 +4,7 @@
  */
 
 import chalk from "chalk";
+import { elapsed } from "./format.js";
 import type { Task } from "./parser.js";
 
 export type TaskStatus = "pending" | "planning" | "running" | "done" | "failed";
@@ -23,6 +24,8 @@ export interface TuiState {
   serverUrl?: string;
   /** Active provider name — shown in the booting phase */
   provider?: string;
+  /** Model identifier reported by the provider, if available */
+  model?: string;
 }
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -46,14 +49,6 @@ function progressBar(done: number, total: number): string {
     chalk.dim("░".repeat(empty)) +
     chalk.white(` ${pct}%`)
   );
-}
-
-function elapsed(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  const m = Math.floor(s / 60);
-  const sec = s % 60;
-  if (m > 0) return `${m}m ${sec}s`;
-  return `${sec}s`;
 }
 
 function statusIcon(status: TaskStatus): string {
@@ -115,6 +110,15 @@ function render(state: TuiState): string {
   // ── Header ──────────────────────────────────────────────────
   lines.push("");
   lines.push(chalk.bold.white("  ⚡ dispatch") + chalk.dim(` — AI task orchestration`));
+
+  // Show provider/model info when available
+  if (state.provider) {
+    const providerInfo = state.model
+      ? `  provider: ${state.provider} · model: ${state.model}`
+      : `  provider: ${state.provider}`;
+    lines.push(chalk.dim(providerInfo));
+  }
+
   lines.push(chalk.dim("  ─".repeat(24)));
 
   // ── Phase + Timer ───────────────────────────────────────────

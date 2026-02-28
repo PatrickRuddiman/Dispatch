@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { writeFile, unlink, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parseTaskContent, parseTaskFile, markTaskComplete, buildTaskContext } from "./parser.js";
+import { parseTaskContent, parseTaskFile, markTaskComplete, buildTaskContext, groupTasksByMode, type Task } from "../parser.js";
 import { readFile } from "node:fs/promises";
 
 // ─── parseTaskContent (pure, no I/O) ─────────────────────────────────
@@ -295,6 +295,250 @@ describe("parseTaskContent", () => {
     // Text should be trimmed cleanly
     expect(result.tasks[0].text).toBe("Task one");
     expect(result.tasks[1].text).toBe("Task two");
+  });
+});
+
+// ─── parseTaskContent: mode extraction ───────────────────────────────
+
+describe("parseTaskContent — mode extraction", () => {
+  const FILE = "/fake/tasks.md";
+
+  it("extracts (P) prefix as parallel mode and strips it from text", () => {
+    const md = "- [ ] (P) Add validation to the user form";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0]).toMatchObject({
+      text: "Add validation to the user form",
+      mode: "parallel",
+    });
+  });
+
+  it("extracts (S) prefix as serial mode and strips it from text", () => {
+    const md = "- [ ] (S) Refactor the orchestrator dispatch loop";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0]).toMatchObject({
+      text: "Refactor the orchestrator dispatch loop",
+      mode: "serial",
+    });
+  });
+
+  it("defaults to serial mode when no prefix is present", () => {
+    const md = "- [ ] No prefix defaults to serial";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0]).toMatchObject({
+      text: "No prefix defaults to serial",
+      mode: "serial",
+    });
+  });
+
+  it("preserves raw line with (P)/(S) prefix intact", () => {
+    const md = "- [ ] (P) Parallel task";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0].raw).toBe("- [ ] (P) Parallel task");
+  });
+
+  it("handles mixed modes in the same file", () => {
+    const md = [
+      "- [ ] (P) First parallel task",
+      "- [ ] (S) Serial task",
+      "- [ ] Untagged task",
+      "- [ ] (P) Second parallel task",
+    ].join("\n");
+
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks).toHaveLength(4);
+    expect(result.tasks[0]).toMatchObject({ text: "First parallel task", mode: "parallel" });
+    expect(result.tasks[1]).toMatchObject({ text: "Serial task", mode: "serial" });
+    expect(result.tasks[2]).toMatchObject({ text: "Untagged task", mode: "serial" });
+    expect(result.tasks[3]).toMatchObject({ text: "Second parallel task", mode: "parallel" });
+  });
+
+  it("does not strip non-mode parenthetical prefixes", () => {
+    const md = "- [ ] (parenthetical) notes should remain";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({
+      text: "(parenthetical) notes should remain",
+      mode: "serial",
+    });
+  });
+
+  it("does not match lowercase (p) or (s)", () => {
+    const md = [
+      "- [ ] (p) lowercase p",
+      "- [ ] (s) lowercase s",
+    ].join("\n");
+
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({ text: "(p) lowercase p", mode: "serial" });
+    expect(result.tasks[1]).toMatchObject({ text: "(s) lowercase s", mode: "serial" });
+  });
+
+  it("handles (P)/(S) on indented tasks", () => {
+    const md = [
+      "  - [ ] (P) Indented parallel",
+      "    - [ ] (S) Deeply indented serial",
+    ].join("\n");
+
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({ text: "Indented parallel", mode: "parallel" });
+    expect(result.tasks[1]).toMatchObject({ text: "Deeply indented serial", mode: "serial" });
+  });
+
+  it("handles (P)/(S) with CRLF line endings", () => {
+    const md = "- [ ] (P) CRLF parallel task\r\n- [ ] (S) CRLF serial task\r\n";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({ text: "CRLF parallel task", mode: "parallel" });
+    expect(result.tasks[1]).toMatchObject({ text: "CRLF serial task", mode: "serial" });
+  });
+
+  it("requires a space after (P)/(S) to count as a mode prefix", () => {
+    const md = "- [ ] (P)NoSpace should not match";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({
+      text: "(P)NoSpace should not match",
+      mode: "serial",
+    });
+  });
+
+  it("handles multiple spaces after (P) prefix", () => {
+    const md = "- [ ] (P)  Add feature with extra space";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0]).toMatchObject({
+      text: "Add feature with extra space",
+      mode: "parallel",
+    });
+  });
+
+  it("handles special characters in task text after (P) prefix", () => {
+    const md = [
+      "- [ ] (P) Fix the `user?.name ?? 'default'` pattern",
+      "- [ ] (S) Handle $PATH env variable",
+      "- [ ] (P) Add `src/utils/*.ts` glob support",
+    ].join("\n");
+
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks).toHaveLength(3);
+    expect(result.tasks[0]).toMatchObject({
+      text: "Fix the `user?.name ?? 'default'` pattern",
+      mode: "parallel",
+    });
+    expect(result.tasks[1]).toMatchObject({
+      text: "Handle $PATH env variable",
+      mode: "serial",
+    });
+    expect(result.tasks[2]).toMatchObject({
+      text: "Add `src/utils/*.ts` glob support",
+      mode: "parallel",
+    });
+  });
+
+  it("preserves parentheses in task text after mode prefix is stripped", () => {
+    const md = "- [ ] (P) Refactor the (legacy) authentication module";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({
+      text: "Refactor the (legacy) authentication module",
+      mode: "parallel",
+    });
+  });
+
+  it("extracts mode from asterisk list markers", () => {
+    const md = [
+      "* [ ] (P) Parallel with asterisk",
+      "* [ ] (S) Serial with asterisk",
+    ].join("\n");
+
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({ text: "Parallel with asterisk", mode: "parallel" });
+    expect(result.tasks[1]).toMatchObject({ text: "Serial with asterisk", mode: "serial" });
+  });
+
+  it("only strips the first mode prefix when multiple are present", () => {
+    const md = "- [ ] (P) (S) ambiguous double prefix";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({
+      text: "(S) ambiguous double prefix",
+      mode: "parallel",
+    });
+  });
+
+  it("handles inline markdown formatting after mode prefix", () => {
+    const md = [
+      "- [ ] (P) Create **bold** feature",
+      "- [ ] (S) Add [link](http://example.com) docs",
+      "- [ ] (P) Use _italic_ emphasis here",
+    ].join("\n");
+
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({
+      text: "Create **bold** feature",
+      mode: "parallel",
+    });
+    expect(result.tasks[1]).toMatchObject({
+      text: "Add [link](http://example.com) docs",
+      mode: "serial",
+    });
+    expect(result.tasks[2]).toMatchObject({
+      text: "Use _italic_ emphasis here",
+      mode: "parallel",
+    });
+  });
+
+  it("assigns serial mode to all untagged tasks in a mixed file", () => {
+    const md = [
+      "# Tasks",
+      "",
+      "- [ ] (P) Tagged parallel",
+      "- [ ] First untagged",
+      "- [ ] Second untagged",
+      "- [ ] (S) Tagged serial",
+      "- [ ] Third untagged",
+    ].join("\n");
+
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks).toHaveLength(5);
+    expect(result.tasks[0].mode).toBe("parallel");
+    expect(result.tasks[1].mode).toBe("serial");
+    expect(result.tasks[2].mode).toBe("serial");
+    expect(result.tasks[3].mode).toBe("serial");
+    expect(result.tasks[4].mode).toBe("serial");
+  });
+
+  it("handles tab character after mode prefix", () => {
+    const md = "- [ ] (P)\tTab-separated task";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({
+      text: "Tab-separated task",
+      mode: "parallel",
+    });
+  });
+
+  it("does not extract mode when (P) or (S) appears mid-text", () => {
+    const md = [
+      "- [ ] Run the (P) optimization pass",
+      "- [ ] Check the (S) synchronization flag",
+    ].join("\n");
+
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({
+      text: "Run the (P) optimization pass",
+      mode: "serial",
+    });
+    expect(result.tasks[1]).toMatchObject({
+      text: "Check the (S) synchronization flag",
+      mode: "serial",
+    });
+  });
+
+  it("handles long task descriptions with special punctuation after prefix", () => {
+    const md = "- [ ] (P) Refactor `src/agents/orchestrator.ts` — replace the flat dispatch loop with group-aware execution (see #5 for details)";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({
+      text: "Refactor `src/agents/orchestrator.ts` — replace the flat dispatch loop with group-aware execution (see #5 for details)",
+      mode: "parallel",
+    });
   });
 });
 
@@ -603,5 +847,149 @@ describe("buildTaskContext", () => {
     expect(result).not.toContain("Return 401");
     expect(result).not.toContain("Remove Express");
     expect(result).not.toContain("Update Dockerfile");
+  });
+});
+
+// ─── groupTasksByMode ───────────────────────────────────────────────
+
+describe("groupTasksByMode", () => {
+  /** Helper to create a minimal Task with the given mode */
+  function makeTask(mode?: "parallel" | "serial", index = 0): Task {
+    return {
+      index,
+      text: `Task ${index}`,
+      line: index + 1,
+      raw: `- [ ] Task ${index}`,
+      file: "/fake/tasks.md",
+      mode,
+    };
+  }
+
+  it("returns empty array for empty input", () => {
+    expect(groupTasksByMode([])).toEqual([]);
+  });
+
+  it("groups a lone serial task as a solo group", () => {
+    const tasks = [makeTask("serial", 0)];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toHaveLength(1);
+    expect(groups[0][0].mode).toBe("serial");
+  });
+
+  it("groups a lone parallel task as a solo group", () => {
+    const tasks = [makeTask("parallel", 0)];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toHaveLength(1);
+    expect(groups[0][0].mode).toBe("parallel");
+  });
+
+  it("accumulates consecutive parallel tasks into one group", () => {
+    const tasks = [
+      makeTask("parallel", 0),
+      makeTask("parallel", 1),
+      makeTask("parallel", 2),
+    ];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toHaveLength(3);
+  });
+
+  it("serial task caps the current group", () => {
+    const tasks = [
+      makeTask("parallel", 0),
+      makeTask("serial", 1),
+    ];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toHaveLength(2);
+    expect(groups[0][0].mode).toBe("parallel");
+    expect(groups[0][1].mode).toBe("serial");
+  });
+
+  it("produces correct groups for P S S P P P pattern", () => {
+    const tasks = [
+      makeTask("parallel", 0),
+      makeTask("serial", 1),
+      makeTask("serial", 2),
+      makeTask("parallel", 3),
+      makeTask("parallel", 4),
+      makeTask("parallel", 5),
+    ];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toHaveLength(3);
+    expect(groups[0]).toHaveLength(2); // [P, S]
+    expect(groups[1]).toHaveLength(1); // [S]
+    expect(groups[2]).toHaveLength(3); // [P, P, P]
+  });
+
+  it("handles all-serial tasks as individual solo groups", () => {
+    const tasks = [
+      makeTask("serial", 0),
+      makeTask("serial", 1),
+      makeTask("serial", 2),
+    ];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toHaveLength(3);
+    expect(groups[0]).toHaveLength(1);
+    expect(groups[1]).toHaveLength(1);
+    expect(groups[2]).toHaveLength(1);
+  });
+
+  it("treats undefined mode as serial (default behavior)", () => {
+    const tasks = [
+      makeTask(undefined, 0),
+      makeTask("parallel", 1),
+      makeTask(undefined, 2),
+    ];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toHaveLength(2);
+    expect(groups[0]).toHaveLength(1); // [undefined/serial]
+    expect(groups[1]).toHaveLength(2); // [P, undefined/serial]
+  });
+
+  it("preserves task order within groups", () => {
+    const tasks = [
+      makeTask("parallel", 0),
+      makeTask("parallel", 1),
+      makeTask("serial", 2),
+      makeTask("parallel", 3),
+      makeTask("parallel", 4),
+    ];
+    const groups = groupTasksByMode(tasks);
+    expect(groups[0].map((t) => t.index)).toEqual([0, 1, 2]);
+    expect(groups[1].map((t) => t.index)).toEqual([3, 4]);
+  });
+
+  it("handles serial at start followed by parallel tasks", () => {
+    const tasks = [
+      makeTask("serial", 0),
+      makeTask("parallel", 1),
+      makeTask("parallel", 2),
+    ];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toHaveLength(2);
+    expect(groups[0]).toHaveLength(1); // [S]
+    expect(groups[1]).toHaveLength(2); // [P, P]
+  });
+
+  it("handles alternating P S P S pattern", () => {
+    const tasks = [
+      makeTask("parallel", 0),
+      makeTask("serial", 1),
+      makeTask("parallel", 2),
+      makeTask("serial", 3),
+    ];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toHaveLength(2);
+    expect(groups[0]).toHaveLength(2); // [P, S]
+    expect(groups[1]).toHaveLength(2); // [P, S]
+  });
+
+  it("single serial task produces exactly one group of length 1", () => {
+    const tasks = [makeTask("serial", 0)];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toEqual([[tasks[0]]]);
   });
 });

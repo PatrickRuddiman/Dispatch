@@ -32,6 +32,9 @@ export interface ProviderInstance {
   /** Human-readable provider name (e.g. "opencode", "copilot") */
   readonly name: string;
 
+  /** Model identifier reported by the underlying AI backend, if available */
+  readonly model?: string;
+
   /**
    * Create a new isolated session for a single task.
    * Returns an opaque session identifier.

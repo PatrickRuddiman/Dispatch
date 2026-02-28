@@ -5,6 +5,7 @@
 
 import type { ProviderInstance } from "./provider.js";
 import type { Task } from "./parser.js";
+import { log } from "./logger.js";
 
 export interface DispatchResult {
   task: Task;
@@ -26,18 +27,23 @@ export async function dispatchTask(
   plan?: string
 ): Promise<DispatchResult> {
   try {
+    log.debug(`Dispatching task: ${task.file}:${task.line} — ${task.text.slice(0, 80)}`);
     const sessionId = await instance.createSession();
     const prompt = plan ? buildPlannedPrompt(task, cwd, plan) : buildPrompt(task, cwd);
+    log.debug(`Prompt built (${prompt.length} chars, ${plan ? "with plan" : "no plan"})`);
 
     const response = await instance.prompt(sessionId, prompt);
 
     if (response === null) {
+      log.debug("Task dispatch returned null response");
       return { task, success: false, error: "No response from agent" };
     }
 
+    log.debug(`Task dispatch completed (${response.length} chars response)`);
     return { task, success: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    log.debug(`Task dispatch failed: ${log.formatErrorChain(err)}`);
     return { task, success: false, error: message };
   }
 }
@@ -57,7 +63,7 @@ function buildPrompt(task: Task, cwd: string): string {
     `Instructions:`,
     `- Complete ONLY this specific task — do not work on other tasks.`,
     `- Make the minimal, correct changes needed.`,
-    `- Do NOT commit changes — the orchestrator handles commits.`,
+    buildCommitInstruction(task.text),
     `- When finished, confirm by saying "Task complete."`,
   ].join("\n");
 }
@@ -84,10 +90,34 @@ function buildPlannedPrompt(task: Task, cwd: string, plan: string): string {
     `---`,
     ``,
     `## Executor Constraints`,
-    `- Follow the plan above precisely.`,
+    `- Follow the plan above precisely — do not deviate, skip steps, or reorder.`,
     `- Complete ONLY this specific task — do not work on other tasks.`,
-    `- Make the minimal, correct changes needed.`,
-    `- Do NOT commit changes — the orchestrator handles commits.`,
+    `- Make the minimal, correct changes needed — do not refactor unrelated code.`,
+    `- Do NOT explore the codebase. The planner has already done all necessary research. Only read or modify the files explicitly referenced in the plan.`,
+    `- Do NOT re-plan, question, or revise the plan. Trust it as given and execute it faithfully.`,
+    `- Do NOT search for additional context using grep, find, or similar tools unless the plan explicitly instructs you to.`,
+    buildCommitInstruction(task.text),
     `- When finished, confirm by saying "Task complete."`,
   ].join("\n");
+}
+
+/**
+ * Check whether a task description includes an instruction to commit.
+ */
+function taskRequestsCommit(taskText: string): boolean {
+  return /\bcommit\b/i.test(taskText);
+}
+
+/**
+ * Build a commit instruction line based on whether the task requests a commit.
+ */
+function buildCommitInstruction(taskText: string): string {
+  if (taskRequestsCommit(taskText)) {
+    return (
+      `- The task description includes a commit instruction. After completing the implementation, ` +
+      `stage all changes and create a conventional commit. Use one of these types: ` +
+      `feat, fix, docs, refactor, test, chore, style, perf, ci.`
+    );
+  }
+  return `- Do NOT commit changes — the orchestrator handles commits.`;
 }

@@ -1,0 +1,169 @@
+# Planning & Dispatch Pipeline
+
+The planning and dispatch pipeline is the core task execution engine of the
+Dispatch tool. It transforms markdown task files into completed, committed work
+by routing each task through a series of stages: parsing, optional planning,
+AI-driven execution, file mutation, and version control.
+
+## Why this pipeline exists
+
+Dispatch automates multi-task software engineering work by delegating individual
+tasks to AI agents. The pipeline exists to solve three problems:
+
+1. **Context isolation** -- Each task must be executed in a fresh AI session so
+   that context from one task does not leak into or confuse another.
+2. **Precision through planning** -- A two-phase planner-then-executor
+   architecture allows a read-only planning agent to explore the codebase first,
+   producing a detailed execution plan that a separate executor agent follows.
+3. **Automated record-keeping** -- After each task completes, the pipeline marks
+   it done in the source markdown and creates a conventional commit, maintaining
+   a clean, auditable git history.
+
+## Pipeline stages
+
+```mermaid
+flowchart TD
+    A["Markdown Task Files<br/>(tasks/**/*.md)"] --> B["Parse Tasks<br/>(parser.ts)"]
+    B --> C{"--no-plan?"}
+    C -- "Yes" --> E["Build Simple Prompt<br/>(dispatcher.ts)"]
+    C -- "No" --> D["Build Filtered Context<br/>(parser.ts: buildTaskContext)"]
+    D --> F["Plan Task<br/>(planner.ts)"]
+    F --> G{"Plan succeeded?"}
+    G -- "No" --> H["Task Failed<br/>(report error)"]
+    G -- "Yes" --> I["Build Planned Prompt<br/>(dispatcher.ts)"]
+    E --> J["Dispatch to AI Agent<br/>(dispatcher.ts)"]
+    I --> J
+    J --> K{"Agent succeeded?"}
+    K -- "No" --> H
+    K -- "Yes" --> L["Mark Task Complete<br/>(parser.ts: markTaskComplete)"]
+    L --> M["Commit Changes<br/>(git.ts: commitTask)"]
+    M --> N["Task Done"]
+
+    style A fill:#e8f4f8,stroke:#2196F3
+    style N fill:#e8f5e9,stroke:#4CAF50
+    style H fill:#ffebee,stroke:#f44336
+```
+
+## Task state machine
+
+Each task transitions through well-defined states during processing. The
+`--no-plan` flag causes the `planning` state to be skipped entirely.
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending
+    pending --> planning : plan phase starts
+    pending --> running : --no-plan mode
+    planning --> running : plan succeeded
+    planning --> failed : plan error
+    running --> done : agent succeeded
+    running --> failed : agent error or null response
+    done --> [*]
+    failed --> [*]
+```
+
+State transitions are managed by the [orchestrator](../cli-orchestration/orchestrator.md)
+(`src/orchestrator.ts`) and reflected in the [TUI](../cli-orchestration/tui.md) via `TaskState` updates.
+
+## Prompt construction chain
+
+Understanding which data flows into which prompt template is critical for
+debugging and extending the pipeline.
+
+```mermaid
+sequenceDiagram
+    participant MD as Markdown File
+    participant P as parser.ts
+    participant PL as planner.ts
+    participant D as dispatcher.ts
+    participant AI as AI Provider
+
+    MD->>P: readFile()
+    P->>P: parseTaskContent() extracts tasks
+    P->>P: buildTaskContext() filters sibling tasks
+    P->>PL: filtered file context + Task
+    PL->>PL: buildPlannerPrompt() assembles planning prompt
+    PL->>AI: prompt(sessionId, plannerPrompt)
+    AI-->>PL: execution plan text
+    PL->>D: plan string
+    D->>D: buildPlannedPrompt() wraps plan + task metadata
+    D->>AI: prompt(sessionId, executorPrompt)
+    AI-->>D: agent response
+```
+
+When `--no-plan` is active, the planner step is skipped entirely and
+`buildPrompt()` in `dispatcher.ts` constructs a simpler prompt containing
+only the task metadata and working directory.
+
+## Module responsibilities
+
+| Module | Responsibility | Source |
+|--------|---------------|--------|
+| `parser.ts` | Extract tasks from markdown; build filtered context; mark tasks complete | `src/parser.ts` — see [Task Parsing](../task-parsing/overview.md) |
+| `planner.ts` | Run a read-only AI session to produce an execution plan | `src/planner.ts` — see [Planner Agent](./planner.md) |
+| `dispatcher.ts` | Send tasks to an AI agent in isolated sessions | `src/dispatcher.ts` — see [Dispatcher](./dispatcher.md) |
+| `git.ts` | Stage changes and create conventional commits | `src/git.ts` — see [Git Operations](./git.md) |
+
+## Key design decisions
+
+### Two-phase planner-then-executor (optional)
+
+The pipeline supports an optional planning phase where a separate AI session
+explores the codebase before the executor acts. This produces higher-quality
+results because the executor receives a detailed, context-rich plan rather than
+just the raw task text. The `--no-plan` CLI flag bypasses this phase for speed
+when tasks are simple or the user prefers direct execution.
+
+See [Planner Agent](./planner.md) for details on when to use `--no-plan`.
+
+### Session isolation per task
+
+Every task -- whether in the planning or execution phase -- gets a fresh
+provider session via `createSession()`. This prevents context rot and ensures
+one task's conversation history cannot influence another.
+
+See [Dispatcher](./dispatcher.md#session-isolation) for details on isolation
+guarantees.
+
+### Prompt-only planner read-only enforcement
+
+The planner agent is instructed to be read-only via prompt instructions, not
+via provider-level tool restrictions. This is a deliberate trade-off.
+
+See [Planner Agent](./planner.md#read-only-enforcement) for the rationale and
+limitations.
+
+### Automatic conventional commit type inference
+
+After task completion, `git.ts` infers a commit type from the task text using
+regex pattern matching, following the
+[Conventional Commits](https://www.conventionalcommits.org/) specification.
+
+See [Git Operations](./git.md#commit-type-inference) for the full type mapping.
+
+## Concurrency model
+
+The [orchestrator](../cli-orchestration/orchestrator.md) processes tasks in batches controlled by `--concurrency N`
+(default: 1). Within a batch, tasks run in parallel via `Promise.all()`. This
+has important implications for both git operations and file mutations.
+
+See [Git Operations](./git.md#concurrency-and-git-add--a) and
+[Task Parsing](./task-context-and-lifecycle.md#concurrent-write-safety) for
+concurrency-related concerns.
+
+## Related documentation
+
+- [Dispatcher](./dispatcher.md) -- Session isolation, prompt construction,
+  success verification
+- [Planner Agent](./planner.md) -- Two-phase architecture, read-only
+  enforcement, file context
+- [Git Operations](./git.md) -- Conventional commits, staging behavior,
+  troubleshooting
+- [Task Context & Lifecycle](./task-context-and-lifecycle.md) -- Markdown
+  format, context filtering, concurrent writes
+- [Integrations & Troubleshooting](./integrations.md) -- Provider system,
+  Node.js child_process, fs operations
+- [CLI & Orchestration](../cli-orchestration/overview.md) -- Orchestrator loop and CLI flags
+- [Provider Abstraction](../provider-system/provider-overview.md) -- Provider interface and backends
+- [Shared Interfaces & Utilities](../shared-types/overview.md) -- `Task`, `TaskFile`, and
+  `ProviderInstance` type definitions
