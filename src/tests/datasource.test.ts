@@ -296,6 +296,7 @@ describe("DatasourceName and registry", () => {
       expect(typeof ds.createAndSwitchBranch).toBe("function");
       expect(typeof ds.switchBranch).toBe("function");
       expect(typeof ds.pushBranch).toBe("function");
+      expect(typeof ds.commitAllChanges).toBe("function");
       expect(typeof ds.createPullRequest).toBe("function");
     }
   });

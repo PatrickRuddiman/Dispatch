@@ -132,6 +132,10 @@ export const datasource: Datasource = {
     // No-op for local markdown datasource
   },
 
+  async commitAllChanges(_message: string, _opts: DispatchLifecycleOptions): Promise<void> {
+    // No-op for local markdown datasource
+  },
+
   async createPullRequest(
     _branchName: string,
     _issueNumber: string,

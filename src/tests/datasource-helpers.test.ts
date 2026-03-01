@@ -39,6 +39,7 @@ function createMockDatasource(overrides?: Partial<Datasource>): Datasource {
     createAndSwitchBranch: vi.fn<Datasource["createAndSwitchBranch"]>().mockResolvedValue(undefined),
     switchBranch: vi.fn<Datasource["switchBranch"]>().mockResolvedValue(undefined),
     pushBranch: vi.fn<Datasource["pushBranch"]>().mockResolvedValue(undefined),
+    commitAllChanges: vi.fn<Datasource["commitAllChanges"]>().mockResolvedValue(undefined),
     createPullRequest: vi.fn<Datasource["createPullRequest"]>().mockResolvedValue("https://github.com/org/repo/pull/1"),
     ...overrides,
   };

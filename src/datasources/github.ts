@@ -206,6 +206,16 @@ export const datasource: Datasource = {
     await git(["push", "--set-upstream", "origin", branchName], opts.cwd);
   },
 
+  async commitAllChanges(message, opts) {
+    const cwd = opts.cwd;
+    await git(["add", "-A"], cwd);
+    const status = await git(["diff", "--cached", "--stat"], cwd);
+    if (!status.trim()) {
+      return; // nothing to commit
+    }
+    await git(["commit", "-m", message], cwd);
+  },
+
   async createPullRequest(branchName, issueNumber, title, opts) {
     const cwd = opts.cwd;
     try {

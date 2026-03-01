@@ -157,6 +157,15 @@ export interface Datasource {
   pushBranch(branchName: string, opts: DispatchLifecycleOptions): Promise<void>;
 
   /**
+   * Stage all changes and create a commit with the given message.
+   * This is the safety-net commit after all tasks for an issue complete.
+   *
+   * @param message - The commit message
+   * @param opts - Lifecycle options (cwd)
+   */
+  commitAllChanges(message: string, opts: DispatchLifecycleOptions): Promise<void>;
+
+  /**
    * Create a pull request linking the branch to the issue.
    *
    * @param branchName - The source branch name

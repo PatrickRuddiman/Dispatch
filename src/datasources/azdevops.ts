@@ -220,6 +220,15 @@ export const datasource: Datasource = {
     await exec("git", ["push", "--set-upstream", "origin", branchName], { cwd: opts.cwd });
   },
 
+  async commitAllChanges(message: string, opts: DispatchLifecycleOptions): Promise<void> {
+    await exec("git", ["add", "-A"], { cwd: opts.cwd });
+    const { stdout } = await exec("git", ["diff", "--cached", "--stat"], { cwd: opts.cwd });
+    if (!stdout.trim()) {
+      return; // nothing to commit
+    }
+    await exec("git", ["commit", "-m", message], { cwd: opts.cwd });
+  },
+
   async createPullRequest(
     branchName: string,
     issueNumber: string,
