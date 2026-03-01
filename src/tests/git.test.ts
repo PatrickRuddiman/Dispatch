@@ -19,6 +19,10 @@ vi.mock("node:util", () => ({
 import { datasource as github, getCommitMessages } from "../datasources/github.js";
 import { datasource as azdevops } from "../datasources/azdevops.js";
 import { datasource as md } from "../datasources/md.js";
+import { buildPrBody, buildPrTitle } from "../orchestrator/datasource-helpers.js";
+import type { Task } from "../parser.js";
+import type { DispatchResult } from "../dispatcher.js";
+import type { IssueDetails } from "../datasources/interface.js";
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -361,6 +365,80 @@ describe("GitHub datasource — createPullRequest", () => {
       }),
     ).rejects.toThrow("authentication failed");
   });
+
+  it("passes multiline markdown body through to gh pr create", async () => {
+    mockExecFile.mockResolvedValue({
+      stdout: "https://github.com/org/repo/pull/3\n",
+    });
+
+    const multilineBody = [
+      "## Summary",
+      "",
+      "- feat: add login",
+      "- feat: add signup",
+      "",
+      "## Tasks",
+      "",
+      "- [x] Implement login",
+      "- [x] Implement signup",
+      "",
+      "Closes #42",
+    ].join("\n");
+
+    const result = await github.createPullRequest(
+      "dispatch/42-feature",
+      "42",
+      "feat: add user auth",
+      multilineBody,
+      { cwd: "/tmp/repo" },
+    );
+
+    expect(result).toBe("https://github.com/org/repo/pull/3");
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "gh",
+      [
+        "pr",
+        "create",
+        "--title",
+        "feat: add user auth",
+        "--body",
+        multilineBody,
+        "--head",
+        "dispatch/42-feature",
+      ],
+      { cwd: "/tmp/repo" },
+    );
+  });
+
+  it("uses default body when body is empty string", async () => {
+    mockExecFile.mockResolvedValue({
+      stdout: "https://github.com/org/repo/pull/4\n",
+    });
+
+    const result = await github.createPullRequest(
+      "dispatch/99-bugfix",
+      "99",
+      "fix: resolve crash",
+      "",
+      { cwd: "/tmp/repo" },
+    );
+
+    expect(result).toBe("https://github.com/org/repo/pull/4");
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "gh",
+      [
+        "pr",
+        "create",
+        "--title",
+        "fix: resolve crash",
+        "--body",
+        "Closes #99",
+        "--head",
+        "dispatch/99-bugfix",
+      ],
+      { cwd: "/tmp/repo" },
+    );
+  });
 });
 
 // ─── Section G2: GitHub — getCommitMessages ─────────────────────────────────────
@@ -519,6 +597,85 @@ describe("Azure DevOps datasource — createPullRequest", () => {
       }),
     ).rejects.toThrow("auth failed");
   });
+
+  it("passes provided body to az repos pr create --description", async () => {
+    mockExecFile.mockResolvedValue({
+      stdout: JSON.stringify({
+        url: "https://dev.azure.com/org/project/_git/repo/pullrequest/2",
+      }),
+    });
+
+    const customBody = "## Summary\n\nImplemented auth flow\n\nResolves AB#42";
+    const result = await azdevops.createPullRequest(
+      "dispatch/42-feature",
+      "42",
+      "feat: add auth",
+      customBody,
+      { cwd: "/tmp/repo" },
+    );
+
+    expect(result).toBe(
+      "https://dev.azure.com/org/project/_git/repo/pullrequest/2",
+    );
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "az",
+      [
+        "repos",
+        "pr",
+        "create",
+        "--title",
+        "feat: add auth",
+        "--description",
+        customBody,
+        "--source-branch",
+        "dispatch/42-feature",
+        "--work-items",
+        "42",
+        "--output",
+        "json",
+      ],
+      { cwd: "/tmp/repo" },
+    );
+  });
+
+  it("uses default description when body is empty string", async () => {
+    mockExecFile.mockResolvedValue({
+      stdout: JSON.stringify({
+        url: "https://dev.azure.com/org/project/_git/repo/pullrequest/3",
+      }),
+    });
+
+    const result = await azdevops.createPullRequest(
+      "dispatch/99-fix",
+      "99",
+      "fix: resolve bug",
+      "",
+      { cwd: "/tmp/repo" },
+    );
+
+    expect(result).toBe(
+      "https://dev.azure.com/org/project/_git/repo/pullrequest/3",
+    );
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "az",
+      [
+        "repos",
+        "pr",
+        "create",
+        "--title",
+        "fix: resolve bug",
+        "--description",
+        "Resolves AB#99",
+        "--source-branch",
+        "dispatch/99-fix",
+        "--work-items",
+        "99",
+        "--output",
+        "json",
+      ],
+      { cwd: "/tmp/repo" },
+    );
+  });
 });
 
 // ─── Section I: Azure DevOps — buildBranchName ─────────────────────────────────
@@ -577,5 +734,195 @@ describe("MD datasource — no-op dispatch lifecycle methods", () => {
     );
     expect(result).toBe("");
     expect(mockExecFile).not.toHaveBeenCalled();
+  });
+
+  it("createPullRequest with custom body still returns empty string (no-op)", async () => {
+    const result = await md.createPullRequest(
+      "dispatch/42-feature",
+      "42",
+      "feat: add auth",
+      "## Summary\n\nCustom body content\n\nCloses #42",
+      { cwd: "/tmp" },
+    );
+    expect(result).toBe("");
+    expect(mockExecFile).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Section K: PR title builder ────────────────────────────────────────────────
+
+describe("buildPrTitle", () => {
+  it("returns issue title when no commits are found", async () => {
+    mockExecFile.mockRejectedValue(new Error("fatal: bad revision"));
+
+    const result = await buildPrTitle("Add user auth", "main", "/tmp/repo");
+
+    expect(result).toBe("Add user auth");
+  });
+
+  it("returns the single commit message when one commit exists", async () => {
+    mockExecFile.mockResolvedValue({
+      stdout: "feat: implement login flow\n",
+    });
+
+    const result = await buildPrTitle("Add user auth", "main", "/tmp/repo");
+
+    expect(result).toBe("feat: implement login flow");
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "git",
+      ["log", "main..HEAD", "--pretty=format:%s"],
+      { cwd: "/tmp/repo" },
+    );
+  });
+
+  it("returns oldest commit with count suffix for multiple commits", async () => {
+    mockExecFile.mockResolvedValue({
+      stdout: "fix: handle edge case\nfeat: add login page\nfeat: scaffold auth module\n",
+    });
+
+    const result = await buildPrTitle("Add user auth", "main", "/tmp/repo");
+
+    expect(result).toBe("feat: scaffold auth module (+2 more)");
+  });
+
+  it("returns issue title when git log returns empty output", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "" });
+
+    const result = await buildPrTitle("My feature", "main", "/tmp/repo");
+
+    expect(result).toBe("My feature");
+  });
+});
+
+// ─── Section L: PR body builder ─────────────────────────────────────────────────
+
+describe("buildPrBody", () => {
+  /** Create a Task fixture. */
+  function createTask(overrides?: Partial<Task>): Task {
+    return {
+      index: 0,
+      text: "Implement feature",
+      line: 1,
+      raw: "- [ ] Implement feature",
+      file: "/tmp/dispatch-abc/42-feature.md",
+      ...overrides,
+    };
+  }
+
+  /** Create an IssueDetails fixture. */
+  function createIssueDetails(overrides?: Partial<IssueDetails>): IssueDetails {
+    return {
+      number: "42",
+      title: "Default Title",
+      body: "Default body",
+      labels: [],
+      state: "open",
+      url: "https://github.com/org/repo/issues/42",
+      comments: [],
+      acceptanceCriteria: "",
+      ...overrides,
+    };
+  }
+
+  it("includes commit summaries in the body", async () => {
+    mockExecFile.mockResolvedValue({
+      stdout: "feat: add login\nfeat: add signup\n",
+    });
+
+    const details = createIssueDetails({ number: "42", labels: [] });
+    const task = createTask({ text: "Add login" });
+    const result: DispatchResult = { task, success: true };
+
+    const body = await buildPrBody(details, [task], [result], "main", "github", "/tmp/repo");
+
+    expect(body).toContain("## Summary");
+    expect(body).toContain("- feat: add login");
+    expect(body).toContain("- feat: add signup");
+  });
+
+  it("includes completed and failed tasks", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "" });
+
+    const details = createIssueDetails({ number: "42" });
+    const task1 = createTask({ index: 0, text: "Task one", line: 1 });
+    const task2 = createTask({ index: 1, text: "Task two", line: 2 });
+    const results: DispatchResult[] = [
+      { task: task1, success: true },
+      { task: task2, success: false, error: "timeout" },
+    ];
+
+    const body = await buildPrBody(details, [task1, task2], results, "main", "github", "/tmp/repo");
+
+    expect(body).toContain("## Tasks");
+    expect(body).toContain("- [x] Task one");
+    expect(body).toContain("- [ ] Task two");
+  });
+
+  it("includes labels when present", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "" });
+
+    const details = createIssueDetails({ number: "10", labels: ["bug", "urgent"] });
+
+    const body = await buildPrBody(details, [], [], "main", "github", "/tmp/repo");
+
+    expect(body).toContain("**Labels:** bug, urgent");
+  });
+
+  it("appends GitHub close reference for github datasource", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "" });
+
+    const details = createIssueDetails({ number: "42" });
+
+    const body = await buildPrBody(details, [], [], "main", "github", "/tmp/repo");
+
+    expect(body).toContain("Closes #42");
+    expect(body).not.toContain("Resolves AB#");
+  });
+
+  it("appends Azure DevOps close reference for azdevops datasource", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "" });
+
+    const details = createIssueDetails({ number: "42" });
+
+    const body = await buildPrBody(details, [], [], "main", "azdevops", "/tmp/repo");
+
+    expect(body).toContain("Resolves AB#42");
+    expect(body).not.toContain("Closes #");
+  });
+
+  it("includes no close reference for md datasource", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "" });
+
+    const details = createIssueDetails({ number: "42" });
+
+    const body = await buildPrBody(details, [], [], "main", "md", "/tmp/repo");
+
+    expect(body).not.toContain("Closes #");
+    expect(body).not.toContain("Resolves AB#");
+  });
+
+  it("handles git log failure gracefully", async () => {
+    mockExecFile.mockRejectedValue(new Error("git not found"));
+
+    const details = createIssueDetails({ number: "42" });
+    const task = createTask({ text: "Do something" });
+    const result: DispatchResult = { task, success: true };
+
+    const body = await buildPrBody(details, [task], [result], "main", "github", "/tmp/repo");
+
+    expect(body).not.toContain("## Summary");
+    expect(body).toContain("## Tasks");
+    expect(body).toContain("- [x] Do something");
+    expect(body).toContain("Closes #42");
+  });
+
+  it("omits tasks section when no tasks match results", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "feat: init\n" });
+
+    const details = createIssueDetails({ number: "7" });
+
+    const body = await buildPrBody(details, [], [], "main", "github", "/tmp/repo");
+
+    expect(body).not.toContain("## Tasks");
   });
 });
