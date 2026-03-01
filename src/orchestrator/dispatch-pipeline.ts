@@ -6,6 +6,7 @@
  */
 
 import { readFile } from "node:fs/promises";
+import { basename } from "node:path";
 import { parseTaskFile, buildTaskContext, groupTasksByMode, type TaskFile } from "../parser.js";
 import type { DispatchResult } from "../dispatcher.js";
 import { boot as bootPlanner } from "../agents/planner.js";
@@ -24,6 +25,15 @@ import {
   closeCompletedSpecIssues,
   parseIssueFilename,
 } from "./datasource-helpers.js";
+import {
+  getDefaultBranch,
+  createAndSwitchBranch,
+  switchBranch,
+  pushBranch,
+  commitAllChanges,
+  createPullRequest,
+  buildBranchName,
+} from "../git.js";
 
 /**
  * Run the full dispatch pipeline: discover tasks from a datasource,
@@ -40,6 +50,7 @@ export async function runDispatchPipeline(
     dryRun,
     serverUrl,
     noPlan,
+    noBranch,
     provider = "opencode",
     source,
     org,
@@ -131,84 +142,181 @@ export async function runDispatchPipeline(
     const planner = noPlan ? null : await bootPlanner({ provider: instance, cwd });
     const executor = await bootExecutor({ provider: instance, cwd });
 
-    // ── 5. Dispatch tasks ───────────────────────────────────────
+    // ── 5. Dispatch tasks (per-issue) ───────────────────────────
     tui.state.phase = "dispatching";
     const results: DispatchResult[] = [];
     let completed = 0;
     let failed = 0;
 
-    const groups = groupTasksByMode(allTasks);
+    // Detect default branch once (for branch operations)
+    let defaultBranch: string | undefined;
+    if (!noBranch) {
+      try {
+        defaultBranch = await getDefaultBranch(cwd);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        log.warn(`Could not detect default branch: ${message}. Skipping branch operations.`);
+      }
+    }
 
-    for (const group of groups) {
-      // Dispatch all tasks in the group concurrently, respecting --concurrency
-      const groupQueue = [...group];
+    // Process each issue's tasks separately
+    for (const taskFile of taskFiles) {
+      const issueTasks = taskFile.tasks;
+      if (issueTasks.length === 0) continue;
 
-      while (groupQueue.length > 0) {
-        const batch = groupQueue.splice(0, concurrency);
-        const batchResults = await Promise.all(
-          batch.map(async (task) => {
-            const tuiTask = tui.state.tasks.find((t) => t.task === task)!;
-            const startTime = Date.now();
-            tuiTask.elapsed = startTime;
+      const parsed = parseIssueFilename(taskFile.path);
+      const issueNumber = parsed?.issueId ?? basename(taskFile.path, ".md");
+      const issueSlug = parsed?.slug ?? "unknown";
 
-            // ── Phase A: Plan (unless --no-plan) ─────────────────
-            let plan: string | undefined;
-            if (planner) {
-              tuiTask.status = "planning";
-              const rawContent = fileContentMap.get(task.file);
-              const fileContext = rawContent ? buildTaskContext(rawContent, task) : undefined;
-              const planResult = await planner.plan(task, fileContext);
+      // ── Branch creation ─────────────────────────────────────
+      let branchName: string | undefined;
+      if (!noBranch && defaultBranch) {
+        const details = issueDetailsByFile.get(taskFile.path);
+        const title = details?.title ?? issueSlug;
+        branchName = buildBranchName(issueNumber, title);
+        try {
+          await createAndSwitchBranch(branchName, defaultBranch, cwd);
+          log.info(`Created branch ${branchName} for issue #${issueNumber}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.warn(`Could not create branch for issue #${issueNumber}: ${message}. Processing without branch isolation.`);
+          branchName = undefined;
+        }
+      }
 
-              if (!planResult.success) {
+      // ── Dispatch tasks for this issue ───────────────────────
+      const groups = groupTasksByMode(issueTasks);
+      let issueHadFailure = false;
+
+      for (const group of groups) {
+        const groupQueue = [...group];
+
+        while (groupQueue.length > 0) {
+          const batch = groupQueue.splice(0, concurrency);
+          const batchResults = await Promise.all(
+            batch.map(async (task) => {
+              const tuiTask = tui.state.tasks.find((t) => t.task === task)!;
+              const startTime = Date.now();
+              tuiTask.elapsed = startTime;
+
+              // ── Phase A: Plan (unless --no-plan) ─────────────────
+              let plan: string | undefined;
+              if (planner) {
+                tuiTask.status = "planning";
+                const rawContent = fileContentMap.get(task.file);
+                const fileContext = rawContent ? buildTaskContext(rawContent, task) : undefined;
+                const planResult = await planner.plan(task, fileContext);
+
+                if (!planResult.success) {
+                  tuiTask.status = "failed";
+                  tuiTask.error = `Planning failed: ${planResult.error}`;
+                  tuiTask.elapsed = Date.now() - startTime;
+                  failed++;
+                  issueHadFailure = true;
+                  return { task, success: false, error: tuiTask.error } as DispatchResult;
+                }
+
+                plan = planResult.prompt;
+              }
+
+              // ── Phase B: Execute via executor agent ──────────────
+              tuiTask.status = "running";
+              const execResult = await executor.execute({
+                task,
+                cwd,
+                plan: plan ?? null,
+              });
+
+              if (execResult.success) {
+                // Sync checked-off state back to the datasource
+                try {
+                  const fileParsed = parseIssueFilename(task.file);
+                  if (fileParsed) {
+                    const updatedContent = await readFile(task.file, "utf-8");
+                    const details = issueDetailsByFile.get(task.file);
+                    const title = details?.title ?? fileParsed.slug;
+                    await datasource.update(fileParsed.issueId, title, updatedContent, fetchOpts);
+                    log.success(`Synced task completion to issue #${fileParsed.issueId}`);
+                  }
+                } catch (err) {
+                  const message = err instanceof Error ? err.message : String(err);
+                  log.warn(`Could not sync task completion to datasource: ${message}`);
+                }
+
+                tuiTask.status = "done";
+                tuiTask.elapsed = Date.now() - startTime;
+                completed++;
+              } else {
                 tuiTask.status = "failed";
-                tuiTask.error = `Planning failed: ${planResult.error}`;
+                tuiTask.error = execResult.error;
                 tuiTask.elapsed = Date.now() - startTime;
                 failed++;
-                return { task, success: false, error: tuiTask.error } as DispatchResult;
+                issueHadFailure = true;
               }
 
-              plan = planResult.prompt;
-            }
+              return execResult.dispatchResult;
+            })
+          );
 
-            // ── Phase B: Execute via executor agent ──────────────
-            tuiTask.status = "running";
-            const execResult = await executor.execute({
-              task,
-              cwd,
-              plan: plan ?? null,
-            });
+          results.push(...batchResults);
+        }
+      }
 
-            if (execResult.success) {
-              // Sync checked-off state back to the datasource
-              try {
-                const parsed = parseIssueFilename(task.file);
-                if (parsed) {
-                  const updatedContent = await readFile(task.file, "utf-8");
-                  const details = issueDetailsByFile.get(task.file);
-                  const title = details?.title ?? parsed.slug;
-                  await datasource.update(parsed.issueId, title, updatedContent, fetchOpts);
-                  log.success(`Synced task completion to issue #${parsed.issueId}`);
-                }
-              } catch (err) {
-                const message = err instanceof Error ? err.message : String(err);
-                log.warn(`Could not sync task completion to datasource: ${message}`);
-              }
+      // ── Post-issue: commit, push, PR ────────────────────────
+      if (branchName && defaultBranch) {
+        // Safety-net commit: stage and commit any uncommitted changes
+        try {
+          await commitAllChanges(
+            `feat(dispatch): complete tasks for issue #${issueNumber}`,
+            cwd,
+          );
+          log.info(`Committed uncommitted changes for issue #${issueNumber}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.warn(`Could not commit changes for issue #${issueNumber}: ${message}`);
+        }
 
-              tuiTask.status = "done";
-              tuiTask.elapsed = Date.now() - startTime;
-              completed++;
-            } else {
-              tuiTask.status = "failed";
-              tuiTask.error = execResult.error;
-              tuiTask.elapsed = Date.now() - startTime;
-              failed++;
-            }
+        // Push the branch (even on partial failure)
+        try {
+          await pushBranch(branchName, cwd);
+          log.success(`Pushed branch ${branchName}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.warn(`Could not push branch ${branchName}: ${message}`);
+        }
 
-            return execResult.dispatchResult;
-          })
-        );
+        // Open a PR linking back to the issue
+        try {
+          const prTitle = `dispatch: resolve issue #${issueNumber}`;
+          const issueTaskSummary = issueTasks.map((t) => {
+            const tuiTask = tui.state.tasks.find((ts) => ts.task === t);
+            const status = tuiTask?.status === "done" ? "✅" : tuiTask?.status === "failed" ? "❌" : "⏳";
+            return `- ${status} ${t.text}`;
+          }).join("\n");
+          const prBody = [
+            `Resolves #${issueNumber}`,
+            ``,
+            `## Tasks`,
+            issueTaskSummary,
+            issueHadFailure ? `\n⚠️ Some tasks failed — this PR contains partial progress.` : ``,
+          ].join("\n");
 
-        results.push(...batchResults);
+          const prUrl = await createPullRequest(branchName, defaultBranch, prTitle, prBody, cwd);
+          if (prUrl) {
+            log.success(`Opened PR: ${prUrl}`);
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.warn(`Could not create PR for issue #${issueNumber}: ${message}`);
+        }
+
+        // Switch back to default branch for the next issue
+        try {
+          await switchBranch(defaultBranch, cwd);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.warn(`Could not switch back to ${defaultBranch}: ${message}`);
+        }
       }
     }
 

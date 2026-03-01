@@ -18,6 +18,7 @@ export interface OrchestrateRunOptions {
   concurrency?: number;
   dryRun: boolean;
   noPlan?: boolean;
+  noBranch?: boolean;
   provider?: ProviderName;
   serverUrl?: string;
   source?: DatasourceName;
