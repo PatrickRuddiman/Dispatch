@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import type { DatasourceName } from "../datasources/interface.js";
 import { DATASOURCE_NAMES, getDatasource } from "../datasources/index.js";
 import { validateConfigValue } from "../config.js";
+import { extractTitle } from "../datasources/md.js";
 
 // ─── MD datasource — list ────────────────────────────────────────────
 
@@ -112,13 +113,70 @@ describe("MD datasource — fetch", () => {
     expect(result.title).toBe("Feature Title");
   });
 
-  it("falls back to filename as title when no H1 heading", async () => {
+  it("extracts title from first content line when no H1 heading", async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
     const specsDir = join(tmpDir, ".dispatch", "specs");
     await mkdir(specsDir, { recursive: true });
     await writeFile(join(specsDir, "my-spec.md"), "No heading here\n\nJust content", "utf-8");
     const result = await md.fetch("my-spec", { cwd: tmpDir });
-    expect(result.title).toBe("my-spec");
+    expect(result.title).toBe("No heading here");
+  });
+
+  it("strips leading markdown prefixes from title", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
+    const specsDir = join(tmpDir, ".dispatch", "specs");
+    await mkdir(specsDir, { recursive: true });
+    await writeFile(join(specsDir, "test.md"), "## Subheading Title\n\nBody", "utf-8");
+    const result = await md.fetch("test", { cwd: tmpDir });
+    expect(result.title).toBe("Subheading Title");
+  });
+
+  it("truncates long first lines at word boundary", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
+    const specsDir = join(tmpDir, ".dispatch", "specs");
+    await mkdir(specsDir, { recursive: true });
+    const longLine = "This is a very long description that should be truncated at a word boundary because it exceeds eighty characters in total length";
+    await writeFile(join(specsDir, "long.md"), longLine, "utf-8");
+    const result = await md.fetch("long", { cwd: tmpDir });
+    expect(result.title.length).toBeLessThanOrEqual(80);
+    expect(longLine.startsWith(result.title)).toBe(true);
+    expect(result.title).not.toMatch(/\s$/);
+  });
+
+  it("skips blank lines to find first meaningful content", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
+    const specsDir = join(tmpDir, ".dispatch", "specs");
+    await mkdir(specsDir, { recursive: true });
+    await writeFile(join(specsDir, "test.md"), "\n\n\nActual content here", "utf-8");
+    const result = await md.fetch("test", { cwd: tmpDir });
+    expect(result.title).toBe("Actual content here");
+  });
+
+  it("strips blockquote prefix from title", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
+    const specsDir = join(tmpDir, ".dispatch", "specs");
+    await mkdir(specsDir, { recursive: true });
+    await writeFile(join(specsDir, "test.md"), "> Quoted description text", "utf-8");
+    const result = await md.fetch("test", { cwd: tmpDir });
+    expect(result.title).toBe("Quoted description text");
+  });
+
+  it("strips list marker prefix from title", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
+    const specsDir = join(tmpDir, ".dispatch", "specs");
+    await mkdir(specsDir, { recursive: true });
+    await writeFile(join(specsDir, "test.md"), "- List item as description", "utf-8");
+    const result = await md.fetch("test", { cwd: tmpDir });
+    expect(result.title).toBe("List item as description");
+  });
+
+  it("falls back to filename when content is only whitespace", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
+    const specsDir = join(tmpDir, ".dispatch", "specs");
+    await mkdir(specsDir, { recursive: true });
+    await writeFile(join(specsDir, "empty.md"), "   \n  \n   ", "utf-8");
+    const result = await md.fetch("empty", { cwd: tmpDir });
+    expect(result.title).toBe("empty");
   });
 
   it("throws when file does not exist", async () => {
@@ -227,10 +285,142 @@ describe("MD datasource — create", () => {
   it("returns correct IssueDetails for created file", async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
     const result = await md.create("Test Title", "body", { cwd: tmpDir });
-    expect(result.title).toBe("test-title");
+    expect(result.title).toBe("body");
     expect(result.body).toBe("body");
     expect(result.state).toBe("open");
     expect(result.labels).toEqual([]);
+  });
+});
+
+// ─── extractTitle — direct unit tests ────────────────────────────────
+
+describe("extractTitle", () => {
+  // --- H1 heading extraction (primary) ---
+
+  it("extracts title from H1 heading", () => {
+    expect(extractTitle("# My Title\n\nBody text", "file.md")).toBe("My Title");
+  });
+
+  it("extracts H1 heading even when not on first line", () => {
+    expect(extractTitle("Some preamble\n# Actual Title\n\nBody", "file.md")).toBe("Actual Title");
+  });
+
+  it("trims whitespace from extracted H1 heading", () => {
+    expect(extractTitle("#   Spaced Title  \n\nBody", "file.md")).toBe("Spaced Title");
+  });
+
+  it("uses first H1 when multiple H1 headings exist", () => {
+    expect(extractTitle("# First\n\n# Second", "file.md")).toBe("First");
+  });
+
+  // --- Description-based extraction (secondary) ---
+
+  it("extracts title from plain text description without H1", () => {
+    expect(extractTitle("This is a plain text description", "my-spec.md")).toBe("This is a plain text description");
+  });
+
+  it("extracts title from first non-heading text line when only H2+ headings present", () => {
+    expect(extractTitle("## Section Heading\n\nSome body text", "file.md")).toBe("Section Heading");
+  });
+
+  it("strips H2 prefix from content", () => {
+    expect(extractTitle("## Subheading Title", "file.md")).toBe("Subheading Title");
+  });
+
+  it("strips H3 prefix from content", () => {
+    expect(extractTitle("### Third Level Heading", "file.md")).toBe("Third Level Heading");
+  });
+
+  it("strips leading blockquote prefix from content", () => {
+    expect(extractTitle("> This is a blockquote description", "file.md")).toBe("This is a blockquote description");
+  });
+
+  it("strips leading list marker dash from content", () => {
+    expect(extractTitle("- First list item", "file.md")).toBe("First list item");
+  });
+
+  it("strips leading list marker asterisk from content", () => {
+    expect(extractTitle("* Asterisk list item", "file.md")).toBe("Asterisk list item");
+  });
+
+  it("skips leading blank lines to find first meaningful content", () => {
+    expect(extractTitle("\n\n\nActual content after blanks", "file.md")).toBe("Actual content after blanks");
+  });
+
+  it("skips lines that are only whitespace", () => {
+    expect(extractTitle("   \n  \t  \nReal content here", "file.md")).toBe("Real content here");
+  });
+
+  it("handles content with leading blank lines before a non-H1 heading", () => {
+    expect(extractTitle("\n\n## Delayed Heading\n\nBody", "file.md")).toBe("Delayed Heading");
+  });
+
+  // --- Truncation ---
+
+  it("truncates content exceeding 80 characters at word boundary", () => {
+    const longLine = "This is a very long description line that definitely exceeds the eighty character truncation limit and should be cut off at a word boundary";
+    const result = extractTitle(longLine, "file.md");
+    expect(result.length).toBeLessThanOrEqual(80);
+    expect(longLine.startsWith(result)).toBe(true);
+    // Should not end with a space
+    expect(result).not.toMatch(/\s$/);
+  });
+
+  it("returns exactly 80 characters when the content breaks cleanly at 80", () => {
+    // 80 chars exactly: "a" repeated pattern ending at exactly 80
+    const exactly80 = "a".repeat(80);
+    const result = extractTitle(exactly80, "file.md");
+    expect(result).toBe(exactly80);
+  });
+
+  it("does not truncate content that is exactly 80 characters", () => {
+    const content = "x".repeat(80);
+    expect(extractTitle(content, "file.md")).toBe(content);
+  });
+
+  it("truncates a single long word without spaces to 80 characters", () => {
+    const longWord = "a".repeat(100);
+    const result = extractTitle(longWord, "file.md");
+    expect(result.length).toBe(80);
+    expect(result).toBe("a".repeat(80));
+  });
+
+  // --- Filename fallback (tertiary) ---
+
+  it("falls back to filename when content is only whitespace", () => {
+    expect(extractTitle("   \n  \n   ", "my-spec.md")).toBe("my-spec");
+  });
+
+  it("falls back to filename when content is empty string", () => {
+    expect(extractTitle("", "fallback-name.md")).toBe("fallback-name");
+  });
+
+  it("falls back to filename when content has only markdown prefixes with no text", () => {
+    expect(extractTitle("##\n>\n-\n*", "prefix-only.md")).toBe("prefix-only");
+  });
+
+  it("strips .md extension from filename in fallback", () => {
+    expect(extractTitle("", "my-feature.md")).toBe("my-feature");
+  });
+
+  // --- Mixed formatting ---
+
+  it("handles content with mixed formatting and extracts first meaningful line", () => {
+    const content = "\n\n> Quoted intro to the feature\n\n## Details\n\n- item one\n- item two";
+    expect(extractTitle(content, "file.md")).toBe("Quoted intro to the feature");
+  });
+
+  it("prefers H1 heading over plain text content", () => {
+    expect(extractTitle("Plain text first\n# Heading After\nMore text", "file.md")).toBe("Heading After");
+  });
+
+  it("handles content with only a blockquote across multiple lines", () => {
+    expect(extractTitle("> First quote line\n> Second quote line", "file.md")).toBe("First quote line");
+  });
+
+  it("handles content that starts with a markdown list", () => {
+    const content = "- First item\n- Second item\n- Third item";
+    expect(extractTitle(content, "file.md")).toBe("First item");
   });
 });
 

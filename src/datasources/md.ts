@@ -27,11 +27,35 @@ function resolveDir(opts?: IssueFetchOptions): string {
 
 /**
  * Extract a title from markdown content.
- * Looks for the first `# Heading` line; falls back to the filename.
+ * Looks for the first `# Heading` line; if not found, derives a title from the
+ * first meaningful line of content (stripping markdown formatting and truncating
+ * to ~80 characters at a word boundary). Falls back to the filename when the
+ * content has no usable text.
  */
 export function extractTitle(content: string, filename: string): string {
+  // Primary: H1 heading
   const match = content.match(/^#\s+(.+)$/m);
-  return match ? match[1].trim() : parsePath(filename).name;
+  if (match) return match[1].trim();
+
+  // Secondary: first meaningful content line
+  const lines = content.split("\n");
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    // Strip leading markdown prefixes (##, -, *, >, or combinations)
+    const cleaned = trimmed.replace(/^[#>*\-]+\s*/, "").trim();
+    if (!cleaned) continue;
+
+    // Truncate to ~80 chars at a word boundary
+    if (cleaned.length <= 80) return cleaned;
+    const truncated = cleaned.slice(0, 80);
+    const lastSpace = truncated.lastIndexOf(" ");
+    return lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated;
+  }
+
+  // Fallback: filename without extension
+  return parsePath(filename).name;
 }
 
 /**
