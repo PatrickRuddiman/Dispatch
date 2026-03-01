@@ -1,7 +1,9 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { readFile, rm } from "node:fs/promises";
 import { join, basename } from "node:path";
 import type { Datasource, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
+import type { Task } from "../parser.js";
+import type { DispatchResult } from "../dispatcher.js";
 
 vi.mock("../logger.js", () => ({
   log: {
@@ -17,12 +19,30 @@ vi.mock("../logger.js", () => ({
   },
 }));
 
+const { mockExecFile } = vi.hoisted(() => ({
+  mockExecFile: vi.fn(),
+}));
+
+vi.mock("node:child_process", () => ({
+  execFile: mockExecFile,
+}));
+
+vi.mock("node:util", () => ({
+  promisify: () => mockExecFile,
+}));
+
 // Must import log AFTER vi.mock to get the mocked version
 import { log } from "../logger.js";
+
+beforeEach(() => {
+  mockExecFile.mockReset();
+});
 import {
   parseIssueFilename,
   fetchItemsById,
   writeItemsToTempDir,
+  buildPrBody,
+  buildPrTitle,
 } from "../orchestrator/datasource-helpers.js";
 
 /** Create a mock Datasource with all methods stubbed via vi.fn(). */
@@ -444,5 +464,169 @@ describe("writeItemsToTempDir", () => {
       const content = await readFile(file, "utf-8");
       expect(content).toBe(mapped!.body);
     }
+  });
+});
+
+// ─── buildPrTitle ───────────────────────────────────────────────────
+
+describe("buildPrTitle", () => {
+  it("returns issue title when no commits are found", async () => {
+    mockExecFile.mockRejectedValue(new Error("fatal: bad revision"));
+
+    const result = await buildPrTitle("Add user auth", "main", "/tmp/repo");
+
+    expect(result).toBe("Add user auth");
+  });
+
+  it("returns the single commit message when only one commit exists", async () => {
+    mockExecFile.mockResolvedValue({
+      stdout: "feat: implement login flow\n",
+    });
+
+    const result = await buildPrTitle("Add user auth", "main", "/tmp/repo");
+
+    expect(result).toBe("feat: implement login flow");
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "git",
+      ["log", "main..HEAD", "--pretty=format:%s"],
+      { cwd: "/tmp/repo" },
+    );
+  });
+
+  it("returns oldest commit message with count suffix for multiple commits", async () => {
+    mockExecFile.mockResolvedValue({
+      stdout: "fix: handle edge case\nfeat: add login page\nfeat: scaffold auth module\n",
+    });
+
+    const result = await buildPrTitle("Add user auth", "main", "/tmp/repo");
+
+    expect(result).toBe("feat: scaffold auth module (+2 more)");
+  });
+
+  it("returns issue title when git log returns empty output", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "" });
+
+    const result = await buildPrTitle("My feature", "main", "/tmp/repo");
+
+    expect(result).toBe("My feature");
+  });
+});
+
+// ─── buildPrBody ────────────────────────────────────────────────────
+
+describe("buildPrBody", () => {
+  /** Create a Task fixture. */
+  function createTask(overrides?: Partial<Task>): Task {
+    return {
+      index: 0,
+      text: "Implement feature",
+      line: 1,
+      raw: "- [ ] Implement feature",
+      file: "/tmp/dispatch-abc/42-feature.md",
+      ...overrides,
+    };
+  }
+
+  it("includes commit summaries in the body", async () => {
+    mockExecFile.mockResolvedValue({
+      stdout: "feat: add login\nfeat: add signup\n",
+    });
+
+    const details = createIssueDetails({ number: "42", title: "Auth", labels: [] });
+    const task = createTask({ text: "Add login" });
+    const result: DispatchResult = { task, success: true };
+
+    const body = await buildPrBody(details, [task], [result], "main", "github", "/tmp/repo");
+
+    expect(body).toContain("## Summary");
+    expect(body).toContain("- feat: add login");
+    expect(body).toContain("- feat: add signup");
+  });
+
+  it("includes completed and failed tasks", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "" });
+
+    const details = createIssueDetails({ number: "42" });
+    const task1 = createTask({ index: 0, text: "Task one", line: 1 });
+    const task2 = createTask({ index: 1, text: "Task two", line: 2 });
+    const results: DispatchResult[] = [
+      { task: task1, success: true },
+      { task: task2, success: false, error: "timeout" },
+    ];
+
+    const body = await buildPrBody(details, [task1, task2], results, "main", "github", "/tmp/repo");
+
+    expect(body).toContain("## Tasks");
+    expect(body).toContain("- [x] Task one");
+    expect(body).toContain("- [ ] Task two");
+  });
+
+  it("includes labels when present", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "" });
+
+    const details = createIssueDetails({ number: "10", labels: ["bug", "urgent"] });
+
+    const body = await buildPrBody(details, [], [], "main", "github", "/tmp/repo");
+
+    expect(body).toContain("**Labels:** bug, urgent");
+  });
+
+  it("appends GitHub close reference for github datasource", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "" });
+
+    const details = createIssueDetails({ number: "42" });
+
+    const body = await buildPrBody(details, [], [], "main", "github", "/tmp/repo");
+
+    expect(body).toContain("Closes #42");
+    expect(body).not.toContain("Resolves AB#");
+  });
+
+  it("appends Azure DevOps close reference for azdevops datasource", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "" });
+
+    const details = createIssueDetails({ number: "42" });
+
+    const body = await buildPrBody(details, [], [], "main", "azdevops", "/tmp/repo");
+
+    expect(body).toContain("Resolves AB#42");
+    expect(body).not.toContain("Closes #");
+  });
+
+  it("includes no close reference for md datasource", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "" });
+
+    const details = createIssueDetails({ number: "42" });
+
+    const body = await buildPrBody(details, [], [], "main", "md", "/tmp/repo");
+
+    expect(body).not.toContain("Closes #");
+    expect(body).not.toContain("Resolves AB#");
+  });
+
+  it("handles git log failure gracefully", async () => {
+    mockExecFile.mockRejectedValue(new Error("git not found"));
+
+    const details = createIssueDetails({ number: "42" });
+    const task = createTask({ text: "Do something" });
+    const result: DispatchResult = { task, success: true };
+
+    const body = await buildPrBody(details, [task], [result], "main", "github", "/tmp/repo");
+
+    // Should still produce a body without the summary section
+    expect(body).not.toContain("## Summary");
+    expect(body).toContain("## Tasks");
+    expect(body).toContain("- [x] Do something");
+    expect(body).toContain("Closes #42");
+  });
+
+  it("omits tasks section when no tasks match results", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "feat: init\n" });
+
+    const details = createIssueDetails({ number: "7" });
+
+    const body = await buildPrBody(details, [], [], "main", "github", "/tmp/repo");
+
+    expect(body).not.toContain("## Tasks");
   });
 });

@@ -23,6 +23,8 @@ import {
   writeItemsToTempDir,
   closeCompletedSpecIssues,
   parseIssueFilename,
+  buildPrBody,
+  buildPrTitle,
 } from "./datasource-helpers.js";
 
 /**
@@ -256,10 +258,20 @@ export async function runDispatchPipeline(
         }
 
         try {
+          const prTitle = await buildPrTitle(details.title, defaultBranch, lifecycleOpts.cwd);
+          const prBody = await buildPrBody(
+            details,
+            fileTasks,
+            results,
+            defaultBranch,
+            datasource.name,
+            lifecycleOpts.cwd,
+          );
           const prUrl = await datasource.createPullRequest(
             branchName,
             details.number,
-            details.title,
+            prTitle,
+            prBody,
             lifecycleOpts,
           );
           if (prUrl) {
