@@ -24,6 +24,8 @@ export interface DispatchConfig {
   org?: string;
   project?: string;
   serverUrl?: string;
+  planTimeout?: number;
+  planRetries?: number;
 }
 
 /** Valid configuration key names. */
@@ -34,6 +36,8 @@ export const CONFIG_KEYS = [
   "org",
   "project",
   "serverUrl",
+  "planTimeout",
+  "planRetries",
 ] as const;
 
 /** A valid configuration key name. */
@@ -118,6 +122,22 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
       }
       return null;
 
+    case "planTimeout": {
+      const num = Number(value);
+      if (!Number.isFinite(num) || num <= 0) {
+        return `Invalid planTimeout "${value}". Must be a positive number (minutes)`;
+      }
+      return null;
+    }
+
+    case "planRetries": {
+      const num = Number(value);
+      if (!Number.isInteger(num) || num < 0) {
+        return `Invalid planRetries "${value}". Must be a non-negative integer`;
+      }
+      return null;
+    }
+
     default:
       return `Unknown config key "${key}"`;
   }
@@ -127,8 +147,11 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
  * Parse a string value into the appropriate type for a config key.
  */
 export function parseConfigValue(key: ConfigKey, value: string): string | number {
-  if (key === "concurrency") {
+  if (key === "concurrency" || key === "planRetries") {
     return parseInt(value, 10);
+  }
+  if (key === "planTimeout") {
+    return parseFloat(value);
   }
   return value;
 }
