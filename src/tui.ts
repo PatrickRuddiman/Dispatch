@@ -113,12 +113,15 @@ function render(state: TuiState): string {
   lines.push("");
   lines.push(chalk.bold.white("  ⚡ dispatch") + chalk.dim(` — AI task orchestration`));
 
-  // Show provider/model info when available
+  // Show provider/model/source info when available — one per line
   if (state.provider) {
-    const providerInfo = state.model
-      ? `  provider: ${state.provider} · model: ${state.model}`
-      : `  provider: ${state.provider}`;
-    lines.push(chalk.dim(providerInfo));
+    lines.push(chalk.dim(`  provider: ${state.provider}`));
+  }
+  if (state.model) {
+    lines.push(chalk.dim(`  model: ${state.model}`));
+  }
+  if (state.source) {
+    lines.push(chalk.dim(`  source: ${state.source}`));
   }
 
   lines.push(chalk.dim("  ─".repeat(24)));
