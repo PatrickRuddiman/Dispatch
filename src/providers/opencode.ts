@@ -56,8 +56,7 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
     const { data: config } = await client.config.get();
     if (config?.model) {
       // model is in "provider/model" format (e.g. "anthropic/claude-sonnet-4")
-      const slashIndex = config.model.indexOf("/");
-      model = slashIndex !== -1 ? config.model.slice(slashIndex + 1) : config.model;
+      model = config.model;
       log.debug(`Detected model: ${model}`);
     }
   } catch (err) {
