@@ -7,7 +7,9 @@ import type { AgentBootOptions } from "./interface.js";
 import type { ProviderName } from "../providers/interface.js";
 import type { DatasourceName } from "../datasources/interface.js";
 import type { SpecOptions, SpecSummary } from "../spec-generator.js";
-import { defaultConcurrency } from "../spec-generator.js";
+import { defaultConcurrency, resolveSource } from "../spec-generator.js";
+import { getDatasource } from "../datasources/index.js";
+import { log } from "../logger.js";
 import { resolveCliConfig } from "../orchestrator/cli-config.js";
 import { runSpecPipeline } from "../orchestrator/spec-pipeline.js";
 import { runDispatchPipeline } from "../orchestrator/dispatch-pipeline.js";
@@ -40,6 +42,7 @@ export interface RawCliArgs {
   cwd: string;
   verbose: boolean;
   spec?: string | string[];
+  respec?: string | string[];
   issueSource?: DatasourceName;
   org?: string;
   project?: string;
@@ -101,6 +104,13 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
 
     async runFromCli(args: RawCliArgs): Promise<RunResult> {
       const m = await resolveCliConfig(args);
+
+      // ── Mutual exclusion: --spec and --respec ───────────────
+      if (m.spec && m.respec) {
+        log.error("--spec and --respec are mutually exclusive");
+        process.exit(1);
+      }
+
       if (m.spec) {
         return this.generateSpecs({
           issues: m.spec, issueSource: m.issueSource, provider: m.provider,
@@ -108,6 +118,39 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
           org: m.org, project: m.project, concurrency: m.concurrency,
         });
       }
+
+      if (m.respec) {
+        const respecArgs = m.respec;
+        const isEmpty = Array.isArray(respecArgs) && respecArgs.length === 0;
+
+        let issues: string | string[];
+        if (isEmpty) {
+          // No arguments: discover all existing specs via datasource.list()
+          const source = await resolveSource(respecArgs, m.issueSource, m.cwd);
+          if (!source) {
+            process.exit(1);
+          }
+          const datasource = getDatasource(source);
+          const existing = await datasource.list({ cwd: m.cwd, org: m.org, project: m.project });
+          if (existing.length === 0) {
+            log.error("No existing specs found to regenerate");
+            process.exit(1);
+          }
+          const identifiers = existing.map((item) => item.number);
+          const allNumeric = identifiers.every((id) => /^\d+$/.test(id));
+          issues = allNumeric ? identifiers.join(",") : identifiers;
+        } else {
+          // With arguments: pass directly (same as --spec)
+          issues = respecArgs;
+        }
+
+        return this.generateSpecs({
+          issues, issueSource: m.issueSource, provider: m.provider,
+          serverUrl: m.serverUrl, cwd: m.cwd, outputDir: m.outputDir,
+          org: m.org, project: m.project, concurrency: m.concurrency,
+        });
+      }
+
       return this.orchestrate({
         issueIds: m.issueIds, concurrency: m.concurrency ?? defaultConcurrency(),
         dryRun: m.dryRun, noPlan: m.noPlan, noBranch: m.noBranch, provider: m.provider,
