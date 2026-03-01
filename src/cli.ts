@@ -26,6 +26,7 @@ const HELP = `
     dispatch [issue-id...]           Dispatch specific issues (or all open issues if none given)
     dispatch --spec <ids>            Generate spec files from issues
     dispatch --spec <glob>           Generate specs from local markdown files in the configured datasource
+    dispatch --spec "description"    Generate a spec from an inline text description
 
   Dispatch options:
     --dry-run              List tasks without dispatching
@@ -37,7 +38,7 @@ const HELP = `
     --cwd <dir>            Working directory (default: cwd)
 
   Spec options:
-    --spec <value>         Comma-separated issue numbers or glob pattern for .md files (creates specs in configured datasource)
+    --spec <value>         Comma-separated issue numbers, glob pattern for .md files, or inline text description
     --source <name>        Issue source: ${DATASOURCE_NAMES.join(", ")} (auto-detected from git remote)
     --org <url>            Azure DevOps organization URL
     --project <name>       Azure DevOps project name
@@ -70,6 +71,8 @@ const HELP = `
     dispatch --spec "drafts/*.md"
     dispatch --spec "drafts/*.md" --source github
     dispatch --spec "./my-feature.md" --provider copilot
+    dispatch --spec "add dark mode toggle to settings page"
+    dispatch --spec "feature A should do x" --provider copilot
     dispatch config set provider copilot
     dispatch config list
     dispatch config reset
