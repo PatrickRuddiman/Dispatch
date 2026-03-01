@@ -168,12 +168,15 @@ export async function runDispatchPipeline(
       const issueNumber = parsed?.issueId ?? basename(taskFile.path, ".md");
       const issueSlug = parsed?.slug ?? "unknown";
 
+      // Update TUI with current issue context
+      const issueDetails = issueDetailsByFile.get(taskFile.path);
+      const issueTitle = issueDetails?.title ?? issueSlug;
+      tui.state.currentIssue = { number: String(issueNumber), title: issueTitle };
+
       // ── Branch creation ─────────────────────────────────────
       let branchName: string | undefined;
       if (!noBranch && defaultBranch) {
-        const details = issueDetailsByFile.get(taskFile.path);
-        const title = details?.title ?? issueSlug;
-        branchName = buildBranchName(issueNumber, title);
+        branchName = buildBranchName(issueNumber, issueTitle);
         try {
           await createAndSwitchBranch(branchName, defaultBranch, cwd);
           log.info(`Created branch ${branchName} for issue #${issueNumber}`);
@@ -319,6 +322,8 @@ export async function runDispatchPipeline(
         }
       }
     }
+
+    tui.state.currentIssue = undefined;
 
     // ── 6. Close originating issues for completed spec files ────
     await closeCompletedSpecIssues(taskFiles, results, cwd, source, org, project);

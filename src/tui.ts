@@ -28,6 +28,8 @@ export interface TuiState {
   model?: string;
   /** Datasource name (e.g. "github", "azdevops", "md") */
   source?: string;
+  /** Currently-processing issue context (number + title) */
+  currentIssue?: { number: string; title: string };
 }
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -118,6 +120,12 @@ function render(state: TuiState): string {
       source: state.source,
     })
   );
+
+  if (state.currentIssue) {
+    lines.push(
+      chalk.dim(`  issue: `) + chalk.white(`#${state.currentIssue.number}`) + chalk.dim(` — ${state.currentIssue.title}`)
+    );
+  }
 
   lines.push(chalk.dim("  ─".repeat(24)));
 
