@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { isIssueNumbers, validateSpecStructure, extractSpecContent, resolveSource } from "../spec-generator.js";
+import { isIssueNumbers, isGlobOrFilePath, validateSpecStructure, extractSpecContent, resolveSource } from "../spec-generator.js";
 import { buildFileSpecPrompt, boot } from "../agents/spec.js";
 import * as datasourcesIndex from "../datasources/index.js";
 import type { ProviderInstance } from "../providers/interface.js";
@@ -253,6 +253,170 @@ describe("isIssueNumbers", () => {
 
   it("returns false for an empty array", () => {
     expect(isIssueNumbers([])).toBe(false);
+  });
+});
+
+describe("isGlobOrFilePath", () => {
+  // --- Glob patterns (true) ---
+
+  it("returns true for a wildcard glob pattern", () => {
+    expect(isGlobOrFilePath("*.md")).toBe(true);
+  });
+
+  it("returns true for a directory wildcard glob", () => {
+    expect(isGlobOrFilePath("drafts/*.md")).toBe(true);
+  });
+
+  it("returns true for a double-star recursive glob", () => {
+    expect(isGlobOrFilePath("**/*.ts")).toBe(true);
+  });
+
+  it("returns true for a question mark glob", () => {
+    expect(isGlobOrFilePath("file?.txt")).toBe(true);
+  });
+
+  it("returns true for a bracket glob pattern", () => {
+    expect(isGlobOrFilePath("file[0-9].md")).toBe(true);
+  });
+
+  it("returns true for a brace expansion glob", () => {
+    expect(isGlobOrFilePath("*.{md,txt}")).toBe(true);
+  });
+
+  // --- File paths (true) ---
+
+  it("returns true for a relative file path with directory", () => {
+    expect(isGlobOrFilePath("drafts/feature.md")).toBe(true);
+  });
+
+  it("returns true for a dot-slash relative path", () => {
+    expect(isGlobOrFilePath("./my-spec.md")).toBe(true);
+  });
+
+  it("returns true for a dot-dot relative path", () => {
+    expect(isGlobOrFilePath("../specs/feature.md")).toBe(true);
+  });
+
+  it("returns true for an absolute Unix path", () => {
+    expect(isGlobOrFilePath("/home/user/spec.md")).toBe(true);
+  });
+
+  it("returns true for a Windows-style backslash path", () => {
+    expect(isGlobOrFilePath("docs\\specs\\feature.md")).toBe(true);
+  });
+
+  it("returns true for a path with multiple directories", () => {
+    expect(isGlobOrFilePath("src/tests/spec-generator.test.ts")).toBe(true);
+  });
+
+  // --- Bare filenames with extensions (true) ---
+
+  it("returns true for a bare .md filename", () => {
+    expect(isGlobOrFilePath("spec.md")).toBe(true);
+  });
+
+  it("returns true for a bare .txt filename", () => {
+    expect(isGlobOrFilePath("notes.txt")).toBe(true);
+  });
+
+  it("returns true for a bare .json filename", () => {
+    expect(isGlobOrFilePath("config.json")).toBe(true);
+  });
+
+  it("returns true for a bare .ts filename", () => {
+    expect(isGlobOrFilePath("index.ts")).toBe(true);
+  });
+
+  it("returns true for a bare .yaml filename", () => {
+    expect(isGlobOrFilePath("config.yaml")).toBe(true);
+  });
+
+  it("returns true for a hyphenated filename with extension", () => {
+    expect(isGlobOrFilePath("my-feature.md")).toBe(true);
+  });
+
+  // --- Inline text strings (false) ---
+
+  it("returns false for a plain text sentence", () => {
+    expect(isGlobOrFilePath("feature A should do x")).toBe(false);
+  });
+
+  it("returns false for a multi-word description", () => {
+    expect(isGlobOrFilePath("add dark mode toggle to settings page")).toBe(false);
+  });
+
+  it("returns false for a single word", () => {
+    expect(isGlobOrFilePath("refactor")).toBe(false);
+  });
+
+  it("returns false for a sentence with punctuation", () => {
+    expect(isGlobOrFilePath("add validation for email, phone, and address")).toBe(false);
+  });
+
+  it("returns false for a sentence with a colon", () => {
+    expect(isGlobOrFilePath("feat: add user authentication")).toBe(false);
+  });
+
+  it("returns false for a sentence with parentheses", () => {
+    expect(isGlobOrFilePath("implement caching (redis)")).toBe(false);
+  });
+
+  it("returns false for a sentence with a dash", () => {
+    expect(isGlobOrFilePath("add dark-mode support")).toBe(false);
+  });
+
+  // --- Edge cases ---
+
+  it("returns false for an empty string", () => {
+    expect(isGlobOrFilePath("")).toBe(false);
+  });
+
+  it("returns false for whitespace only", () => {
+    expect(isGlobOrFilePath("   ")).toBe(false);
+  });
+
+  it("returns false for a string with special characters but no glob or path chars", () => {
+    expect(isGlobOrFilePath("hello @world #test")).toBe(false);
+  });
+
+  it("returns false for a string with equals sign", () => {
+    expect(isGlobOrFilePath("key=value")).toBe(false);
+  });
+
+  it("returns false for a quoted phrase", () => {
+    expect(isGlobOrFilePath("\"add new feature\"")).toBe(false);
+  });
+
+  it("returns false for a string with exclamation mark", () => {
+    expect(isGlobOrFilePath("fix the bug!")).toBe(false);
+  });
+
+  it("returns true for a lone forward slash", () => {
+    expect(isGlobOrFilePath("/")).toBe(true);
+  });
+
+  it("returns true for a lone asterisk", () => {
+    expect(isGlobOrFilePath("*")).toBe(true);
+  });
+
+  it("returns true for a dot followed by extension only", () => {
+    expect(isGlobOrFilePath(".md")).toBe(true);
+  });
+
+  it("returns false for a string ending with a long pseudo-extension", () => {
+    expect(isGlobOrFilePath("something.toolong")).toBe(false);
+  });
+
+  it("returns false for a string with a dot but no valid extension", () => {
+    expect(isGlobOrFilePath("version 2.0 is ready")).toBe(false);
+  });
+
+  it("returns false for a number string", () => {
+    expect(isGlobOrFilePath("42")).toBe(false);
+  });
+
+  it("returns false for comma-separated numbers", () => {
+    expect(isGlobOrFilePath("1,2,3")).toBe(false);
   });
 });
 
