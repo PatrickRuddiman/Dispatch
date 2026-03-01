@@ -5,7 +5,7 @@
  * To add a new datasource:
  *   1. Create `src/datasources/<name>.ts` exporting a `datasource` object
  *   2. Import and register it in the `DATASOURCES` map below
- *   3. Add the name to the `DatasourceName` type in `src/datasource.ts`
+ *   3. Add the name to the `DatasourceName` type in `src/datasources/interface.ts`
  *   4. Add a URL pattern to `detectDatasource` if auto-detection is possible
  */
 
