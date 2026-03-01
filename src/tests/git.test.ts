@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// ─── Mock setup ────────────────────────────────────────────────────────────────
+// Must use vi.hoisted so the mock is declared before vi.mock calls run.
+// This intercepts `promisify(execFile)` at module load time for all datasources.
 const { mockExecFile } = vi.hoisted(() => ({
   mockExecFile: vi.fn(),
 }));
@@ -12,118 +15,61 @@ vi.mock("node:util", () => ({
   promisify: () => mockExecFile,
 }));
 
-import {
-  buildBranchName,
-  getCurrentBranch,
-  getDefaultBranch,
-  createAndSwitchBranch,
-  switchBranch,
-  pushBranch,
-  createPullRequest,
-  commitTask,
-  commitAllChanges,
-} from "../git.js";
+// Import the actual datasource implementations AFTER mocking
+import { datasource as github } from "../datasources/github.js";
+import { datasource as azdevops } from "../datasources/azdevops.js";
+import { datasource as md } from "../datasources/md.js";
 
 beforeEach(() => {
   vi.resetAllMocks();
 });
 
-// ─── buildBranchName (pure function) ─────────────────────────────────
+// ─── Section A: GitHub — buildBranchName ────────────────────────────────────────
 
-describe("buildBranchName", () => {
-  it("converts a simple title to a slug", () => {
-    expect(buildBranchName("42", "Add User Auth")).toBe(
+describe("GitHub datasource — buildBranchName", () => {
+  it("builds a branch name from issue number and title", () => {
+    expect(github.buildBranchName("42", "Add User Auth")).toBe(
       "dispatch/42-add-user-auth",
     );
   });
 
-  it("strips special characters", () => {
-    expect(buildBranchName("10", "Fix Bug #123 (Urgent!)")).toBe(
+  it("strips non-alphanumeric characters and converts to lowercase", () => {
+    expect(github.buildBranchName("10", "Fix Bug #123 (Urgent!)")).toBe(
       "dispatch/10-fix-bug-123-urgent",
     );
   });
 
-  it("strips leading and trailing hyphens from the slug", () => {
-    expect(buildBranchName("5", "---Special---")).toBe(
+  it("strips leading and trailing hyphens from slug", () => {
+    expect(github.buildBranchName("5", "---Special---")).toBe(
       "dispatch/5-special",
     );
   });
 
-  it("truncates the slug to 60 characters", () => {
-    expect(buildBranchName("1", "a".repeat(100))).toBe(
-      "dispatch/1-" + "a".repeat(60),
+  it("truncates slug to 50 characters", () => {
+    expect(github.buildBranchName("1", "a".repeat(100))).toBe(
+      "dispatch/1-" + "a".repeat(50),
     );
   });
 
-  it("handles mixed case and symbols", () => {
-    expect(buildBranchName("7", "Hello WORLD! @#$ Test")).toBe(
+  it("handles empty title", () => {
+    expect(github.buildBranchName("1", "")).toBe("dispatch/1-");
+  });
+
+  it("handles mixed case and special characters", () => {
+    expect(github.buildBranchName("7", "Hello WORLD! @#$ Test")).toBe(
       "dispatch/7-hello-world-test",
     );
   });
-
-  it("handles numbers in the title", () => {
-    expect(buildBranchName("99", "v2.0 Release Notes")).toBe(
-      "dispatch/99-v2-0-release-notes",
-    );
-  });
-
-  it("handles a single-word title", () => {
-    expect(buildBranchName("1", "refactor")).toBe("dispatch/1-refactor");
-  });
-
-  it("handles an empty title", () => {
-    expect(buildBranchName("1", "")).toBe("dispatch/1-");
-  });
-
-  it("handles a title that becomes empty after slug processing", () => {
-    expect(buildBranchName("1", "!@#$%")).toBe("dispatch/1-");
-  });
-
-  it("does not truncate a slug that is exactly 60 characters", () => {
-    const sixtyChars = "a".repeat(60);
-    expect(buildBranchName("1", sixtyChars)).toBe(
-      `dispatch/1-${sixtyChars}`,
-    );
-  });
-
-  it("truncates a slug that is 61+ characters", () => {
-    const sixtyOneChars = "a".repeat(61);
-    expect(buildBranchName("1", sixtyOneChars)).toBe(
-      `dispatch/1-${"a".repeat(60)}`,
-    );
-  });
 });
 
-// ─── getCurrentBranch ────────────────────────────────────────────────
+// ─── Section B: GitHub — getDefaultBranch ───────────────────────────────────────
 
-describe("getCurrentBranch", () => {
-  it("returns the trimmed branch name", async () => {
-    mockExecFile.mockResolvedValue({ stdout: "main\n" });
-    const result = await getCurrentBranch("/tmp/repo");
-    expect(result).toBe("main");
-    expect(mockExecFile).toHaveBeenCalledWith(
-      "git",
-      ["rev-parse", "--abbrev-ref", "HEAD"],
-      { cwd: "/tmp/repo" },
-    );
-  });
-
-  it("propagates errors from git", async () => {
-    mockExecFile.mockRejectedValue(new Error("not a git repo"));
-    await expect(getCurrentBranch("/tmp/bad")).rejects.toThrow(
-      "not a git repo",
-    );
-  });
-});
-
-// ─── getDefaultBranch ────────────────────────────────────────────────
-
-describe("getDefaultBranch", () => {
+describe("GitHub datasource — getDefaultBranch", () => {
   it("returns branch from symbolic-ref when available", async () => {
-    mockExecFile.mockResolvedValue({
-      stdout: "refs/remotes/origin/main\n",
-    });
-    const result = await getDefaultBranch("/tmp/repo");
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/main\n" });
+
+    const result = await github.getDefaultBranch({ cwd: "/tmp/repo" });
+
     expect(result).toBe("main");
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
@@ -132,19 +78,23 @@ describe("getDefaultBranch", () => {
     );
   });
 
-  it("returns 'main' when symbolic-ref fails but main branch exists", async () => {
+  it("falls back to 'main' when symbolic-ref fails but main exists", async () => {
     mockExecFile
       .mockRejectedValueOnce(new Error("not a symbolic ref"))
       .mockResolvedValueOnce({ stdout: "abc123\n" });
-    const result = await getDefaultBranch("/tmp/repo");
+
+    const result = await github.getDefaultBranch({ cwd: "/tmp/repo" });
+
     expect(result).toBe("main");
   });
 
-  it("returns 'master' when both symbolic-ref and main verification fail", async () => {
+  it("falls back to 'master' when both symbolic-ref and main fail", async () => {
     mockExecFile
       .mockRejectedValueOnce(new Error("not a symbolic ref"))
-      .mockRejectedValueOnce(new Error("not a valid ref"));
-    const result = await getDefaultBranch("/tmp/repo");
+      .mockRejectedValueOnce(new Error("not found"));
+
+    const result = await github.getDefaultBranch({ cwd: "/tmp/repo" });
+
     expect(result).toBe("master");
   });
 
@@ -152,72 +102,101 @@ describe("getDefaultBranch", () => {
     mockExecFile.mockResolvedValue({
       stdout: "refs/remotes/origin/develop\n",
     });
-    const result = await getDefaultBranch("/tmp/repo");
+
+    const result = await github.getDefaultBranch({ cwd: "/tmp/repo" });
+
     expect(result).toBe("develop");
   });
 });
 
-// ─── createAndSwitchBranch ───────────────────────────────────────────
+// ─── Section C: GitHub — createAndSwitchBranch ──────────────────────────────────
 
-describe("createAndSwitchBranch", () => {
-  it("creates and switches to a new branch", async () => {
+describe("GitHub datasource — createAndSwitchBranch", () => {
+  it("creates a new branch", async () => {
     mockExecFile.mockResolvedValue({ stdout: "" });
-    await createAndSwitchBranch("dispatch/42-feature", "main", "/tmp/repo");
+
+    await github.createAndSwitchBranch("dispatch/42-feature", {
+      cwd: "/tmp/repo",
+    });
+
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
-      ["checkout", "-b", "dispatch/42-feature", "main"],
+      ["checkout", "-b", "dispatch/42-feature"],
       { cwd: "/tmp/repo" },
     );
-    expect(mockExecFile).toHaveBeenCalledTimes(1);
   });
 
-  it("falls back to checkout + reset when branch already exists", async () => {
+  it("falls back to checkout when branch already exists", async () => {
     mockExecFile
-      .mockRejectedValueOnce(new Error("branch already exists"))
-      .mockResolvedValueOnce({ stdout: "" })
+      .mockRejectedValueOnce(
+        new Error(
+          "fatal: a branch named 'dispatch/42-feature' already exists",
+        ),
+      )
       .mockResolvedValueOnce({ stdout: "" });
-    await createAndSwitchBranch("dispatch/42-feature", "main", "/tmp/repo");
-    expect(mockExecFile).toHaveBeenCalledTimes(3);
+
+    await github.createAndSwitchBranch("dispatch/42-feature", {
+      cwd: "/tmp/repo",
+    });
+
+    expect(mockExecFile).toHaveBeenCalledTimes(2);
+    expect(mockExecFile).toHaveBeenNthCalledWith(
+      1,
+      "git",
+      ["checkout", "-b", "dispatch/42-feature"],
+      { cwd: "/tmp/repo" },
+    );
     expect(mockExecFile).toHaveBeenNthCalledWith(
       2,
       "git",
       ["checkout", "dispatch/42-feature"],
       { cwd: "/tmp/repo" },
     );
-    expect(mockExecFile).toHaveBeenNthCalledWith(
-      3,
+  });
+
+  it("re-throws non-'already exists' errors", async () => {
+    mockExecFile.mockRejectedValue(new Error("permission denied"));
+
+    await expect(
+      github.createAndSwitchBranch("dispatch/42-feature", {
+        cwd: "/tmp/repo",
+      }),
+    ).rejects.toThrow("permission denied");
+  });
+});
+
+// ─── Section D: GitHub — switchBranch ───────────────────────────────────────────
+
+describe("GitHub datasource — switchBranch", () => {
+  it("checks out the specified branch", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "" });
+
+    await github.switchBranch("main", { cwd: "/tmp/repo" });
+
+    expect(mockExecFile).toHaveBeenCalledWith(
       "git",
-      ["reset", "--hard", "main"],
+      ["checkout", "main"],
       { cwd: "/tmp/repo" },
     );
   });
-});
 
-// ─── switchBranch ────────────────────────────────────────────────────
-
-describe("switchBranch", () => {
-  it("checks out the specified branch", async () => {
-    mockExecFile.mockResolvedValue({ stdout: "" });
-    await switchBranch("main", "/tmp/repo");
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "main"], {
-      cwd: "/tmp/repo",
-    });
-  });
-
-  it("propagates errors from git", async () => {
+  it("propagates errors", async () => {
     mockExecFile.mockRejectedValue(new Error("branch not found"));
-    await expect(switchBranch("nonexistent", "/tmp/repo")).rejects.toThrow(
-      "branch not found",
-    );
+
+    await expect(
+      github.switchBranch("nonexistent", { cwd: "/tmp/repo" }),
+    ).rejects.toThrow("branch not found");
   });
 });
 
-// ─── pushBranch ──────────────────────────────────────────────────────
+// ─── Section E: GitHub — pushBranch ─────────────────────────────────────────────
 
-describe("pushBranch", () => {
-  it("pushes with --set-upstream to origin", async () => {
+describe("GitHub datasource — pushBranch", () => {
+  it("pushes with --set-upstream", async () => {
     mockExecFile.mockResolvedValue({ stdout: "" });
-    await pushBranch("dispatch/42-feature", "/tmp/repo");
+
+    await github.pushBranch("dispatch/42-feature", { cwd: "/tmp/repo" });
+
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["push", "--set-upstream", "origin", "dispatch/42-feature"],
@@ -227,69 +206,290 @@ describe("pushBranch", () => {
 
   it("propagates push errors", async () => {
     mockExecFile.mockRejectedValue(new Error("remote rejected"));
+
     await expect(
-      pushBranch("dispatch/42-feature", "/tmp/repo"),
+      github.pushBranch("dispatch/42-feature", { cwd: "/tmp/repo" }),
     ).rejects.toThrow("remote rejected");
   });
 });
 
-// ─── createPullRequest ───────────────────────────────────────────────
+// ─── Section F: GitHub — commitAllChanges ───────────────────────────────────────
 
-describe("createPullRequest", () => {
-  it("creates a PR and returns the URL", async () => {
+describe("GitHub datasource — commitAllChanges", () => {
+  it("commits when there are staged changes", async () => {
+    mockExecFile
+      .mockResolvedValueOnce({ stdout: "" }) // git add -A
+      .mockResolvedValueOnce({ stdout: " 3 files changed\n" }) // git diff --cached --stat
+      .mockResolvedValueOnce({ stdout: "" }); // git commit
+
+    await github.commitAllChanges("feat: implement feature", {
+      cwd: "/tmp/repo",
+    });
+
+    expect(mockExecFile).toHaveBeenCalledTimes(3);
+    expect(mockExecFile).toHaveBeenNthCalledWith(
+      1,
+      "git",
+      ["add", "-A"],
+      { cwd: "/tmp/repo" },
+    );
+    expect(mockExecFile).toHaveBeenNthCalledWith(
+      2,
+      "git",
+      ["diff", "--cached", "--stat"],
+      { cwd: "/tmp/repo" },
+    );
+    expect(mockExecFile).toHaveBeenNthCalledWith(
+      3,
+      "git",
+      ["commit", "-m", "feat: implement feature"],
+      { cwd: "/tmp/repo" },
+    );
+  });
+
+  it("skips commit when there are no staged changes", async () => {
+    mockExecFile
+      .mockResolvedValueOnce({ stdout: "" }) // git add -A
+      .mockResolvedValueOnce({ stdout: "" }); // git diff --cached --stat (empty)
+
+    await github.commitAllChanges("feat: implement feature", {
+      cwd: "/tmp/repo",
+    });
+
+    expect(mockExecFile).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ─── Section G: GitHub — createPullRequest ──────────────────────────────────────
+
+describe("GitHub datasource — createPullRequest", () => {
+  it("creates PR and returns URL", async () => {
     mockExecFile.mockResolvedValue({
       stdout: "https://github.com/org/repo/pull/1\n",
     });
-    const url = await createPullRequest(
+
+    const result = await github.createPullRequest(
       "dispatch/42-feature",
-      "main",
+      "42",
       "feat: add user auth",
-      "Closes #42",
-      "/tmp/repo",
+      { cwd: "/tmp/repo" },
     );
-    expect(url).toBe("https://github.com/org/repo/pull/1");
+
+    expect(result).toBe("https://github.com/org/repo/pull/1");
     expect(mockExecFile).toHaveBeenCalledWith(
       "gh",
       [
         "pr",
         "create",
-        "--head",
-        "dispatch/42-feature",
-        "--base",
-        "main",
         "--title",
         "feat: add user auth",
         "--body",
         "Closes #42",
+        "--head",
+        "dispatch/42-feature",
       ],
       { cwd: "/tmp/repo" },
     );
   });
 
-  it("returns empty string when PR already exists", async () => {
-    mockExecFile.mockRejectedValue(
-      new Error("a pull request for branch already exists"),
-    );
-    const url = await createPullRequest(
+  it("returns existing PR URL when PR already exists", async () => {
+    mockExecFile
+      .mockRejectedValueOnce(
+        new Error(
+          "a pull request for branch 'dispatch/42-feature' already exists",
+        ),
+      )
+      .mockResolvedValueOnce({
+        stdout: "https://github.com/org/repo/pull/1\n",
+      });
+
+    const result = await github.createPullRequest(
       "dispatch/42-feature",
-      "main",
+      "42",
       "feat: add user auth",
-      "Closes #42",
-      "/tmp/repo",
+      { cwd: "/tmp/repo" },
     );
-    expect(url).toBe("");
+
+    expect(result).toBe("https://github.com/org/repo/pull/1");
+    expect(mockExecFile).toHaveBeenNthCalledWith(
+      2,
+      "gh",
+      ["pr", "view", "dispatch/42-feature", "--json", "url", "--jq", ".url"],
+      { cwd: "/tmp/repo" },
+    );
   });
 
-  it("re-throws errors unrelated to existing PRs", async () => {
+  it("re-throws non-'already exists' errors", async () => {
     mockExecFile.mockRejectedValue(new Error("authentication failed"));
+
     await expect(
-      createPullRequest(
-        "dispatch/42-feature",
-        "main",
-        "title",
-        "body",
-        "/tmp/repo",
-      ),
+      github.createPullRequest("dispatch/42-feature", "42", "feat: auth", {
+        cwd: "/tmp/repo",
+      }),
     ).rejects.toThrow("authentication failed");
+  });
+});
+
+// ─── Section H: Azure DevOps — createPullRequest ────────────────────────────────
+
+describe("Azure DevOps datasource — createPullRequest", () => {
+  it("creates PR using az repos pr create and returns URL", async () => {
+    mockExecFile.mockResolvedValue({
+      stdout: JSON.stringify({
+        url: "https://dev.azure.com/org/project/_git/repo/pullrequest/1",
+      }),
+    });
+
+    const result = await azdevops.createPullRequest(
+      "dispatch/42-feature",
+      "42",
+      "feat: add auth",
+      { cwd: "/tmp/repo" },
+    );
+
+    expect(result).toBe(
+      "https://dev.azure.com/org/project/_git/repo/pullrequest/1",
+    );
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "az",
+      [
+        "repos",
+        "pr",
+        "create",
+        "--title",
+        "feat: add auth",
+        "--description",
+        "Resolves AB#42",
+        "--source-branch",
+        "dispatch/42-feature",
+        "--work-items",
+        "42",
+        "--output",
+        "json",
+      ],
+      { cwd: "/tmp/repo" },
+    );
+  });
+
+  it("returns existing PR URL when PR already exists", async () => {
+    mockExecFile
+      .mockRejectedValueOnce(new Error("already exists"))
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify([
+          {
+            url: "https://dev.azure.com/org/project/_git/repo/pullrequest/1",
+          },
+        ]),
+      });
+
+    const result = await azdevops.createPullRequest(
+      "dispatch/42-feature",
+      "42",
+      "feat: add auth",
+      { cwd: "/tmp/repo" },
+    );
+
+    expect(result).toBe(
+      "https://dev.azure.com/org/project/_git/repo/pullrequest/1",
+    );
+    expect(mockExecFile).toHaveBeenNthCalledWith(
+      2,
+      "az",
+      [
+        "repos",
+        "pr",
+        "list",
+        "--source-branch",
+        "dispatch/42-feature",
+        "--status",
+        "active",
+        "--output",
+        "json",
+      ],
+      { cwd: "/tmp/repo" },
+    );
+  });
+
+  it("returns empty string when PR already exists but none found", async () => {
+    mockExecFile
+      .mockRejectedValueOnce(new Error("already exists"))
+      .mockResolvedValueOnce({ stdout: "[]" });
+
+    const result = await azdevops.createPullRequest(
+      "dispatch/42-feature",
+      "42",
+      "feat: add auth",
+      { cwd: "/tmp/repo" },
+    );
+
+    expect(result).toBe("");
+  });
+
+  it("re-throws non-'already exists' errors", async () => {
+    mockExecFile.mockRejectedValue(new Error("auth failed"));
+
+    await expect(
+      azdevops.createPullRequest("dispatch/42-feature", "42", "feat: auth", {
+        cwd: "/tmp/repo",
+      }),
+    ).rejects.toThrow("auth failed");
+  });
+});
+
+// ─── Section I: Azure DevOps — buildBranchName ─────────────────────────────────
+
+describe("Azure DevOps datasource — buildBranchName", () => {
+  it("builds a branch name with the same format as GitHub", () => {
+    expect(azdevops.buildBranchName("42", "Add User Auth")).toBe(
+      "dispatch/42-add-user-auth",
+    );
+  });
+});
+
+// ─── Section J: MD datasource — no-op dispatch lifecycle methods ────────────────
+
+describe("MD datasource — no-op dispatch lifecycle methods", () => {
+  it("getDefaultBranch resolves to 'main'", async () => {
+    const result = await md.getDefaultBranch({ cwd: "/tmp" });
+    expect(result).toBe("main");
+    expect(mockExecFile).not.toHaveBeenCalled();
+  });
+
+  it("buildBranchName returns the same slug format", () => {
+    expect(md.buildBranchName("42", "My Feature")).toBe(
+      "dispatch/42-my-feature",
+    );
+    expect(mockExecFile).not.toHaveBeenCalled();
+  });
+
+  it("createAndSwitchBranch resolves without error (no-op)", async () => {
+    await md.createAndSwitchBranch("dispatch/42-feature", { cwd: "/tmp" });
+    expect(mockExecFile).not.toHaveBeenCalled();
+  });
+
+  it("switchBranch resolves without error (no-op)", async () => {
+    await md.switchBranch("main", { cwd: "/tmp" });
+    expect(mockExecFile).not.toHaveBeenCalled();
+  });
+
+  it("pushBranch resolves without error (no-op)", async () => {
+    await md.pushBranch("dispatch/42-feature", { cwd: "/tmp" });
+    expect(mockExecFile).not.toHaveBeenCalled();
+  });
+
+  it("commitAllChanges resolves without error (no-op)", async () => {
+    await md.commitAllChanges("feat: test", { cwd: "/tmp" });
+    expect(mockExecFile).not.toHaveBeenCalled();
+  });
+
+  it("createPullRequest resolves to empty string (no-op)", async () => {
+    const result = await md.createPullRequest(
+      "dispatch/42-feature",
+      "42",
+      "title",
+      { cwd: "/tmp" },
+    );
+    expect(result).toBe("");
+    expect(mockExecFile).not.toHaveBeenCalled();
   });
 });

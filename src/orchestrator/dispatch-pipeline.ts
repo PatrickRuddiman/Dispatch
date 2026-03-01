@@ -6,7 +6,6 @@
  */
 
 import { readFile } from "node:fs/promises";
-import { basename } from "node:path";
 import { parseTaskFile, buildTaskContext, groupTasksByMode, type TaskFile } from "../parser.js";
 import type { DispatchResult } from "../dispatcher.js";
 import { boot as bootPlanner } from "../agents/planner.js";
@@ -17,7 +16,7 @@ import { createTui } from "../tui.js";
 import type { ProviderName } from "../providers/interface.js";
 import { bootProvider } from "../providers/index.js";
 import { getDatasource } from "../datasources/index.js";
-import type { DatasourceName, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
+import type { DatasourceName, DispatchLifecycleOptions, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
 import type { OrchestrateRunOptions, DispatchSummary } from "../agents/orchestrator.js";
 import {
   fetchItemsById,
@@ -25,15 +24,6 @@ import {
   closeCompletedSpecIssues,
   parseIssueFilename,
 } from "./datasource-helpers.js";
-import {
-  getDefaultBranch,
-  createAndSwitchBranch,
-  switchBranch,
-  pushBranch,
-  commitAllChanges,
-  createPullRequest,
-  buildBranchName,
-} from "../git.js";
 
 /**
  * Run the full dispatch pipeline: discover tasks from a datasource,
@@ -59,7 +49,7 @@ export async function runDispatchPipeline(
 
   // Dry-run mode uses simple log output
   if (dryRun) {
-    return dryRunMode(issueIds, cwd, source, org, project, noBranch);
+    return dryRunMode(issueIds, cwd, source, org, project);
   }
 
   // ── Start TUI ───────────────────────────────────────────────
@@ -142,54 +132,46 @@ export async function runDispatchPipeline(
     const planner = noPlan ? null : await bootPlanner({ provider: instance, cwd });
     const executor = await bootExecutor({ provider: instance, cwd });
 
-    // ── 5. Dispatch tasks (per-issue) ───────────────────────────
+    // ── 5. Dispatch tasks ───────────────────────────────────────
     tui.state.phase = "dispatching";
     const results: DispatchResult[] = [];
     let completed = 0;
     let failed = 0;
 
-    // Detect default branch once (for branch operations)
-    let defaultBranch: string | undefined;
-    if (!noBranch) {
-      try {
-        defaultBranch = await getDefaultBranch(cwd);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        log.warn(`Could not detect default branch: ${message}. Skipping branch operations.`);
-      }
+    const lifecycleOpts: DispatchLifecycleOptions = { cwd };
+
+    // Group tasks by their source file (each file = one issue)
+    const tasksByFile = new Map<string, typeof allTasks>();
+    for (const task of allTasks) {
+      const list = tasksByFile.get(task.file) ?? [];
+      list.push(task);
+      tasksByFile.set(task.file, list);
     }
 
-    // Process each issue's tasks separately
-    for (const taskFile of taskFiles) {
-      const issueTasks = taskFile.tasks;
-      if (issueTasks.length === 0) continue;
-
-      const parsed = parseIssueFilename(taskFile.path);
-      const issueNumber = parsed?.issueId ?? basename(taskFile.path, ".md");
-      const issueSlug = parsed?.slug ?? "unknown";
-
-      // Update TUI with current issue context
-      const issueDetails = issueDetailsByFile.get(taskFile.path);
-      const issueTitle = issueDetails?.title ?? issueSlug;
-      tui.state.currentIssue = { number: String(issueNumber), title: issueTitle };
-
-      // ── Branch creation ─────────────────────────────────────
+    // Process each issue's tasks, optionally wrapping with branch lifecycle
+    for (const [file, fileTasks] of tasksByFile) {
+      const details = issueDetailsByFile.get(file);
+      let defaultBranch: string | undefined;
       let branchName: string | undefined;
-      if (!noBranch && defaultBranch) {
-        branchName = buildBranchName(issueNumber, issueTitle);
+
+      // ── Branch setup (unless --no-branch) ───────────────────
+      if (!noBranch && details) {
         try {
-          await createAndSwitchBranch(branchName, defaultBranch, cwd);
-          log.info(`Created branch ${branchName} for issue #${issueNumber}`);
+          defaultBranch = await datasource.getDefaultBranch(lifecycleOpts);
+          branchName = datasource.buildBranchName(details.number, details.title);
+          await datasource.createAndSwitchBranch(branchName, lifecycleOpts);
+          log.debug(`Switched to branch ${branchName}`);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          log.warn(`Could not create branch for issue #${issueNumber}: ${message}. Processing without branch isolation.`);
+          log.warn(`Could not create branch for issue #${details.number}: ${message}`);
+          // Continue without branching
           branchName = undefined;
+          defaultBranch = undefined;
         }
       }
 
-      // ── Dispatch tasks for this issue ───────────────────────
-      const groups = groupTasksByMode(issueTasks);
-      let issueHadFailure = false;
+      // ── Dispatch file's tasks ─────────────────────────────────
+      const groups = groupTasksByMode(fileTasks);
 
       for (const group of groups) {
         const groupQueue = [...group];
@@ -215,7 +197,6 @@ export async function runDispatchPipeline(
                   tuiTask.error = `Planning failed: ${planResult.error}`;
                   tuiTask.elapsed = Date.now() - startTime;
                   failed++;
-                  issueHadFailure = true;
                   return { task, success: false, error: tuiTask.error } as DispatchResult;
                 }
 
@@ -233,13 +214,13 @@ export async function runDispatchPipeline(
               if (execResult.success) {
                 // Sync checked-off state back to the datasource
                 try {
-                  const fileParsed = parseIssueFilename(task.file);
-                  if (fileParsed) {
+                  const parsed = parseIssueFilename(task.file);
+                  if (parsed) {
                     const updatedContent = await readFile(task.file, "utf-8");
-                    const details = issueDetailsByFile.get(task.file);
-                    const title = details?.title ?? fileParsed.slug;
-                    await datasource.update(fileParsed.issueId, title, updatedContent, fetchOpts);
-                    log.success(`Synced task completion to issue #${fileParsed.issueId}`);
+                    const issueDetails = issueDetailsByFile.get(task.file);
+                    const title = issueDetails?.title ?? parsed.slug;
+                    await datasource.update(parsed.issueId, title, updatedContent, fetchOpts);
+                    log.success(`Synced task completion to issue #${parsed.issueId}`);
                   }
                 } catch (err) {
                   const message = err instanceof Error ? err.message : String(err);
@@ -254,7 +235,6 @@ export async function runDispatchPipeline(
                 tuiTask.error = execResult.error;
                 tuiTask.elapsed = Date.now() - startTime;
                 failed++;
-                issueHadFailure = true;
               }
 
               return execResult.dispatchResult;
@@ -265,65 +245,40 @@ export async function runDispatchPipeline(
         }
       }
 
-      // ── Post-issue: commit, push, PR ────────────────────────
-      if (branchName && defaultBranch) {
-        // Safety-net commit: stage and commit any uncommitted changes
+      // ── Branch teardown (push, PR, switch back) ──────────────
+      if (!noBranch && branchName && defaultBranch && details) {
         try {
-          await commitAllChanges(
-            `feat(dispatch): complete tasks for issue #${issueNumber}`,
-            cwd,
-          );
-          log.info(`Committed uncommitted changes for issue #${issueNumber}`);
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          log.warn(`Could not commit changes for issue #${issueNumber}: ${message}`);
-        }
-
-        // Push the branch (even on partial failure)
-        try {
-          await pushBranch(branchName, cwd);
-          log.success(`Pushed branch ${branchName}`);
+          await datasource.pushBranch(branchName, lifecycleOpts);
+          log.debug(`Pushed branch ${branchName}`);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           log.warn(`Could not push branch ${branchName}: ${message}`);
         }
 
-        // Open a PR linking back to the issue
         try {
-          const prTitle = `dispatch: resolve issue #${issueNumber}`;
-          const issueTaskSummary = issueTasks.map((t) => {
-            const tuiTask = tui.state.tasks.find((ts) => ts.task === t);
-            const status = tuiTask?.status === "done" ? "✅" : tuiTask?.status === "failed" ? "❌" : "⏳";
-            return `- ${status} ${t.text}`;
-          }).join("\n");
-          const prBody = [
-            `Resolves #${issueNumber}`,
-            ``,
-            `## Tasks`,
-            issueTaskSummary,
-            issueHadFailure ? `\n⚠️ Some tasks failed — this PR contains partial progress.` : ``,
-          ].join("\n");
-
-          const prUrl = await createPullRequest(branchName, defaultBranch, prTitle, prBody, cwd);
+          const prUrl = await datasource.createPullRequest(
+            branchName,
+            details.number,
+            details.title,
+            lifecycleOpts,
+          );
           if (prUrl) {
-            log.success(`Opened PR: ${prUrl}`);
+            log.success(`Created PR for issue #${details.number}: ${prUrl}`);
           }
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          log.warn(`Could not create PR for issue #${issueNumber}: ${message}`);
+          log.warn(`Could not create PR for issue #${details.number}: ${message}`);
         }
 
-        // Switch back to default branch for the next issue
         try {
-          await switchBranch(defaultBranch, cwd);
+          await datasource.switchBranch(defaultBranch, lifecycleOpts);
+          log.debug(`Switched back to ${defaultBranch}`);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           log.warn(`Could not switch back to ${defaultBranch}: ${message}`);
         }
       }
     }
-
-    tui.state.currentIssue = undefined;
 
     // ── 6. Close originating issues for completed spec files ────
     await closeCompletedSpecIssues(taskFiles, results, cwd, source, org, project);
@@ -353,7 +308,6 @@ export async function dryRunMode(
   source?: DatasourceName,
   org?: string,
   project?: string,
-  noBranch = false,
 ): Promise<DispatchSummary> {
   if (!source) {
     log.error("No datasource configured. Use --source or run: dispatch config set source <name>");
@@ -372,7 +326,8 @@ export async function dryRunMode(
     return { total: 0, completed: 0, failed: 0, skipped: 0, results: [] };
   }
 
-  const { files, issueDetailsByFile } = await writeItemsToTempDir(items);
+  const { files } = await writeItemsToTempDir(items);
+
   const taskFiles: TaskFile[] = [];
   for (const file of files) {
     const tf = await parseTaskFile(file);
@@ -389,22 +344,13 @@ export async function dryRunMode(
   }
 
   log.info(`Dry run — ${allTasks.length} task(s) across ${taskFiles.length} file(s):\n`);
-
-  if (!noBranch) {
-    log.info("Planned branches:");
-    for (const tf of taskFiles) {
-      const parsed = parseIssueFilename(tf.path);
-      const issueNumber = parsed?.issueId ?? basename(tf.path, ".md");
-      const details = issueDetailsByFile.get(tf.path);
-      const title = details?.title ?? parsed?.slug ?? "unknown";
-      const branch = buildBranchName(issueNumber, title);
-      log.dim(`  ${branch}  (issue #${issueNumber}, ${tf.tasks.length} task(s))`);
-    }
-    log.info(""); // blank line separator
-  }
-
   for (const task of allTasks) {
-    log.task(allTasks.indexOf(task), allTasks.length, `${task.file}:${task.line} — ${task.text}`);
+    const parsed = parseIssueFilename(task.file);
+    const details = parsed ? items.find((item) => item.number === parsed.issueId) : undefined;
+    const branchInfo = details
+      ? ` [branch: ${datasource.buildBranchName(details.number, details.title)}]`
+      : "";
+    log.task(allTasks.indexOf(task), allTasks.length, `${task.file}:${task.line} — ${task.text}${branchInfo}`);
   }
 
   return {

@@ -30,7 +30,7 @@ const HELP = `
   Dispatch options:
     --dry-run              List tasks without dispatching
     --no-plan              Skip the planner agent, dispatch directly
-    --no-branch            Skip branch creation and PR workflow
+    --no-branch            Skip branch creation, push, and PR lifecycle
     --concurrency <n>      Max parallel dispatches (default: min(cpus, freeMB/500))
     --provider <name>      Agent backend: ${PROVIDER_NAMES.join(", ")} (default: opencode)
     --server-url <url>     URL of a running provider server
