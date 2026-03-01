@@ -111,7 +111,8 @@ Based on patterns in the existing providers:
   Swallow errors from destroy operations during cleanup (as the Copilot provider
   does with `.catch(() => {})`). The [cleanup registry](../shared-types/cleanup.md)
   will call your provider's `cleanup()` on process exit (SIGINT, SIGTERM, or
-  unhandled error).
+   unhandled error).
+
 ## Step 2: Add to the ProviderName union
 
 Edit `src/provider.ts:11` to add your provider name to the union type:

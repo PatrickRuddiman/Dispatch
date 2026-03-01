@@ -220,3 +220,7 @@ would contain mojibake characters.
   rejected syntax patterns
 - [Task Context & Lifecycle](../planning-and-dispatch/task-context-and-lifecycle.md) --
   recommended file structure and how context filtering works
+- [Parser Tests](../testing/parser-tests.md) -- Test suite verifying accepted
+  and rejected syntax patterns, CRLF handling, and mode prefix parsing
+- [Format Tests](../testing/format-tests.md) -- Related pure-function test
+  patterns used in the testing suite

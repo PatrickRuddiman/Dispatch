@@ -140,6 +140,7 @@ export const datasource: Datasource = {
     _branchName: string,
     _issueNumber: string,
     _title: string,
+    _body: string,
     _opts: DispatchLifecycleOptions,
   ): Promise<string> {
     // No-op for local markdown datasource

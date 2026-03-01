@@ -171,6 +171,7 @@ export interface Datasource {
    * @param branchName - The source branch name
    * @param issueNumber - The issue number to reference
    * @param title - PR title
+   * @param body - PR body/description content
    * @param opts - Lifecycle options (cwd)
    * @returns The URL of the created PR, or the existing PR URL if one already exists
    */
@@ -178,6 +179,7 @@ export interface Datasource {
     branchName: string,
     issueNumber: string,
     title: string,
+    body: string,
     opts: DispatchLifecycleOptions,
   ): Promise<string>;
 }

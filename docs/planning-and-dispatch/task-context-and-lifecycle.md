@@ -155,3 +155,7 @@ handling, see
 - [Shared Parser Types](../shared-types/parser.md) -- `Task` and `TaskFile` type
   definitions and exported functions
 - [Integrations & Troubleshooting](./integrations.md) -- Node.js fs details
+- [Parser Tests](../testing/parser-tests.md) -- Test suite verifying parsing
+  behavior, edge cases, and CRLF handling
+- [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) --
+  File I/O safety and concurrent write analysis

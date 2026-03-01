@@ -88,7 +88,7 @@ for a detailed analysis.
 | File | Purpose |
 |---|---|
 | `src/parser.ts` | All parsing logic, types, and file mutation |
-| `src/parser.test.ts` | Comprehensive test suite (607 lines, 25+ test cases) |
+| `src/tests/parser.test.ts` | Comprehensive test suite (995 lines, 62 tests) |
 
 ## Related documentation
 

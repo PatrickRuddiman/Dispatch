@@ -407,7 +407,7 @@ code. Use the log output to determine which specific issues failed and why.
 
 ### Provider cleanup
 
-Unlike the [dispatch orchestrator's cleanup gap](../cli-orchestration/orchestrator.md#the-cleanup-gap),
+Unlike the [dispatch orchestrator's cleanup gap](../cli-orchestration/orchestrator.md#the-cleanup-gap-mitigated),
 the spec generator calls `instance.cleanup()` on the success path at
 `src/spec-generator.ts:163`. The [cleanup registry](../shared-types/cleanup.md)
 provides a safety net: even if an unhandled error occurs after the

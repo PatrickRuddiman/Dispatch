@@ -6,8 +6,12 @@ implemented in `src/datasources/github.ts` and registered under the name
 
 ## What it does
 
-The GitHub datasource translates the five [`Datasource` interface](./overview.md#the-datasource-interface) operations
-into `gh` CLI commands:
+The GitHub datasource translates the [`Datasource` interface](./overview.md#the-datasource-interface) operations
+into `gh` CLI and `git` commands. It provides five CRUD operations for issue
+management and seven git lifecycle operations for branching, committing,
+pushing, and pull request creation.
+
+### CRUD operations
 
 | Operation | `gh` command | JSON output? |
 |-----------|-------------|-------------|
@@ -16,6 +20,18 @@ into `gh` CLI commands:
 | `update()` | `gh issue edit <id> --title <title> --body <body>` | No |
 | `close()` | `gh issue close <id>` | No |
 | `create()` | `gh issue create --title <title> --body <body>` | No (outputs URL) |
+
+### Git lifecycle operations
+
+| Operation | Command(s) | Purpose |
+|-----------|-----------|---------|
+| `getDefaultBranch()` | `git symbolic-ref refs/remotes/origin/HEAD`, fallback to `git rev-parse --verify main` | Detect `main` or `master` |
+| `buildBranchName()` | _(pure function)_ | Returns `dispatch/<number>-<slug>` |
+| `createAndSwitchBranch()` | `git checkout -b <branch>`, fallback to `git checkout <branch>` | Create or switch to branch |
+| `switchBranch()` | `git checkout <branch>` | Switch to existing branch |
+| `pushBranch()` | `git push --set-upstream origin <branch>` | Push branch to remote |
+| `commitAllChanges()` | `git add -A` + `git diff --cached --stat` + `git commit -m <msg>` | Stage and commit; no-ops if nothing staged |
+| `createPullRequest()` | `gh pr create --title <t> --body "Closes #<n>" --head <branch>` | Create PR with issue auto-close link |
 
 All commands are executed via `execFile("gh", [...args], { cwd })` with no
 shell interpolation. The `cwd` option is set from `opts.cwd` or defaults to
@@ -54,8 +70,26 @@ export GH_TOKEN="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 ```
 
 The `gh` CLI checks for these environment variables automatically. `GH_TOKEN`
-takes precedence over `GITHUB_TOKEN`. The token must have the `repo` scope for
-private repositories, or `public_repo` for public repositories.
+takes precedence over `GITHUB_TOKEN`.
+
+### Required token scopes
+
+The minimum scopes depend on the operations used:
+
+| Scope | Required for |
+|-------|-------------|
+| `repo` | All issue operations on private repositories; PR creation |
+| `public_repo` | Issue operations on public repositories (narrower alternative to `repo`) |
+| `read:org` | Listing issues in organization-owned repositories |
+
+For the full dispatch pipeline (including `createPullRequest()`), the `repo`
+scope is required because PR creation needs write access. The `gh auth login`
+interactive flow requests `repo`, `read:org`, and `gist` scopes by default,
+which covers all dispatch-tasks operations.
+
+When authenticating with `--with-token` (piping a PAT via stdin), ensure the
+token has at least the `repo` scope. Tokens with insufficient scopes will
+produce "Resource not accessible by integration" errors on PR creation.
 
 ### GitHub Enterprise Server
 
@@ -154,6 +188,77 @@ match (unexpected output format), the issue number defaults to `"0"`.
 `create()` rather than re-fetching from GitHub. Labels, comments, and
 acceptanceCriteria are empty.
 
+## Git lifecycle operation details
+
+The GitHub datasource implements all seven git lifecycle methods using the `git`
+and `gh` CLI tools. These operations are used by the dispatch pipeline to manage
+the branching, committing, and PR workflow after task completion.
+
+### `getDefaultBranch()`
+
+Detects the repository's default branch name using a two-step fallback:
+
+1. Tries `git symbolic-ref refs/remotes/origin/HEAD` to read the remote HEAD
+   reference. If this succeeds, extracts the branch name from the last path
+   segment (e.g., `refs/remotes/origin/main` yields `"main"`).
+2. If step 1 fails (common when `origin/HEAD` is not set, e.g., after a
+   `git clone --bare` or when the remote HEAD has never been fetched), tries
+   `git rev-parse --verify main` to check if a `main` branch exists.
+3. If both fail, falls back to `"master"`.
+
+**Troubleshooting `symbolic-ref` failures:** Run
+`git remote set-head origin --auto` to set `origin/HEAD` from the remote,
+which makes step 1 work reliably.
+
+### `buildBranchName()`
+
+Pure synchronous function that produces `dispatch/<number>-<slug>`. The title
+is slugified (lowercased, non-alphanumeric runs replaced with hyphens, trimmed,
+truncated to 50 characters). See the
+[branch naming convention](./overview.md#branch-naming-convention) in the
+overview.
+
+### `createAndSwitchBranch()`
+
+Attempts `git checkout -b <branchName>`. If the branch already exists (the
+error message contains `"already exists"`), falls back to
+`git checkout <branchName>`. Other errors are re-thrown.
+
+### `switchBranch()`
+
+Runs `git checkout <branchName>`. Throws if the branch does not exist.
+
+### `pushBranch()`
+
+Runs `git push --set-upstream origin <branchName>`. The `--set-upstream` flag
+sets the tracking reference so subsequent `git push` calls on the branch do
+not require explicit remote/branch arguments.
+
+### `commitAllChanges()`
+
+Three-step process (`src/datasources/github.ts:209-217`):
+
+1. `git add -A` -- stages all changes (new, modified, deleted files).
+2. `git diff --cached --stat` -- checks if anything is actually staged.
+3. If the diff output is non-empty, runs `git commit -m <message>`. If nothing
+   is staged, the method returns without committing (no-op).
+
+This prevents empty commits when tasks produce no file changes.
+
+### `createPullRequest()`
+
+Creates a pull request using `gh pr create` with:
+
+- `--title <title>` -- PR title (typically the issue title).
+- `--body "Closes #<issueNumber>"` -- PR body with GitHub's auto-close keyword.
+  When this PR is merged, GitHub automatically closes the linked issue.
+- `--head <branchName>` -- the source branch.
+
+If the `gh pr create` command fails with an "already exists" error (a PR
+already exists for this branch), the method falls back to
+`gh pr view <branchName> --json url --jq .url` to retrieve and return the
+existing PR's URL.
+
 ## Rate limits
 
 The `gh` CLI is subject to GitHub's API rate limits:
@@ -226,6 +331,8 @@ uses only the `origin` remote. Use `--source github` to force GitHub.
   and auto-detection
 - [Azure DevOps Datasource](./azdevops-datasource.md) -- The Azure DevOps
   counterpart
+- [Datasource Helpers](./datasource-helpers.md) -- Orchestration bridge that
+  consumes datasource operations for temp file writing and auto-close
 - [Integrations & Troubleshooting](./integrations.md) -- Cross-cutting
   subprocess and error-handling concerns
 - [Datasource Testing](./testing.md) -- Test coverage for the datasource

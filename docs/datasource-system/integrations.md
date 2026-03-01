@@ -2,7 +2,8 @@
 
 This page documents cross-cutting concerns that apply to all datasource
 implementations: subprocess execution behavior, error handling patterns,
-external tool dependencies, and the git-based auto-detection system.
+external tool dependencies, the git-based auto-detection system, git lifecycle
+operations, and the temp file lifecycle.
 
 ## Subprocess execution model
 
@@ -91,9 +92,9 @@ when a datasource operation is first called. This applies to:
 
 | Tool | Required by | Detection point |
 |------|------------|-----------------|
-| `gh` | GitHub datasource | First call to any GitHub operation |
-| `az` | Azure DevOps datasource | First call to any Azure DevOps operation |
-| `git` | Auto-detection (`detectDatasource()`) | Call to `detectDatasource()` |
+| `gh` | GitHub datasource (CRUD + PR creation) | First call to any GitHub operation |
+| `az` | Azure DevOps datasource (CRUD + PR creation) | First call to any Azure DevOps operation |
+| `git` | Auto-detection (`detectDatasource()`), all lifecycle operations | Call to `detectDatasource()` or any git lifecycle method |
 
 The markdown datasource does not depend on any external tools, so ENOENT errors
 do not apply to it.
@@ -151,6 +152,167 @@ The markdown datasource must always be selected explicitly with `--source md`.
 
 **Return type.** `detectDatasource()` returns `Promise<DatasourceName | null>`,
 not `Promise<DatasourceName>`. Callers must handle the `null` case.
+
+## Git CLI integration for lifecycle operations
+
+The GitHub and Azure DevOps datasources use the `git` CLI directly for
+branching, committing, and pushing operations. These operations are part of
+the [git lifecycle methods](./overview.md#git-lifecycle-operations) on the
+`Datasource` interface.
+
+### Git commands used
+
+| Operation | Git command(s) | Notes |
+|-----------|---------------|-------|
+| Default branch detection | `git symbolic-ref refs/remotes/origin/HEAD` | Falls back to `git rev-parse --verify main`, then `"master"` |
+| Branch creation | `git checkout -b <branch>` | Falls back to `git checkout <branch>` if exists |
+| Branch switching | `git checkout <branch>` | |
+| Staging | `git add -A` | Stages all changes including untracked files |
+| Empty check | `git diff --cached --stat` | Prevents empty commits |
+| Committing | `git commit -m <message>` | Only runs if diff check is non-empty |
+| Pushing | `git push --set-upstream origin <branch>` | Sets tracking reference |
+
+All git commands are executed via `execFile("git", [...], { cwd })` using the
+same subprocess model as `gh` and `az` (no shell, no timeout, inherited
+environment).
+
+### Git version requirements
+
+No minimum git version is enforced. The commands used (`checkout -b`,
+`symbolic-ref`, `rev-parse`, `add`, `diff`, `commit`, `push`) are stable
+across all modern git versions (2.x+). The `--set-upstream` push flag has been
+available since git 1.7.
+
+### Common git failure scenarios
+
+| Failure | Cause | Error |
+|---------|-------|-------|
+| `symbolic-ref` fails | `origin/HEAD` not set (never fetched) | Caught silently; falls back to `main`/`master` |
+| `checkout -b` fails | Branch name already exists | Caught; falls back to `git checkout <branch>` |
+| `checkout -b` fails | Uncommitted changes conflict | Propagates to caller |
+| `push` fails | No remote `origin` configured | Propagates to caller |
+| `push` fails | Authentication failure (SSH key, HTTPS token) | Propagates to caller |
+| `commit` fails | No user.name or user.email configured | Propagates to caller |
+
+### Fixing `symbolic-ref` failures
+
+If `getDefaultBranch()` consistently falls back to `"master"` when the actual
+default is `"main"`, run:
+
+```sh
+git remote set-head origin --auto
+```
+
+This queries the remote and sets `refs/remotes/origin/HEAD` to the correct
+default branch.
+
+### Uncommitted changes and branching
+
+The `createAndSwitchBranch()` method does not stash or check for uncommitted
+changes before switching branches. If the working directory has uncommitted
+changes that conflict with the target branch, `git checkout -b` or
+`git checkout` will fail with a merge conflict error. The dispatch pipeline
+should ensure the working directory is clean before calling branching
+operations.
+
+## Branch naming convention
+
+All three datasource implementations use a consistent branch naming convention:
+
+```
+dispatch/<issueNumber>-<slugified-title>
+```
+
+### Slug construction
+
+The title is slugified using this algorithm (identical across all datasources):
+
+1. Lowercase the title.
+2. Replace runs of non-alphanumeric characters with a single hyphen.
+3. Trim leading and trailing hyphens.
+4. Truncate to 50 characters.
+
+### CI/CD implications
+
+The `dispatch/` prefix creates a predictable namespace for CI/CD configuration:
+
+**GitHub Actions:**
+```yaml
+on:
+  push:
+    branches: ['dispatch/**']
+```
+
+**Azure DevOps Pipelines:**
+```yaml
+trigger:
+  branches:
+    include:
+      - dispatch/*
+```
+
+This allows teams to create pipeline triggers that run only on
+dispatch-created branches, avoiding unnecessary CI runs on manual branches.
+
+### Branch name conflicts
+
+The `createAndSwitchBranch()` method handles the case where a branch already
+exists by falling back to `git checkout <branch>` (switching to it). This
+means re-running dispatch for the same issue will reuse the existing branch
+rather than failing.
+
+## Temp file lifecycle
+
+The [datasource helpers](./datasource-helpers.md) module creates temporary
+files when fetching issues for the dispatch pipeline. This section documents
+the lifecycle of those files.
+
+### Creation
+
+`writeItemsToTempDir()` creates a temporary directory using:
+
+```
+mkdtemp(join(tmpdir(), "dispatch-"))
+```
+
+This produces a directory like `/tmp/dispatch-abc123/` on Linux/macOS or
+`C:\Users\...\AppData\Local\Temp\dispatch-abc123\` on Windows.
+
+Each `IssueDetails` item is written as a `<number>-<slug>.md` file inside this
+directory.
+
+### Naming convention
+
+Temp files follow the pattern `<issueNumber>-<slugified-title>.md`. The slug
+is constructed identically to branch names, except truncated to 60 characters
+(vs 50 for branch names). Examples:
+
+| Issue number | Title | Temp filename |
+|-------------|-------|---------------|
+| `42` | `"Add user authentication"` | `42-add-user-authentication.md` |
+| `7` | `"Fix Bug #123!!"` | `7-fix-bug-123.md` |
+
+### Sorting
+
+The returned file list is sorted numerically by the leading issue number. If
+two files share the same number, they are sorted lexicographically by full
+path. This ensures deterministic processing order.
+
+### Cleanup
+
+The temp directory is **not** cleaned up by `writeItemsToTempDir()` or any
+other function in the datasource system. It relies on the operating system's
+temp file cleanup mechanism (typically on reboot, or periodic `tmpwatch`/`tmpreaper`
+cron jobs on Linux). Long-running systems may accumulate dispatch temp
+directories.
+
+### Issue ID extraction from temp files
+
+The `parseIssueFilename()` function extracts the issue ID from temp filenames
+by matching the regex `/^(\d+)-(.+)\.md$/`. This is how the dispatch pipeline
+maps completed tasks back to their originating issues for auto-close. See the
+[datasource helpers documentation](./datasource-helpers.md#parseissuefilename)
+for details.
 
 ## Error handling patterns
 
@@ -243,6 +405,8 @@ for migration guidance and removal assessment.
   behavior
 - [Markdown Datasource](./markdown-datasource.md) -- Filesystem-specific
   behavior
+- [Datasource Helpers](./datasource-helpers.md) -- Orchestration bridge:
+  temp file writing, issue ID extraction, and auto-close logic
 - [Testing](./testing.md) -- Test suite covering the datasource system
 - [Deprecated Compatibility Layer](../deprecated-compat/overview.md) --
   Legacy `IssueFetcher` shims that delegate to datasource implementations
