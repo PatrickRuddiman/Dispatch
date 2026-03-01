@@ -83,12 +83,12 @@ const HELP = `
 `.trimStart();
 
 /** Parsed CLI arguments including shell-only flags (help, version). */
-interface ParsedArgs extends Omit<RawCliArgs, "explicitFlags"> {
+export interface ParsedArgs extends Omit<RawCliArgs, "explicitFlags"> {
   help: boolean;
   version: boolean;
 }
 
-function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
+export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
   const args: ParsedArgs = {
     issueIds: [],
     dryRun: false,
