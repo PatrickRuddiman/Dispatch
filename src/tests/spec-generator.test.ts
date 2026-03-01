@@ -279,15 +279,15 @@ describe("buildFileSpecPrompt", () => {
     expect(result).not.toContain("- **Title:** some-other-name");
   });
 
-  it("falls back to filename as title when no H1 heading exists", () => {
+  it("extracts title from first content line when no H1 heading exists", () => {
     const result = buildFileSpecPrompt(FILE_PATH, CONTENT, CWD);
-    expect(result).toContain("- **Title:** my-feature");
+    expect(result).toContain("- **Title:** This is the feature description.");
   });
 
-  it("falls back to filename when content has only H2 or lower headings", () => {
+  it("extracts title from content when only H2 or lower headings exist", () => {
     const noH1Content = "## Subheading Only\n\nNo top-level heading here.";
     const result = buildFileSpecPrompt(FILE_PATH, noH1Content, CWD);
-    expect(result).toContain("- **Title:** my-feature");
+    expect(result).toContain("- **Title:** Subheading Only");
   });
 
   it("includes the source file path", () => {
@@ -379,8 +379,8 @@ describe("buildFileSpecPrompt", () => {
 
   it("handles a file path without .md extension", () => {
     const result = buildFileSpecPrompt("/home/user/drafts/feature.txt", CONTENT, CWD);
-    // extractTitle falls back to parsePath().name which strips any extension
-    expect(result).toContain("- **Title:** feature");
+    // extractTitle derives title from content, not from filename
+    expect(result).toContain("- **Title:** This is the feature description.");
   });
 
   it("includes all key guidelines", () => {
