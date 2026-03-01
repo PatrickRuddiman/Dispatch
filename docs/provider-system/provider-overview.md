@@ -235,7 +235,7 @@ same codebase but should not confuse the agent by mixing conversation contexts.
 
 ### The cleanup registry
 
-The process-level cleanup registry (`src/cleanup.ts`) provides a safety net for
+The process-level [cleanup registry](../shared-types/cleanup.md) (`src/cleanup.ts`) provides a safety net for
 resource cleanup on abnormal exit. It works as follows:
 
 1. When the orchestrator boots a provider, it immediately registers the
@@ -367,3 +367,7 @@ implementations normalize to `string | null`:
   and dispatcher consume `ProviderInstance`
 - [Shared Provider Types](../shared-types/provider.md) -- `ProviderName`,
   `ProviderBootOptions`, and `ProviderInstance` type definitions
+- [Cleanup Registry](../shared-types/cleanup.md) -- Process-level cleanup
+  registry that ensures provider sessions are terminated on exit
+- [Testing Overview](../testing/overview.md) -- Test suite framework and
+  coverage including provider-related test patterns

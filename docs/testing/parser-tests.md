@@ -237,4 +237,5 @@ creates a unique `/tmp/dispatch-test-*` directory and removes it in `afterEach`.
 - [Architecture and concurrency](../task-parsing/architecture-and-concurrency.md) — concurrency concerns
 - [Shared parser types](../shared-types/parser.md) — `Task`, `TaskFile`, and exported function signatures
 - [Planning & Dispatch overview](../planning-and-dispatch/overview.md) — the planner and dispatcher that consume parser output
+- [Task context and lifecycle](../planning-and-dispatch/task-context-and-lifecycle.md) — task lifecycle from parsing through dispatch
 - [Spec generator tests](spec-generator-tests.md) — `(P)`/`(S)` prefix instructions in prompts

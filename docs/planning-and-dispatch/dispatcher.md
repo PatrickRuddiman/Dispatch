@@ -282,3 +282,6 @@ Returned by `dispatchTask()`:
   interface and backend implementations
 - [Orchestrator](../cli-orchestration/orchestrator.md) -- How the orchestrator
   coordinates dispatch within the batch loop
+- [Logger](../shared-types/logger.md) -- Logger interface used during dispatch
+- [Datasource Helpers](../datasource-system/datasource-helpers.md) -- Helper
+  utilities for datasource operations referenced by the dispatcher

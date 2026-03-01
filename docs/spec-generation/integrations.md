@@ -83,7 +83,7 @@ If this outputs nothing or errors, auto-detection will fail.
 [OpenCode Backend](../provider-system/opencode-backend.md),
 [Copilot Backend](../provider-system/copilot-backend.md)
 
-The spec generator uses the same `ProviderInstance` interface as the dispatch
+The spec generator uses the same [`ProviderInstance`](../provider-system/provider-overview.md#the-providerinstance-interface) interface as the dispatch
 pipeline. It boots a provider, creates one session per issue, sends the spec
 prompt, and calls cleanup when done.
 
@@ -288,3 +288,7 @@ documentation on chalk color detection and level overrides.
   lifecycle and backend implementations
 - [CLI Argument Parser](../cli-orchestration/cli.md) -- `--spec` mode flags
   and exit codes
+- [Datasource Helpers](../datasource-system/datasource-helpers.md) -- Temp
+  file writing and issue ID extraction used alongside spec generation
+- [Logger](../shared-types/logger.md) -- Structured logging facade used for
+  spec generation progress and error reporting

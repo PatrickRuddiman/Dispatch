@@ -59,6 +59,27 @@ async function getDefaultBranch(cwd: string): Promise<string> {
   }
 }
 
+/**
+ * Gather commit messages from the current branch relative to the default branch.
+ * Uses `git log` to list commits that exist on the current branch but not on
+ * the default branch, returning each commit's subject line.
+ *
+ * @param defaultBranch - The default branch name to compare against (e.g. "main")
+ * @param cwd - The working directory (git repo root)
+ * @returns An array of commit message subject lines
+ */
+export async function getCommitMessages(defaultBranch: string, cwd: string): Promise<string[]> {
+  try {
+    const output = await git(
+      ["log", `origin/${defaultBranch}..HEAD`, "--pretty=format:%s"],
+      cwd,
+    );
+    return output.trim().split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 export const datasource: Datasource = {
   name: "github",
 
@@ -216,8 +237,9 @@ export const datasource: Datasource = {
     await git(["commit", "-m", message], cwd);
   },
 
-  async createPullRequest(branchName, issueNumber, title, opts) {
+  async createPullRequest(branchName, issueNumber, title, body, opts) {
     const cwd = opts.cwd;
+    const prBody = body || `Closes #${issueNumber}`;
     try {
       const url = await gh(
         [
@@ -226,7 +248,7 @@ export const datasource: Datasource = {
           "--title",
           title,
           "--body",
-          `Closes #${issueNumber}`,
+          prBody,
           "--head",
           branchName,
         ],

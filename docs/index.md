@@ -30,8 +30,9 @@ offline workflows where local markdown files replace cloud-hosted trackers.
 
 - **Datasource**: A strategy-pattern abstraction that normalizes access to work
   items across GitHub Issues (`gh` CLI), Azure DevOps Work Items (`az` CLI),
-  and local markdown files (`fs`). All backends satisfy a five-method CRUD
-  interface and produce normalized `IssueDetails` objects.
+  and local markdown files (`fs`). All backends satisfy a twelve-method
+  interface covering CRUD operations and git lifecycle management, producing
+  normalized `IssueDetails` objects.
 
 - **Provider**: An abstraction over AI agent runtimes. Each provider implements
   a `createSession` / `prompt` / `cleanup` lifecycle. Two backends are
@@ -64,8 +65,8 @@ offline workflows where local markdown files replace cloud-hosted trackers.
 New to dispatch-tasks? Start with the
 [Architecture Overview](./architecture.md). It covers the full system topology,
 both pipeline modes (dispatch and spec generation), the task lifecycle state
-machine, and all key design decisions including the strategy patterns, CLI-over-REST
-approach, and three-tier configuration precedence.
+machine, and all key design decisions including the strategy patterns,
+CLI-over-REST approach, and three-tier configuration precedence.
 
 From there, the documentation is organized by subsystem:
 
@@ -78,6 +79,7 @@ into the system.
 **Datasource system** explains the strategy-pattern layer that normalizes
 access to GitHub Issues, Azure DevOps Work Items, and local markdown files. It
 covers auto-detection from git remote URLs, per-backend operation semantics,
+git lifecycle management (branching, committing, pushing, PR creation),
 authentication delegation to external CLI tools, and a guide for adding new
 datasource implementations.
 
@@ -105,8 +107,8 @@ contracts that every other module depends on: the cleanup registry, logger,
 duration formatting, `Task`/`TaskFile` types, and `ProviderInstance` interface.
 
 **Testing** describes the Vitest-based test suite covering configuration,
-format utilities, the parser, and the spec generator, all using real filesystem
-I/O rather than mocks.
+format utilities, the parser, and the spec generator, with patterns using both
+real filesystem I/O and module mocking for external dependencies.
 
 **Deprecated compatibility layer** documents the legacy `IssueFetcher` shims
 that delegate to the new datasource system. These are slated for removal and
@@ -128,6 +130,7 @@ no production code imports from them.
 ## Datasource System
 
 - [Azdevops Datasource](./datasource-system/azdevops-datasource.md)
+- [Datasource Helpers](./datasource-system/datasource-helpers.md)
 - [Github Datasource](./datasource-system/github-datasource.md)
 - [Integrations](./datasource-system/integrations.md)
 - [Markdown Datasource](./datasource-system/markdown-datasource.md)

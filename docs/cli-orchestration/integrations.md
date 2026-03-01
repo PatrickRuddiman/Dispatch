@@ -130,7 +130,7 @@ the server itself — the client simply sends HTTP requests.
 | "Failed to create OpenCode session" | Server not running or not reachable | Check `--server-url` is correct; verify server is running |
 | "OpenCode prompt failed" | Session expired or server error | Check server logs; ensure server has not been restarted mid-session |
 | Timeout during `bootProvider()` | Server startup taking too long | Increase system resources; check for port conflicts |
-| Orphaned server process after crash | `cleanup()` was not called (see [orchestrator cleanup gap](orchestrator.md#the-cleanup-gap)) | Manually kill the OpenCode server process |
+| Orphaned server process after crash | `cleanup()` was not called (see [orchestrator cleanup gap](orchestrator.md#the-cleanup-gap-mitigated)) | Manually kill the OpenCode server process |
 
 ### Rate limits and cost
 

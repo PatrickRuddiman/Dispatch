@@ -416,11 +416,14 @@ The system uses a consistent **catch-and-continue** pattern for batch operations
 |----------|----------|-------------|
 | Individual issue fetch fails in spec pipeline | Logged, skipped; others continue | [Spec Generation](spec-generation/overview.md#error-handling-and-exit-codes) |
 | Spec generation fails for one issue | Logged, `failed` counter incremented; others continue | [Spec Generation](spec-generation/overview.md#error-handling-and-exit-codes) |
-| Planner fails for a task | Task marked failed and skipped; others proceed | [Orchestrator](cli-orchestration/orchestrator.md) |
+| Planner fails or times out for a task | Task marked failed and skipped; retried once by default (10 min timeout, configurable via `--plan-timeout` / `--plan-retries`) | [Orchestrator](cli-orchestration/orchestrator.md) |
 | Executor returns null response | Task marked failed | [Dispatcher](planning-and-dispatch/dispatcher.md) |
 | Datasource sync fails after task completion | Warning logged; task still counted as completed | [Orchestrator](cli-orchestration/orchestrator.md) |
 | Provider boot fails | Entire run aborts; no retry (indicates misconfiguration) | [Provider -- Error Recovery](provider-system/provider-overview.md#error-recovery-on-boot-failure) |
 | `commitTask()` fails after `markTaskComplete()` | Markdown left in modified-but-uncommitted state; no rollback | [Orchestrator](cli-orchestration/orchestrator.md) |
+| Branch creation fails | Execution continues without branching; results not lost | [Orchestrator](cli-orchestration/orchestrator.md) |
+| PR creation fails or PR already exists | Warning logged; falls back to returning existing PR URL | [Datasource Overview](datasource-system/overview.md#existing-pr-handling) |
+| Config file corrupted (invalid JSON) | `loadConfig()` silently returns empty object; defaults apply | [Configuration](cli-orchestration/configuration.md) |
 
 **Exit codes**: `0` if all tasks/specs succeed, `1` if any fail. No distinction
 between partial and total failure. See [CLI](cli-orchestration/cli.md).

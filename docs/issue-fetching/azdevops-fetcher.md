@@ -28,3 +28,7 @@ documentation.
   Migration guidance and removal assessment for the old fetcher interface
 - [Issue Fetching Overview](./overview.md) -- Architecture and data flow of
   the deprecated fetcher system
+- [Datasource Overview](../datasource-system/overview.md) -- The datasource
+  abstraction that supersedes this fetcher interface
+- [Spec Generation](../spec-generation/overview.md) -- How the spec pipeline
+  uses datasources to fetch Azure DevOps work items for spec generation

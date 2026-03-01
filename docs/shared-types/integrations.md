@@ -156,6 +156,12 @@ with code `EACCES`. This prevents marking the task as complete.
 **Mitigation:** Ensure task markdown files have write permissions. In git
 repositories, file permissions are typically not restrictive on checkout.
 
+**To troubleshoot**:
+
+1. Check file permissions: `ls -la tasks/your-file.md`
+2. Ensure the user running Dispatch has `rw` access
+3. On shared systems, check ACLs: `getfacl tasks/your-file.md`
+
 ### Data loss during writeFile
 
 `writeFile` from `fs/promises` is **not atomic**. The implementation:
@@ -172,6 +178,12 @@ or partially written.
 files are typically under version control, so a corrupted file can be recovered
 with `git checkout`. The write operation is small (the entire file content is
 written in a single call), minimizing the window of vulnerability.
+
+**Recovery**:
+
+1. Check the task file for corruption: `cat tasks/your-file.md`
+2. Use `git checkout -- tasks/your-file.md` to restore from the last commit
+3. Re-run dispatch to re-process the affected tasks
 
 **Atomic write alternative:** For higher safety, the write could use a
 write-to-temp-then-rename pattern (see [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md#the-read-modify-write-pattern)):
@@ -243,7 +255,7 @@ an unhandled exception escapes the main function.
 If a user sends two rapid Ctrl+C signals, the second signal arrives while
 `runCleanup()` from the first is still executing. Because `runCleanup()`
 uses `splice(0)` to atomically drain the cleanup array (see
-[Cleanup registry — Drain-and-clear pattern](./cleanup.md#the-drain-and-clear-pattern)),
+[Cleanup registry — Signal coordination](./cleanup.md#how-signals-coordinate-with-the-cleanup-registry)),
 the second invocation sees an empty array and returns immediately. This
 prevents double-execution of cleanup functions.
 
