@@ -45,6 +45,7 @@ vi.mock("../providers/index.js", () => ({
 
 vi.mock("../format.js", () => ({
   elapsed: vi.fn().mockReturnValue("0ms"),
+  renderHeaderLines: vi.fn().mockReturnValue(["mock-header"]),
 }));
 
 import { mkdir, readFile, writeFile, unlink } from "node:fs/promises";

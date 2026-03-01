@@ -4,7 +4,7 @@
  */
 
 import chalk from "chalk";
-import { elapsed } from "./format.js";
+import { elapsed, renderHeaderLines } from "./format.js";
 import type { Task } from "./parser.js";
 
 export type TaskStatus = "pending" | "planning" | "running" | "done" | "failed";
@@ -111,18 +111,13 @@ function render(state: TuiState): string {
 
   // ── Header ──────────────────────────────────────────────────
   lines.push("");
-  lines.push(chalk.bold.white("  ⚡ dispatch") + chalk.dim(` — AI task orchestration`));
-
-  // Show provider/model/source info when available — one per line
-  if (state.provider) {
-    lines.push(chalk.dim(`  provider: ${state.provider}`));
-  }
-  if (state.model) {
-    lines.push(chalk.dim(`  model: ${state.model}`));
-  }
-  if (state.source) {
-    lines.push(chalk.dim(`  source: ${state.source}`));
-  }
+  lines.push(
+    ...renderHeaderLines({
+      provider: state.provider,
+      model: state.model,
+      source: state.source,
+    })
+  );
 
   lines.push(chalk.dim("  ─".repeat(24)));
 

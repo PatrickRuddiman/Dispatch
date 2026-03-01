@@ -19,7 +19,8 @@ import { bootProvider } from "../providers/index.js";
 import { boot as bootSpecAgent } from "../agents/spec.js";
 import { registerCleanup } from "../cleanup.js";
 import { log } from "../logger.js";
-import { elapsed } from "../format.js";
+import chalk from "chalk";
+import { elapsed, renderHeaderLines } from "../format.js";
 
 /**
  * Run the spec-generation pipeline end-to-end.
@@ -44,7 +45,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
   // ── Resolve datasource ─────────────────────────────────────
   const source = await resolveSource(issues, opts.issueSource, specCwd);
   if (!source) {
-    return { total: 0, generated: 0, failed: 0, files: [], durationMs: Date.now() - pipelineStart, fileDurationsMs: {} };
+    return { total: 0, generated: 0, failed: 0, files: [], issueNumbers: [], durationMs: Date.now() - pipelineStart, fileDurationsMs: {} };
   }
 
   const datasource = getDatasource(source);
@@ -63,7 +64,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
 
     if (issueNumbers.length === 0) {
       log.error("No issue numbers provided. Use --spec 1,2,3");
-      return { total: 0, generated: 0, failed: 0, files: [], durationMs: 0, fileDurationsMs: {} };
+      return { total: 0, generated: 0, failed: 0, files: [], issueNumbers: [], durationMs: 0, fileDurationsMs: {} };
     }
 
     const fetchStart = Date.now();
@@ -99,7 +100,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
 
     if (files.length === 0) {
       log.error(`No files matched the pattern "${Array.isArray(issues) ? issues.join(", ") : issues}".`);
-      return { total: 0, generated: 0, failed: 0, files: [], durationMs: 0, fileDurationsMs: {} };
+      return { total: 0, generated: 0, failed: 0, files: [], issueNumbers: [], durationMs: 0, fileDurationsMs: {} };
     }
 
     log.info(`Matched ${files.length} file(s) for spec generation (concurrency: ${concurrency})...`);
@@ -131,7 +132,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
   if (validItems.length === 0) {
     const noun = isTrackerMode ? "issues" : "files";
     log.error(`No ${noun} could be loaded. Aborting spec generation.`);
-    return { total: items.length, generated: 0, failed: items.length, files: [], durationMs: Date.now() - pipelineStart, fileDurationsMs: {} };
+    return { total: items.length, generated: 0, failed: items.length, files: [], issueNumbers: [], durationMs: Date.now() - pipelineStart, fileDurationsMs: {} };
   }
 
   // ── Boot AI provider ────────────────────────────────────────
@@ -141,6 +142,19 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
   const instance = await bootProvider(provider, { url: serverUrl, cwd: specCwd });
   registerCleanup(() => instance.cleanup());
   log.debug(`Provider booted in ${elapsed(Date.now() - bootStart)}`);
+
+  // ── Header banner ────────────────────────────────────────────
+  const headerLines = renderHeaderLines({
+    provider,
+    model: instance.model,
+    source,
+  });
+  console.log("");
+  for (const line of headerLines) {
+    console.log(line);
+  }
+  console.log(chalk.dim("  ─".repeat(24)));
+  console.log("");
 
   // ── Boot spec agent ─────────────────────────────────────────
   const specAgent = await bootSpecAgent({ provider: instance, cwd: specCwd });
