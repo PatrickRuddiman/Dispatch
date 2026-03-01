@@ -16,7 +16,7 @@ vi.mock("node:util", () => ({
 }));
 
 // Import the actual datasource implementations AFTER mocking
-import { datasource as github } from "../datasources/github.js";
+import { datasource as github, getCommitMessages } from "../datasources/github.js";
 import { datasource as azdevops } from "../datasources/azdevops.js";
 import { datasource as md } from "../datasources/md.js";
 
@@ -272,6 +272,7 @@ describe("GitHub datasource — createPullRequest", () => {
       "dispatch/42-feature",
       "42",
       "feat: add user auth",
+      "",
       { cwd: "/tmp/repo" },
     );
 
@@ -285,6 +286,37 @@ describe("GitHub datasource — createPullRequest", () => {
         "feat: add user auth",
         "--body",
         "Closes #42",
+        "--head",
+        "dispatch/42-feature",
+      ],
+      { cwd: "/tmp/repo" },
+    );
+  });
+
+  it("passes provided body to gh pr create", async () => {
+    mockExecFile.mockResolvedValue({
+      stdout: "https://github.com/org/repo/pull/2\n",
+    });
+
+    const customBody = "## Summary\n\nImplemented user auth\n\nCloses #42";
+    const result = await github.createPullRequest(
+      "dispatch/42-feature",
+      "42",
+      "feat: add user auth",
+      customBody,
+      { cwd: "/tmp/repo" },
+    );
+
+    expect(result).toBe("https://github.com/org/repo/pull/2");
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "gh",
+      [
+        "pr",
+        "create",
+        "--title",
+        "feat: add user auth",
+        "--body",
+        customBody,
         "--head",
         "dispatch/42-feature",
       ],
@@ -307,6 +339,7 @@ describe("GitHub datasource — createPullRequest", () => {
       "dispatch/42-feature",
       "42",
       "feat: add user auth",
+      "",
       { cwd: "/tmp/repo" },
     );
 
@@ -323,10 +356,59 @@ describe("GitHub datasource — createPullRequest", () => {
     mockExecFile.mockRejectedValue(new Error("authentication failed"));
 
     await expect(
-      github.createPullRequest("dispatch/42-feature", "42", "feat: auth", {
+      github.createPullRequest("dispatch/42-feature", "42", "feat: auth", "", {
         cwd: "/tmp/repo",
       }),
     ).rejects.toThrow("authentication failed");
+  });
+});
+
+// ─── Section G2: GitHub — getCommitMessages ─────────────────────────────────────
+
+describe("GitHub datasource — getCommitMessages", () => {
+  it("returns commit messages from branch relative to default branch", async () => {
+    mockExecFile.mockResolvedValue({
+      stdout: "feat: add login page\nfeat: add auth middleware\nfix: handle token expiry\n",
+    });
+
+    const messages = await getCommitMessages("main", "/tmp/repo");
+
+    expect(messages).toEqual([
+      "feat: add login page",
+      "feat: add auth middleware",
+      "fix: handle token expiry",
+    ]);
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "git",
+      ["log", "origin/main..HEAD", "--pretty=format:%s"],
+      { cwd: "/tmp/repo" },
+    );
+  });
+
+  it("returns single commit message", async () => {
+    mockExecFile.mockResolvedValue({
+      stdout: "feat: implement feature\n",
+    });
+
+    const messages = await getCommitMessages("main", "/tmp/repo");
+
+    expect(messages).toEqual(["feat: implement feature"]);
+  });
+
+  it("returns empty array when no commits exist", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "" });
+
+    const messages = await getCommitMessages("main", "/tmp/repo");
+
+    expect(messages).toEqual([]);
+  });
+
+  it("returns empty array on git log failure", async () => {
+    mockExecFile.mockRejectedValue(new Error("fatal: bad revision"));
+
+    const messages = await getCommitMessages("main", "/tmp/repo");
+
+    expect(messages).toEqual([]);
   });
 });
 
@@ -344,6 +426,7 @@ describe("Azure DevOps datasource — createPullRequest", () => {
       "dispatch/42-feature",
       "42",
       "feat: add auth",
+      "",
       { cwd: "/tmp/repo" },
     );
 
@@ -386,6 +469,7 @@ describe("Azure DevOps datasource — createPullRequest", () => {
       "dispatch/42-feature",
       "42",
       "feat: add auth",
+      "",
       { cwd: "/tmp/repo" },
     );
 
@@ -419,6 +503,7 @@ describe("Azure DevOps datasource — createPullRequest", () => {
       "dispatch/42-feature",
       "42",
       "feat: add auth",
+      "",
       { cwd: "/tmp/repo" },
     );
 
@@ -429,7 +514,7 @@ describe("Azure DevOps datasource — createPullRequest", () => {
     mockExecFile.mockRejectedValue(new Error("auth failed"));
 
     await expect(
-      azdevops.createPullRequest("dispatch/42-feature", "42", "feat: auth", {
+      azdevops.createPullRequest("dispatch/42-feature", "42", "feat: auth", "", {
         cwd: "/tmp/repo",
       }),
     ).rejects.toThrow("auth failed");
@@ -487,6 +572,7 @@ describe("MD datasource — no-op dispatch lifecycle methods", () => {
       "dispatch/42-feature",
       "42",
       "title",
+      "",
       { cwd: "/tmp" },
     );
     expect(result).toBe("");
