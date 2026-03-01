@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { mkdir, readFile, unlink } from "node:fs/promises";
 import { glob } from "glob";
 import type { SpecOptions, SpecSummary } from "../spec-generator.js";
-import { isIssueNumbers, resolveSource, defaultConcurrency } from "../spec-generator.js";
+import { isIssueNumbers, isGlobOrFilePath, resolveSource, defaultConcurrency } from "../spec-generator.js";
 import type { IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
 import { getDatasource } from "../datasources/index.js";
 import { extractTitle } from "../datasources/md.js";
@@ -53,6 +53,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
 
   // ── Determine items to process ─────────────────────────────
   const isTrackerMode = isIssueNumbers(issues);
+  const isInlineText = !isTrackerMode && !isGlobOrFilePath(issues);
   let items: { id: string; details: IssueDetails | null; error?: string }[];
 
   if (isTrackerMode) {
@@ -94,6 +95,31 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
       items.push(...batchResults);
     }
     log.debug(`Issue fetching completed in ${elapsed(Date.now() - fetchStart)}`);
+  } else if (isInlineText) {
+    // Inline text mode: construct IssueDetails from the raw text
+    const text = Array.isArray(issues) ? issues.join(" ") : issues;
+    const title = text.length > 80 ? text.slice(0, 80).trimEnd() + "…" : text;
+    const slug = text
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 60);
+    const filename = `${slug}.md`;
+    const filepath = join(outputDir, filename);
+
+    const details: IssueDetails = {
+      number: filepath,
+      title,
+      body: text,
+      labels: [],
+      state: "open",
+      url: filepath,
+      comments: [],
+      acceptanceCriteria: "",
+    };
+
+    log.info(`Inline text spec: "${title}"`);
+    items = [{ id: filepath, details }];
   } else {
     // File/glob mode: resolve files and build IssueDetails from content
     const files = await glob(issues, { cwd: specCwd, absolute: true });
@@ -130,7 +156,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
 
   const validItems = items.filter((i) => i.details !== null);
   if (validItems.length === 0) {
-    const noun = isTrackerMode ? "issues" : "files";
+    const noun = isTrackerMode ? "issues" : isInlineText ? "inline specs" : "files";
     log.error(`No ${noun} could be loaded. Aborting spec generation.`);
     return { total: items.length, generated: 0, failed: items.length, files: [], issueNumbers: [], durationMs: Date.now() - pipelineStart, fileDurationsMs: {} };
   }
@@ -189,6 +215,9 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
             .slice(0, 60);
           const filename = `${id}-${slug}.md`;
           filepath = join(outputDir, filename);
+        } else if (isInlineText) {
+          // Inline text: id is already the full output path
+          filepath = id;
         } else {
           // File-based: overwrite the source file in-place
           filepath = id;
