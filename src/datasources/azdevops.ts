@@ -10,8 +10,7 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { Datasource } from "./interface.js";
-import type { IssueDetails, IssueFetchOptions } from "./interface.js";
+import type { Datasource, IssueDetails, IssueFetchOptions, DispatchLifecycleOptions } from "./interface.js";
 
 const exec = promisify(execFile);
 
@@ -174,6 +173,108 @@ export const datasource: Datasource = {
       acceptanceCriteria:
         fields["Microsoft.VSTS.Common.AcceptanceCriteria"] ?? "",
     };
+  },
+
+  async getDefaultBranch(opts: DispatchLifecycleOptions): Promise<string> {
+    try {
+      const { stdout } = await exec("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], { cwd: opts.cwd });
+      const parts = stdout.trim().split("/");
+      return parts[parts.length - 1];
+    } catch {
+      try {
+        await exec("git", ["rev-parse", "--verify", "main"], { cwd: opts.cwd });
+        return "main";
+      } catch {
+        return "master";
+      }
+    }
+  },
+
+  buildBranchName(issueNumber: string, title: string): string {
+    const slug = title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 50);
+    return `dispatch/${issueNumber}-${slug}`;
+  },
+
+  async createAndSwitchBranch(branchName: string, opts: DispatchLifecycleOptions): Promise<void> {
+    try {
+      await exec("git", ["checkout", "-b", branchName], { cwd: opts.cwd });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes("already exists")) {
+        await exec("git", ["checkout", branchName], { cwd: opts.cwd });
+      } else {
+        throw err;
+      }
+    }
+  },
+
+  async switchBranch(branchName: string, opts: DispatchLifecycleOptions): Promise<void> {
+    await exec("git", ["checkout", branchName], { cwd: opts.cwd });
+  },
+
+  async pushBranch(branchName: string, opts: DispatchLifecycleOptions): Promise<void> {
+    await exec("git", ["push", "--set-upstream", "origin", branchName], { cwd: opts.cwd });
+  },
+
+  async createPullRequest(
+    branchName: string,
+    issueNumber: string,
+    title: string,
+    opts: DispatchLifecycleOptions,
+  ): Promise<string> {
+    try {
+      const { stdout } = await exec(
+        "az",
+        [
+          "repos",
+          "pr",
+          "create",
+          "--title",
+          title,
+          "--description",
+          `Resolves AB#${issueNumber}`,
+          "--source-branch",
+          branchName,
+          "--work-items",
+          issueNumber,
+          "--output",
+          "json",
+        ],
+        { cwd: opts.cwd },
+      );
+      const pr = JSON.parse(stdout);
+      return pr.url ?? "";
+    } catch (err) {
+      // If a PR already exists for this branch, retrieve its URL
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes("already exists")) {
+        const { stdout } = await exec(
+          "az",
+          [
+            "repos",
+            "pr",
+            "list",
+            "--source-branch",
+            branchName,
+            "--status",
+            "active",
+            "--output",
+            "json",
+          ],
+          { cwd: opts.cwd },
+        );
+        const prs = JSON.parse(stdout);
+        if (Array.isArray(prs) && prs.length > 0) {
+          return prs[0].url ?? "";
+        }
+        return "";
+      }
+      throw err;
+    }
   },
 };
 

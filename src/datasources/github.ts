@@ -8,9 +8,56 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { Datasource, IssueDetails, IssueFetchOptions } from "./interface.js";
+import type { Datasource, IssueDetails, IssueFetchOptions, DispatchLifecycleOptions } from "./interface.js";
 
 const exec = promisify(execFile);
+
+/** Execute a git command and return stdout. */
+async function git(args: string[], cwd: string): Promise<string> {
+  const { stdout } = await exec("git", args, { cwd });
+  return stdout;
+}
+
+/** Execute a gh CLI command and return stdout. */
+async function gh(args: string[], cwd: string): Promise<string> {
+  const { stdout } = await exec("gh", args, { cwd });
+  return stdout;
+}
+
+/**
+ * Build a branch name from an issue number and title.
+ * Produces: `dispatch/<number>-<slugified-title>`
+ */
+function buildBranchName(issueNumber: string, title: string): string {
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 50);
+  return `dispatch/${issueNumber}-${slug}`;
+}
+
+/**
+ * Detect the default branch of the repository.
+ * Tries `git symbolic-ref refs/remotes/origin/HEAD` first,
+ * falls back to checking if "main" or "master" exists.
+ */
+async function getDefaultBranch(cwd: string): Promise<string> {
+  try {
+    const ref = await git(["symbolic-ref", "refs/remotes/origin/HEAD"], cwd);
+    // ref looks like "refs/remotes/origin/main"
+    const parts = ref.trim().split("/");
+    return parts[parts.length - 1];
+  } catch {
+    // Fallback: check if "main" branch exists
+    try {
+      await git(["rev-parse", "--verify", "main"], cwd);
+      return "main";
+    } catch {
+      return "master";
+    }
+  }
+}
 
 export const datasource: Datasource = {
   name: "github",
@@ -126,5 +173,67 @@ export const datasource: Datasource = {
       comments: [],
       acceptanceCriteria: "",
     };
+  },
+
+  getDefaultBranch(opts) {
+    return getDefaultBranch(opts.cwd);
+  },
+
+  buildBranchName(issueNumber, title) {
+    return buildBranchName(issueNumber, title);
+  },
+
+  async createAndSwitchBranch(branchName, opts) {
+    const cwd = opts.cwd;
+    try {
+      await git(["checkout", "-b", branchName], cwd);
+    } catch (err) {
+      // Branch may already exist — switch to it instead
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes("already exists")) {
+        await git(["checkout", branchName], cwd);
+      } else {
+        throw err;
+      }
+    }
+  },
+
+  async switchBranch(branchName, opts) {
+    await git(["checkout", branchName], opts.cwd);
+  },
+
+  async pushBranch(branchName, opts) {
+    await git(["push", "--set-upstream", "origin", branchName], opts.cwd);
+  },
+
+  async createPullRequest(branchName, issueNumber, title, opts) {
+    const cwd = opts.cwd;
+    try {
+      const url = await gh(
+        [
+          "pr",
+          "create",
+          "--title",
+          title,
+          "--body",
+          `Closes #${issueNumber}`,
+          "--head",
+          branchName,
+        ],
+        cwd,
+      );
+      return url.trim();
+    } catch (err) {
+      // If a PR already exists for this branch, retrieve its URL
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes("already exists")) {
+        const existing = await gh(
+          ["pr", "view", branchName, "--json", "url", "--jq", ".url"],
+          cwd,
+        );
+        return existing.trim();
+      }
+      throw err;
+    }
   },
 };
