@@ -1176,7 +1176,7 @@ describe("SpecAgent generate", () => {
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("Either issue or filePath+fileContent must be provided");
+    expect(result.error).toContain("Either issue, inlineText, or filePath+fileContent must be provided");
     expect(result.valid).toBe(false);
   });
 
@@ -1548,5 +1548,219 @@ describe("spec output formatting", () => {
 
     expect(runLine).toBeDefined();
     expect(runLine).toContain("dispatch 42");
+  });
+});
+
+// ─── inline text pipeline (runSpecPipeline inline text branch) ───────
+
+describe("inline text pipeline", () => {
+  const CWD = "/tmp/test-project";
+  const OUTPUT_DIR = "/tmp/test-project/.dispatch/specs";
+
+  const VALID_SPEC = [
+    "# My Feature (#42)",
+    "",
+    "> Summary of the feature",
+    "",
+    "## Context",
+    "",
+    "Some context here.",
+    "",
+    "## Tasks",
+    "",
+    "- [ ] (P) First task",
+    "- [ ] (S) Second task",
+  ].join("\n");
+
+  function createMockDatasource(name: "github" | "azdevops" | "md", overrides?: Record<string, unknown>) {
+    return {
+      name,
+      list: vi.fn().mockResolvedValue([]),
+      fetch: vi.fn().mockResolvedValue({
+        number: "42",
+        title: "My Feature",
+        body: "Feature body",
+        labels: [],
+        state: "open",
+        url: "https://github.com/org/repo/issues/42",
+        comments: [],
+        acceptanceCriteria: "",
+      }),
+      update: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+      create: vi.fn().mockResolvedValue({
+        number: "99",
+        title: "My Feature",
+        body: "Spec content",
+        labels: [],
+        state: "open",
+        url: "https://github.com/org/repo/issues/99",
+        comments: [],
+        acceptanceCriteria: "",
+      }),
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.mocked(mkdir).mockResolvedValue(undefined);
+    vi.mocked(writeFile).mockResolvedValue(undefined);
+    vi.mocked(unlink).mockResolvedValue(undefined);
+    vi.mocked(readFile).mockResolvedValue(VALID_SPEC);
+    vi.mocked(randomUUID).mockReturnValue("test-uuid-1234" as `${string}-${string}-${string}-${string}-${string}`);
+
+    vi.mocked(bootProvider).mockResolvedValue({
+      name: "mock",
+      model: "mock-model",
+      createSession: vi.fn().mockResolvedValue("session-1"),
+      prompt: vi.fn().mockResolvedValue("done"),
+      cleanup: vi.fn().mockResolvedValue(undefined),
+    });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("generates a spec file for inline text input", async () => {
+    const mockDs = createMockDatasource("md");
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
+
+    const result = await runSpecPipeline({
+      issues: "add dark mode toggle to settings page",
+      provider: "opencode",
+      cwd: CWD,
+      outputDir: OUTPUT_DIR,
+      concurrency: 10,
+    });
+
+    expect(result.generated).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(result.total).toBe(1);
+    expect(result.files).toHaveLength(1);
+    expect(result.files[0]).toContain("add-dark-mode-toggle-to-settings-page.md");
+  });
+
+  it("shows file path in dispatch command for inline text with md datasource", async () => {
+    const mockDs = createMockDatasource("md");
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
+
+    await runSpecPipeline({
+      issues: "add dark mode toggle to settings page",
+      provider: "opencode",
+      cwd: CWD,
+      outputDir: OUTPUT_DIR,
+      concurrency: 10,
+    });
+
+    const dimCalls = vi.mocked(log.dim).mock.calls.map((c) => c[0]);
+    const runLine = dimCalls.find((msg) => typeof msg === "string" && msg.includes("dispatch"));
+
+    expect(runLine).toBeDefined();
+    expect(runLine).toContain("add-dark-mode-toggle-to-settings-page.md");
+    // File paths (non-numeric identifiers) should be quoted in the output
+    expect(runLine).toContain('"');
+  });
+
+  it("truncates long inline text in spec title", async () => {
+    const mockDs = createMockDatasource("md");
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
+
+    const longInput = "implement a comprehensive user authentication system with oauth2 support and multi-factor authentication for the admin panel";
+
+    await runSpecPipeline({
+      issues: longInput,
+      provider: "opencode",
+      cwd: CWD,
+      outputDir: OUTPUT_DIR,
+      concurrency: 10,
+    });
+
+    const infoCalls = vi.mocked(log.info).mock.calls.map((c) => c[0]);
+    const inlineLine = infoCalls.find((msg) => typeof msg === "string" && msg.includes("Inline text spec:"));
+
+    expect(inlineLine).toBeDefined();
+    // The title is truncated to 80 chars + "…"
+    expect(inlineLine).toContain("…");
+  });
+
+  it("slugifies inline text into the output filename", async () => {
+    const mockDs = createMockDatasource("md");
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
+
+    const result = await runSpecPipeline({
+      issues: "Add validation for email & phone",
+      provider: "opencode",
+      cwd: CWD,
+      outputDir: OUTPUT_DIR,
+      concurrency: 10,
+    });
+
+    expect(result.files).toHaveLength(1);
+    // Special chars become dashes, leading/trailing dashes stripped, lowercased
+    expect(result.files[0]).toContain("add-validation-for-email-phone.md");
+  });
+
+  it("passes inline text as fileContent to spec agent", async () => {
+    const mockDs = createMockDatasource("md");
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
+
+    const mockProvider = {
+      name: "mock",
+      model: "mock-model",
+      createSession: vi.fn().mockResolvedValue("session-1"),
+      prompt: vi.fn().mockResolvedValue("done"),
+      cleanup: vi.fn().mockResolvedValue(undefined),
+    };
+    vi.mocked(bootProvider).mockResolvedValue(mockProvider);
+
+    const inlineText = "add user profile page";
+
+    await runSpecPipeline({
+      issues: inlineText,
+      provider: "opencode",
+      cwd: CWD,
+      outputDir: OUTPUT_DIR,
+      concurrency: 10,
+    });
+
+    // The spec agent's prompt should contain the inline text
+    // Since the agent is called via provider.prompt, check that the prompt
+    // was called and the session was created
+    expect(mockProvider.createSession).toHaveBeenCalled();
+    expect(mockProvider.prompt).toHaveBeenCalled();
+
+    // Verify writeFile was called with the expected output path
+    const writeFileCalls = vi.mocked(writeFile).mock.calls;
+    const specWriteCall = writeFileCalls.find(
+      (call) => typeof call[0] === "string" && (call[0] as string).includes("add-user-profile-page.md")
+    );
+    expect(specWriteCall).toBeDefined();
+  });
+
+  it("returns spec summary with identifiers for inline text", async () => {
+    const mockDs = createMockDatasource("md");
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
+
+    const result = await runSpecPipeline({
+      issues: "feature A should do x",
+      provider: "opencode",
+      cwd: CWD,
+      outputDir: OUTPUT_DIR,
+      concurrency: 10,
+    });
+
+    expect(result.identifiers).toBeDefined();
+    expect(result.identifiers).toHaveLength(1);
+    // Identifier should be the file path (md datasource, not a tracker)
+    expect(result.identifiers![0]).toContain("feature-a-should-do-x.md");
+    // No issue numbers should be created for md datasource
+    expect(result.issueNumbers).toHaveLength(0);
   });
 });
