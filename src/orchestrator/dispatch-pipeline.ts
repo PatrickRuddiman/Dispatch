@@ -16,7 +16,7 @@ import { createTui } from "../tui.js";
 import type { ProviderName } from "../providers/interface.js";
 import { bootProvider } from "../providers/index.js";
 import { getDatasource } from "../datasources/index.js";
-import type { DatasourceName, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
+import type { DatasourceName, DispatchLifecycleOptions, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
 import type { OrchestrateRunOptions, DispatchSummary } from "../agents/orchestrator.js";
 import {
   fetchItemsById,
@@ -40,6 +40,7 @@ export async function runDispatchPipeline(
     dryRun,
     serverUrl,
     noPlan,
+    noBranch,
     provider = "opencode",
     source,
     org,
@@ -137,78 +138,145 @@ export async function runDispatchPipeline(
     let completed = 0;
     let failed = 0;
 
-    const groups = groupTasksByMode(allTasks);
+    const lifecycleOpts: DispatchLifecycleOptions = { cwd };
 
-    for (const group of groups) {
-      // Dispatch all tasks in the group concurrently, respecting --concurrency
-      const groupQueue = [...group];
+    // Group tasks by their source file (each file = one issue)
+    const tasksByFile = new Map<string, typeof allTasks>();
+    for (const task of allTasks) {
+      const list = tasksByFile.get(task.file) ?? [];
+      list.push(task);
+      tasksByFile.set(task.file, list);
+    }
 
-      while (groupQueue.length > 0) {
-        const batch = groupQueue.splice(0, concurrency);
-        const batchResults = await Promise.all(
-          batch.map(async (task) => {
-            const tuiTask = tui.state.tasks.find((t) => t.task === task)!;
-            const startTime = Date.now();
-            tuiTask.elapsed = startTime;
+    // Process each issue's tasks, optionally wrapping with branch lifecycle
+    for (const [file, fileTasks] of tasksByFile) {
+      const details = issueDetailsByFile.get(file);
+      let defaultBranch: string | undefined;
+      let branchName: string | undefined;
 
-            // ── Phase A: Plan (unless --no-plan) ─────────────────
-            let plan: string | undefined;
-            if (planner) {
-              tuiTask.status = "planning";
-              const rawContent = fileContentMap.get(task.file);
-              const fileContext = rawContent ? buildTaskContext(rawContent, task) : undefined;
-              const planResult = await planner.plan(task, fileContext);
+      // ── Branch setup (unless --no-branch) ───────────────────
+      if (!noBranch && details) {
+        try {
+          defaultBranch = await datasource.getDefaultBranch(lifecycleOpts);
+          branchName = datasource.buildBranchName(details.number, details.title);
+          await datasource.createAndSwitchBranch(branchName, lifecycleOpts);
+          log.debug(`Switched to branch ${branchName}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.warn(`Could not create branch for issue #${details.number}: ${message}`);
+          // Continue without branching
+          branchName = undefined;
+          defaultBranch = undefined;
+        }
+      }
 
-              if (!planResult.success) {
+      // ── Dispatch file's tasks ─────────────────────────────────
+      const groups = groupTasksByMode(fileTasks);
+
+      for (const group of groups) {
+        const groupQueue = [...group];
+
+        while (groupQueue.length > 0) {
+          const batch = groupQueue.splice(0, concurrency);
+          const batchResults = await Promise.all(
+            batch.map(async (task) => {
+              const tuiTask = tui.state.tasks.find((t) => t.task === task)!;
+              const startTime = Date.now();
+              tuiTask.elapsed = startTime;
+
+              // ── Phase A: Plan (unless --no-plan) ─────────────────
+              let plan: string | undefined;
+              if (planner) {
+                tuiTask.status = "planning";
+                const rawContent = fileContentMap.get(task.file);
+                const fileContext = rawContent ? buildTaskContext(rawContent, task) : undefined;
+                const planResult = await planner.plan(task, fileContext);
+
+                if (!planResult.success) {
+                  tuiTask.status = "failed";
+                  tuiTask.error = `Planning failed: ${planResult.error}`;
+                  tuiTask.elapsed = Date.now() - startTime;
+                  failed++;
+                  return { task, success: false, error: tuiTask.error } as DispatchResult;
+                }
+
+                plan = planResult.prompt;
+              }
+
+              // ── Phase B: Execute via executor agent ──────────────
+              tuiTask.status = "running";
+              const execResult = await executor.execute({
+                task,
+                cwd,
+                plan: plan ?? null,
+              });
+
+              if (execResult.success) {
+                // Sync checked-off state back to the datasource
+                try {
+                  const parsed = parseIssueFilename(task.file);
+                  if (parsed) {
+                    const updatedContent = await readFile(task.file, "utf-8");
+                    const issueDetails = issueDetailsByFile.get(task.file);
+                    const title = issueDetails?.title ?? parsed.slug;
+                    await datasource.update(parsed.issueId, title, updatedContent, fetchOpts);
+                    log.success(`Synced task completion to issue #${parsed.issueId}`);
+                  }
+                } catch (err) {
+                  const message = err instanceof Error ? err.message : String(err);
+                  log.warn(`Could not sync task completion to datasource: ${message}`);
+                }
+
+                tuiTask.status = "done";
+                tuiTask.elapsed = Date.now() - startTime;
+                completed++;
+              } else {
                 tuiTask.status = "failed";
-                tuiTask.error = `Planning failed: ${planResult.error}`;
+                tuiTask.error = execResult.error;
                 tuiTask.elapsed = Date.now() - startTime;
                 failed++;
-                return { task, success: false, error: tuiTask.error } as DispatchResult;
               }
 
-              plan = planResult.prompt;
-            }
+              return execResult.dispatchResult;
+            })
+          );
 
-            // ── Phase B: Execute via executor agent ──────────────
-            tuiTask.status = "running";
-            const execResult = await executor.execute({
-              task,
-              cwd,
-              plan: plan ?? null,
-            });
+          results.push(...batchResults);
+        }
+      }
 
-            if (execResult.success) {
-              // Sync checked-off state back to the datasource
-              try {
-                const parsed = parseIssueFilename(task.file);
-                if (parsed) {
-                  const updatedContent = await readFile(task.file, "utf-8");
-                  const details = issueDetailsByFile.get(task.file);
-                  const title = details?.title ?? parsed.slug;
-                  await datasource.update(parsed.issueId, title, updatedContent, fetchOpts);
-                  log.success(`Synced task completion to issue #${parsed.issueId}`);
-                }
-              } catch (err) {
-                const message = err instanceof Error ? err.message : String(err);
-                log.warn(`Could not sync task completion to datasource: ${message}`);
-              }
+      // ── Branch teardown (push, PR, switch back) ──────────────
+      if (!noBranch && branchName && defaultBranch && details) {
+        try {
+          await datasource.pushBranch(branchName, lifecycleOpts);
+          log.debug(`Pushed branch ${branchName}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.warn(`Could not push branch ${branchName}: ${message}`);
+        }
 
-              tuiTask.status = "done";
-              tuiTask.elapsed = Date.now() - startTime;
-              completed++;
-            } else {
-              tuiTask.status = "failed";
-              tuiTask.error = execResult.error;
-              tuiTask.elapsed = Date.now() - startTime;
-              failed++;
-            }
+        try {
+          const prUrl = await datasource.createPullRequest(
+            branchName,
+            details.number,
+            details.title,
+            lifecycleOpts,
+          );
+          if (prUrl) {
+            log.success(`Created PR for issue #${details.number}: ${prUrl}`);
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.warn(`Could not create PR for issue #${details.number}: ${message}`);
+        }
 
-            return execResult.dispatchResult;
-          })
-        );
-
-        results.push(...batchResults);
+        try {
+          await datasource.switchBranch(defaultBranch, lifecycleOpts);
+          log.debug(`Switched back to ${defaultBranch}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.warn(`Could not switch back to ${defaultBranch}: ${message}`);
+        }
       }
     }
 
@@ -277,7 +345,12 @@ export async function dryRunMode(
 
   log.info(`Dry run — ${allTasks.length} task(s) across ${taskFiles.length} file(s):\n`);
   for (const task of allTasks) {
-    log.task(allTasks.indexOf(task), allTasks.length, `${task.file}:${task.line} — ${task.text}`);
+    const parsed = parseIssueFilename(task.file);
+    const details = parsed ? items.find((item) => item.number === parsed.issueId) : undefined;
+    const branchInfo = details
+      ? ` [branch: ${datasource.buildBranchName(details.number, details.title)}]`
+      : "";
+    log.task(allTasks.indexOf(task), allTasks.length, `${task.file}:${task.line} — ${task.text}${branchInfo}`);
   }
 
   return {

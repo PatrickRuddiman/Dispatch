@@ -47,6 +47,14 @@ export interface IssueFetchOptions {
   project?: string;
 }
 
+/**
+ * Options for dispatch lifecycle operations (branching, pushing, PRs).
+ */
+export interface DispatchLifecycleOptions {
+  /** Working directory (git repo root) */
+  cwd: string;
+}
+
 /** Valid datasource backend names. */
 export type DatasourceName = "github" | "azdevops" | "md";
 
@@ -105,4 +113,71 @@ export interface Datasource {
    * @returns The created issue details
    */
   create(title: string, body: string, opts?: IssueFetchOptions): Promise<IssueDetails>;
+
+  /**
+   * Get the default branch name (e.g. "main" or "master").
+   *
+   * @param opts - Lifecycle options (cwd)
+   * @returns The default branch name
+   */
+  getDefaultBranch(opts: DispatchLifecycleOptions): Promise<string>;
+
+  /**
+   * Build a branch name from an issue number and title.
+   *
+   * @param issueNumber - The issue number/ID
+   * @param title - The issue title
+   * @returns A sanitized branch name
+   */
+  buildBranchName(issueNumber: string, title: string): string;
+
+  /**
+   * Create and switch to a feature branch for an issue.
+   * If the branch already exists, switch to it instead.
+   *
+   * @param branchName - The branch name to create
+   * @param opts - Lifecycle options (cwd)
+   */
+  createAndSwitchBranch(branchName: string, opts: DispatchLifecycleOptions): Promise<void>;
+
+  /**
+   * Switch to an existing branch.
+   *
+   * @param branchName - The branch name to switch to
+   * @param opts - Lifecycle options (cwd)
+   */
+  switchBranch(branchName: string, opts: DispatchLifecycleOptions): Promise<void>;
+
+  /**
+   * Push the current branch to the remote.
+   *
+   * @param branchName - The branch name to push
+   * @param opts - Lifecycle options (cwd)
+   */
+  pushBranch(branchName: string, opts: DispatchLifecycleOptions): Promise<void>;
+
+  /**
+   * Stage all changes and create a commit with the given message.
+   * This is the safety-net commit after all tasks for an issue complete.
+   *
+   * @param message - The commit message
+   * @param opts - Lifecycle options (cwd)
+   */
+  commitAllChanges(message: string, opts: DispatchLifecycleOptions): Promise<void>;
+
+  /**
+   * Create a pull request linking the branch to the issue.
+   *
+   * @param branchName - The source branch name
+   * @param issueNumber - The issue number to reference
+   * @param title - PR title
+   * @param opts - Lifecycle options (cwd)
+   * @returns The URL of the created PR, or the existing PR URL if one already exists
+   */
+  createPullRequest(
+    branchName: string,
+    issueNumber: string,
+    title: string,
+    opts: DispatchLifecycleOptions,
+  ): Promise<string>;
 }
