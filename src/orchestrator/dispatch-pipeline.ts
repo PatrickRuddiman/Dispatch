@@ -54,6 +54,7 @@ export async function runDispatchPipeline(
   // ── Start TUI ───────────────────────────────────────────────
   const tui = createTui();
   tui.state.provider = provider;
+  tui.state.source = source;
 
   try {
     // ── 1. Discover task files ──────────────────────────────────

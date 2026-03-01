@@ -26,6 +26,8 @@ export interface TuiState {
   provider?: string;
   /** Model identifier reported by the provider, if available */
   model?: string;
+  /** Datasource name (e.g. "github", "azdevops", "md") */
+  source?: string;
 }
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
