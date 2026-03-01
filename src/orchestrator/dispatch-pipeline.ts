@@ -59,7 +59,7 @@ export async function runDispatchPipeline(
 
   // Dry-run mode uses simple log output
   if (dryRun) {
-    return dryRunMode(issueIds, cwd, source, org, project);
+    return dryRunMode(issueIds, cwd, source, org, project, noBranch);
   }
 
   // ── Start TUI ───────────────────────────────────────────────
@@ -353,6 +353,7 @@ export async function dryRunMode(
   source?: DatasourceName,
   org?: string,
   project?: string,
+  noBranch = false,
 ): Promise<DispatchSummary> {
   if (!source) {
     log.error("No datasource configured. Use --source or run: dispatch config set source <name>");
@@ -371,8 +372,7 @@ export async function dryRunMode(
     return { total: 0, completed: 0, failed: 0, skipped: 0, results: [] };
   }
 
-  const { files } = await writeItemsToTempDir(items);
-
+  const { files, issueDetailsByFile } = await writeItemsToTempDir(items);
   const taskFiles: TaskFile[] = [];
   for (const file of files) {
     const tf = await parseTaskFile(file);
@@ -389,6 +389,20 @@ export async function dryRunMode(
   }
 
   log.info(`Dry run — ${allTasks.length} task(s) across ${taskFiles.length} file(s):\n`);
+
+  if (!noBranch) {
+    log.info("Planned branches:");
+    for (const tf of taskFiles) {
+      const parsed = parseIssueFilename(tf.path);
+      const issueNumber = parsed?.issueId ?? basename(tf.path, ".md");
+      const details = issueDetailsByFile.get(tf.path);
+      const title = details?.title ?? parsed?.slug ?? "unknown";
+      const branch = buildBranchName(issueNumber, title);
+      log.dim(`  ${branch}  (issue #${issueNumber}, ${tf.tasks.length} task(s))`);
+    }
+    log.info(""); // blank line separator
+  }
+
   for (const task of allTasks) {
     log.task(allTasks.indexOf(task), allTasks.length, `${task.file}:${task.line} — ${task.text}`);
   }
