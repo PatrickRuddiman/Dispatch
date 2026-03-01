@@ -290,6 +290,71 @@ npm run dev        # Watch mode for development
 
 ---
 
+## Node.js fs/promises (config file I/O)
+
+**Module**: `node:fs/promises`
+**Used in**: `src/config.ts:7` (`readFile`, `writeFile`, `mkdir`, `rm`)
+**Official docs**: [nodejs.org/api/fs.html#promises-api](https://nodejs.org/api/fs.html#promises-api)
+
+The `fs/promises` module provides asynchronous filesystem operations for the
+[configuration system](configuration.md). It is used to read, write, create,
+and delete the persistent config file at `~/.dispatch/config.json`.
+
+### Functions used
+
+| Function | Usage | Location |
+|----------|-------|----------|
+| `readFile` | Load config file contents as UTF-8 string | `src/config.ts:59` |
+| `writeFile` | Write pretty-printed JSON config to disk | `src/config.ts:77` |
+| `mkdir` | Create `~/.dispatch/` directory if it doesn't exist | `src/config.ts:76` |
+| `rm` | Delete config file during `config reset` | `src/config.ts:205` |
+
+### Config file location and permissions
+
+The config file path is `~/.dispatch/config.json`, computed via
+`join(homedir(), ".dispatch", "config.json")`. The `~/.dispatch/` directory is
+created with `{ recursive: true }`, which:
+
+- Creates all missing parent directories in the path.
+- Is a no-op if the directory already exists.
+- Uses the process's default umask for directory permissions (typically
+  `0755` on Unix systems).
+
+The config file itself is written with `writeFile` using the default mode,
+which on Unix systems is typically `0644` (owner read-write, group and others
+read-only). No explicit `mode` option is passed.
+
+### Error handling strategy
+
+The config system uses a **silent-fallback** strategy for read errors and an
+**explicit-error** strategy for write errors:
+
+| Operation | Error behavior | Rationale |
+|-----------|---------------|-----------|
+| `readFile` (load config) | `catch` returns `{}` — no error shown | Missing or corrupted config is common and non-fatal |
+| `writeFile` (save config) | Error propagates to caller | Write failures need user attention (permissions, disk space) |
+| `mkdir` (create dir) | Error propagates to caller | Directory creation failures block config persistence |
+| `rm` (reset config) | `{ force: true }` + `catch` returns success | File may already be deleted; either way, reset succeeds |
+
+### Troubleshooting fs/promises issues
+
+| Symptom | Likely cause | Resolution |
+|---------|-------------|------------|
+| `EACCES` on `saveConfig` | No write permission on `~/.dispatch/` | `chmod u+w ~/.dispatch/` or run as a user with home directory access |
+| `ENOSPC` on `writeFile` | Disk full | Free disk space in the home directory partition |
+| Config silently ignored | Corrupted JSON in config file | Run `dispatch config reset` to delete and re-create, or manually edit `~/.dispatch/config.json` |
+| `EROFS` on `mkdir` | Read-only filesystem (e.g., some container images) | Mount a writable volume at `$HOME` or use CLI flags exclusively |
+
+### Concurrent access
+
+The config file has no locking mechanism. If two `dispatch` processes run
+`dispatch config set` simultaneously, the last write wins and the first
+write's changes are lost. This is unlikely in practice since config
+commands are interactive and infrequent. For automated scenarios, external
+locking (e.g., `flock`) would be needed.
+
+---
+
 ## Node.js process (stdout, argv, exit)
 
 **Used in**: `src/cli.ts:119`, `src/cli.ts:148`, `src/tui.ts:130`,
@@ -411,10 +476,12 @@ for how this interacts with the orchestrator's own error recovery.
 
 ## Related documentation
 
-- [CLI](cli.md) — argument parsing and exit codes
-- [Orchestrator](orchestrator.md) — glob usage and provider boot
-- [TUI](tui.md) — ANSI rendering and TTY detection
-- [Logger](../shared-types/logger.md) — chalk usage in logging
-- [Provider Abstraction & Backends](../provider-system/provider-overview.md) — provider SDK details
-- [OpenCode Backend](../provider-system/opencode-backend.md) — OpenCode-specific setup and troubleshooting
-- [Copilot Backend](../provider-system/copilot-backend.md) — Copilot-specific setup and authentication
+- [CLI](cli.md) -- argument parsing and exit codes
+- [Configuration](configuration.md) -- config file, three-tier precedence,
+  `dispatch config` subcommand
+- [Orchestrator](orchestrator.md) -- glob usage and provider boot
+- [TUI](tui.md) -- ANSI rendering and TTY detection
+- [Logger](../shared-types/logger.md) -- chalk usage in logging
+- [Provider Abstraction & Backends](../provider-system/provider-overview.md) -- provider SDK details
+- [OpenCode Backend](../provider-system/opencode-backend.md) -- OpenCode-specific setup and troubleshooting
+- [Copilot Backend](../provider-system/copilot-backend.md) -- Copilot-specific setup and authentication

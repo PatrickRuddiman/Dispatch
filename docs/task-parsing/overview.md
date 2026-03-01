@@ -104,3 +104,9 @@ for a detailed analysis.
   `TaskFile`, and exported functions
 - [Orchestrator](../cli-orchestration/orchestrator.md) -- the primary consumer
   of all parser functions
+- [Spec Generation](../spec-generation/overview.md) -- the `--spec` pipeline
+  that produces the markdown task files consumed by the parser
+- [Testing Overview](../testing/overview.md) -- project-wide test suite
+  including [parser tests](../testing/parser-tests.md) (62 test cases)
+- [Datasource System](../datasource-system/overview.md) -- the markdown
+  datasource also reads/writes `.md` files (in `.dispatch/specs/`)

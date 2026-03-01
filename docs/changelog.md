@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-02-28T23:23:30.191Z
+<!-- hem-sha: feb6f01b96b8257fe0a7ede3b3aad12b0b258490 -->
+- docs/cli-orchestration/configuration.md
+- ocs/architecture.md
+- ocs/cli-orchestration/cli.md
+- ocs/cli-orchestration/integrations.md
+- ocs/cli-orchestration/orchestrator.md
+- ocs/cli-orchestration/overview.md
+- ocs/index.md
+- ocs/issue-fetching/adding-a-fetcher.md
+- ocs/issue-fetching/azdevops-fetcher.md
+- ocs/issue-fetching/github-fetcher.md
+- ocs/issue-fetching/integrations.md
+- ocs/issue-fetching/overview.md
+- ocs/planning-and-dispatch/integrations.md
+- ocs/planning-and-dispatch/overview.md
+- ocs/provider-system/adding-a-provider.md
+- ocs/provider-system/copilot-backend.md
+- ocs/shared-types/cleanup.md
+- ocs/shared-types/format.md
+- ocs/shared-types/overview.md
+- ocs/shared-types/parser.md
+- ocs/spec-generation/integrations.md
+- ocs/spec-generation/overview.md
+- ocs/task-parsing/api-reference.md
+- ocs/task-parsing/overview.md
+- ocs/task-parsing/testing-guide.md
+- ocs/testing/format-tests.md
+- ocs/testing/overview.md
+- ocs/testing/parser-tests.md
+
 ## 2026-02-25T19:18:49.388Z
 <!-- hem-sha: 7e71ab9a391d43a15cb73e30162d7f3ef82b8d73 -->
 - docs/shared-types/cleanup.md

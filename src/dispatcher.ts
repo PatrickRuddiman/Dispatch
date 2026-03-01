@@ -3,7 +3,7 @@
  * isolated and avoid context rot. Works with any registered provider.
  */
 
-import type { ProviderInstance } from "./provider.js";
+import type { ProviderInstance } from "./providers/interface.js";
 import type { Task } from "./parser.js";
 import { log } from "./logger.js";
 

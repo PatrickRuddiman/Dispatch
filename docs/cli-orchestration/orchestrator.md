@@ -7,26 +7,47 @@ mutation, and automatic issue closing on external trackers.
 
 ## What it does
 
-The `orchestrate()` function accepts an `OrchestrateRunOptions` object from the
-[CLI](cli.md) and executes a seven-stage pipeline:
+The orchestrator exposes two entry points from the CLI:
 
-1. **Discover** task files via [glob pattern matching](integrations.md#glob-npm-package), sorted by leading filename digits
-2. **Parse** unchecked tasks from discovered markdown files using [`parseTaskFile()`](../task-parsing/api-reference.md#parsetaskfile)
-3. **Boot** the selected [AI provider](../provider-system/provider-overview.md) (OpenCode or Copilot)
-4. **Group** tasks by execution mode using [`groupTasksByMode()`](../task-parsing/api-reference.md#grouptasksbymode)
-5. **Dispatch** tasks in [group-aware concurrent batches](#concurrency-model) (plan + execute per task)
-6. **Mutate** source markdown to [mark tasks complete](../task-parsing/api-reference.md#marktaskcomplete)
-7. **Close issues** on the originating tracker when all tasks in a spec file succeed
+1. **`runFromCli(args)`**: Called by the CLI after `bootOrchestrator()`. This
+   method first calls [`resolveCliConfig()`](configuration.md#three-tier-configuration-precedence)
+   to merge config-file defaults with CLI flags, then routes to either the
+   spec pipeline (if `--spec` is present; see [Spec Generation](../spec-generation/overview.md)) or the dispatch pipeline.
+
+2. **`orchestrate()`**: The core dispatch function that accepts an
+   `OrchestrateRunOptions` object and executes a seven-stage pipeline:
+
+    1. **Discover** task files via [glob pattern matching](integrations.md#glob-npm-package), sorted by leading filename digits
+    2. **Parse** unchecked tasks from discovered markdown files using [`parseTaskFile()`](../task-parsing/api-reference.md#parsetaskfile)
+    3. **Boot** the selected [AI provider](../provider-system/provider-overview.md) (OpenCode or Copilot)
+    4. **Group** tasks by execution mode using [`groupTasksByMode()`](../task-parsing/api-reference.md#grouptasksbymode)
+    5. **Dispatch** tasks in [group-aware concurrent batches](#concurrency-model) (plan + execute per task)
+    6. **Mutate** source markdown to [mark tasks complete](../task-parsing/api-reference.md#marktaskcomplete)
+    7. **Close issues** on the originating tracker when all tasks in a spec file succeed
 
 It returns a [`DispatchSummary`](#dispatchsummary) with counts of completed, failed, and skipped
 tasks plus per-task results.
+
+### Config resolution before pipeline execution
+
+Before `runFromCli()` delegates to the dispatch or spec pipeline, it calls
+`resolveCliConfig(args)` from `src/orchestrator/cli-config.ts`. This function:
+
+1. Loads `~/.dispatch/config.json` via `loadConfig()`.
+2. Merges config defaults beneath CLI flags using the `explicitFlags` set
+   (CLI flags always win).
+3. Validates that mandatory fields (`provider` and `source`) are configured.
+4. Enables verbose logging if `--verbose` was passed.
+
+See [Configuration — Three-tier precedence](configuration.md#three-tier-configuration-precedence)
+for the full merge algorithm and precedence rules.
 
 ## Why it exists
 
 The orchestrator is the "glue" that turns independent modules ([parser](../task-parsing/overview.md), [planner](../planning-and-dispatch/planner.md),
 [dispatcher](../planning-and-dispatch/dispatcher.md), [git](../planning-and-dispatch/git.md), [provider](../provider-system/provider-overview.md)) into a coherent pipeline. Without it, each module
 would need to know about the others. The orchestrator enforces execution order,
-manages the provider lifecycle, and translates between module interfaces.
+manages the provider lifecycle (including the [cleanup registry](../shared-types/cleanup.md)), and translates between module interfaces.
 
 ## Pipeline phases
 
@@ -253,7 +274,9 @@ in a spec file has succeeded.
 
 ### How it works
 
-1. **Detect issue source**: `detectIssueSource(cwd)` inspects the `origin` git
+1. **Detect issue source**: `detectIssueSource(cwd)` (see
+   [Datasource Auto-Detection](../datasource-system/overview.md#auto-detection))
+   inspects the `origin` git
    remote URL (via `git remote get-url origin`) and matches it against known
    platforms (GitHub, Azure DevOps). If no supported platform is detected, the
    function returns silently — no error is thrown.
@@ -386,8 +409,9 @@ catch the error within the per-task handler and record it as a failed dispatch.
 
 ## Dry-run mode
 
-When `--dry-run` is passed, the orchestrator takes a completely separate code
-path (`dryRunMode()` at `src/agents/orchestrator.ts:292-336`):
+When `--dry-run` is passed (see [CLI options](cli.md#options-reference)), the
+orchestrator takes a completely separate code path (`dryRunMode()` at
+`src/agents/orchestrator.ts:292-336`):
 
 - No TUI is created.
 - No provider is booted.
@@ -402,7 +426,9 @@ AI providers or modifying any files.
 
 ### OrchestrateRunOptions
 
-Passed from the CLI to `orchestrate()` (`src/agents/orchestrator.ts:28-41`):
+Passed from `runFromCli()` (after config resolution) to `orchestrate()`
+(`src/agents/orchestrator.ts:28-41`). The `cwd` field is captured at boot
+time via `bootOrchestrator({ cwd })` rather than passed per-invocation:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -428,10 +454,12 @@ Returned from `orchestrate()` to the CLI:
 ## Related documentation
 
 - [CLI](cli.md) -- how options are parsed and exit codes are determined
+- [Configuration](configuration.md) -- persistent config, `resolveCliConfig()`
+  merge logic, mandatory validation, and `dispatch config` subcommand
 - [Terminal UI](tui.md) -- how pipeline phases drive TUI rendering
 - [Logger](../shared-types/logger.md) -- output in dry-run mode
-- [Integrations](integrations.md) -- glob file discovery details and cleanup
-  registry
+- [Integrations](integrations.md) -- glob file discovery, cleanup registry,
+  and fs/promises config I/O
 - [Task Parsing & Markdown](../task-parsing/overview.md) -- `parseTaskFile()` and
   `markTaskComplete()` behavior
 - [API Reference (parser)](../task-parsing/api-reference.md) -- detailed function
@@ -444,3 +472,11 @@ Returned from `orchestrate()` to the CLI:
   write safety concerns for `markTaskComplete()`
 - [Issue Fetching](../issue-fetching/overview.md) -- how `detectIssueSource()`
   and `getIssueFetcher()` work for auto-closing
+- [Spec Generation](../spec-generation/overview.md) -- how the `--spec` pipeline
+  generates markdown spec files from issues
+- [Datasource System](../datasource-system/overview.md) -- the unified datasource
+  abstraction that underlies issue fetching and auto-detection
+- [Cleanup Registry](../shared-types/cleanup.md) -- process-level cleanup for
+  graceful provider shutdown
+- [Testing Overview](../testing/overview.md) -- project-wide test suite
+  documentation (note: orchestrator is not directly tested)

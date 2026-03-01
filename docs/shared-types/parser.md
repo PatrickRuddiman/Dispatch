@@ -63,7 +63,8 @@ Represents a parsed markdown file:
 ## Source references
 
 - `src/parser.ts` — Full parser implementation (171 lines)
-- `src/tests/parser.test.ts` — Comprehensive test suite (995 lines, 62 tests)
+- `src/tests/parser.test.ts` — Comprehensive test suite (995 lines, 62 tests);
+  see [Parser Tests](../testing/parser-tests.md) for the detailed breakdown
 
 ## Detailed documentation
 
@@ -87,3 +88,9 @@ concurrency analysis, and testing:
   How `buildTaskContext` and `markTaskComplete` fit in the dispatch pipeline
 - [Provider Interface](./provider.md) -- The `ProviderInstance` abstraction that
   consumes parser output
+- [Testing Guide](../task-parsing/testing-guide.md) -- How to run and extend
+  the parser test suite
+- [Parser Tests (detailed)](../testing/parser-tests.md) -- Comprehensive
+  breakdown of all 62 parser tests including mode extraction and grouping
+- [CLI & Orchestration](../cli-orchestration/overview.md) -- How the orchestrator
+  uses `parseTaskFile`, `buildTaskContext`, and `markTaskComplete`

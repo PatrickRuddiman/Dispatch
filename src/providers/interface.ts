@@ -32,7 +32,10 @@ export interface ProviderInstance {
   /** Human-readable provider name (e.g. "opencode", "copilot") */
   readonly name: string;
 
-  /** Model identifier reported by the underlying AI backend, if available */
+  /**
+   * Full model identifier in "provider/model" format as reported by the
+   * underlying AI backend (e.g. "anthropic/claude-sonnet-4"), if available.
+   */
   readonly model?: string;
 
   /**

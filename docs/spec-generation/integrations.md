@@ -174,8 +174,8 @@ the AI prompt with issue details (title, description, labels, comments).
 
 For full documentation on `gh` CLI setup, authentication, commands,
 troubleshooting, and rate limits, see the
-[Issue Fetching Integrations](../issue-fetching/integrations.md#github-cli-gh)
-page.
+[GitHub Fetcher](../issue-fetching/github-fetcher.md) and
+[Datasource Integrations](../datasource-system/integrations.md) pages.
 
 ---
 
@@ -187,8 +187,8 @@ The spec generator fetches Azure DevOps work items via the `az` CLI with the
 For full documentation on `az` CLI setup, authentication, commands,
 `--org`/`--project` resolution, troubleshooting, and comment fetching
 behavior, see the
-[Issue Fetching Integrations](../issue-fetching/integrations.md#azure-cli-with-azure-devops-extension)
-page.
+[Azure DevOps Fetcher](../issue-fetching/azdevops-fetcher.md) and
+[Datasource Integrations](../datasource-system/integrations.md) pages.
 
 ---
 
@@ -282,8 +282,8 @@ documentation on chalk color detection and level overrides.
   data normalization
 - [GitHub Fetcher](../issue-fetching/github-fetcher.md) -- GitHub CLI
   integration details
-- [Azure DevOps Fetcher](../issue-fetching/azdevops-fetcher.md) -- Azure CLI
-  integration details
+- [Azure DevOps Datasource](../datasource-system/azdevops-datasource.md) --
+  Azure CLI integration details
 - [Provider Abstraction](../provider-system/provider-overview.md) -- Provider
   lifecycle and backend implementations
 - [CLI Argument Parser](../cli-orchestration/cli.md) -- `--spec` mode flags

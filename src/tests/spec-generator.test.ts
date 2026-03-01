@@ -1,5 +1,162 @@
-import { describe, it, expect } from "vitest";
-import { isIssueNumbers, buildFileSpecPrompt, validateSpecStructure, extractSpecContent } from "../spec-generator.js";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { isIssueNumbers, validateSpecStructure, extractSpecContent, resolveSource } from "../spec-generator.js";
+import { buildFileSpecPrompt, boot } from "../agents/spec.js";
+import * as datasourcesIndex from "../datasources/index.js";
+import type { ProviderInstance } from "../providers/interface.js";
+import type { IssueDetails } from "../datasources/interface.js";
+
+vi.mock("node:fs/promises", () => ({
+  mkdir: vi.fn().mockResolvedValue(undefined),
+  readFile: vi.fn().mockResolvedValue(""),
+  writeFile: vi.fn().mockResolvedValue(undefined),
+  unlink: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("node:crypto", () => ({
+  randomUUID: vi.fn().mockReturnValue("test-uuid-1234"),
+}));
+
+vi.mock("../logger.js", () => ({
+  log: {
+    info: vi.fn(),
+    success: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    dim: vi.fn(),
+    task: vi.fn(),
+    verbose: false,
+    formatErrorChain: vi.fn().mockReturnValue(""),
+  },
+}));
+
+vi.mock("glob", () => ({
+  glob: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("../cleanup.js", () => ({
+  registerCleanup: vi.fn(),
+}));
+
+vi.mock("../providers/index.js", () => ({
+  bootProvider: vi.fn(),
+  PROVIDER_NAMES: ["opencode", "copilot"],
+}));
+
+vi.mock("../format.js", () => ({
+  elapsed: vi.fn().mockReturnValue("0ms"),
+  renderHeaderLines: vi.fn().mockReturnValue(["mock-header"]),
+}));
+
+import { mkdir, readFile, writeFile, unlink } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { log } from "../logger.js";
+import { glob as globFn } from "glob";
+import { bootProvider } from "../providers/index.js";
+import { runSpecPipeline } from "../orchestrator/spec-pipeline.js";
+
+function createMockProvider(overrides?: Partial<ProviderInstance>): ProviderInstance {
+  return {
+    name: "mock",
+    model: "mock-model",
+    createSession: vi.fn<ProviderInstance["createSession"]>().mockResolvedValue("session-1"),
+    prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("done"),
+    cleanup: vi.fn<ProviderInstance["cleanup"]>().mockResolvedValue(undefined),
+    ...overrides,
+  };
+}
+
+describe("resolveSource", () => {
+  const CWD = "/tmp/fake-repo";
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // --- Explicit --source flag always wins (unchanged behavior) ---
+
+  it("returns the explicit issueSource when provided with a glob input", async () => {
+    const result = await resolveSource("drafts/*.md", "github", CWD);
+    expect(result).toBe("github");
+  });
+
+  it("returns the explicit issueSource when provided with an azdevops source", async () => {
+    const result = await resolveSource("drafts/*.md", "azdevops", CWD);
+    expect(result).toBe("azdevops");
+  });
+
+  it("returns the explicit issueSource when provided in tracker mode", async () => {
+    const result = await resolveSource("1,2,3", "github", CWD);
+    expect(result).toBe("github");
+  });
+
+  // --- Glob input with no explicit source triggers auto-detection ---
+
+  it("attempts auto-detection when no issueSource is provided and input is a glob", async () => {
+    const spy = vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue("github");
+    const result = await resolveSource("drafts/*.md", undefined, CWD);
+    expect(spy).toHaveBeenCalledWith(CWD);
+    expect(result).toBe("github");
+  });
+
+  it("attempts auto-detection when no issueSource is provided and input is a bare filename", async () => {
+    const spy = vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue("azdevops");
+    const result = await resolveSource("my-spec.md", undefined, CWD);
+    expect(spy).toHaveBeenCalledWith(CWD);
+    expect(result).toBe("azdevops");
+  });
+
+  // --- Glob input falls back to "md" when auto-detection fails ---
+
+  it("falls back to 'md' when no issueSource is provided, input is a glob, and auto-detection returns null", async () => {
+    const spy = vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
+    const result = await resolveSource("drafts/*.md", undefined, CWD);
+    expect(spy).toHaveBeenCalledWith(CWD);
+    expect(result).toBe("md");
+  });
+
+  it("falls back to 'md' when no issueSource is provided, input is a bare filename, and auto-detection returns null", async () => {
+    const spy = vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
+    const result = await resolveSource("my-spec.md", undefined, CWD);
+    expect(spy).toHaveBeenCalledWith(CWD);
+    expect(result).toBe("md");
+  });
+
+  it("falls back to 'md' for glob input with fake cwd (no git remote)", async () => {
+    // No mock — uses real detectDatasource which returns null for /tmp/fake-repo
+    const result = await resolveSource("drafts/*.md", undefined, CWD);
+    expect(result).toBe("md");
+  });
+
+  // --- Glob input still respects explicit --source override ---
+
+  it("returns 'md' when explicitly provided as issueSource with a glob input", async () => {
+    const result = await resolveSource("drafts/*.md", "md", CWD);
+    expect(result).toBe("md");
+  });
+
+  // --- Tracker mode (issue numbers) auto-detection still works ---
+
+  it("attempts auto-detection for issue numbers when no issueSource is provided", async () => {
+    const spy = vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue("github");
+    const result = await resolveSource("1,2,3", undefined, CWD);
+    expect(spy).toHaveBeenCalledWith(CWD);
+    expect(result).toBe("github");
+  });
+
+  it("returns null for issue numbers when auto-detection fails", async () => {
+    const spy = vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
+    const result = await resolveSource("1,2,3", undefined, CWD);
+    expect(spy).toHaveBeenCalledWith(CWD);
+    expect(result).toBeNull();
+  });
+
+  it("returns 'md' for an array of file paths when auto-detection returns null", async () => {
+    vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
+    const result = await resolveSource(["/path/to/spec1.md", "/path/to/spec2.md"], undefined, CWD);
+    expect(result).toBe("md");
+  });
+});
 
 describe("isIssueNumbers", () => {
   it("returns true for a single issue number", () => {
@@ -89,6 +246,14 @@ describe("isIssueNumbers", () => {
   it("returns false for mixed numeric and alphabetic content", () => {
     expect(isIssueNumbers("42,foo")).toBe(false);
   });
+
+  it("returns false for an array of file paths", () => {
+    expect(isIssueNumbers(["/path/to/spec1.md", "/path/to/spec2.md"])).toBe(false);
+  });
+
+  it("returns false for an empty array", () => {
+    expect(isIssueNumbers([])).toBe(false);
+  });
 });
 
 describe("buildFileSpecPrompt", () => {
@@ -101,8 +266,27 @@ describe("buildFileSpecPrompt", () => {
     expect(typeof result).toBe("string");
   });
 
-  it("derives the title from the filename without extension", () => {
+  it("extracts title from first H1 heading when content contains one", () => {
+    const headingContent = "# My Feature Title\n\nThis is the description.";
+    const result = buildFileSpecPrompt(FILE_PATH, headingContent, CWD);
+    expect(result).toContain("- **Title:** My Feature Title");
+  });
+
+  it("prefers the first H1 heading over the filename", () => {
+    const headingContent = "# Use First Heading as Title\n\nSome body text.";
+    const result = buildFileSpecPrompt("/home/user/drafts/some-other-name.md", headingContent, CWD);
+    expect(result).toContain("- **Title:** Use First Heading as Title");
+    expect(result).not.toContain("- **Title:** some-other-name");
+  });
+
+  it("falls back to filename as title when no H1 heading exists", () => {
     const result = buildFileSpecPrompt(FILE_PATH, CONTENT, CWD);
+    expect(result).toContain("- **Title:** my-feature");
+  });
+
+  it("falls back to filename when content has only H2 or lower headings", () => {
+    const noH1Content = "## Subheading Only\n\nNo top-level heading here.";
+    const result = buildFileSpecPrompt(FILE_PATH, noH1Content, CWD);
     expect(result).toContain("- **Title:** my-feature");
   });
 
@@ -195,8 +379,8 @@ describe("buildFileSpecPrompt", () => {
 
   it("handles a file path without .md extension", () => {
     const result = buildFileSpecPrompt("/home/user/drafts/feature.txt", CONTENT, CWD);
-    // basename("/home/user/drafts/feature.txt", ".md") yields "feature.txt"
-    expect(result).toContain("- **Title:** feature.txt");
+    // extractTitle falls back to parsePath().name which strips any extension
+    expect(result).toContain("- **Title:** feature");
   });
 
   it("includes all key guidelines", () => {
@@ -637,5 +821,536 @@ describe("extractSpecContent", () => {
     expect(result).toMatch(/^# Spec Title/);
     expect(result).not.toContain("Sure!");
     expect(result).toContain("- [ ] A task");
+  });
+});
+
+// ─── SpecAgent ───────────────────────────────────────────────────────
+
+describe("SpecAgent boot", () => {
+  it("throws when provider is not supplied", async () => {
+    await expect(boot({ cwd: "/tmp" })).rejects.toThrow(
+      "Spec agent requires a provider instance in boot options"
+    );
+  });
+
+  it("returns an agent with name 'spec'", async () => {
+    const provider = createMockProvider();
+    const agent = await boot({ cwd: "/tmp", provider });
+    expect(agent.name).toBe("spec");
+  });
+
+  it("returns an agent with generate and cleanup methods", async () => {
+    const provider = createMockProvider();
+    const agent = await boot({ cwd: "/tmp", provider });
+    expect(typeof agent.generate).toBe("function");
+    expect(typeof agent.cleanup).toBe("function");
+  });
+});
+
+describe("SpecAgent generate", () => {
+  beforeEach(() => {
+    vi.mocked(mkdir).mockResolvedValue(undefined);
+    vi.mocked(writeFile).mockResolvedValue(undefined);
+    vi.mocked(unlink).mockResolvedValue(undefined);
+    vi.mocked(randomUUID).mockReturnValue("test-uuid-1234" as `${string}-${string}-${string}-${string}-${string}`);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const VALID_SPEC = [
+    "# My Feature (#42)",
+    "",
+    "> Summary of the feature",
+    "",
+    "## Context",
+    "",
+    "Some context here.",
+    "",
+    "## Tasks",
+    "",
+    "- [ ] (P) First task",
+    "- [ ] (S) Second task",
+  ].join("\n");
+
+  const ISSUE_FIXTURE: IssueDetails = {
+    number: "42",
+    title: "My Feature",
+    body: "Implement the feature",
+    labels: ["enhancement"],
+    state: "open",
+    url: "https://github.com/org/repo/issues/42",
+    comments: [],
+    acceptanceCriteria: "",
+  };
+
+  it("generates a spec successfully with the temp file workflow", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("AI response text"),
+    });
+
+    vi.mocked(readFile).mockResolvedValue(VALID_SPEC);
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.valid).toBe(true);
+    expect(result.content).toContain("# My Feature (#42)");
+    expect(result.content).toContain("## Tasks");
+    expect(result.error).toBeUndefined();
+
+    // Verify temp dir was created
+    expect(mkdir).toHaveBeenCalledWith(
+      expect.stringContaining(".dispatch/tmp"),
+      { recursive: true }
+    );
+
+    // Verify provider was called
+    expect(provider.createSession).toHaveBeenCalledOnce();
+    expect(provider.prompt).toHaveBeenCalledOnce();
+
+    // Verify temp file was read
+    expect(readFile).toHaveBeenCalledWith(
+      expect.stringContaining("spec-test-uuid-1234.md"),
+      "utf-8"
+    );
+
+    // Verify final output was written
+    expect(writeFile).toHaveBeenCalledWith(
+      "/tmp/project/.dispatch/specs/42-my-feature.md",
+      expect.any(String),
+      "utf-8"
+    );
+
+    // Verify temp file was cleaned up
+    expect(unlink).toHaveBeenCalledWith(
+      expect.stringContaining("spec-test-uuid-1234.md")
+    );
+  });
+
+  it("generates a spec from file content (file/glob mode)", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("AI response"),
+    });
+
+    vi.mocked(readFile).mockResolvedValue(VALID_SPEC);
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      filePath: "/tmp/project/drafts/feature.md",
+      fileContent: "# Feature\n\nDescription of the feature.",
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/drafts/feature.md",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.valid).toBe(true);
+  });
+
+  it("returns failure when AI returns null response", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue(null),
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("AI agent returned no response");
+    expect(result.valid).toBe(false);
+    expect(result.content).toBe("");
+  });
+
+  it("returns failure when neither issue nor filePath+fileContent is provided", async () => {
+    const provider = createMockProvider();
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/output.md",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Either issue or filePath+fileContent must be provided");
+    expect(result.valid).toBe(false);
+  });
+
+  it("returns failure when the AI does not write the temp file", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("Some response"),
+    });
+
+    vi.mocked(readFile).mockRejectedValue(new Error("ENOENT: no such file"));
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Spec agent did not write the file");
+    expect(result.error).toContain("Some response");
+    expect(result.valid).toBe(false);
+  });
+
+  it("returns failure when provider.createSession throws", async () => {
+    const provider = createMockProvider({
+      createSession: vi.fn().mockRejectedValue(new Error("Connection refused")),
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Connection refused");
+    expect(result.valid).toBe(false);
+  });
+
+  it("returns failure when provider.prompt throws", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn().mockRejectedValue(new Error("Model overloaded")),
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Model overloaded");
+    expect(result.valid).toBe(false);
+  });
+
+  it("cleans up temp file on successful generation", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("AI response"),
+    });
+
+    vi.mocked(readFile).mockResolvedValue(VALID_SPEC);
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+    });
+
+    expect(unlink).toHaveBeenCalledWith(
+      expect.stringContaining("spec-test-uuid-1234.md")
+    );
+  });
+
+  it("does not throw when temp file cleanup fails", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("AI response"),
+    });
+
+    vi.mocked(readFile).mockResolvedValue(VALID_SPEC);
+    vi.mocked(unlink).mockRejectedValue(new Error("ENOENT"));
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+    });
+
+    // Should still succeed despite cleanup failure
+    expect(result.success).toBe(true);
+    expect(result.valid).toBe(true);
+  });
+
+  it("reports validation warnings for structurally invalid specs", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("AI response"),
+    });
+
+    const invalidSpec = "# My Feature\n\nNo tasks section here.";
+    vi.mocked(readFile).mockResolvedValue(invalidSpec);
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+    });
+
+    // Generation succeeds but validation reports invalid
+    expect(result.success).toBe(true);
+    expect(result.valid).toBe(false);
+    expect(result.validationReason).toBeDefined();
+  });
+
+  it("uses unique temp file paths per generation via randomUUID", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("AI response"),
+    });
+
+    vi.mocked(readFile).mockResolvedValue(VALID_SPEC);
+
+    // Override the default mock to return unique UUIDs sequentially
+    vi.mocked(randomUUID)
+      .mockReturnValueOnce("uuid-first" as `${string}-${string}-${string}-${string}-${string}`)
+      .mockReturnValueOnce("uuid-second" as `${string}-${string}-${string}-${string}-${string}`);
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+
+    await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-first.md",
+    });
+
+    await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-second.md",
+    });
+
+    const readCalls = vi.mocked(readFile).mock.calls;
+    expect(readCalls[0][0]).toContain("spec-uuid-first.md");
+    expect(readCalls[1][0]).toContain("spec-uuid-second.md");
+  });
+
+  it("handles non-Error exceptions gracefully", async () => {
+    const provider = createMockProvider({
+      createSession: vi.fn().mockRejectedValue("raw string error"),
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("raw string error");
+  });
+});
+
+// ─── spec output formatting (runSpecPipeline log output) ─────────────
+
+describe("spec output formatting", () => {
+  const CWD = "/tmp/test-project";
+  const OUTPUT_DIR = "/tmp/test-project/.dispatch/specs";
+
+  const VALID_SPEC = [
+    "# My Feature (#42)",
+    "",
+    "> Summary of the feature",
+    "",
+    "## Context",
+    "",
+    "Some context here.",
+    "",
+    "## Tasks",
+    "",
+    "- [ ] (P) First task",
+    "- [ ] (S) Second task",
+  ].join("\n");
+
+  function createMockDatasource(name: "github" | "azdevops" | "md", overrides?: Record<string, unknown>) {
+    return {
+      name,
+      list: vi.fn().mockResolvedValue([]),
+      fetch: vi.fn().mockResolvedValue({
+        number: "42",
+        title: "My Feature",
+        body: "Feature body",
+        labels: [],
+        state: "open",
+        url: "https://github.com/org/repo/issues/42",
+        comments: [],
+        acceptanceCriteria: "",
+      }),
+      update: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+      create: vi.fn().mockResolvedValue({
+        number: "99",
+        title: "My Feature",
+        body: "Spec content",
+        labels: [],
+        state: "open",
+        url: "https://github.com/org/repo/issues/99",
+        comments: [],
+        acceptanceCriteria: "",
+      }),
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.mocked(mkdir).mockResolvedValue(undefined);
+    vi.mocked(writeFile).mockResolvedValue(undefined);
+    vi.mocked(unlink).mockResolvedValue(undefined);
+    vi.mocked(readFile).mockResolvedValue(VALID_SPEC);
+    vi.mocked(randomUUID).mockReturnValue("test-uuid-1234" as `${string}-${string}-${string}-${string}-${string}`);
+
+    // bootProvider returns a mock provider whose prompt triggers the spec agent
+    // to write valid content
+    vi.mocked(bootProvider).mockResolvedValue({
+      name: "mock",
+      model: "mock-model",
+      createSession: vi.fn().mockResolvedValue("session-1"),
+      prompt: vi.fn().mockResolvedValue("done"),
+      cleanup: vi.fn().mockResolvedValue(undefined),
+    });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("shows issue numbers in dispatch command for tracker mode (github)", async () => {
+    const mockDs = createMockDatasource("github");
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue("github");
+
+    await runSpecPipeline({
+      issues: "1,2,3",
+      issueSource: "github",
+      provider: "opencode",
+      cwd: CWD,
+      outputDir: OUTPUT_DIR,
+      concurrency: 10,
+    });
+
+    const dimCalls = vi.mocked(log.dim).mock.calls.map((c) => c[0]);
+    const runLine = dimCalls.find((msg) => typeof msg === "string" && msg.includes("dispatch"));
+
+    expect(runLine).toBeDefined();
+    // Should show issue numbers, not a glob path
+    expect(runLine).toContain("dispatch 1,2,3");
+    expect(runLine).not.toContain("*.md");
+  });
+
+  it("shows issue numbers in dispatch command for tracker mode (azdevops)", async () => {
+    const mockDs = createMockDatasource("azdevops");
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue("azdevops");
+
+    await runSpecPipeline({
+      issues: "100,200",
+      issueSource: "azdevops",
+      provider: "opencode",
+      cwd: CWD,
+      outputDir: OUTPUT_DIR,
+      concurrency: 10,
+    });
+
+    const dimCalls = vi.mocked(log.dim).mock.calls.map((c) => c[0]);
+    const runLine = dimCalls.find((msg) => typeof msg === "string" && msg.includes("dispatch"));
+
+    expect(runLine).toBeDefined();
+    expect(runLine).toContain("dispatch 100,200");
+  });
+
+  it("shows created issue numbers in dispatch command for file/glob mode with tracker datasource", async () => {
+    const mockDs = createMockDatasource("github", {
+      create: vi.fn()
+        .mockResolvedValueOnce({
+          number: "55",
+          title: "Feature A",
+          body: "content",
+          labels: [],
+          state: "open",
+          url: "https://github.com/org/repo/issues/55",
+          comments: [],
+          acceptanceCriteria: "",
+        })
+        .mockResolvedValueOnce({
+          number: "56",
+          title: "Feature B",
+          body: "content",
+          labels: [],
+          state: "open",
+          url: "https://github.com/org/repo/issues/56",
+          comments: [],
+          acceptanceCriteria: "",
+        }),
+    });
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue("github");
+    vi.mocked(globFn).mockResolvedValue(["/tmp/test-project/drafts/a.md", "/tmp/test-project/drafts/b.md"] as any);
+
+    await runSpecPipeline({
+      issues: "drafts/*.md",
+      issueSource: "github",
+      provider: "opencode",
+      cwd: CWD,
+      outputDir: OUTPUT_DIR,
+      concurrency: 10,
+    });
+
+    const dimCalls = vi.mocked(log.dim).mock.calls.map((c) => c[0]);
+    const runLine = dimCalls.find((msg) => typeof msg === "string" && msg.includes("dispatch"));
+
+    expect(runLine).toBeDefined();
+    // Should show newly created issue numbers, not file paths
+    expect(runLine).toContain("55");
+    expect(runLine).toContain("56");
+    expect(runLine).not.toContain("drafts/a.md");
+    expect(runLine).not.toContain("drafts/b.md");
+  });
+
+  it("shows file paths in dispatch command for file/glob mode with md datasource", async () => {
+    const mockDs = createMockDatasource("md");
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
+    vi.mocked(globFn).mockResolvedValue(["/tmp/test-project/drafts/feature.md"] as any);
+
+    await runSpecPipeline({
+      issues: "drafts/*.md",
+      issueSource: "md",
+      provider: "opencode",
+      cwd: CWD,
+      outputDir: OUTPUT_DIR,
+      concurrency: 10,
+    });
+
+    const dimCalls = vi.mocked(log.dim).mock.calls.map((c) => c[0]);
+    const runLine = dimCalls.find((msg) => typeof msg === "string" && msg.includes("dispatch"));
+
+    expect(runLine).toBeDefined();
+    // Should show file paths for md datasource
+    expect(runLine).toContain("/tmp/test-project/drafts/feature.md");
+  });
+
+  it("shows single issue number for tracker mode with one issue", async () => {
+    const mockDs = createMockDatasource("github");
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+
+    await runSpecPipeline({
+      issues: "42",
+      issueSource: "github",
+      provider: "opencode",
+      cwd: CWD,
+      outputDir: OUTPUT_DIR,
+      concurrency: 10,
+    });
+
+    const dimCalls = vi.mocked(log.dim).mock.calls.map((c) => c[0]);
+    const runLine = dimCalls.find((msg) => typeof msg === "string" && msg.includes("dispatch"));
+
+    expect(runLine).toBeDefined();
+    expect(runLine).toContain("dispatch 42");
   });
 });

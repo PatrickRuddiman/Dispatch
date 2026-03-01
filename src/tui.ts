@@ -4,7 +4,7 @@
  */
 
 import chalk from "chalk";
-import { elapsed } from "./format.js";
+import { elapsed, renderHeaderLines } from "./format.js";
 import type { Task } from "./parser.js";
 
 export type TaskStatus = "pending" | "planning" | "running" | "done" | "failed";
@@ -26,6 +26,8 @@ export interface TuiState {
   provider?: string;
   /** Model identifier reported by the provider, if available */
   model?: string;
+  /** Datasource name (e.g. "github", "azdevops", "md") */
+  source?: string;
 }
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -109,15 +111,13 @@ function render(state: TuiState): string {
 
   // ── Header ──────────────────────────────────────────────────
   lines.push("");
-  lines.push(chalk.bold.white("  ⚡ dispatch") + chalk.dim(` — AI task orchestration`));
-
-  // Show provider/model info when available
-  if (state.provider) {
-    const providerInfo = state.model
-      ? `  provider: ${state.provider} · model: ${state.model}`
-      : `  provider: ${state.provider}`;
-    lines.push(chalk.dim(providerInfo));
-  }
+  lines.push(
+    ...renderHeaderLines({
+      provider: state.provider,
+      model: state.model,
+      source: state.source,
+    })
+  );
 
   lines.push(chalk.dim("  ─".repeat(24)));
 

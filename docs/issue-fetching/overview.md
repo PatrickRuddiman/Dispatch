@@ -1,5 +1,13 @@
 # Issue Fetching
 
+> **Deprecated.** The `IssueFetcher` interface and the `src/issue-fetchers/`
+> modules described on this page are deprecated compatibility shims. The actual
+> implementation now lives in `src/datasources/` using the `Datasource`
+> interface. The shims delegate all calls to the new datasource layer via
+> `.bind()` and contain no business logic. See the
+> [Deprecated Compatibility Layer](../deprecated-compat/overview.md) for
+> migration guidance and removal assessment.
+
 The issue fetching subsystem retrieves issues and work items from external
 trackers (GitHub Issues, Azure DevOps Work Items) and normalizes them into a
 common `IssueDetails` structure consumed by the
@@ -128,7 +136,8 @@ sequenceDiagram
 ## The IssueDetails interface
 
 All fetchers normalize tracker-specific data into this common structure
-(defined in `src/issue-fetcher.ts:20-37`):
+(defined in `src/issue-fetcher.ts:20-37`). The same structure is used by the
+[Datasource interface](../datasource-system/overview.md#the-issuedetails-interface):
 
 | Field | Type | Description | GitHub source | Azure DevOps source |
 |-------|------|-------------|--------------|-------------------|
@@ -290,7 +299,22 @@ documentation and the `--spec` invocation details.
   and troubleshooting
 - [Azure DevOps Fetcher](./azdevops-fetcher.md) -- Azure CLI integration,
   setup, and troubleshooting
-- [Integrations & Troubleshooting](./integrations.md) -- External CLI tool
+- [Integrations & Troubleshooting](../datasource-system/integrations.md) -- External CLI tool
   dependencies, subprocess behavior, and error handling
 - [Adding a Fetcher](./adding-a-fetcher.md) -- Step-by-step guide for
   implementing a new issue tracker integration
+
+## Related documentation
+
+- [Deprecated Compatibility Layer](../deprecated-compat/overview.md) -- Migration
+  guidance, removal safety assessment, and adapter pattern details
+- [Datasource Overview](../datasource-system/overview.md) -- The current
+  `Datasource` interface that supersedes `IssueFetcher`
+- [Spec Generation](../spec-generation/overview.md) -- How the spec pipeline
+  consumes `IssueDetails` for AI prompt construction
+- [CLI Argument Parser](../cli-orchestration/cli.md) -- `--spec`, `--source`,
+  `--org`, and `--project` flag documentation
+- [Provider Abstraction](../provider-system/provider-overview.md) -- AI provider
+  boot and session model used by the spec pipeline
+- [Shared Types Overview](../shared-types/overview.md) -- Foundational type
+  definitions shared across the pipeline

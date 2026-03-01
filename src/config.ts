@@ -8,9 +8,9 @@ import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { PROVIDER_NAMES } from "./providers/index.js";
-import { ISSUE_SOURCE_NAMES } from "./issue-fetchers/index.js";
-import type { ProviderName } from "./provider.js";
-import type { IssueSourceName } from "./issue-fetcher.js";
+import { DATASOURCE_NAMES } from "./datasources/index.js";
+import type { ProviderName } from "./providers/interface.js";
+import type { DatasourceName } from "./datasources/interface.js";
 import { log } from "./logger.js";
 
 /**
@@ -20,7 +20,7 @@ import { log } from "./logger.js";
 export interface DispatchConfig {
   provider?: ProviderName;
   concurrency?: number;
-  source?: IssueSourceName;
+  source?: DatasourceName;
   org?: string;
   project?: string;
   serverUrl?: string;
@@ -97,8 +97,8 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
       return null;
 
     case "source":
-      if (!ISSUE_SOURCE_NAMES.includes(value as IssueSourceName)) {
-        return `Invalid source "${value}". Available: ${ISSUE_SOURCE_NAMES.join(", ")}`;
+      if (!DATASOURCE_NAMES.includes(value as DatasourceName)) {
+        return `Invalid source "${value}". Available: ${DATASOURCE_NAMES.join(", ")}`;
       }
       return null;
 

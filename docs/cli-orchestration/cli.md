@@ -1,28 +1,31 @@
 # CLI Argument Parser
 
 The CLI entry point (`src/cli.ts`) provides a hand-rolled argument parser that
-validates user input, displays help and version information, and delegates
-execution to either the [orchestrator](orchestrator.md) (dispatch mode) or the
-[spec generator](../spec-generation/overview.md) (spec mode).
+validates user input, displays help and version information, handles the
+`config` subcommand, and delegates all workflow logic to the
+[orchestrator](orchestrator.md) via `bootOrchestrator` and `runFromCli`.
 
 ## What it does
 
-The CLI is the user-facing surface of `dispatch`. It:
+The CLI is the user-facing surface of `dispatch`. It is documented as part of
+the [CLI & Orchestration group](overview.md). It:
 
-1. Parses `process.argv` into a typed `CliArgs` object.
-2. Handles `--help` and `--version` early-exit paths.
-3. Determines the operating mode: **spec mode** (when `--spec` is present) or
-   **dispatch mode** (when a glob pattern is provided).
-4. In spec mode, passes a `SpecOptions` object to
-   [`generateSpecs()`](../spec-generation/overview.md).
-5. In dispatch mode, validates the glob pattern (mandatory) and passes a
-   `DispatchOptions` object to the [orchestrator](orchestrator.md).
+1. Intercepts the `config` subcommand before argument parsing (see
+   [Configuration](configuration.md)).
+2. Parses `process.argv` into a typed `ParsedArgs` object along with an
+   `explicitFlags` set that tracks which flags were explicitly provided.
+3. Installs `SIGINT` and `SIGTERM` signal handlers for
+   [graceful shutdown](configuration.md#graceful-shutdown-and-cleanup).
+4. Handles `--help` and `--version` early-exit paths.
+5. Boots the orchestrator via `bootOrchestrator({ cwd })` and delegates to
+   `orchestrator.runFromCli(args)`, which handles config resolution, mode
+   routing (dispatch vs spec), and pipeline execution.
 6. Translates the result summary into a POSIX exit code.
 
 ## Why a custom parser instead of commander/yargs?
 
 The project uses a hand-rolled `parseArgs()` function
-(`src/cli.ts:59-116`) rather than an established CLI framework like
+(`src/cli.ts:83-186`) rather than an established CLI framework like
 [commander](https://github.com/tj/commander.js),
 [yargs](https://yargs.js.org/), or
 [citty](https://github.com/unjs/citty).
@@ -33,8 +36,8 @@ The likely reasons are:
   The only runtime dependencies are `chalk`, `glob`, and the two provider SDKs.
   Adding a CLI framework would add another dependency (and its transitive
   dependencies) for a relatively simple argument surface.
-- **Small option set**: Dispatch has 13 options across two modes. A hand-rolled
-  parser for this surface area is straightforward and fits in ~80 lines.
+- **Small option set**: Dispatch has 14 options across two modes. A hand-rolled
+  parser for this surface area is straightforward and fits in ~100 lines.
 - **Full control**: The parser can exit immediately with targeted error messages
   (e.g., provider validation against [`PROVIDER_NAMES`](../provider-system/provider-overview.md#the-provider-registry)) without mapping through
   a framework's validation API.
@@ -54,7 +57,7 @@ frameworks handle automatically:
 | Missing value after `--server-url` | Silently sets `serverUrl` to `undefined` — this is a bug | Would require a value |
 | Missing value after `--cwd` | `resolve(undefined)` returns `process.cwd()` — silent no-op | Would require a value |
 | Unknown options starting with `-` | Correctly exits with "Unknown option" error | Configurable behavior |
-| Positional arguments | First non-flag argument becomes the pattern; subsequent positionals silently overwrite | Positional argument definitions |
+| Positional arguments | Non-flag arguments are collected into `issueIds[]` (supports multiple positionals) | Positional argument definitions |
 
 **Recommendation**: If the option surface grows significantly, consider
 migrating to a lightweight framework. For the current set of options, the
@@ -67,26 +70,27 @@ checks for `--server-url` and `--cwd`.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `<glob>` | string (positional) | *required* | Glob pattern matching markdown task files |
+| `<issue-id...>` | string (positional, repeatable) | *(none — dispatches all open issues if omitted)* | Issue IDs to dispatch (e.g., `14`, `14,15,16`, or `14 15 16`) |
 | `--dry-run` | boolean | `false` | List discovered tasks without executing (see [dry-run mode](orchestrator.md#dry-run-mode)) |
-| `--no-plan` | boolean | `false` | Skip the [planner agent](../planning-and-dispatch/planner.md), dispatch tasks directly |
-| `--concurrency <n>` | integer | `1` | Maximum parallel dispatches per batch (see [concurrency model](orchestrator.md#concurrency-model)) |
+| `--no-plan` | boolean | `false` | Skip the [planner agent](../planning-and-dispatch/planner.md), dispatch tasks directly (see [Planning & Dispatch overview](../planning-and-dispatch/overview.md)) |
+| `--concurrency <n>` | integer | `min(cpus, freeMB/500)` | Maximum parallel dispatches per batch (see [concurrency model](orchestrator.md#concurrency-model) and [default computation](configuration.md#default-concurrency-computation)) |
 | `--provider <name>` | string | `"opencode"` | AI agent backend (`opencode` or `copilot`); see [Provider Abstraction](../provider-system/provider-overview.md) |
 | `--server-url <url>` | string | *none* | Connect to a running provider server instead of starting one |
 | `--cwd <dir>` | string | `process.cwd()` | Working directory for file discovery and agent execution |
+| `--verbose` | boolean | `false` | Show detailed debug output for troubleshooting |
 | `-h`, `--help` | boolean | `false` | Show usage information |
 | `-v`, `--version` | boolean | `false` | Show version string |
 
 ### Spec mode options
 
-Spec mode is activated by passing `--spec`. When active, the glob pattern is
+Spec mode is activated by passing `--spec`. When active, the issue IDs are
 not required and the dispatch-specific flags (`--dry-run`, `--no-plan`,
 `--concurrency`) are ignored.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `--spec <ids>` | string | *none* | Comma-separated issue or work-item numbers (e.g., `42,43,44`). Activates spec mode. |
-| `--source <name>` | string | *auto-detected* | Issue source: `github` or `azdevops`. Auto-detected from `git remote get-url origin` if omitted. See [issue source detection](../spec-generation/overview.md). |
+| `--spec <values...>` | string (one or more) | *none* | Comma-separated issue numbers, multiple space-separated args, or a glob pattern for local `.md` files. Activates spec mode. See [issue IDs vs glob patterns](configuration.md#the---spec-flag-issue-ids-vs-glob-patterns). |
+| `--source <name>` | string | *auto-detected* | Datasource: `github`, `azdevops`, or `md`. Auto-detected from `git remote get-url origin` if omitted. See [datasource detection](configuration.md#auto-detection-from-git-remote) and [Datasource Overview](../datasource-system/overview.md). |
 | `--org <url>` | string | *none* | Azure DevOps organization URL (e.g., `https://dev.azure.com/myorg`). Required when `--source azdevops`. |
 | `--project <name>` | string | *none* | Azure DevOps project name. Required when `--source azdevops`. |
 | `--output-dir <dir>` | string | `.dispatch/specs` | Output directory for generated spec files. Resolved to an absolute path. Created automatically if it does not exist. |
@@ -95,9 +99,9 @@ not required and the dispatch-specific flags (`--dry-run`, `--no-plan`,
 
 #### Spec mode validation
 
-The `--source` flag is validated against `ISSUE_SOURCE_NAMES` (currently
-`["github", "azdevops"]`). An unknown value exits with code `1` and a
-descriptive error message (`src/cli.ts:117-122`).
+The `--source` flag is validated against `DATASOURCE_NAMES` (currently
+`["github", "azdevops", "md"]`). An unknown value exits with code `1` and a
+descriptive error message (`src/cli.ts:129-134`).
 
 When `--source` is omitted, auto-detection runs `git remote get-url origin` and
 matches the output against regex patterns for `github.com` (SSH and HTTPS) and
@@ -129,13 +133,15 @@ process and manages its lifecycle internally.
 
 ## Exit code contract
 
-The CLI uses a binary exit code scheme that applies to both dispatch mode
-(`src/cli.ts:216`) and spec mode (`src/cli.ts:194`):
+The CLI uses a binary exit code scheme with additional signal codes.
+The primary exit logic is at `src/cli.ts:231-232`:
 
 | Exit code | Meaning |
 |-----------|---------|
-| `0` | All tasks completed successfully (or `--help`/`--version` was used) |
+| `0` | All tasks completed successfully (or `--help`/`--version`/`config` was used) |
 | `1` | One or more tasks failed, **or** a fatal error occurred |
+| `130` | Process received SIGINT (Ctrl+C) |
+| `143` | Process received SIGTERM |
 
 There is **no distinction** between partial failure and total failure. If 9 out
 of 10 tasks succeed but 1 fails, the exit code is `1`. This follows POSIX
@@ -149,13 +155,13 @@ information. A future enhancement could add `--json` output or distinct exit
 codes (e.g., `2` for partial failure).
 
 Unhandled exceptions from `main()` are caught by the top-level `.catch()`
-handler (`src/cli.ts:151-154`), which logs the error message and exits with
-code `1`.
+handler (`src/cli.ts:235-238`), which logs the error message, calls
+`runCleanup()` to release provider resources, and exits with code `1`.
 
 ## Version string and tsup define
 
 The version string is currently hardcoded as `"dispatch v0.1.0"` at
-`src/cli.ts:128`. The adjacent comment says `// Read version from package.json
+`src/cli.ts:221`. The adjacent comment says `// Read version from package.json
 at build time via tsup define`, indicating the intent to inject the version at
 build time.
 
@@ -210,46 +216,56 @@ on build-time constant injection.
 
 ```mermaid
 flowchart TD
-    A["process.argv.slice(2)"] --> B["parseArgs(argv)"]
-    B --> C{help?}
-    C -->|Yes| D["print HELP, exit 0"]
-    C -->|No| E{version?}
-    E -->|Yes| F["print version, exit 0"]
-    E -->|No| S{"--spec?"}
-    S -->|Yes| T["generateSpecs(opts)"]
-    T --> U["SpecSummary"]
-    U --> V{"summary.failed > 0?"}
-    V -->|Yes| W["exit 1"]
-    V -->|No| X["exit 0"]
-    S -->|No| G{pattern?}
-    G -->|missing| H["log error, exit 1"]
-    G -->|present| I["orchestrate(options)"]
-    I --> J["DispatchSummary"]
-    J --> K{"summary.failed > 0?"}
-    K -->|Yes| L["exit 1"]
-    K -->|No| M["exit 0"]
-    B -.->|validation error| N["log.error(), exit 1"]
+    A["process.argv.slice(2)"] --> B{"argv[0] === 'config'?"}
+    B -->|Yes| C["handleConfigCommand(argv)<br/>process.exit(0)"]
+    B -->|No| D["parseArgs(argv)<br/>→ [ParsedArgs, explicitFlags]"]
+    D --> E{"help?"}
+    E -->|Yes| F["print HELP, exit 0"]
+    E -->|No| G{"version?"}
+    G -->|Yes| H["print version, exit 0"]
+    G -->|No| I["bootOrchestrator({ cwd })"]
+    I --> J["orchestrator.runFromCli(args)"]
+    J --> K["resolveCliConfig(args)<br/>merge config + validate"]
+    K --> L{"--spec?"}
+    L -->|Yes| M["Spec pipeline"]
+    L -->|No| N["Dispatch pipeline"]
+    M --> O["Summary"]
+    N --> O
+    O --> P{"summary.failed > 0?"}
+    P -->|Yes| Q["exit 1"]
+    P -->|No| R["exit 0"]
+    D -.->|validation error| S["log.error(), exit 1"]
+    K -.->|missing config| T["log.error(), exit 1"]
 ```
 
-The key branching point is at `src/cli.ts:182`: if `args.spec` is truthy, the
-CLI enters spec mode and calls `generateSpecs()` from `src/spec-generator.ts`.
-Otherwise, it falls through to dispatch mode which requires the glob pattern.
-Both modes share the same exit code contract (see below).
+The key architectural change from earlier versions is that the CLI no longer
+directly calls `generateSpecs()` or `orchestrate()`. Instead, it delegates to
+`bootOrchestrator()` (`src/cli.ts:226`) which returns an orchestrator instance,
+then calls `orchestrator.runFromCli(args)` (`src/cli.ts:228`). The orchestrator
+internally calls `resolveCliConfig()` to merge config-file defaults with CLI
+flags before routing to the appropriate pipeline. See
+[Configuration](configuration.md) for full details on the resolution process.
 
 ## Related documentation
 
+- [Configuration](configuration.md) -- persistent config file, three-tier
+  precedence, `dispatch config` subcommand, and mandatory validation
 - [Orchestrator pipeline](orchestrator.md) -- what happens after the CLI
-  delegates to `orchestrate()` in dispatch mode
+  delegates to `orchestrator.runFromCli()` in dispatch mode
 - [Spec Generation](../spec-generation/overview.md) -- the full spec generation
   pipeline invoked by `--spec` mode
 - [Issue Fetching](../issue-fetching/overview.md) -- how issues are retrieved
   from GitHub and Azure DevOps for spec generation
 - [Terminal UI](tui.md) -- real-time dashboard rendering during dispatch
 - [Integrations](integrations.md) -- tsup build configuration, chalk color
-  handling
+  handling, Node.js fs/promises config I/O
 - [Provider Abstraction & Backends](../provider-system/provider-overview.md) -- provider boot
   process and server-url semantics
 - [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) -- planner,
   dispatcher, and git operations that the orchestrator coordinates
 - [Task Parsing & Markdown](../task-parsing/overview.md) -- how markdown task
   files are parsed and mutated
+- [Datasource System](../datasource-system/overview.md) -- datasource
+  abstraction and `--source` flag semantics
+- [Testing Overview](../testing/overview.md) -- test suite structure and
+  coverage (CLI is not currently unit-tested)

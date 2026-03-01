@@ -1,45 +1,31 @@
 /**
  * CLI entry point for `dispatch`.
  *
- * Usage:
- *   dispatch <glob>              Dispatch tasks matching the glob pattern
- *   dispatch tasks/**\/*.md       Common usage — process task files
+ * This module is a thin argument-parsing shell. It parses CLI arguments,
+ * boots the orchestrator, delegates all workflow logic (config loading,
+ * validation, pipeline selection) to the orchestrator's `runFromCli()`
+ * method, and exits based on the result.
  *
- * Spec mode:
- *   dispatch --spec 1,2,3        Generate spec files from issues
- *   dispatch --spec "drafts/*.md" Generate specs from local markdown files
- *
- * Options:
- *   --spec <value>      Issue numbers (comma-separated) or glob pattern for local .md files
- *   --source <name>     Issue source: github, azdevops (auto-detected from remote)
- *   --org <url>         Azure DevOps organization URL
- *   --project <name>    Azure DevOps project name
- *   --output-dir <dir>  Output directory for generated specs (default: .dispatch/specs)
- *   --dry-run           List tasks without executing
- *   --concurrency N     Max parallel dispatches (default: 1)
- *   --provider NAME     Agent backend: opencode, copilot (default: opencode)
- *   --server-url URL    Connect to a running provider server
- *   --help              Show usage information
+ * Process-level concerns (signal handlers, config subcommand) remain here.
  */
 
 import { resolve } from "node:path";
-import { bootOrchestrator } from "./agents/index.js";
-import { generateSpecs, defaultConcurrency } from "./spec-generator.js";
+import { bootOrchestrator, type RawCliArgs } from "./agents/index.js";
 import { log } from "./logger.js";
 import { runCleanup } from "./cleanup.js";
-import type { ProviderName } from "./provider.js";
-import type { IssueSourceName } from "./issue-fetcher.js";
+import type { ProviderName } from "./providers/interface.js";
+import type { DatasourceName } from "./datasources/interface.js";
 import { PROVIDER_NAMES } from "./providers/index.js";
-import { ISSUE_SOURCE_NAMES } from "./issue-fetchers/index.js";
-import { handleConfigCommand, loadConfig } from "./config.js";
+import { DATASOURCE_NAMES } from "./datasources/index.js";
+import { handleConfigCommand } from "./config.js";
 
 const HELP = `
   dispatch — AI agent orchestration CLI
 
   Usage:
-    dispatch <glob>                  Dispatch tasks from markdown files
+    dispatch [issue-id...]           Dispatch specific issues (or all open issues if none given)
     dispatch --spec <ids>            Generate spec files from issues
-    dispatch --spec <glob>           Generate specs from local markdown files
+    dispatch --spec <glob>           Generate specs from local markdown files in the configured datasource
 
   Dispatch options:
     --dry-run              List tasks without dispatching
@@ -50,8 +36,8 @@ const HELP = `
     --cwd <dir>            Working directory (default: cwd)
 
   Spec options:
-    --spec <value>         Comma-separated issue numbers or glob pattern for local .md files
-    --source <name>        Issue source: ${ISSUE_SOURCE_NAMES.join(", ")} (auto-detected from git remote)
+    --spec <value>         Comma-separated issue numbers or glob pattern for .md files (creates specs in configured datasource)
+    --source <name>        Issue source: ${DATASOURCE_NAMES.join(", ")} (auto-detected from git remote)
     --org <url>            Azure DevOps organization URL
     --project <name>       Azure DevOps project name
     --output-dir <dir>     Output directory for specs (default: .dispatch/specs)
@@ -71,43 +57,32 @@ const HELP = `
     Valid keys: provider, concurrency, source, org, project, serverUrl
 
   Examples:
-    dispatch "tasks/**/*.md"
-    dispatch "tasks/**/*.md" --provider copilot
-    dispatch "tasks/**/*.md" --dry-run
-    dispatch "tasks/**/*.md" --concurrency 3
+    dispatch 14
+    dispatch 14,15,16
+    dispatch 14 15 16
+    dispatch
+    dispatch 14 --dry-run
+    dispatch 14 --provider copilot
     dispatch --spec 42,43,44
     dispatch --spec 42,43 --source github --provider copilot
     dispatch --spec 100,200 --source azdevops --org https://dev.azure.com/myorg --project MyProject
     dispatch --spec "drafts/*.md"
+    dispatch --spec "drafts/*.md" --source github
     dispatch --spec "./my-feature.md" --provider copilot
     dispatch config set provider copilot
     dispatch config list
     dispatch config reset
 `.trimStart();
 
-interface CliArgs {
-  pattern: string[];
-  dryRun: boolean;
-  noPlan: boolean;
-  /** undefined means "use mode-specific default" */
-  concurrency?: number;
-  provider: ProviderName;
-  serverUrl?: string;
-  cwd: string;
+/** Parsed CLI arguments including shell-only flags (help, version). */
+interface ParsedArgs extends Omit<RawCliArgs, "explicitFlags"> {
   help: boolean;
   version: boolean;
-  verbose: boolean;
-  // Spec mode
-  spec?: string;
-  issueSource?: IssueSourceName;
-  org?: string;
-  project?: string;
-  outputDir?: string;
 }
 
-function parseArgs(argv: string[]): [CliArgs, Set<string>] {
-  const args: CliArgs = {
-    pattern: [],
+function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
+  const args: ParsedArgs = {
+    issueIds: [],
     dryRun: false,
     noPlan: false,
     provider: "opencode",
@@ -140,18 +115,24 @@ function parseArgs(argv: string[]): [CliArgs, Set<string>] {
       explicitFlags.add("verbose");
     } else if (arg === "--spec") {
       i++;
-      args.spec = argv[i];
+      const specs: string[] = [];
+      while (i < argv.length && !argv[i].startsWith("--")) {
+        specs.push(argv[i]);
+        i++;
+      }
+      i--; // outer loop will i++
+      args.spec = specs.length === 1 ? specs[0] : specs;
       explicitFlags.add("spec");
     } else if (arg === "--source") {
       i++;
       const val = argv[i];
-      if (!ISSUE_SOURCE_NAMES.includes(val as IssueSourceName)) {
+      if (!DATASOURCE_NAMES.includes(val as DatasourceName)) {
         log.error(
-          `Unknown issue source "${val}". Available: ${ISSUE_SOURCE_NAMES.join(", ")}`
+          `Unknown source "${val}". Available: ${DATASOURCE_NAMES.join(", ")}`
         );
         process.exit(1);
       }
-      args.issueSource = val as IssueSourceName;
+      args.issueSource = val as DatasourceName;
       explicitFlags.add("issueSource");
     } else if (arg === "--org") {
       i++;
@@ -192,7 +173,7 @@ function parseArgs(argv: string[]): [CliArgs, Set<string>] {
       args.cwd = resolve(argv[i]);
       explicitFlags.add("cwd");
     } else if (!arg.startsWith("-")) {
-      args.pattern.push(arg);
+      args.issueIds.push(arg);
     } else {
       log.error(`Unknown option: ${arg}`);
       process.exit(1);
@@ -214,26 +195,6 @@ async function main() {
   }
 
   const [args, explicitFlags] = parseArgs(rawArgv);
-
-  // ── Merge config-file defaults beneath CLI flags ───────────
-  const config = await loadConfig();
-
-  // Config key → CliArgs field mapping
-  const CONFIG_TO_CLI: Record<string, keyof typeof args> = {
-    provider: "provider",
-    concurrency: "concurrency",
-    source: "issueSource",
-    org: "org",
-    project: "project",
-    serverUrl: "serverUrl",
-  };
-
-  for (const [configKey, cliField] of Object.entries(CONFIG_TO_CLI)) {
-    const configValue = config[configKey as keyof typeof config];
-    if (configValue !== undefined && !explicitFlags.has(cliField)) {
-      (args as unknown as Record<string, unknown>)[cliField] = configValue;
-    }
-  }
 
   // Enable verbose logging before anything else
   log.verbose = args.verbose;
@@ -261,44 +222,14 @@ async function main() {
     process.exit(0);
   }
 
-  // ── Spec mode ──────────────────────────────────────────────
-  if (args.spec) {
-    const summary = await generateSpecs({
-      issues: args.spec,
-      issueSource: args.issueSource,
-      provider: args.provider,
-      serverUrl: args.serverUrl,
-      cwd: args.cwd,
-      outputDir: args.outputDir,
-      org: args.org,
-      project: args.project,
-      concurrency: args.concurrency,
-    });
-
-    process.exit(summary.failed > 0 ? 1 : 0);
-  }
-
-  // ── Dispatch mode ──────────────────────────────────────────
-  if (!args.pattern.length) {
-    log.error("Missing glob pattern. Usage: dispatch <glob>");
-    log.dim('  Example: dispatch "tasks/**/*.md"');
-    log.dim("  Example: dispatch tasks/a.md tasks/b.md");
-    log.dim("  Or use:  dispatch --spec 1,2,3");
-    process.exit(1);
-  }
-
+  // ── Delegate to orchestrator ───────────────────────────────
   const orchestrator = await bootOrchestrator({ cwd: args.cwd });
-  const summary = await orchestrator.orchestrate({
-    pattern: args.pattern,
-    concurrency: args.concurrency ?? defaultConcurrency(),
-    dryRun: args.dryRun,
-    noPlan: args.noPlan,
-    provider: args.provider,
-    serverUrl: args.serverUrl,
-  });
-  await orchestrator.cleanup();
+  const { help: _, version: __, ...rawArgs } = args;
+  const summary = await orchestrator.runFromCli({ ...rawArgs, explicitFlags });
 
-  process.exit(summary.failed > 0 ? 1 : 0);
+  // Determine exit code from summary
+  const failed = "failed" in summary ? summary.failed : 0;
+  process.exit(failed > 0 ? 1 : 0);
 }
 
 main().catch(async (err) => {

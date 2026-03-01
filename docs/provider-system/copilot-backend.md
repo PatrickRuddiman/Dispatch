@@ -229,7 +229,7 @@ that propagates as a failed task.
 - Rate limits are temporary. Waiting and retrying usually resolves the issue.
 - Preview models may have stricter limits.
 - High concurrency ([`--concurrency > 1`](../cli-orchestration/cli.md)) increases the likelihood of hitting
-  limits.
+  limits. See the [concurrency model](../planning-and-dispatch/overview.md#concurrency-model) for details.
 
 **Monitoring usage**: Copilot usage metrics are available through your GitHub
 organization settings at `Settings > Copilot > Usage`. Individual usage can be
@@ -310,9 +310,13 @@ dispatch "tasks/**/*.md" --provider copilot
   backends
 - [Provider Interface](../shared-types/provider.md) -- `ProviderInstance` type
   definition and lifecycle contract
+- [Cleanup Registry](../shared-types/cleanup.md) -- Process-level cleanup for
+  graceful shutdown and signal handling
 - [Dispatcher](../planning-and-dispatch/dispatcher.md) -- how the dispatcher
   creates sessions and sends prompts
 - [Planner](../planning-and-dispatch/planner.md) -- how the planner creates
   sessions for read-only exploration
 - [CLI Options](../cli-orchestration/cli.md) -- `--provider copilot` and
   `--server-url` flags
+- [Testing Overview](../testing/overview.md) -- test suite structure (note:
+  the Copilot provider is not currently unit-tested)

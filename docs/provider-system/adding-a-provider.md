@@ -109,8 +109,9 @@ Based on patterns in the existing providers:
 - **Cleanup idempotency**: Guard against double-cleanup by using optional
   chaining (`stopServer?.()`) or by tracking whether cleanup has already run.
   Swallow errors from destroy operations during cleanup (as the Copilot provider
-  does with `.catch(() => {})`).
-
+  does with `.catch(() => {})`). The [cleanup registry](../shared-types/cleanup.md)
+  will call your provider's `cleanup()` on process exit (SIGINT, SIGTERM, or
+  unhandled error).
 ## Step 2: Add to the ProviderName union
 
 Edit `src/provider.ts:11` to add your provider name to the union type:
@@ -207,7 +208,13 @@ runtime flexibility.
   using `@github/copilot-sdk`
 - [Provider Interface](../shared-types/provider.md) -- `ProviderInstance`,
   `ProviderName`, and `ProviderBootOptions` type definitions
+- [Cleanup Registry](../shared-types/cleanup.md) -- How provider cleanup
+  functions are registered and invoked on process exit
 - [Dispatcher](../planning-and-dispatch/dispatcher.md) -- How the dispatcher
   consumes `ProviderInstance`
+- [Spec Generation](../spec-generation/overview.md) -- The `--spec` pipeline
+  that also boots and uses providers
 - [CLI Options](../cli-orchestration/cli.md) -- The `--provider` flag and
   argument validation
+- [Testing Overview](../testing/overview.md) -- Test coverage (note: provider
+  backends are not unit tested)

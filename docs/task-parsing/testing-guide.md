@@ -43,9 +43,10 @@ The `package.json` defines two test scripts:
 ## Test suite structure
 
 The test file (`src/tests/parser.test.ts`) is organized into five `describe` blocks
-covering each public function:
+covering each public function. For a comprehensive breakdown of all 62 tests, see
+the [detailed parser tests](../testing/parser-tests.md) documentation.
 
-### parseTaskContent (pure, no I/O)
+### [parseTaskContent](./api-reference.md#parsetaskcontent) (pure, no I/O)
 
 These tests validate the core parsing logic using in-memory strings. No file
 system access is involved.
@@ -72,7 +73,7 @@ system access is involved.
 | handles trailing newline | Trailing `\n` does not create phantom tasks |
 | handles Windows-style CRLF line endings | CRLF normalization produces clean text |
 
-### parseTaskFile (with file I/O)
+### [parseTaskFile](./api-reference.md#parsetaskfile) (with file I/O)
 
 These tests create temporary files on disk and verify the full read-parse
 pipeline.
@@ -81,7 +82,7 @@ pipeline.
 |---|---|
 | reads and parses a file from disk | End-to-end file reading and parsing |
 
-### markTaskComplete
+### [markTaskComplete](./api-reference.md#marktaskcomplete)
 
 These tests create temporary files on disk, mark tasks complete, and verify the
 file contents afterward.
@@ -93,7 +94,7 @@ file contents afterward.
 | throws on out-of-range line number | Error when `task.line` exceeds file length |
 | throws if the line no longer matches unchecked pattern | Error when line is already checked or modified |
 
-### buildTaskContext
+### [buildTaskContext](./api-reference.md#buildtaskcontext)
 
 These tests verify the filtering logic that produces planner-ready context.
 
@@ -108,7 +109,7 @@ These tests verify the filtering logic that produces planner-ready context.
 | preserves asterisk tasks of other types | Non-checkbox `*` list items survive |
 | produces a realistic filtered context | Integration test with multi-section file |
 
-### groupTasksByMode
+### [groupTasksByMode](./api-reference.md#grouptasksbymode)
 
 These tests verify the execution group partitioning logic.
 
@@ -180,6 +181,10 @@ When adding tests for the parser:
 - [API Reference](./api-reference.md) -- function contracts that the tests verify
 - [Architecture & Concurrency](./architecture-and-concurrency.md) -- concurrency
   concerns and the read-modify-write pattern tested by `markTaskComplete` tests
+- [Shared Parser Types](../shared-types/parser.md) -- summary of `Task`,
+  `TaskFile`, and exported functions from the shared-types perspective
+- [Planning & Dispatch Overview](../planning-and-dispatch/overview.md) -- the
+  planner and dispatcher that consume parser output
 
 ### Project-wide test documentation
 

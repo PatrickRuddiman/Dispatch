@@ -4,10 +4,10 @@
  * To add a new agent backend:
  *   1. Create `src/providers/<name>.ts` exporting an async `boot()` function
  *   2. Import and register it in the `PROVIDERS` map below
- *   3. Add the name to the `ProviderName` union in `src/provider.ts`
+ *   3. Add the name to the `ProviderName` union in `src/providers/interface.ts`
  */
 
-import type { ProviderName, ProviderInstance, ProviderBootOptions } from "../provider.js";
+import type { ProviderName, ProviderInstance, ProviderBootOptions } from "./interface.js";
 import { boot as bootOpencode } from "./opencode.js";
 import { boot as bootCopilot } from "./copilot.js";
 
@@ -40,3 +40,5 @@ export async function bootProvider(
   }
   return bootFn(opts);
 }
+
+export type { ProviderName, ProviderInstance, ProviderBootOptions } from "./interface.js";

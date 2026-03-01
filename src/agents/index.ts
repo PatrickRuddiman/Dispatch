@@ -4,18 +4,29 @@
  * To add a new agent:
  *   1. Create `src/agents/<name>.ts` exporting an async `boot()` function
  *   2. Import and register it in the `AGENTS` map below
- *   3. Add the name to the `AgentName` union in `src/agent.ts`
+ *   3. Add the name to the `AgentName` union in `src/agents/interface.ts`
  */
 
-import type { AgentName, Agent, AgentBootOptions } from "../agent.js";
+import type { AgentName, Agent, AgentBootOptions } from "./interface.js";
 import { boot as bootPlanner, type PlannerAgent } from "./planner.js";
-import { boot as bootOrchestrator, type OrchestratorAgent } from "./orchestrator.js";
+import { boot as bootExecutor, type ExecutorAgent } from "./executor.js";
+import { boot as bootSpec, type SpecAgent } from "./spec.js";
+import {
+  boot as bootOrchestrator,
+  type OrchestratorAgent,
+  type RawCliArgs,
+  type UnifiedRunOptions,
+  type RunResult,
+  type DispatchRunOptions,
+  type SpecRunOptions,
+} from "./orchestrator.js";
 
 type BootFn = (opts: AgentBootOptions) => Promise<Agent>;
 
 const AGENTS: Record<AgentName, BootFn> = {
   planner: bootPlanner,
-  orchestrator: bootOrchestrator,
+  executor: bootExecutor,
+  spec: bootSpec,
 };
 
 /**
@@ -45,5 +56,16 @@ export async function bootAgent(
  * Type-safe boot functions for specific agent roles.
  * Prefer these over the generic `bootAgent()` when you know the role at compile time.
  */
-export { bootPlanner, bootOrchestrator };
-export type { PlannerAgent, OrchestratorAgent };
+export { bootPlanner, bootExecutor, bootOrchestrator, bootSpec };
+export type {
+  PlannerAgent,
+  ExecutorAgent,
+  OrchestratorAgent,
+  SpecAgent,
+  RawCliArgs,
+  UnifiedRunOptions,
+  RunResult,
+  DispatchRunOptions,
+  SpecRunOptions,
+};
+export type { AgentName, Agent, AgentBootOptions } from "./interface.js";

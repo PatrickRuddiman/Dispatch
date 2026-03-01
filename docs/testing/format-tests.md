@@ -28,13 +28,9 @@ The test file contains **1 describe block** with **6 tests**.
 
 ### Formatting rules
 
-The `elapsed()` function follows these rules:
-
-1. Convert milliseconds to whole seconds using `Math.floor(ms / 1000)`
-2. If the result is >= 60 seconds, format as `"Xm Ys"` where Y is the remainder
-3. If the result is < 60 seconds, format as `"Xs"`
-4. There is no hour or day unit -- large durations display as high minute counts
-   (e.g., 1 hour = `"60m 0s"`)
+See [Format Utilities](../shared-types/format.md#api) for the full API
+documentation, including behavior details, edge cases, and the no-hour-support
+design rationale.
 
 ## Testing approach
 
