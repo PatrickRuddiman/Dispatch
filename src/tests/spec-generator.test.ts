@@ -331,6 +331,26 @@ describe("isGlobOrFilePath", () => {
     expect(isGlobOrFilePath("config.yaml")).toBe(true);
   });
 
+  it("returns true for a .yml filename", () => {
+    expect(isGlobOrFilePath("config.yml")).toBe(true);
+  });
+
+  it("returns true for a .js filename", () => {
+    expect(isGlobOrFilePath("index.js")).toBe(true);
+  });
+
+  it("returns true for a .tsx filename", () => {
+    expect(isGlobOrFilePath("Component.tsx")).toBe(true);
+  });
+
+  it("returns true for a .jsx filename", () => {
+    expect(isGlobOrFilePath("Component.jsx")).toBe(true);
+  });
+
+  it("returns true for a filename with uppercase extension", () => {
+    expect(isGlobOrFilePath("README.MD")).toBe(true);
+  });
+
   it("returns true for a hyphenated filename with extension", () => {
     expect(isGlobOrFilePath("my-feature.md")).toBe(true);
   });
@@ -363,6 +383,18 @@ describe("isGlobOrFilePath", () => {
 
   it("returns false for a sentence with a dash", () => {
     expect(isGlobOrFilePath("add dark-mode support")).toBe(false);
+  });
+
+  it("returns false for text with special characters but no glob or path indicators", () => {
+    expect(isGlobOrFilePath("add validation — ensure inputs are correct")).toBe(false);
+  });
+
+  it("returns false for text with numbers but no path indicators", () => {
+    expect(isGlobOrFilePath("add 2 new fields to the form")).toBe(false);
+  });
+
+  it("returns false for text with a period but no recognized extension", () => {
+    expect(isGlobOrFilePath("update the U.S. address form")).toBe(false);
   });
 
   // --- Edge cases ---
