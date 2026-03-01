@@ -30,6 +30,7 @@ const HELP = `
   Dispatch options:
     --dry-run              List tasks without dispatching
     --no-plan              Skip the planner agent, dispatch directly
+    --no-branch            Skip branch creation, push, and PR lifecycle
     --concurrency <n>      Max parallel dispatches (default: min(cpus, freeMB/500))
     --provider <name>      Agent backend: ${PROVIDER_NAMES.join(", ")} (default: opencode)
     --server-url <url>     URL of a running provider server
@@ -85,6 +86,7 @@ function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
     issueIds: [],
     dryRun: false,
     noPlan: false,
+    noBranch: false,
     provider: "opencode",
     cwd: process.cwd(),
     help: false,
@@ -110,6 +112,9 @@ function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
     } else if (arg === "--no-plan") {
       args.noPlan = true;
       explicitFlags.add("noPlan");
+    } else if (arg === "--no-branch") {
+      args.noBranch = true;
+      explicitFlags.add("noBranch");
     } else if (arg === "--verbose") {
       args.verbose = true;
       explicitFlags.add("verbose");
