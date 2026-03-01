@@ -31,6 +31,7 @@ export interface RawCliArgs {
   issueIds: string[];
   dryRun: boolean;
   noPlan: boolean;
+  noBranch: boolean;
   concurrency?: number;
   provider: ProviderName;
   serverUrl?: string;
@@ -105,7 +106,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
       }
       return this.orchestrate({
         issueIds: m.issueIds, concurrency: m.concurrency ?? defaultConcurrency(),
-        dryRun: m.dryRun, noPlan: m.noPlan, provider: m.provider,
+        dryRun: m.dryRun, noPlan: m.noPlan, noBranch: m.noBranch, provider: m.provider,
         serverUrl: m.serverUrl, source: m.issueSource, org: m.org, project: m.project,
       });
     },
