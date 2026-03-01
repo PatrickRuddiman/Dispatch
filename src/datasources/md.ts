@@ -10,7 +10,7 @@
 
 import { readFile, writeFile, readdir, mkdir, rename } from "node:fs/promises";
 import { join, parse as parsePath } from "node:path";
-import type { Datasource, IssueDetails, IssueFetchOptions } from "./interface.js";
+import type { Datasource, IssueDetails, IssueFetchOptions, DispatchLifecycleOptions } from "./interface.js";
 
 /** Default directory for markdown specs, relative to cwd. */
 const DEFAULT_DIR = ".dispatch/specs";
@@ -105,5 +105,40 @@ export const datasource: Datasource = {
     const filePath = join(dir, filename);
     await writeFile(filePath, body, "utf-8");
     return toIssueDetails(filename, body, dir);
+  },
+
+  async getDefaultBranch(_opts: DispatchLifecycleOptions): Promise<string> {
+    return "main";
+  },
+
+  buildBranchName(issueNumber: string, title: string): string {
+    const slug = title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 50);
+    return `dispatch/${issueNumber}-${slug}`;
+  },
+
+  async createAndSwitchBranch(_branchName: string, _opts: DispatchLifecycleOptions): Promise<void> {
+    // No-op for local markdown datasource
+  },
+
+  async switchBranch(_branchName: string, _opts: DispatchLifecycleOptions): Promise<void> {
+    // No-op for local markdown datasource
+  },
+
+  async pushBranch(_branchName: string, _opts: DispatchLifecycleOptions): Promise<void> {
+    // No-op for local markdown datasource
+  },
+
+  async createPullRequest(
+    _branchName: string,
+    _issueNumber: string,
+    _title: string,
+    _opts: DispatchLifecycleOptions,
+  ): Promise<string> {
+    // No-op for local markdown datasource
+    return "";
   },
 };
