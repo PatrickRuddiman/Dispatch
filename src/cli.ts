@@ -29,6 +29,7 @@ const HELP = `
     dispatch --respec                Regenerate all existing specs
     dispatch --respec <ids>          Regenerate specs for specific issues
     dispatch --respec <glob>         Regenerate specs matching a glob pattern
+    dispatch --spec "description"    Generate a spec from an inline text description
 
   Dispatch options:
     --dry-run              List tasks without dispatching
@@ -37,11 +38,14 @@ const HELP = `
     --concurrency <n>      Max parallel dispatches (default: min(cpus, freeMB/500))
     --provider <name>      Agent backend: ${PROVIDER_NAMES.join(", ")} (default: opencode)
     --server-url <url>     URL of a running provider server
+    --plan-timeout <min>   Planning timeout in minutes (default: 10)
+    --plan-retries <n>     Retry attempts after planning timeout (default: 1)
     --cwd <dir>            Working directory (default: cwd)
 
   Spec options:
     --spec <value>         Comma-separated issue numbers or glob pattern for .md files (creates specs in configured datasource)
     --respec [value]       Regenerate specs: issue numbers, glob, or omit to regenerate all existing specs
+    --spec <value>         Comma-separated issue numbers, glob pattern for .md files, or inline text description
     --source <name>        Issue source: ${DATASOURCE_NAMES.join(", ")} (auto-detected from git remote)
     --org <url>            Azure DevOps organization URL
     --project <name>       Azure DevOps project name
@@ -59,7 +63,7 @@ const HELP = `
     dispatch config reset               Reset config (delete config file)
     dispatch config path                Show config file path
 
-    Valid keys: provider, concurrency, source, org, project, serverUrl
+    Valid keys: provider, concurrency, source, org, project, serverUrl, planTimeout, planRetries
 
   Examples:
     dispatch 14
@@ -77,6 +81,8 @@ const HELP = `
     dispatch --respec
     dispatch --respec 42,43,44
     dispatch --respec "specs/*.md"
+    dispatch --spec "add dark mode toggle to settings page"
+    dispatch --spec "feature A should do x" --provider copilot
     dispatch config set provider copilot
     dispatch config list
     dispatch config reset
@@ -190,6 +196,24 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
       i++;
       args.serverUrl = argv[i];
       explicitFlags.add("serverUrl");
+    } else if (arg === "--plan-timeout") {
+      i++;
+      const val = parseFloat(argv[i]);
+      if (isNaN(val) || val <= 0) {
+        log.error("--plan-timeout must be a positive number (minutes)");
+        process.exit(1);
+      }
+      args.planTimeout = val;
+      explicitFlags.add("planTimeout");
+    } else if (arg === "--plan-retries") {
+      i++;
+      const val = parseInt(argv[i], 10);
+      if (isNaN(val) || val < 0) {
+        log.error("--plan-retries must be a non-negative integer");
+        process.exit(1);
+      }
+      args.planRetries = val;
+      explicitFlags.add("planRetries");
     } else if (arg === "--cwd") {
       i++;
       args.cwd = resolve(argv[i]);

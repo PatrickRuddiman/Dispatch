@@ -1,11 +1,15 @@
 import { basename, join } from "node:path";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { log } from "../logger.js";
 import { getDatasource, detectDatasource } from "../datasources/index.js";
 import type { Datasource, DatasourceName, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
-import type { TaskFile } from "../parser.js";
+import type { Task, TaskFile } from "../parser.js";
 import type { DispatchResult } from "../dispatcher.js";
+
+const exec = promisify(execFile);
 
 /** Result of writing issue items to a temp directory. */
 export interface WriteItemsResult {
@@ -136,4 +140,136 @@ export async function closeCompletedSpecIssues(
       log.warn(`Could not close issue #${issueId}: ${message}`);
     }
   }
+}
+
+/**
+ * Retrieve one-line commit summaries for commits on the current branch
+ * that are not on the given default branch.
+ *
+ * @param defaultBranch - The base branch to compare against (e.g. "main")
+ * @param cwd - Working directory (git repo root)
+ * @returns Array of commit summary strings, one per commit
+ */
+async function getCommitSummaries(defaultBranch: string, cwd: string): Promise<string[]> {
+  try {
+    const { stdout } = await exec(
+      "git",
+      ["log", `${defaultBranch}..HEAD`, "--pretty=format:%s"],
+      { cwd },
+    );
+    return stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Assemble a descriptive pull request body from pipeline data.
+ *
+ * Includes:
+ * - A summary section with commit messages from the branch
+ * - The list of completed tasks
+ * - Labels from the issue (if any)
+ * - An issue-close reference appropriate for the datasource
+ *
+ * @param details - The issue details (title, body, labels, number)
+ * @param tasks - The tasks that were dispatched for this issue
+ * @param results - The dispatch results for all tasks
+ * @param defaultBranch - The base branch to compare commits against
+ * @param datasourceName - The datasource backend name ("github", "azdevops", "md")
+ * @param cwd - Working directory (git repo root)
+ * @returns The assembled PR body as a markdown string
+ */
+export async function buildPrBody(
+  details: IssueDetails,
+  tasks: Task[],
+  results: DispatchResult[],
+  defaultBranch: string,
+  datasourceName: DatasourceName,
+  cwd: string,
+): Promise<string> {
+  const sections: string[] = [];
+
+  // ── Commit summary section ──────────────────────────────────
+  const commits = await getCommitSummaries(defaultBranch, cwd);
+  if (commits.length > 0) {
+    sections.push("## Summary\n");
+    for (const commit of commits) {
+      sections.push(`- ${commit}`);
+    }
+    sections.push("");
+  }
+
+  // ── Completed tasks section ─────────────────────────────────
+  const taskResults = new Map(
+    results
+      .filter((r) => tasks.includes(r.task))
+      .map((r) => [r.task, r]),
+  );
+
+  const completedTasks = tasks.filter((t) => taskResults.get(t)?.success);
+  const failedTasks = tasks.filter((t) => {
+    const r = taskResults.get(t);
+    return r && !r.success;
+  });
+
+  if (completedTasks.length > 0 || failedTasks.length > 0) {
+    sections.push("## Tasks\n");
+    for (const task of completedTasks) {
+      sections.push(`- [x] ${task.text}`);
+    }
+    for (const task of failedTasks) {
+      sections.push(`- [ ] ${task.text}`);
+    }
+    sections.push("");
+  }
+
+  // ── Labels section ──────────────────────────────────────────
+  if (details.labels.length > 0) {
+    sections.push(`**Labels:** ${details.labels.join(", ")}\n`);
+  }
+
+  // ── Issue-close reference ───────────────────────────────────
+  if (datasourceName === "github") {
+    sections.push(`Closes #${details.number}`);
+  } else if (datasourceName === "azdevops") {
+    sections.push(`Resolves AB#${details.number}`);
+  }
+
+  return sections.join("\n");
+}
+
+/**
+ * Generate a descriptive PR title from commit messages on the branch.
+ *
+ * If a single commit exists, its message is used as the title.
+ * If multiple commits exist, a summary title is generated that
+ * captures the scope, prefixed with the issue title.
+ * Falls back to the issue title if no commits are found.
+ *
+ * @param issueTitle - The original issue title (used as fallback)
+ * @param defaultBranch - The base branch to compare commits against
+ * @param cwd - Working directory (git repo root)
+ * @returns A descriptive PR title string
+ */
+export async function buildPrTitle(
+  issueTitle: string,
+  defaultBranch: string,
+  cwd: string,
+): Promise<string> {
+  const commits = await getCommitSummaries(defaultBranch, cwd);
+
+  if (commits.length === 0) {
+    return issueTitle;
+  }
+
+  if (commits.length === 1) {
+    return commits[0];
+  }
+
+  // Multiple commits — use the first commit message with a count suffix
+  return `${commits[commits.length - 1]} (+${commits.length - 1} more)`;
 }

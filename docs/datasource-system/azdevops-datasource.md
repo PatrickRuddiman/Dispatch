@@ -7,8 +7,13 @@ the datasource registry.
 
 ## What it does
 
-The Azure DevOps datasource translates the five `Datasource` interface
-operations into `az boards` CLI commands:
+The Azure DevOps datasource translates the `Datasource` interface operations
+into `az boards` and `az repos` CLI commands, plus `git` commands for lifecycle
+operations. It provides five CRUD operations for work item management and seven
+git lifecycle operations for branching, committing, pushing, and pull request
+creation.
+
+### CRUD operations
 
 | Operation | `az` command | JSON output? |
 |-----------|-------------|-------------|
@@ -17,6 +22,18 @@ operations into `az boards` CLI commands:
 | `update()` | `az boards work-item update --id <id> --title <t> --description <b>` | No |
 | `close()` | `az boards work-item update --id <id> --state Closed` | No |
 | `create()` | `az boards work-item create --type "User Story" --title <t> --description <b>` | Yes |
+
+### Git lifecycle operations
+
+| Operation | Command(s) | Purpose |
+|-----------|-----------|---------|
+| `getDefaultBranch()` | `git symbolic-ref refs/remotes/origin/HEAD`, fallback chain | Detect `main` or `master` |
+| `buildBranchName()` | _(pure function)_ | Returns `dispatch/<number>-<slug>` |
+| `createAndSwitchBranch()` | `git checkout -b <branch>`, fallback to `git checkout <branch>` | Create or switch to branch |
+| `switchBranch()` | `git checkout <branch>` | Switch to existing branch |
+| `pushBranch()` | `git push --set-upstream origin <branch>` | Push branch to remote |
+| `commitAllChanges()` | `git add -A` + `git diff --cached --stat` + `git commit -m <msg>` | Stage and commit; no-ops if nothing staged |
+| `createPullRequest()` | `az repos pr create --title <t> --description "Resolves AB#<n>" --source-branch <branch> --work-items <n>` | Create PR with work item link |
 
 All commands are executed via `execFile("az", [...args], { cwd })` with no
 shell interpolation. The `--org` and `--project` flags are appended when the
@@ -154,15 +171,24 @@ the `acceptanceCriteria` field. The GitHub and markdown datasources always
 return `""` for this field.
 
 **Comments:** Comments are fetched via a separate `fetchComments()` helper
-function (`src/datasources/azdevops.ts:184`) that calls `az boards work-item
+function (`src/datasources/azdevops.ts:294`) that calls `az boards work-item
 relation list-comment`. Comments are formatted as `**<displayName>:** <text>`
-strings.
+strings, using the `createdBy.displayName` field for the author name (falling
+back to `"unknown"`).
 
 **Comment fetching is non-fatal:** The `fetchComments()` function wraps the
-entire comment fetch in a `try/catch` block (`src/datasources/azdevops.ts:221`).
-If comments cannot be retrieved (e.g., permission denied, extension not
-installed, API error), the function silently returns an empty array. This means
-the work item itself will still be returned successfully, just without comments.
+entire comment fetch -- including the `execFile` call and `JSON.parse` -- in a
+`try/catch` block (`src/datasources/azdevops.ts:298`). If comments cannot be
+retrieved for any reason (permission denied, extension not installed, API error,
+malformed JSON response), the function silently returns an empty array. This
+means the work item itself will still be returned successfully, just without
+comments.
+
+**Consequence of silent failure:** There is no way to distinguish "the work
+item has no comments" from "comment fetching failed" in the returned
+`IssueDetails`. Both cases produce `comments: []`. If you suspect comments are
+missing, check the Azure DevOps web UI to verify whether comments exist and
+ensure the authenticated user has read access to comments.
 
 ### `update()`
 
@@ -193,6 +219,70 @@ operation will fail.
 **Return value:** Unlike GitHub's `create()`, the Azure DevOps `create()`
 fetches the response JSON and extracts fields from the created work item,
 providing accurate field values in the returned `IssueDetails`.
+
+## Git lifecycle operation details
+
+The Azure DevOps datasource implements all seven git lifecycle methods. The
+branching, committing, and pushing operations use `git` directly (identical to
+the GitHub implementation). Pull request creation uses `az repos pr create`.
+
+### `getDefaultBranch()`
+
+Uses the same detection strategy as the GitHub datasource:
+
+1. `git symbolic-ref refs/remotes/origin/HEAD` -- extract branch from remote
+   HEAD reference.
+2. Fallback: `git rev-parse --verify main` -- check if `main` exists.
+3. Final fallback: returns `"master"`.
+
+### `buildBranchName()`
+
+Same convention as all datasources: `dispatch/<number>-<slug>`. See the
+[branch naming convention](./overview.md#branch-naming-convention) in the
+overview.
+
+### `createAndSwitchBranch()`
+
+Attempts `git checkout -b <branchName>`. If the branch already exists, falls
+back to `git checkout <branchName>`. Identical behavior to the GitHub
+implementation.
+
+### `switchBranch()`
+
+Runs `git checkout <branchName>`.
+
+### `pushBranch()`
+
+Runs `git push --set-upstream origin <branchName>`.
+
+### `commitAllChanges()`
+
+Three-step process identical to the GitHub implementation:
+
+1. `git add -A` -- stage all changes.
+2. `git diff --cached --stat` -- check if anything is staged.
+3. If non-empty, `git commit -m <message>`. Otherwise, no-op.
+
+### `createPullRequest()`
+
+Creates a pull request using `az repos pr create`
+(`src/datasources/azdevops.ts:232`) with:
+
+- `--title <title>` -- PR title.
+- `--description "Resolves AB#<issueNumber>"` -- PR description with the Azure
+  DevOps work item linking keyword. `AB#` is the Azure Boards integration
+  prefix that triggers automatic work item resolution when the PR is completed.
+- `--source-branch <branchName>` -- the feature branch.
+- `--work-items <issueNumber>` -- creates a formal link between the PR and the
+  work item in Azure DevOps, independent of the description keyword. This
+  link appears in the work item's "Development" section.
+- `--output json` -- the response is parsed to extract the PR URL.
+
+**Existing PR handling:** If `az repos pr create` fails with "already exists",
+the method falls back to
+`az repos pr list --source-branch <branch> --status active --output json` to
+find and return the first active PR's URL. If no active PR is found, returns
+`""`.
 
 ## Rate limits
 
@@ -291,5 +381,7 @@ remain functional.
   and auto-detection
 - [GitHub Datasource](./github-datasource.md) -- The GitHub counterpart
 - [Markdown Datasource](./markdown-datasource.md) -- Offline alternative
+- [Datasource Helpers](./datasource-helpers.md) -- Orchestration bridge that
+  consumes datasource operations for temp file writing and auto-close
 - [Integrations & Troubleshooting](./integrations.md) -- Cross-cutting
   subprocess and error-handling concerns

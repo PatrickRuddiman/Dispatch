@@ -233,6 +233,7 @@ export const datasource: Datasource = {
     branchName: string,
     issueNumber: string,
     title: string,
+    body: string,
     opts: DispatchLifecycleOptions,
   ): Promise<string> {
     try {
@@ -245,7 +246,7 @@ export const datasource: Datasource = {
           "--title",
           title,
           "--description",
-          `Resolves AB#${issueNumber}`,
+          body || `Resolves AB#${issueNumber}`,
           "--source-branch",
           branchName,
           "--work-items",

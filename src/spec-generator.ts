@@ -64,6 +64,38 @@ export function isIssueNumbers(input: string | string[]): input is string {
 }
 
 /**
+ * Returns `true` when the input looks like a glob pattern or file path
+ * rather than free-form inline text.
+ *
+ * Checks for:
+ * - Glob metacharacters: `*`, `?`, `[`, `{`
+ * - Path separators: `/`, `\`
+ * - Dot-prefix relative paths: `./`, `../`
+ * - Common file extensions: `.md`, `.txt`, `.yaml`, `.yml`, `.json`, `.ts`,
+ *   `.js`, `.tsx`, `.jsx`
+ *
+ * This is a pure function intended to be called *after* `isIssueNumbers()`
+ * has already returned `false`, providing the second level of input
+ * discrimination for the spec pipeline.
+ */
+export function isGlobOrFilePath(input: string | string[]): boolean {
+  if (Array.isArray(input)) return true;
+  // Glob metacharacters
+  if (/[*?\[{]/.test(input)) return true;
+
+  // Path separators (forward slash or backslash)
+  if (/[/\\]/.test(input)) return true;
+
+  // Dot-prefix relative paths (./something or ../something)
+  if (/^\.\.?\//.test(input)) return true;
+
+  // Common file extensions at end of string
+  if (/\.(md|txt|yaml|yml|json|ts|js|tsx|jsx)$/i.test(input)) return true;
+
+  return false;
+}
+
+/**
  * Post-process raw spec file content written by the AI agent.
  *
  * Strips code-fence wrapping, preamble text before the first H1 heading,

@@ -176,48 +176,7 @@ This would kill the git process after 30 seconds with `SIGTERM`.
 
 ## Node.js fs (readFile/writeFile)
 
-**Used in**: `src/parser.ts:9, 92, 100, 120`
-**Official documentation**: [Node.js fs.promises](https://nodejs.org/api/fs.html#fspromisesreadfilepath-options)
-
-The parser uses `fs/promises` for reading task files and writing back completed
-tasks.
-
-### File permission errors
-
-If the Dispatch process lacks read or write permissions on a task file:
-
-- `readFile` throws `EACCES` (permission denied) or `EPERM` (operation not
-  permitted)
-- The error propagates to the orchestrator, which marks the task as failed
-
-**To troubleshoot**:
-
-1. Check file permissions: `ls -la tasks/your-file.md`
-2. Ensure the user running Dispatch has `rw` access
-3. On shared systems, check ACLs: `getfacl tasks/your-file.md`
-
-### Process interruption during writes
-
-If the process receives SIGINT (Ctrl+C) during a `writeFile` call in
-`markTaskComplete()`:
-
-- `writeFile` is **not atomic**: the file may be partially written
-- The task file could be left in a corrupted state (truncated, missing lines)
-- The task's `[ ]` may not have been replaced with `[x]`
-
-**Recovery**:
-
-1. Check the task file for corruption: `cat tasks/your-file.md`
-2. Use `git checkout -- tasks/your-file.md` to restore from the last commit
-3. Re-run dispatch to re-process the affected tasks
-
-**Prevention**: A safer implementation would use a write-to-temp-then-rename
-pattern, which is atomic on most filesystems.
-
-### Encoding
-
-All file operations use `utf-8` encoding. Non-UTF-8 task files will produce
-garbled content or throw errors during parsing.
+The parser uses `fs/promises` for reading task files and writing back completed tasks. For detailed coverage of fs/promises usage, edge cases (ENOENT, EACCES, non-atomic writes), troubleshooting steps, and encoding details, see [Shared Types — Node.js fs/promises](../shared-types/integrations.md#nodejs-fspromises).
 
 ## Provider system (ProviderInstance interface)
 

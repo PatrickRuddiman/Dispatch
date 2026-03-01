@@ -8,7 +8,7 @@
 import { readFile } from "node:fs/promises";
 import { parseTaskFile, buildTaskContext, groupTasksByMode, type TaskFile } from "../parser.js";
 import type { DispatchResult } from "../dispatcher.js";
-import { boot as bootPlanner } from "../agents/planner.js";
+import { boot as bootPlanner, type PlanResult } from "../agents/planner.js";
 import { boot as bootExecutor } from "../agents/executor.js";
 import { log } from "../logger.js";
 import { registerCleanup } from "../cleanup.js";
@@ -23,7 +23,10 @@ import {
   writeItemsToTempDir,
   closeCompletedSpecIssues,
   parseIssueFilename,
+  buildPrBody,
+  buildPrTitle,
 } from "./datasource-helpers.js";
+import { withTimeout, TimeoutError } from "../timeout.js";
 
 /**
  * Run the full dispatch pipeline: discover tasks from a datasource,
@@ -45,7 +48,13 @@ export async function runDispatchPipeline(
     source,
     org,
     project,
+    planTimeout,
+    planRetries,
   } = opts;
+
+  // Planning timeout/retry defaults
+  const planTimeoutMs = (planTimeout ?? 10) * 60_000; // default 10 minutes → ms
+  const maxPlanAttempts = (planRetries ?? 1) + 1;     // retries + initial attempt
 
   // Dry-run mode uses simple log output
   if (dryRun) {
@@ -190,7 +199,46 @@ export async function runDispatchPipeline(
                 tuiTask.status = "planning";
                 const rawContent = fileContentMap.get(task.file);
                 const fileContext = rawContent ? buildTaskContext(rawContent, task) : undefined;
-                const planResult = await planner.plan(task, fileContext);
+
+                let planResult: PlanResult | undefined;
+
+                for (let attempt = 1; attempt <= maxPlanAttempts; attempt++) {
+                  try {
+                    planResult = await withTimeout(
+                      planner.plan(task, fileContext),
+                      planTimeoutMs,
+                      "planner.plan()",
+                    );
+                    break; // success — exit retry loop
+                  } catch (err) {
+                    if (err instanceof TimeoutError) {
+                      log.warn(
+                        `Planning timed out for task "${task.text}" (attempt ${attempt}/${maxPlanAttempts})`,
+                      );
+                      if (attempt < maxPlanAttempts) {
+                        log.debug(`Retrying planning (attempt ${attempt + 1}/${maxPlanAttempts})`);
+                      }
+                    } else {
+                      // Non-timeout error — do not retry, surface immediately
+                      planResult = {
+                        prompt: "",
+                        success: false,
+                        error: err instanceof Error ? err.message : String(err),
+                      };
+                      break;
+                    }
+                  }
+                }
+
+                // All attempts exhausted with timeout — produce failure result
+                if (!planResult) {
+                  const timeoutMin = planTimeout ?? 10;
+                  planResult = {
+                    prompt: "",
+                    success: false,
+                    error: `Planning timed out after ${timeoutMin}m (${maxPlanAttempts} attempts)`,
+                  };
+                }
 
                 if (!planResult.success) {
                   tuiTask.status = "failed";
@@ -256,10 +304,20 @@ export async function runDispatchPipeline(
         }
 
         try {
+          const prTitle = await buildPrTitle(details.title, defaultBranch, lifecycleOpts.cwd);
+          const prBody = await buildPrBody(
+            details,
+            fileTasks,
+            results,
+            defaultBranch,
+            datasource.name,
+            lifecycleOpts.cwd,
+          );
           const prUrl = await datasource.createPullRequest(
             branchName,
             details.number,
-            details.title,
+            prTitle,
+            prBody,
             lifecycleOpts,
           );
           if (prUrl) {

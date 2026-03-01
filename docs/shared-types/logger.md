@@ -13,8 +13,10 @@ Dispatch. It is imported by the [CLI entry point](../cli-orchestration/cli.md)
 (`src/agents/orchestrator.ts`), the
 [dispatcher](../planning-and-dispatch/dispatcher.md) (`src/dispatcher.ts`),
 both [provider backends](../provider-system/provider-overview.md)
-(`src/providers/opencode.ts`, `src/providers/copilot.ts`), and the
-[spec generator](../spec-generation/overview.md) (`src/spec-generator.ts`).
+(`src/providers/opencode.ts`, `src/providers/copilot.ts`), the
+[spec generator](../spec-generation/overview.md) (`src/spec-generator.ts`),
+and the [datasource helpers](../datasource-system/datasource-helpers.md)
+(`src/orchestrator/datasource-helpers.ts`).
 When the full [TUI](../cli-orchestration/tui.md) is active, the TUI module
 renders its own output directly; the logger is used for simpler output modes
 and for verbose debug tracing that runs alongside the TUI.
@@ -319,3 +321,7 @@ a full log-level hierarchy.
   replaces the logger during normal dispatch
 - [CLI & Orchestration](../cli-orchestration/overview.md) -- Where the logger
   is consumed and verbose mode is initialized
+- [Spec Generation](../spec-generation/overview.md) -- How the spec pipeline
+  uses logger for progress reporting and error diagnostics
+- [Dispatcher](../planning-and-dispatch/dispatcher.md) -- Debug tracing of
+  prompt dispatch and error chain formatting

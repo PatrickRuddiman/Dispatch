@@ -155,4 +155,6 @@ infrastructure.
   types tested by config, format, and parser test files
 - [Spec Generation](../spec-generation/overview.md) -- the spec pipeline
   tested by `spec-generator.test.ts`
+- [Provider System Overview](../provider-system/provider-overview.md) -- provider
+  interface and registry (untested modules listed above)
 - [Architecture overview](../architecture.md) -- system-wide context

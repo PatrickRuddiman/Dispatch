@@ -7,8 +7,8 @@ registry.
 
 ## What it does
 
-The markdown datasource maps the five `Datasource` interface operations onto
-local filesystem operations:
+The markdown datasource maps the five CRUD `Datasource` interface operations
+onto local filesystem operations:
 
 | Operation | Filesystem operation | Target path |
 |-----------|---------------------|-------------|
@@ -207,6 +207,62 @@ passed to `create()`. For example, `create("My Feature", "no heading here")`
 returns `title: "my-feature"` (the filename stem) because the body has no H1
 heading.
 
+## Git lifecycle operations (no-ops)
+
+The markdown datasource implements all seven git lifecycle methods from the
+`Datasource` interface, but most are intentional no-ops. This is because the
+markdown datasource is designed for local-first, offline workflows where git
+branching, pushing, and PR creation do not apply.
+
+| Method | Implementation | Return value |
+|--------|---------------|-------------|
+| `getDefaultBranch()` | Returns `"main"` without checking git | `"main"` |
+| `buildBranchName()` | Same slug logic as GitHub/Azure DevOps | `dispatch/<number>-<slug>` |
+| `createAndSwitchBranch()` | No-op (empty function body) | `void` |
+| `switchBranch()` | No-op (empty function body) | `void` |
+| `pushBranch()` | No-op (empty function body) | `void` |
+| `commitAllChanges()` | No-op (empty function body) | `void` |
+| `createPullRequest()` | No-op (returns empty string) | `""` |
+
+### Why no-ops instead of throwing
+
+The dispatch pipeline calls git lifecycle methods on whatever datasource is
+active. If the markdown datasource threw errors for these operations, the
+pipeline would fail when used with `--source md`. By implementing them as
+silent no-ops, the pipeline runs to completion -- it just skips the git
+workflow steps. The markdown datasource user is expected to manage their own
+git workflow (if any) outside of dispatch-tasks.
+
+### `buildBranchName()` is not a no-op
+
+Note that `buildBranchName()` is fully implemented (not a no-op) even in the
+markdown datasource. It produces `dispatch/<number>-<slug>` using the same
+slugification logic as the other datasources. This is because `buildBranchName`
+may be called for informational purposes (e.g., logging) even when the
+branching operations themselves are no-ops.
+
+### `getDefaultBranch()` hardcodes `"main"`
+
+Unlike the GitHub and Azure DevOps datasources which detect the default branch
+from `git symbolic-ref`, the markdown datasource returns `"main"` without any
+git inspection. This avoids requiring a git repository to be present at all
+when using `--source md`.
+
+### Impact on the dispatch pipeline
+
+When the dispatch pipeline runs with `--source md`:
+
+1. **Branching:** `createAndSwitchBranch()` is a no-op -- the pipeline stays
+   on whatever branch is currently checked out.
+2. **Committing:** `commitAllChanges()` is a no-op -- file changes from task
+   execution remain uncommitted.
+3. **Pushing:** `pushBranch()` is a no-op -- nothing is pushed to a remote.
+4. **PR creation:** `createPullRequest()` returns `""` -- no PR is created.
+   The pipeline handles the empty string as "no PR URL available".
+5. **Auto-close:** `closeCompletedSpecIssues()` in the
+   [datasource helpers](./datasource-helpers.md) still calls `close()` on
+   completed specs, which moves them to the `archive/` directory.
+
 ## Version control considerations
 
 Markdown spec files live in the project directory and can be version-controlled
@@ -262,5 +318,7 @@ datasource, always pass `--source md` explicitly.
 - [GitHub Datasource](./github-datasource.md) -- GitHub alternative
 - [Azure DevOps Datasource](./azdevops-datasource.md) -- Azure DevOps
   alternative
+- [Datasource Helpers](./datasource-helpers.md) -- Orchestration bridge that
+  consumes datasource operations, including `close()` for auto-archiving
 - [Integrations & Troubleshooting](./integrations.md) -- Cross-cutting
   error-handling concerns

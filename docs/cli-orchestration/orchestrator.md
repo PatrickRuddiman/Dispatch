@@ -1,9 +1,10 @@
 # Orchestrator Pipeline
 
 The orchestrator (`src/agents/orchestrator.ts`) implements the core multi-phase
-pipeline that drives the entire dispatch tool. It coordinates file discovery,
-task parsing, AI provider lifecycle, optional planning, execution, markdown
-mutation, and automatic issue closing on external trackers.
+pipeline that drives the entire dispatch tool. It coordinates datasource-driven
+work item discovery, task parsing, AI provider lifecycle, optional planning,
+execution, per-issue branch management, datasource sync, and automatic issue
+closing on external trackers.
 
 ## What it does
 
@@ -15,15 +16,19 @@ The orchestrator exposes two entry points from the CLI:
    spec pipeline (if `--spec` is present; see [Spec Generation](../spec-generation/overview.md)) or the dispatch pipeline.
 
 2. **`orchestrate()`**: The core dispatch function that accepts an
-   `OrchestrateRunOptions` object and executes a seven-stage pipeline:
+   `OrchestrateRunOptions` object and executes the dispatch pipeline
+   (`src/orchestrator/dispatch-pipeline.ts`):
 
-    1. **Discover** task files via [glob pattern matching](integrations.md#glob-npm-package), sorted by leading filename digits
-    2. **Parse** unchecked tasks from discovered markdown files using [`parseTaskFile()`](../task-parsing/api-reference.md#parsetaskfile)
-    3. **Boot** the selected [AI provider](../provider-system/provider-overview.md) (OpenCode or Copilot)
-    4. **Group** tasks by execution mode using [`groupTasksByMode()`](../task-parsing/api-reference.md#grouptasksbymode)
-    5. **Dispatch** tasks in [group-aware concurrent batches](#concurrency-model) (plan + execute per task)
-    6. **Mutate** source markdown to [mark tasks complete](../task-parsing/api-reference.md#marktaskcomplete)
-    7. **Close issues** on the originating tracker when all tasks in a spec file succeed
+    1. **Discover** work items from the configured [datasource](../datasource-system/overview.md) (GitHub, Azure DevOps, or local markdown), optionally filtered by issue IDs
+    2. **Write** discovered items to temporary spec files via `writeItemsToTempDir()`
+    3. **Parse** unchecked tasks from the spec files using [`parseTaskFile()`](../task-parsing/api-reference.md#parsetaskfile)
+    4. **Boot** the selected [AI provider](../provider-system/provider-overview.md) (OpenCode or Copilot)
+    5. **Group** tasks by source file (one file = one issue), then by execution mode using [`groupTasksByMode()`](../task-parsing/api-reference.md#grouptasksbymode)
+    6. **Branch** (unless `--no-branch`): create a per-issue feature branch, dispatch tasks, push, create PR, switch back (see [branch lifecycle](cli.md#the---no-branch-flag))
+    7. **Dispatch** tasks in [group-aware concurrent batches](#concurrency-model) (plan + execute per task)
+    8. **Sync** task completion state back to the originating datasource via `datasource.update()`
+    9. **Close issues** on the originating tracker when all tasks in a spec file succeed
+    10. **Cleanup** provider and agent resources
 
 It returns a [`DispatchSummary`](#dispatchsummary) with counts of completed, failed, and skipped
 tasks plus per-task results.
@@ -54,7 +59,8 @@ manages the provider lifecycle (including the [cleanup registry](../shared-types
 ```mermaid
 flowchart TD
     subgraph "Phase 1: Discovery"
-        A["glob(pattern, {cwd, absolute: true})"] --> B{"files.length > 0?"}
+        A["datasource.list() or fetchItemsById()"] --> A2["writeItemsToTempDir()"]
+        A2 --> B{"files.length > 0?"}
         B -->|No| C["warn + return empty summary"]
     end
 
@@ -69,45 +75,59 @@ flowchart TD
     subgraph "Phase 3: Provider Boot"
         G -->|Yes| I["bootProvider(provider, {url, cwd})"]
         I --> I2["registerCleanup(() => instance.cleanup())"]
+        I2 --> I3["bootPlanner + bootExecutor"]
     end
 
-    subgraph "Phase 4: Grouping"
-        I2 --> J["groupTasksByMode(allTasks)"]
-        J --> K["Task[][] — groups of (P) and (S) tasks"]
+    subgraph "Phase 4: Per-Issue Dispatch"
+        I3 --> J["Group tasks by source file"]
+        J --> K["for each file (issue)"]
+
+        K --> K2{"--no-branch?"}
+        K2 -->|No| K3["getDefaultBranch → buildBranchName → createAndSwitchBranch"]
+        K2 -->|Yes| K4["Skip branch creation"]
+        K3 --> L
+        K4 --> L
+
+        L["groupTasksByMode(fileTasks)"]
+        L --> M["for each group (sequential)"]
+        M --> N["splice batch of size concurrency"]
+        N --> O["Promise.all(batch.map(task => ...))"]
+        O --> P{"--no-plan?"}
+        P -->|No| Q["planner.plan(task)"]
+        P -->|Yes| R["executor.execute(task, plan?)"]
+        Q --> R
+        R --> S{"success?"}
+        S -->|Yes| T["datasource.update() — sync completion"]
+        S -->|No| U["Record failure"]
+        T --> V{"group queue empty?"}
+        U --> V
+        V -->|No| N
+        V -->|Yes| W{"more groups?"}
+        W -->|Yes| M
+
+        W -->|No| W2{"branch was created?"}
+        W2 -->|Yes| W3["pushBranch → createPullRequest → switchBranch(default)"]
+        W2 -->|No| W4["Continue"]
+        W3 --> W4
+
+        W4 --> X{"more files?"}
+        X -->|Yes| K
     end
 
-    subgraph "Phase 5: Group-Aware Dispatch"
-        K --> L["for each group (sequential)"]
-        L --> M["splice batch of size concurrency"]
-        M --> N["Promise.all(batch.map(task => ...))"]
-        N --> O{"--no-plan?"}
-        O -->|No| P["planTask() → plan string"]
-        O -->|Yes| Q["dispatchTask(plan?)"]
-        P --> Q
-        Q --> R{"success?"}
-        R -->|Yes| S["markTaskComplete()"]
-        R -->|No| T["Record failure"]
-        S --> U{"group queue empty?"}
-        T --> U
-        U -->|No| M
-        U -->|Yes| V{"more groups?"}
-        V -->|Yes| L
+    subgraph "Phase 5: Issue Closing"
+        X -->|No| Y["closeCompletedSpecIssues()"]
     end
 
-    subgraph "Phase 6: Issue Closing"
-        V -->|No| W["closeCompletedSpecIssues()"]
-    end
-
-    subgraph "Phase 7: Cleanup"
-        W --> X["planner.cleanup() + instance.cleanup()"]
-        X --> Y["TUI stop, return DispatchSummary"]
+    subgraph "Phase 6: Cleanup"
+        Y --> Z["executor.cleanup() + planner.cleanup() + instance.cleanup()"]
+        Z --> ZZ["TUI stop, return DispatchSummary"]
     end
 ```
 
 ## Concurrency model
 
-The orchestrator uses a **group-aware batch-sequential** concurrency model
-(`src/agents/orchestrator.ts:165-220`). Tasks are first partitioned into
+The orchestrator uses a **group-aware batch-sequential** concurrency model.
+Within each issue's tasks, tasks are first partitioned into
 execution groups by their `(P)` / `(S)` mode prefix, then each group is
 dispatched using a batch-sequential loop.
 
@@ -178,17 +198,19 @@ approach is simpler but can leave capacity idle between batches.
 `Promise.all()` rejects as soon as **any** promise rejects. However, the
 individual task handlers catch their own errors internally:
 
-- **Planning failure** (`src/agents/orchestrator.ts:187-193`): If `planTask()` throws
+- **Planning failure**: If `planner.plan()` throws
   or returns `success: false`, the task is marked `"failed"` in the TUI and
   the handler returns a failed `DispatchResult`. It does **not** throw, so
   `Promise.all` does **not** reject. Other tasks in the batch continue
   independently.
-- **Dispatch failure** (`src/agents/orchestrator.ts:207-212`): If `dispatchTask()`
+- **Dispatch failure**: If `executor.execute()`
   returns `success: false`, the task is marked failed similarly. No throw.
 - **Unexpected exception**: If an exception escapes the handler (e.g., from
-  `markTaskComplete()`), it **would** cause `Promise.all` to reject, which
-  would propagate to the outer `try/catch` and stop the entire pipeline. This
-  is a gap — post-dispatch failures are not individually caught.
+  the datasource sync step), it **would** cause `Promise.all` to reject, which
+  would propagate to the outer `try/catch` and stop the entire pipeline.
+  However, the datasource sync is wrapped in its own `try/catch`
+  (`src/orchestrator/dispatch-pipeline.ts:225-228`), so in practice sync
+  failures are logged as warnings and do not propagate.
 
 **Key insight**: A planning failure in one task does **not** block other tasks
 in the same batch. Tasks are independent within a batch. A failure in one group
@@ -198,7 +220,7 @@ exception reaches `Promise.all`).
 ## The fileContentMap
 
 The orchestrator builds a `Map<string, string>` from file paths to raw file
-content at `src/orchestrator.ts:80-83`:
+content at `src/orchestrator/dispatch-pipeline.ts:102-105`:
 
 ```typescript
 const fileContentMap = new Map<string, string>();
@@ -217,58 +239,43 @@ The map avoids repeatedly reading `TaskFile` objects to find the one matching a
 task's `file` property. It trades a small amount of memory for O(1) path-based
 lookup instead of O(n) array scanning.
 
-## File discovery and ordering
+## File discovery and task source
 
-After glob resolves matching files, the orchestrator sorts them by the leading
-digits in the filename (`src/agents/orchestrator.ts:107-112`):
+The dispatch pipeline discovers work items from the configured
+[datasource](../datasource-system/overview.md) rather than using direct glob
+pattern matching. The pipeline (`src/orchestrator/dispatch-pipeline.ts:61-86`):
 
-```
-files.sort((a, b) => {
-    numA = parseInt(basename(a).match(/^(\d+)/)?.[1] ?? "0", 10)
-    numB = parseInt(basename(b).match(/^(\d+)/)?.[1] ?? "0", 10)
-    if (numA !== numB) return numA - numB
-    return a.localeCompare(b)
-})
-```
+1. **Fetches items**: If issue IDs were passed on the CLI, `fetchItemsById()`
+   retrieves those specific items. Otherwise, `datasource.list()` retrieves all
+   open items from the configured source.
+2. **Writes to temp files**: `writeItemsToTempDir()` writes each item's
+   content to a temporary spec file and returns the file paths along with an
+   `issueDetailsByFile` map that associates each file with its `IssueDetails`.
+3. **Parses tasks**: Each temp file is parsed via `parseTaskFile()` to extract
+   unchecked tasks.
 
-This is a **numeric** sort, not a lexicographic one. The regex `^(\d+)` extracts
-the leading integer from the filename (e.g., `6` from `6-auth.md`, `11` from
-`11-deploy.md`). Files without a leading number are treated as `0`.
+This datasource-driven approach replaces the earlier glob-based discovery model
+and enables the pipeline to work with any supported backend (GitHub, Azure
+DevOps, local markdown) through the unified `Datasource` interface.
 
-| Filename | Extracted number | Sort position |
-|----------|-----------------|---------------|
-| `1-setup.md` | 1 | first |
-| `6-auth.md` | 6 | second |
-| `11-deploy.md` | 11 | third |
-| `notes.md` | 0 (no match) | before all numbered files |
+### Task grouping by file
 
-When two files have the same leading number (or both lack one), they fall back
-to lexicographic comparison (`a.localeCompare(b)`).
+After parsing, tasks are grouped by their source file
+(`src/orchestrator/dispatch-pipeline.ts:143-149`). Each file represents one
+issue, and the pipeline processes files sequentially. Within each file, tasks
+are further grouped by execution mode via `groupTasksByMode()` (see
+[concurrency model](#concurrency-model)).
 
-### Why this matters
-
-Task files generated by `--spec` mode use the naming pattern `<id>-<slug>.md`
-where `<id>` is the issue number. Numeric sorting ensures issue #6 is processed
-before issue #11, even though `"6" > "11"` lexicographically. This gives the
-user predictable, ascending-order execution that matches the issue numbering.
-
-### Filename convention for issue IDs
-
-Spec files follow the pattern `<id>-<slug>.md`:
-
-- `<id>` is the issue or work item number (digits only)
-- `<slug>` is the lowercased, sanitized issue title truncated to 60 characters
-- The separator is a single hyphen
-
-Examples: `42-add-user-auth.md`, `7-fix-login-redirect.md`
-
-This convention is relied upon by both the numeric sort and the
-[issue auto-close feature](#automatic-issue-closing) to extract the issue ID.
+This per-file grouping is what enables the branch lifecycle: all tasks for a
+given issue are dispatched on the same feature branch before the pipeline moves
+to the next issue.
 
 ## Automatic issue closing
 
-After all groups have been dispatched, the orchestrator calls
-`closeCompletedSpecIssues()` (`src/agents/orchestrator.ts:223, 251-290`). This
+After all issues have been dispatched, the pipeline calls
+`closeCompletedSpecIssues()` (`src/orchestrator/dispatch-pipeline.ts:284`),
+which is imported from `src/orchestrator/datasource-helpers.ts` (see
+[Datasource Helpers](../datasource-system/datasource-helpers.md#closecompletedspecissues)). This
 function automatically closes issues on the originating tracker when every task
 in a spec file has succeeded.
 
@@ -317,8 +324,8 @@ the `DispatchSummary` returned to the CLI.
 
 ### Process-level cleanup via `registerCleanup`
 
-Immediately after booting the provider (`src/agents/orchestrator.ts:151`), the
-orchestrator registers the provider's cleanup function with the process-level
+Immediately after booting the provider (`src/orchestrator/dispatch-pipeline.ts:123`), the
+pipeline registers the provider's cleanup function with the process-level
 cleanup registry:
 
 ```
@@ -344,24 +351,19 @@ The cleanup registry has these characteristics:
 
 ### The cleanup gap (mitigated)
 
-The orchestrator's `try/catch` structure (`src/agents/orchestrator.ts:95-236`)
-calls `instance.cleanup()` only on the success path (line 227):
+The dispatch pipeline's `try/catch` structure
+(`src/orchestrator/dispatch-pipeline.ts:60-298`) calls cleanup on the success
+path (lines 287-289):
 
 ```
-try {
-  // ... pipeline phases ...
-  await planner?.cleanup();
-  await instance.cleanup();  // only on success path
-  // ...
-} catch (err) {
-  tui.stop();                // TUI is stopped
-  throw err;                 // but instance.cleanup() is NOT called here
-}
+await executor.cleanup();
+await planner?.cleanup();
+await instance.cleanup();
 ```
 
 If an error occurs anywhere in the pipeline after the provider is booted,
-the catch block stops the TUI but does **not** call `instance.cleanup()`.
-However, the `registerCleanup` call at line 151 ensures that when the
+the catch block stops the TUI but does **not** call cleanup.
+However, the `registerCleanup` call at line 123 ensures that when the
 re-thrown error reaches the CLI's top-level error handler, `runCleanup()` is
 called, which invokes `instance.cleanup()`.
 
@@ -384,39 +386,38 @@ try {
 }
 ```
 
-### Markdown mutation after success
+### Datasource sync after success
 
-After a task succeeds, the orchestrator calls [`markTaskComplete()`](../task-parsing/api-reference.md#marktaskcomplete)
-(`src/agents/orchestrator.ts:203`):
+After a task succeeds, the pipeline syncs the completion state back to the
+originating datasource (`src/orchestrator/dispatch-pipeline.ts:216-228`):
 
-```
-await markTaskComplete(task);
-```
+1. The task's filename is parsed via `parseIssueFilename()` to extract the
+   issue ID.
+2. The updated file content is read from disk.
+3. `datasource.update(issueId, title, updatedContent, fetchOpts)` pushes the
+   updated content back to the tracker.
 
-If `markTaskComplete()` throws (e.g., file deleted, line-number mismatch, disk
-full), the exception escapes the per-task handler and causes `Promise.all` to
-reject. This means the task's dispatch result is not recorded, and the entire
-pipeline may stop (see [failure semantics](#promiseall-and-failure-semantics)).
+This sync step is wrapped in a `try/catch`. If it fails (e.g., network error,
+permission issue), a warning is logged but the task is still marked as
+successful. The pipeline continues with the next task.
 
-The markdown mutation is **not rolled back** on failure. If `markTaskComplete`
-partially writes and then fails, the file may be left in an inconsistent state.
-On a subsequent run, the task may be skipped (if it was marked `[x]` before the
-failure) or retried (if the write didn't complete).
-
-**Mitigation**: File mutation failures are rare in practice. If one occurs, the
-user can manually inspect and fix the task file. A more robust approach would
-catch the error within the per-task handler and record it as a failed dispatch.
+**Note**: Unlike the earlier `markTaskComplete()` approach that mutated local
+files, the current pipeline syncs state to the external datasource. The local
+temp files are written by `writeItemsToTempDir()` and are not the source of
+truth -- the datasource is.
 
 ## Dry-run mode
 
 When `--dry-run` is passed (see [CLI options](cli.md#options-reference)), the
-orchestrator takes a completely separate code path (`dryRunMode()` at
-`src/agents/orchestrator.ts:292-336`):
+pipeline takes a completely separate code path (`dryRunMode()` at
+`src/orchestrator/dispatch-pipeline.ts:305-363`):
 
 - No TUI is created.
 - No provider is booted.
-- Files are discovered and parsed, then tasks are listed via the
-  [logger](../shared-types/logger.md).
+- Items are fetched from the datasource and written to temp files, then parsed.
+  Tasks are listed via the [logger](../shared-types/logger.md), including the
+  branch name that would be created for each issue. The branch name uses the
+  [datasource branch naming convention](../datasource-system/overview.md#branch-naming-convention).
 - All tasks are reported as `skipped` in the summary.
 
 Dry-run mode is useful for previewing what dispatch would do without starting
@@ -427,17 +428,21 @@ AI providers or modifying any files.
 ### OrchestrateRunOptions
 
 Passed from `runFromCli()` (after config resolution) to `orchestrate()`
-(`src/agents/orchestrator.ts:28-41`). The `cwd` field is captured at boot
+(`src/agents/orchestrator.ts:18-29`). The `cwd` field is captured at boot
 time via `bootOrchestrator({ cwd })` rather than passed per-invocation:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `pattern` | `string[]` | Glob pattern(s) for task file discovery (array, not a single string) |
-| `concurrency` | `number` | Max parallel dispatches per batch |
-| `dryRun` | `boolean` | Preview mode — no execution |
+| `issueIds` | `string[]` | Issue IDs to dispatch (empty array = dispatch all open issues) |
+| `concurrency` | `number?` | Max parallel dispatches per batch |
+| `dryRun` | `boolean` | Preview mode -- no execution |
 | `noPlan` | `boolean?` | Skip the planner agent phase (optional, defaults to `false`) |
+| `noBranch` | `boolean?` | Skip branch creation, push, and PR lifecycle (optional, defaults to `false`). See [the --no-branch flag](cli.md#the---no-branch-flag). |
 | `provider` | `ProviderName?` | AI backend name (`"opencode"` or `"copilot"`, defaults to `"opencode"`) |
 | `serverUrl` | `string?` | URL of a running provider server |
+| `source` | `DatasourceName?` | Datasource backend (`"github"`, `"azdevops"`, or `"md"`) |
+| `org` | `string?` | Azure DevOps organization URL |
+| `project` | `string?` | Azure DevOps project name |
 
 ### DispatchSummary
 
@@ -476,7 +481,13 @@ Returned from `orchestrate()` to the CLI:
   generates markdown spec files from issues
 - [Datasource System](../datasource-system/overview.md) -- the unified datasource
   abstraction that underlies issue fetching and auto-detection
+- [Datasource Helpers](../datasource-system/datasource-helpers.md) -- temp file
+  writing, issue ID extraction, and auto-close logic used by the pipeline
 - [Cleanup Registry](../shared-types/cleanup.md) -- process-level cleanup for
   graceful provider shutdown
+- [Markdown Syntax Reference](../task-parsing/markdown-syntax.md) -- supported
+  checkbox formats and `(P)`/`(S)` mode prefixes that drive grouping
+- [Git Operations](../planning-and-dispatch/git.md) -- how `commitTask()` creates
+  conventional commits after task completion
 - [Testing Overview](../testing/overview.md) -- project-wide test suite
   documentation (note: orchestrator is not directly tested)

@@ -572,8 +572,9 @@ If the config file is deleted between `loadConfig()` and a subsequent
 
 If `dispatch config set <key> <value>` reports an unknown key, the key must be
 one of: `provider`, `concurrency`, `source`, `org`, `project`, `serverUrl`.
-Keys like `dryRun`, `noPlan`, and `verbose` are CLI-only flags and cannot be
-persisted.
+Keys like `dryRun`, `noPlan`, `noBranch`, and `verbose` are CLI-only flags and
+cannot be persisted. See [the --no-branch flag](cli.md#the---no-branch-flag)
+for details on that flag's behavior.
 
 ## Related documentation
 

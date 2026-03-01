@@ -126,7 +126,7 @@ nearly the same time:
    commit message
 
 The [orchestrator](../cli-orchestration/orchestrator.md) (`src/orchestrator.ts:113-115`) processes tasks in batches
-using `Promise.all()`. Within a batch, the [`markTaskComplete`](../task-parsing/api-reference.md#marktaskcomplete) → `commitTask`
+using `Promise.all()`. Within a batch, the [`markTaskComplete`](../task-parsing/api-reference.md#marktaskcomplete) → [`commitTask`](#the-committask-function)
 sequence for each task runs concurrently. There is no locking or sequencing
 of git operations between tasks in the same batch.
 
@@ -232,3 +232,7 @@ If this becomes an issue, the `git()` helper can be modified to pass a larger
   sequences `markTaskComplete` and `commitTask`
 - [CLI Options](../cli-orchestration/cli.md#options-reference) -- `--concurrency`
   flag that affects git safety
+- [Markdown Syntax Reference](../task-parsing/markdown-syntax.md) -- Checkbox
+  format that the parser uses to identify tasks before commit
+- [Datasource Overview](../datasource-system/overview.md) -- Branch naming
+  convention and git lifecycle operations managed by the datasource layer

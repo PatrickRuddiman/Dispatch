@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-03-01T02:29:09.017Z
+<!-- hem-sha: 880b9a4ff42ed1cf40fc1be3511ad287b2740337 -->
+- docs/datasource-system/datasource-helpers.md
+- ocs/architecture.md
+- ocs/cli-orchestration/cli.md
+- ocs/cli-orchestration/configuration.md
+- ocs/cli-orchestration/integrations.md
+- ocs/cli-orchestration/orchestrator.md
+- ocs/datasource-system/azdevops-datasource.md
+- ocs/datasource-system/github-datasource.md
+- ocs/datasource-system/integrations.md
+- ocs/datasource-system/markdown-datasource.md
+- ocs/datasource-system/overview.md
+- ocs/datasource-system/testing.md
+- ocs/index.md
+- ocs/issue-fetching/azdevops-fetcher.md
+- ocs/planning-and-dispatch/dispatcher.md
+- ocs/planning-and-dispatch/git.md
+- ocs/planning-and-dispatch/integrations.md
+- ocs/planning-and-dispatch/task-context-and-lifecycle.md
+- ocs/provider-system/adding-a-provider.md
+- ocs/provider-system/provider-overview.md
+- ocs/shared-types/integrations.md
+- ocs/shared-types/logger.md
+- ocs/spec-generation/integrations.md
+- ocs/spec-generation/overview.md
+- ocs/task-parsing/markdown-syntax.md
+- ocs/task-parsing/overview.md
+- ocs/testing/format-tests.md
+- ocs/testing/overview.md
+- ocs/testing/parser-tests.md
+
 ## 2026-02-28T23:23:30.191Z
 <!-- hem-sha: feb6f01b96b8257fe0a7ede3b3aad12b0b258490 -->
 - docs/cli-orchestration/configuration.md

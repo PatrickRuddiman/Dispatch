@@ -22,6 +22,62 @@ the [CLI & Orchestration group](overview.md). It:
    routing (dispatch vs spec), and pipeline execution.
 6. Translates the result summary into a POSIX exit code.
 
+## Installation and distribution
+
+The `dispatch` CLI is distributed as the npm package `dispatch-tasks`.
+
+### Requirements
+
+- **Node.js >= 18** (`package.json` `engines` field). The tsup build target is
+  `node18` (`tsup.config.ts`).
+- **ESM only**: The package uses `"type": "module"` in `package.json`. All
+  imports use `.js` extensions for ESM compatibility.
+
+### Install methods
+
+```bash
+# Global install — adds `dispatch` to PATH
+npm install -g dispatch-tasks
+
+# Run without installing
+npx dispatch-tasks
+
+# Local project install
+npm install --save-dev dispatch-tasks
+npx dispatch           # runs via local node_modules/.bin
+```
+
+### Binary entry point
+
+The `package.json` `bin` field maps the `dispatch` command to `./dist/cli.js`:
+
+```json
+{ "bin": { "dispatch": "./dist/cli.js" } }
+```
+
+The tsup build (`tsup.config.ts`) compiles `src/cli.ts` to `dist/cli.js` as a
+single ESM bundle with a `#!/usr/bin/env node` shebang banner. Source maps are
+enabled (`sourcemap: true`), type declarations are not emitted (`dts: false`),
+and code splitting is disabled (`splitting: false`) to produce a single output
+file.
+
+### Published files
+
+Only the `dist/` directory is included in the published package (`"files": ["dist"]`
+in `package.json`). Source TypeScript files, tests, docs, and configuration
+files are excluded from the npm tarball.
+
+### Runtime dependencies
+
+The package has four runtime dependencies:
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `@opencode-ai/sdk` | ^1.2.10 | OpenCode provider SDK |
+| `@github/copilot-sdk` | ^0.1.0 | GitHub Copilot provider SDK |
+| `chalk` | ^5.4.1 | Terminal color output |
+| `glob` | ^11.0.1 | File pattern matching for task discovery |
+
 ## Why a custom parser instead of commander/yargs?
 
 The project uses a hand-rolled `parseArgs()` function
@@ -73,6 +129,7 @@ checks for `--server-url` and `--cwd`.
 | `<issue-id...>` | string (positional, repeatable) | *(none — dispatches all open issues if omitted)* | Issue IDs to dispatch (e.g., `14`, `14,15,16`, or `14 15 16`) |
 | `--dry-run` | boolean | `false` | List discovered tasks without executing (see [dry-run mode](orchestrator.md#dry-run-mode)) |
 | `--no-plan` | boolean | `false` | Skip the [planner agent](../planning-and-dispatch/planner.md), dispatch tasks directly (see [Planning & Dispatch overview](../planning-and-dispatch/overview.md)) |
+| `--no-branch` | boolean | `false` | Skip branch creation, push, and PR lifecycle (see [the --no-branch flag](#the---no-branch-flag)) |
 | `--concurrency <n>` | integer | `min(cpus, freeMB/500)` | Maximum parallel dispatches per batch (see [concurrency model](orchestrator.md#concurrency-model) and [default computation](configuration.md#default-concurrency-computation)) |
 | `--provider <name>` | string | `"opencode"` | AI agent backend (`opencode` or `copilot`); see [Provider Abstraction](../provider-system/provider-overview.md) |
 | `--server-url <url>` | string | *none* | Connect to a running provider server instead of starting one |
@@ -130,6 +187,85 @@ on the selected provider:
 
 When `--server-url` is not provided, each provider boots its own server
 process and manages its lifecycle internally.
+
+## The `--no-branch` flag
+
+The `--no-branch` flag (`src/cli.ts:122-124`) disables the per-issue branch
+lifecycle that the dispatch pipeline normally performs. It is a boolean flag
+parsed into `explicitFlags` as `"noBranch"` and passed through to the
+orchestrator's `OrchestrateRunOptions.noBranch` field.
+
+### What the branch lifecycle does (when `--no-branch` is *not* set)
+
+When dispatching tasks, the pipeline groups tasks by their source file (each
+file corresponds to one issue). For each file that has associated
+`IssueDetails` (issue number and title), the pipeline:
+
+1. **Gets the default branch** via `datasource.getDefaultBranch()` (e.g.,
+   `main` or `master`).
+2. **Builds a branch name** via `datasource.buildBranchName(number, title)` --
+   typically `dispatch/<number>-<sanitized-title>`.
+3. **Creates and switches to the branch** via
+   `datasource.createAndSwitchBranch()`. If the branch already exists, the
+   datasource switches to it instead of creating a new one.
+4. **Dispatches all tasks** for that issue on the new branch.
+5. **Pushes the branch** to the remote via `datasource.pushBranch()`.
+6. **Creates a pull request** linking the branch to the issue via
+   `datasource.createPullRequest()`.
+7. **Switches back** to the default branch via `datasource.switchBranch()`.
+
+Each step is wrapped in `try/catch` with a warning on failure. A branch
+creation failure causes the pipeline to continue dispatching tasks on the
+current branch (no branch isolation), but push and PR steps are skipped. See
+`src/orchestrator/dispatch-pipeline.ts:157-280` for the implementation.
+
+### When to use `--no-branch`
+
+Use `--no-branch` when:
+
+- **You are working on a branch already** and want tasks committed to the
+  current branch rather than new per-issue branches.
+- **Your workflow manages branches externally** (e.g., a CI pipeline that
+  creates branches before invoking `dispatch`).
+- **The repository does not have a remote** or push access is not available.
+- **Testing or development**: You want to see task results without creating
+  git artifacts.
+
+### CLI-only flag
+
+`--no-branch` is a CLI-only flag. It is **not** in `CONFIG_KEYS` and cannot be
+persisted via `dispatch config set`. This is intentional -- branch lifecycle
+behavior is typically per-invocation rather than a persistent default.
+
+```mermaid
+sequenceDiagram
+    participant CLI as CLI (cli.ts)
+    participant Orch as Orchestrator
+    participant Pipeline as dispatch-pipeline.ts
+    participant DS as Datasource
+
+    CLI->>Orch: runFromCli({ noBranch: false })
+    Orch->>Pipeline: runDispatchPipeline(opts, cwd)
+
+    loop For each issue file
+        alt noBranch = false AND issueDetails exist
+            Pipeline->>DS: getDefaultBranch()
+            DS-->>Pipeline: "main"
+            Pipeline->>DS: buildBranchName(number, title)
+            DS-->>Pipeline: "dispatch/42-add-auth"
+            Pipeline->>DS: createAndSwitchBranch("dispatch/42-add-auth")
+        end
+
+        Pipeline->>Pipeline: dispatch tasks (plan + execute)
+
+        alt noBranch = false AND branch was created
+            Pipeline->>DS: pushBranch("dispatch/42-add-auth")
+            Pipeline->>DS: createPullRequest(branch, number, title)
+            DS-->>Pipeline: PR URL
+            Pipeline->>DS: switchBranch("main")
+        end
+    end
+```
 
 ## Exit code contract
 

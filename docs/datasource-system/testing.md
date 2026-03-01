@@ -162,5 +162,7 @@ directories.
   documentation
 - [Configuration Tests](../testing/config-tests.md) -- Config validation tests
   that also cover datasource name validation
+- [Datasource Helpers](./datasource-helpers.md) -- Helper utilities used by
+  datasource implementations
 - [Spec Generator Tests](../testing/spec-generator-tests.md) -- Tests for the
   spec pipeline that consumes datasource output
