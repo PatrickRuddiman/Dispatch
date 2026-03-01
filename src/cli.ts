@@ -26,6 +26,9 @@ const HELP = `
     dispatch [issue-id...]           Dispatch specific issues (or all open issues if none given)
     dispatch --spec <ids>            Generate spec files from issues
     dispatch --spec <glob>           Generate specs from local markdown files in the configured datasource
+    dispatch --respec                Regenerate all existing specs
+    dispatch --respec <ids>          Regenerate specs for specific issues
+    dispatch --respec <glob>         Regenerate specs matching a glob pattern
 
   Dispatch options:
     --dry-run              List tasks without dispatching
@@ -38,6 +41,7 @@ const HELP = `
 
   Spec options:
     --spec <value>         Comma-separated issue numbers or glob pattern for .md files (creates specs in configured datasource)
+    --respec [value]       Regenerate specs: issue numbers, glob, or omit to regenerate all existing specs
     --source <name>        Issue source: ${DATASOURCE_NAMES.join(", ")} (auto-detected from git remote)
     --org <url>            Azure DevOps organization URL
     --project <name>       Azure DevOps project name
@@ -70,6 +74,9 @@ const HELP = `
     dispatch --spec "drafts/*.md"
     dispatch --spec "drafts/*.md" --source github
     dispatch --spec "./my-feature.md" --provider copilot
+    dispatch --respec
+    dispatch --respec 42,43,44
+    dispatch --respec "specs/*.md"
     dispatch config set provider copilot
     dispatch config list
     dispatch config reset
@@ -128,6 +135,16 @@ function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
       i--; // outer loop will i++
       args.spec = specs.length === 1 ? specs[0] : specs;
       explicitFlags.add("spec");
+    } else if (arg === "--respec") {
+      i++;
+      const respecs: string[] = [];
+      while (i < argv.length && !argv[i].startsWith("--")) {
+        respecs.push(argv[i]);
+        i++;
+      }
+      i--; // outer loop will i++
+      args.respec = respecs.length === 1 ? respecs[0] : respecs;
+      explicitFlags.add("respec");
     } else if (arg === "--source") {
       i++;
       const val = argv[i];

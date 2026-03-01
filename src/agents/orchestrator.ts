@@ -38,6 +38,7 @@ export interface RawCliArgs {
   cwd: string;
   verbose: boolean;
   spec?: string | string[];
+  respec?: string | string[];
   issueSource?: DatasourceName;
   org?: string;
   project?: string;
