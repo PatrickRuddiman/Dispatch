@@ -220,6 +220,54 @@ describe("validateConfigValue", () => {
       expect(result).toContain("must not be empty");
     }
   });
+
+  it("accepts valid planTimeout (positive number)", () => {
+    expect(validateConfigValue("planTimeout", "1")).toBe(null);
+    expect(validateConfigValue("planTimeout", "10")).toBe(null);
+    expect(validateConfigValue("planTimeout", "1.5")).toBe(null);
+    expect(validateConfigValue("planTimeout", "0.5")).toBe(null);
+  });
+
+  it("rejects non-positive planTimeout", () => {
+    const zero = validateConfigValue("planTimeout", "0");
+    expect(zero).not.toBe(null);
+    expect(zero).toContain("positive number");
+
+    const negative = validateConfigValue("planTimeout", "-5");
+    expect(negative).not.toBe(null);
+    expect(negative).toContain("positive number");
+  });
+
+  it("rejects non-numeric planTimeout", () => {
+    const text = validateConfigValue("planTimeout", "abc");
+    expect(text).not.toBe(null);
+    expect(text).toContain("positive number");
+
+    const empty = validateConfigValue("planTimeout", "");
+    expect(empty).not.toBe(null);
+  });
+
+  it("accepts valid planRetries (non-negative integer)", () => {
+    expect(validateConfigValue("planRetries", "0")).toBe(null);
+    expect(validateConfigValue("planRetries", "1")).toBe(null);
+    expect(validateConfigValue("planRetries", "5")).toBe(null);
+  });
+
+  it("rejects negative planRetries", () => {
+    const negative = validateConfigValue("planRetries", "-1");
+    expect(negative).not.toBe(null);
+    expect(negative).toContain("non-negative integer");
+  });
+
+  it("rejects non-integer planRetries", () => {
+    const decimal = validateConfigValue("planRetries", "1.5");
+    expect(decimal).not.toBe(null);
+    expect(decimal).toContain("non-negative integer");
+
+    const text = validateConfigValue("planRetries", "abc");
+    expect(text).not.toBe(null);
+    expect(text).toContain("non-negative integer");
+  });
 });
 
 // ─── parseConfigValue ────────────────────────────────────────────────
@@ -235,6 +283,18 @@ describe("parseConfigValue", () => {
     const result = parseConfigValue("provider", "copilot");
     expect(result).toBe("copilot");
     expect(typeof result).toBe("string");
+  });
+
+  it("converts planTimeout to a number via parseFloat", () => {
+    const result = parseConfigValue("planTimeout", "10.5");
+    expect(result).toBe(10.5);
+    expect(typeof result).toBe("number");
+  });
+
+  it("converts planRetries to a number via parseInt", () => {
+    const result = parseConfigValue("planRetries", "3");
+    expect(result).toBe(3);
+    expect(typeof result).toBe("number");
   });
 });
 

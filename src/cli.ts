@@ -35,6 +35,8 @@ const HELP = `
     --concurrency <n>      Max parallel dispatches (default: min(cpus, freeMB/500))
     --provider <name>      Agent backend: ${PROVIDER_NAMES.join(", ")} (default: opencode)
     --server-url <url>     URL of a running provider server
+    --plan-timeout <min>   Planning timeout in minutes (default: 10)
+    --plan-retries <n>     Retry attempts after planning timeout (default: 1)
     --cwd <dir>            Working directory (default: cwd)
 
   Spec options:
@@ -56,7 +58,7 @@ const HELP = `
     dispatch config reset               Reset config (delete config file)
     dispatch config path                Show config file path
 
-    Valid keys: provider, concurrency, source, org, project, serverUrl
+    Valid keys: provider, concurrency, source, org, project, serverUrl, planTimeout, planRetries
 
   Examples:
     dispatch 14
@@ -176,6 +178,24 @@ function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
       i++;
       args.serverUrl = argv[i];
       explicitFlags.add("serverUrl");
+    } else if (arg === "--plan-timeout") {
+      i++;
+      const val = parseFloat(argv[i]);
+      if (isNaN(val) || val <= 0) {
+        log.error("--plan-timeout must be a positive number (minutes)");
+        process.exit(1);
+      }
+      args.planTimeout = val;
+      explicitFlags.add("planTimeout");
+    } else if (arg === "--plan-retries") {
+      i++;
+      const val = parseInt(argv[i], 10);
+      if (isNaN(val) || val < 0) {
+        log.error("--plan-retries must be a non-negative integer");
+        process.exit(1);
+      }
+      args.planRetries = val;
+      explicitFlags.add("planRetries");
     } else if (arg === "--cwd") {
       i++;
       args.cwd = resolve(argv[i]);
