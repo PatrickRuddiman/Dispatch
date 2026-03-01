@@ -112,13 +112,70 @@ describe("MD datasource — fetch", () => {
     expect(result.title).toBe("Feature Title");
   });
 
-  it("falls back to filename as title when no H1 heading", async () => {
+  it("extracts title from first content line when no H1 heading", async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
     const specsDir = join(tmpDir, ".dispatch", "specs");
     await mkdir(specsDir, { recursive: true });
     await writeFile(join(specsDir, "my-spec.md"), "No heading here\n\nJust content", "utf-8");
     const result = await md.fetch("my-spec", { cwd: tmpDir });
-    expect(result.title).toBe("my-spec");
+    expect(result.title).toBe("No heading here");
+  });
+
+  it("strips leading markdown prefixes from title", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
+    const specsDir = join(tmpDir, ".dispatch", "specs");
+    await mkdir(specsDir, { recursive: true });
+    await writeFile(join(specsDir, "test.md"), "## Subheading Title\n\nBody", "utf-8");
+    const result = await md.fetch("test", { cwd: tmpDir });
+    expect(result.title).toBe("Subheading Title");
+  });
+
+  it("truncates long first lines at word boundary", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
+    const specsDir = join(tmpDir, ".dispatch", "specs");
+    await mkdir(specsDir, { recursive: true });
+    const longLine = "This is a very long description that should be truncated at a word boundary because it exceeds eighty characters in total length";
+    await writeFile(join(specsDir, "long.md"), longLine, "utf-8");
+    const result = await md.fetch("long", { cwd: tmpDir });
+    expect(result.title.length).toBeLessThanOrEqual(80);
+    expect(longLine.startsWith(result.title)).toBe(true);
+    expect(result.title).not.toMatch(/\s$/);
+  });
+
+  it("skips blank lines to find first meaningful content", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
+    const specsDir = join(tmpDir, ".dispatch", "specs");
+    await mkdir(specsDir, { recursive: true });
+    await writeFile(join(specsDir, "test.md"), "\n\n\nActual content here", "utf-8");
+    const result = await md.fetch("test", { cwd: tmpDir });
+    expect(result.title).toBe("Actual content here");
+  });
+
+  it("strips blockquote prefix from title", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
+    const specsDir = join(tmpDir, ".dispatch", "specs");
+    await mkdir(specsDir, { recursive: true });
+    await writeFile(join(specsDir, "test.md"), "> Quoted description text", "utf-8");
+    const result = await md.fetch("test", { cwd: tmpDir });
+    expect(result.title).toBe("Quoted description text");
+  });
+
+  it("strips list marker prefix from title", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
+    const specsDir = join(tmpDir, ".dispatch", "specs");
+    await mkdir(specsDir, { recursive: true });
+    await writeFile(join(specsDir, "test.md"), "- List item as description", "utf-8");
+    const result = await md.fetch("test", { cwd: tmpDir });
+    expect(result.title).toBe("List item as description");
+  });
+
+  it("falls back to filename when content is only whitespace", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
+    const specsDir = join(tmpDir, ".dispatch", "specs");
+    await mkdir(specsDir, { recursive: true });
+    await writeFile(join(specsDir, "empty.md"), "   \n  \n   ", "utf-8");
+    const result = await md.fetch("empty", { cwd: tmpDir });
+    expect(result.title).toBe("empty");
   });
 
   it("throws when file does not exist", async () => {
@@ -227,7 +284,7 @@ describe("MD datasource — create", () => {
   it("returns correct IssueDetails for created file", async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
     const result = await md.create("Test Title", "body", { cwd: tmpDir });
-    expect(result.title).toBe("test-title");
+    expect(result.title).toBe("body");
     expect(result.body).toBe("body");
     expect(result.state).toBe("open");
     expect(result.labels).toEqual([]);
