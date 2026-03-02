@@ -52,6 +52,11 @@ vi.mock("../orchestrator/dispatch-pipeline.js", () => ({
   }),
 }));
 
+vi.mock("../helpers/confirm-large-batch.js", () => ({
+  LARGE_BATCH_THRESHOLD: 100,
+  confirmLargeBatch: vi.fn().mockResolvedValue(true),
+}));
+
 // ─── Imports (AFTER vi.mock calls) ──────────────────────────────────
 
 import { boot, type RawCliArgs } from "../orchestrator/runner.js";
@@ -61,6 +66,7 @@ import { resolveSource } from "../spec-generator.js";
 import { getDatasource } from "../datasources/index.js";
 import { runSpecPipeline } from "../orchestrator/spec-pipeline.js";
 import { runDispatchPipeline } from "../orchestrator/dispatch-pipeline.js";
+import { confirmLargeBatch } from "../helpers/confirm-large-batch.js";
 import type { IssueDetails, Datasource } from "../datasources/interface.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -124,6 +130,7 @@ describe("--respec routing in runFromCli()", () => {
     // Restore default mock implementations after clearAllMocks resets them
     vi.mocked(resolveCliConfig).mockImplementation(async (args) => args);
     vi.mocked(resolveSource).mockResolvedValue("md");
+    vi.mocked(confirmLargeBatch).mockResolvedValue(true);
     vi.mocked(runSpecPipeline).mockResolvedValue({
       total: 0,
       generated: 0,
@@ -300,6 +307,46 @@ describe("--respec routing in runFromCli()", () => {
       agent.runFromCli(createRawCliArgs({ respec: [] })),
     ).rejects.toThrow("process.exit called");
 
+    expect(runSpecPipeline).not.toHaveBeenCalled();
+  });
+
+  // ─── Large batch confirmation ─────────────────────────────────
+
+  it("prompts for confirmation when bare respec discovers many specs", async () => {
+    const manySpecs = Array.from({ length: 150 }, (_, i) =>
+      createIssueDetails({ number: String(i + 1) }),
+    );
+    const mockDs = createMockDatasource({
+      list: vi.fn<Datasource["list"]>().mockResolvedValue(manySpecs),
+    });
+    vi.mocked(getDatasource).mockReturnValue(mockDs);
+    vi.mocked(resolveSource).mockResolvedValue("md");
+
+    const agent = await boot({ cwd: "/tmp/test" });
+    await agent.runFromCli(createRawCliArgs({ respec: [] }));
+
+    expect(confirmLargeBatch).toHaveBeenCalledWith(150);
+    expect(runSpecPipeline).toHaveBeenCalledOnce();
+  });
+
+  it("exits cleanly when user declines confirmation for bare respec", async () => {
+    vi.mocked(confirmLargeBatch).mockResolvedValue(false);
+    const manySpecs = Array.from({ length: 150 }, (_, i) =>
+      createIssueDetails({ number: String(i + 1) }),
+    );
+    const mockDs = createMockDatasource({
+      list: vi.fn<Datasource["list"]>().mockResolvedValue(manySpecs),
+    });
+    vi.mocked(getDatasource).mockReturnValue(mockDs);
+    vi.mocked(resolveSource).mockResolvedValue("md");
+
+    const agent = await boot({ cwd: "/tmp/test" });
+
+    await expect(
+      agent.runFromCli(createRawCliArgs({ respec: [] })),
+    ).rejects.toThrow("process.exit called");
+
+    expect(process.exit).toHaveBeenCalledWith(0);
     expect(runSpecPipeline).not.toHaveBeenCalled();
   });
 });

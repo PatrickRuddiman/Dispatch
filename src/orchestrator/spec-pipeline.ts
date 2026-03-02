@@ -19,6 +19,7 @@ import { bootProvider } from "../providers/index.js";
 import { boot as bootSpecAgent } from "../agents/spec.js";
 import { registerCleanup } from "../helpers/cleanup.js";
 import { log } from "../helpers/logger.js";
+import { confirmLargeBatch } from "../helpers/confirm-large-batch.js";
 import chalk from "chalk";
 import { elapsed, renderHeaderLines } from "../helpers/format.js";
 import { slugify } from "../helpers/slugify.js";
@@ -156,6 +157,12 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     const noun = isTrackerMode ? "issues" : isInlineText ? "inline specs" : "files";
     log.error(`No ${noun} could be loaded. Aborting spec generation.`);
     return { total: items.length, generated: 0, failed: items.length, files: [], issueNumbers: [], durationMs: Date.now() - pipelineStart, fileDurationsMs: {} };
+  }
+
+  // ── Confirm large batch ─────────────────────────────────────
+  const confirmed = await confirmLargeBatch(validItems.length);
+  if (!confirmed) {
+    return { total: 0, generated: 0, failed: 0, files: [], issueNumbers: [], durationMs: Date.now() - pipelineStart, fileDurationsMs: {} };
   }
 
   // ── Boot AI provider ────────────────────────────────────────
