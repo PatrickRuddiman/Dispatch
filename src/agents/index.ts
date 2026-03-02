@@ -19,6 +19,8 @@ import {
   type RunResult,
   type DispatchRunOptions,
   type SpecRunOptions,
+  type FixTestsRunOptions,
+  type FixTestsSummary,
 } from "./orchestrator.js";
 
 type BootFn = (opts: AgentBootOptions) => Promise<Agent>;
@@ -67,5 +69,7 @@ export type {
   RunResult,
   DispatchRunOptions,
   SpecRunOptions,
+  FixTestsRunOptions,
+  FixTestsSummary,
 };
 export type { AgentName, Agent, AgentBootOptions } from "./interface.js";

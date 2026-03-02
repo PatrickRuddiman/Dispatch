@@ -30,6 +30,7 @@ const HELP = `
     dispatch --respec <ids>          Regenerate specs for specific issues
     dispatch --respec <glob>         Regenerate specs matching a glob pattern
     dispatch --spec "description"    Generate a spec from an inline text description
+    dispatch --fix-tests             Run tests and fix failures via AI agent
 
   Dispatch options:
     --dry-run              List tasks without dispatching
@@ -151,6 +152,9 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
       i--; // outer loop will i++
       args.respec = respecs.length === 1 ? respecs[0] : respecs;
       explicitFlags.add("respec");
+    } else if (arg === "--fix-tests") {
+      args.fixTests = true;
+      explicitFlags.add("fixTests");
     } else if (arg === "--source") {
       i++;
       const val = argv[i];
@@ -274,7 +278,7 @@ async function main() {
   const summary = await orchestrator.runFromCli({ ...rawArgs, explicitFlags });
 
   // Determine exit code from summary
-  const failed = "failed" in summary ? summary.failed : 0;
+  const failed = "failed" in summary ? summary.failed : ("success" in summary && !summary.success ? 1 : 0);
   process.exit(failed > 0 ? 1 : 0);
 }
 
