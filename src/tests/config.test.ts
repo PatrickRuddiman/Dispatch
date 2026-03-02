@@ -125,7 +125,7 @@ describe("getConfigPath", () => {
     expect(getConfigPath("/custom/dir")).toBe("/custom/dir/config.json");
   });
 
-  it("defaults to ~/.dispatch/config.json when no override", () => {
+  it("defaults to {CWD}/.dispatch/config.json when no override", () => {
     const result = getConfigPath();
     expect(result).toMatch(/^.+\.dispatch\/config\.json$/);
   });
