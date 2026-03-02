@@ -192,6 +192,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
   const fileDurationsMs: Record<string, number> = {};
 
   const genQueue = [...validItems];
+  let modelLoggedInBanner = !!instance.model; // true if model was already shown in header
 
   while (genQueue.length > 0) {
     const batch = genQueue.splice(0, concurrency);
@@ -291,6 +292,12 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
       } else {
         failed++;
       }
+    }
+
+    // Log model once detected (wasn't available at header time for lazy providers)
+    if (!modelLoggedInBanner && instance.model) {
+      log.info(`Detected model: ${instance.model}`);
+      modelLoggedInBanner = true;
     }
   }
 

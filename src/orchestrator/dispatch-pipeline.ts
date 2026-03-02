@@ -327,6 +327,11 @@ export async function runDispatchPipeline(
           );
 
           results.push(...batchResults);
+
+          // Update TUI once the provider detects the actual model (lazy detection)
+          if (!tui.state.model && instance.model) {
+            tui.state.model = instance.model;
+          }
         }
       }
 
