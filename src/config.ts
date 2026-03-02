@@ -12,6 +12,7 @@ import { DATASOURCE_NAMES } from "./datasources/index.js";
 import type { ProviderName } from "./providers/interface.js";
 import type { DatasourceName } from "./datasources/interface.js";
 import { log } from "./logger.js";
+import { runInteractiveConfigWizard } from "./config-prompts.js";
 
 /**
  * Persistent configuration options for Dispatch.
@@ -241,14 +242,15 @@ export async function handleConfigCommand(argv: string[]): Promise<void> {
     default: {
       if (operation) {
         log.error(`Unknown config operation "${operation}".`);
+        log.dim("  Usage: dispatch config <set|get|list|reset|path>");
+        log.dim("  Example: dispatch config set provider copilot");
+        log.dim("  Example: dispatch config get provider");
+        log.dim("  Example: dispatch config list");
+        process.exit(1);
       } else {
-        log.error("Missing config operation.");
+        await runInteractiveConfigWizard();
       }
-      log.dim("  Usage: dispatch config <set|get|list|reset|path>");
-      log.dim("  Example: dispatch config set provider copilot");
-      log.dim("  Example: dispatch config get provider");
-      log.dim("  Example: dispatch config list");
-      process.exit(1);
+      break;
     }
   }
 }
