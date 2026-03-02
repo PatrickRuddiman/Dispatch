@@ -10,6 +10,7 @@ vi.mock("node:fs/promises", () => ({
   readFile: vi.fn().mockResolvedValue(""),
   writeFile: vi.fn().mockResolvedValue(undefined),
   unlink: vi.fn().mockResolvedValue(undefined),
+  rename: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("node:crypto", () => ({
@@ -48,7 +49,7 @@ vi.mock("../format.js", () => ({
   renderHeaderLines: vi.fn().mockReturnValue(["mock-header"]),
 }));
 
-import { mkdir, readFile, writeFile, unlink } from "node:fs/promises";
+import { mkdir, readFile, writeFile, unlink, rename } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { log } from "../logger.js";
 import { glob as globFn } from "glob";
@@ -1397,6 +1398,7 @@ describe("spec output formatting", () => {
     vi.mocked(mkdir).mockResolvedValue(undefined);
     vi.mocked(writeFile).mockResolvedValue(undefined);
     vi.mocked(unlink).mockResolvedValue(undefined);
+    vi.mocked(rename).mockResolvedValue(undefined);
     vi.mocked(readFile).mockResolvedValue(VALID_SPEC);
     vi.mocked(randomUUID).mockReturnValue("test-uuid-1234" as `${string}-${string}-${string}-${string}-${string}`);
 
@@ -1606,6 +1608,7 @@ describe("inline text pipeline", () => {
     vi.mocked(mkdir).mockResolvedValue(undefined);
     vi.mocked(writeFile).mockResolvedValue(undefined);
     vi.mocked(unlink).mockResolvedValue(undefined);
+    vi.mocked(rename).mockResolvedValue(undefined);
     vi.mocked(readFile).mockResolvedValue(VALID_SPEC);
     vi.mocked(randomUUID).mockReturnValue("test-uuid-1234" as `${string}-${string}-${string}-${string}-${string}`);
 
@@ -1639,7 +1642,7 @@ describe("inline text pipeline", () => {
     expect(result.failed).toBe(0);
     expect(result.total).toBe(1);
     expect(result.files).toHaveLength(1);
-    expect(result.files[0]).toContain("add-dark-mode-toggle-to-settings-page.md");
+    expect(result.files[0]).toContain("my-feature-42.md");
   });
 
   it("shows file path in dispatch command for inline text with md datasource", async () => {
@@ -1659,7 +1662,7 @@ describe("inline text pipeline", () => {
     const runLine = dimCalls.find((msg) => typeof msg === "string" && msg.includes("dispatch"));
 
     expect(runLine).toBeDefined();
-    expect(runLine).toContain("add-dark-mode-toggle-to-settings-page.md");
+    expect(runLine).toContain("my-feature-42.md");
     // File paths (non-numeric identifiers) should be quoted in the output
     expect(runLine).toContain('"');
   });
@@ -1702,7 +1705,7 @@ describe("inline text pipeline", () => {
 
     expect(result.files).toHaveLength(1);
     // Special chars become dashes, leading/trailing dashes stripped, lowercased
-    expect(result.files[0]).toContain("add-validation-for-email-phone.md");
+    expect(result.files[0]).toContain("my-feature-42.md");
   });
 
   it("passes inline text as fileContent to spec agent", async () => {
@@ -1741,6 +1744,12 @@ describe("inline text pipeline", () => {
       (call) => typeof call[0] === "string" && (call[0] as string).includes("add-user-profile-page.md")
     );
     expect(specWriteCall).toBeDefined();
+
+    // After generation, the pipeline renames to the H1-derived filename
+    expect(rename).toHaveBeenCalledWith(
+      expect.stringContaining("add-user-profile-page.md"),
+      expect.stringContaining("my-feature-42.md")
+    );
   });
 
   it("returns spec summary with identifiers for inline text", async () => {
@@ -1759,8 +1768,211 @@ describe("inline text pipeline", () => {
     expect(result.identifiers).toBeDefined();
     expect(result.identifiers).toHaveLength(1);
     // Identifier should be the file path (md datasource, not a tracker)
-    expect(result.identifiers![0]).toContain("feature-a-should-do-x.md");
+    expect(result.identifiers![0]).toContain("my-feature-42.md");
     // No issue numbers should be created for md datasource
     expect(result.issueNumbers).toHaveLength(0);
+  });
+});
+
+// ─── H1-to-filename derivation (runSpecPipeline post-generation rename) ──
+
+describe("H1-to-filename derivation", () => {
+  const CWD = "/tmp/test-project";
+  const OUTPUT_DIR = "/tmp/test-project/.dispatch/specs";
+
+  function createMockDatasource(name: "github" | "azdevops" | "md", overrides?: Record<string, unknown>) {
+    return {
+      name,
+      list: vi.fn().mockResolvedValue([]),
+      fetch: vi.fn().mockResolvedValue({
+        number: "42",
+        title: "Original Tracker Title",
+        body: "Feature body",
+        labels: [],
+        state: "open",
+        url: "https://github.com/org/repo/issues/42",
+        comments: [],
+        acceptanceCriteria: "",
+      }),
+      update: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+      create: vi.fn().mockResolvedValue({
+        number: "99",
+        title: "Created Issue",
+        body: "Spec content",
+        labels: [],
+        state: "open",
+        url: "https://github.com/org/repo/issues/99",
+        comments: [],
+        acceptanceCriteria: "",
+      }),
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.mocked(mkdir).mockResolvedValue(undefined);
+    vi.mocked(writeFile).mockResolvedValue(undefined);
+    vi.mocked(unlink).mockResolvedValue(undefined);
+    vi.mocked(rename).mockResolvedValue(undefined);
+    vi.mocked(randomUUID).mockReturnValue("test-uuid-1234" as `${string}-${string}-${string}-${string}-${string}`);
+
+    vi.mocked(bootProvider).mockResolvedValue({
+      name: "mock",
+      model: "mock-model",
+      createSession: vi.fn().mockResolvedValue("session-1"),
+      prompt: vi.fn().mockResolvedValue("done"),
+      cleanup: vi.fn().mockResolvedValue(undefined),
+    });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("renames tracker mode spec file based on H1 heading from generated content", async () => {
+    const specWithCustomH1 = [
+      "# Improved Auth Flow (#42)",
+      "",
+      "> Better auth",
+      "",
+      "## Context",
+      "",
+      "Details.",
+      "",
+      "## Tasks",
+      "",
+      "- [ ] (P) Task one",
+    ].join("\n");
+
+    vi.mocked(readFile).mockResolvedValue(specWithCustomH1);
+
+    const mockDs = createMockDatasource("github");
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue("github");
+
+    const result = await runSpecPipeline({
+      issues: "42",
+      issueSource: "github",
+      provider: "opencode",
+      cwd: CWD,
+      outputDir: OUTPUT_DIR,
+      concurrency: 10,
+    });
+
+    expect(result.generated).toBe(1);
+    // The file should be named based on the H1 "Improved Auth Flow (#42)" → "improved-auth-flow-42"
+    expect(result.files[0]).toContain("42-improved-auth-flow-42.md");
+    // rename should have been called since H1 differs from the original tracker title
+    expect(rename).toHaveBeenCalled();
+  });
+
+  it("does not rename when H1-derived slug matches the pre-generation slug in tracker mode", async () => {
+    // The fetch returns title "My Feature" and the H1 in the spec is also "My Feature"
+    const specMatchingTitle = [
+      "# My Feature",
+      "",
+      "> Summary",
+      "",
+      "## Tasks",
+      "",
+      "- [ ] (P) Task",
+    ].join("\n");
+
+    vi.mocked(readFile).mockResolvedValue(specMatchingTitle);
+
+    const mockDs = createMockDatasource("github", {
+      fetch: vi.fn().mockResolvedValue({
+        number: "10",
+        title: "My Feature",
+        body: "body",
+        labels: [],
+        state: "open",
+        url: "https://github.com/org/repo/issues/10",
+        comments: [],
+        acceptanceCriteria: "",
+      }),
+    });
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue("github");
+
+    const result = await runSpecPipeline({
+      issues: "10",
+      issueSource: "github",
+      provider: "opencode",
+      cwd: CWD,
+      outputDir: OUTPUT_DIR,
+      concurrency: 10,
+    });
+
+    expect(result.generated).toBe(1);
+    expect(result.files[0]).toContain("10-my-feature.md");
+    // No rename needed since slugs match
+    expect(rename).not.toHaveBeenCalled();
+  });
+
+  it("renames inline text spec file based on H1 heading from generated content", async () => {
+    const specWithH1 = [
+      "# Dark Mode Toggle for Settings",
+      "",
+      "> Add dark mode",
+      "",
+      "## Tasks",
+      "",
+      "- [ ] (P) Implement toggle",
+    ].join("\n");
+
+    vi.mocked(readFile).mockResolvedValue(specWithH1);
+
+    const mockDs = createMockDatasource("md");
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
+
+    const result = await runSpecPipeline({
+      issues: "add dark mode toggle",
+      provider: "opencode",
+      cwd: CWD,
+      outputDir: OUTPUT_DIR,
+      concurrency: 10,
+    });
+
+    expect(result.generated).toBe(1);
+    // Should use H1-derived slug, not the raw input text
+    expect(result.files[0]).toContain("dark-mode-toggle-for-settings.md");
+    expect(rename).toHaveBeenCalled();
+  });
+
+  it("does not rename file-based specs (file/glob mode overwrites in-place)", async () => {
+    const specContent = [
+      "# Completely Different Title",
+      "",
+      "> Summary",
+      "",
+      "## Tasks",
+      "",
+      "- [ ] (P) Task",
+    ].join("\n");
+
+    vi.mocked(readFile).mockResolvedValue(specContent);
+    vi.mocked(globFn).mockResolvedValue(["/tmp/test-project/drafts/original.md"] as any);
+
+    const mockDs = createMockDatasource("md");
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
+
+    const result = await runSpecPipeline({
+      issues: "drafts/*.md",
+      issueSource: "md",
+      provider: "opencode",
+      cwd: CWD,
+      outputDir: OUTPUT_DIR,
+      concurrency: 10,
+    });
+
+    expect(result.generated).toBe(1);
+    // File should keep its original path (in-place overwrite)
+    expect(result.files[0]).toBe("/tmp/test-project/drafts/original.md");
+    // No rename for file/glob mode
+    expect(rename).not.toHaveBeenCalled();
   });
 });

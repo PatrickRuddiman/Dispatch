@@ -8,7 +8,7 @@
  */
 
 import { join } from "node:path";
-import { mkdir, readFile, unlink } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink } from "node:fs/promises";
 import { glob } from "glob";
 import type { SpecOptions, SpecSummary } from "../spec-generator.js";
 import { isIssueNumbers, isGlobOrFilePath, resolveSource, defaultConcurrency } from "../spec-generator.js";
@@ -229,6 +229,18 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
 
           if (!result.success) {
             throw new Error(result.error ?? "Spec generation failed");
+          }
+
+          // Derive final filename from H1 heading in the generated spec
+          if (isTrackerMode || isInlineText) {
+            const h1Title = extractTitle(result.content, filepath);
+            const h1Slug = slugify(h1Title, 60);
+            const finalFilename = isTrackerMode ? `${id}-${h1Slug}.md` : `${h1Slug}.md`;
+            const finalFilepath = join(outputDir, finalFilename);
+            if (finalFilepath !== filepath) {
+              await rename(filepath, finalFilepath);
+              filepath = finalFilepath;
+            }
           }
 
           const specDuration = Date.now() - specStart;
