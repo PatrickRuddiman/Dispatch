@@ -62,10 +62,13 @@ export async function resolveCliConfig(args: RawCliArgs): Promise<RawCliArgs> {
   const sourceConfigured =
     explicitFlags.has("issueSource") || config.source !== undefined;
 
-  if (!providerConfigured || !sourceConfigured) {
+  // fix-tests mode does not require a datasource
+  const needsSource = !merged.fixTests;
+
+  if (!providerConfigured || (needsSource && !sourceConfigured)) {
     const missing: string[] = [];
     if (!providerConfigured) missing.push("provider");
-    if (!sourceConfigured) missing.push("source");
+    if (needsSource && !sourceConfigured) missing.push("source");
 
     log.error(
       `Missing required configuration: ${missing.join(", ")}`
@@ -74,7 +77,7 @@ export async function resolveCliConfig(args: RawCliArgs): Promise<RawCliArgs> {
     if (!providerConfigured) {
       log.dim("    dispatch config set provider <name>");
     }
-    if (!sourceConfigured) {
+    if (needsSource && !sourceConfigured) {
       log.dim("    dispatch config set source <name>");
     }
     log.dim("  Or pass them as CLI flags: --provider <name> --source <name>");
