@@ -11,7 +11,7 @@ flags, and config subcommand handling embedded in the CLI entry point
 
 The configuration system allows users to set persistent defaults for frequently
 used CLI options, avoiding the need to pass `--provider copilot --source github`
-on every invocation. It supports six configurable keys and provides a
+on every invocation. It supports eight configurable keys and provides a
 `dispatch config` subcommand for managing stored values.
 
 ## Why it exists
@@ -59,7 +59,9 @@ The config file is a plain JSON object with optional fields:
   "source": "github",
   "org": "https://dev.azure.com/myorg",
   "project": "MyProject",
-  "serverUrl": "http://localhost:4096"
+  "serverUrl": "http://localhost:4096",
+  "planTimeout": 10,
+  "planRetries": 1
 }
 ```
 
@@ -90,7 +92,7 @@ is created with the default `mkdir` permissions (typically `0755`).
 
 ### Is the config file format versioned?
 
-No. The `DispatchConfig` interface (`src/config.ts:20-27`) defines the schema,
+No. The `DispatchConfig` interface (`src/config.ts:20-29`) defines the schema,
 but there is no version field, no migration logic, and no schema validation
 beyond per-key type checks. When new keys are added to `DispatchConfig` in
 future releases:
@@ -115,10 +117,12 @@ handles the common cases without explicit versioning.
 | `org` | string | Any non-empty string | Azure DevOps organization URL |
 | `project` | string | Any non-empty string | Azure DevOps project name |
 | `serverUrl` | string | Any non-empty string | URL of a running provider server |
+| `planTimeout` | number | Positive number (e.g., 0.5, 1, 10) | Planning timeout in minutes. Parsed via `parseFloat`. |
+| `planRetries` | number | Non-negative integer (0, 1, 2, ...) | Number of retry attempts after planning timeout. Parsed via `parseInt`. |
 
 ### Validation rules
 
-`validateConfigValue()` (`src/config.ts:91-124`) enforces type-specific rules:
+`validateConfigValue()` (`src/config.ts:95-143`) enforces type-specific rules:
 
 - **`provider`** must be in `PROVIDER_NAMES` (currently `"opencode"` or
   `"copilot"`). Invalid values produce:
@@ -129,6 +133,14 @@ handles the common cases without explicit versioning.
 - **`concurrency`** must parse to a positive integer. Values like `"0"`,
   `"-1"`, `"1.5"`, and `"abc"` are rejected.
 - **`org`**, **`project`**, **`serverUrl`** must be non-empty strings.
+- **`planTimeout`** must parse to a positive finite number via
+  `Number(value)`. Values like `"0"`, `"-5"`, `"abc"`, and `""` are rejected.
+  The error message is:
+  `Invalid planTimeout "<value>". Must be a positive number (minutes)`
+- **`planRetries`** must parse to a non-negative integer via
+  `Number(value)`. Values like `"-1"`, `"1.5"`, and `"abc"` are rejected.
+  The error message is:
+  `Invalid planRetries "<value>". Must be a non-negative integer`
 
 ### Config key to CLI field mapping
 
@@ -142,6 +154,8 @@ The config system uses different key names than the CLI in one case:
 | `org` | `--org` | `org` |
 | `project` | `--project` | `project` |
 | `serverUrl` | `--server-url` | `serverUrl` |
+| `planTimeout` | `--plan-timeout` | `planTimeout` |
+| `planRetries` | `--plan-retries` | `planRetries` |
 
 The `source` to `issueSource` mapping (`src/orchestrator/cli-config.ts:24`)
 is the only field where the config key differs from the CLI field name. This
@@ -151,7 +165,7 @@ of "source" in the codebase.
 
 ## The `dispatch config` subcommand
 
-The config subcommand (`src/config.ts:143-230`) supports five operations:
+The config subcommand (`src/config.ts:166-253`) supports five operations:
 
 ### `dispatch config set <key> <value>`
 
@@ -166,6 +180,8 @@ dispatch config set concurrency 3
 dispatch config set serverUrl http://localhost:4096
 dispatch config set org https://dev.azure.com/myorg
 dispatch config set project MyProject
+dispatch config set planTimeout 10
+dispatch config set planRetries 2
 ```
 
 ### `dispatch config get <key>`
@@ -242,7 +258,7 @@ flowchart TD
 
 ### How the `explicitFlags` set prevents config overrides
 
-The `parseArgs()` function in `src/cli.ts:83-186` builds a `Set<string>` of
+The `parseArgs()` function in `src/cli.ts:97-232` builds a `Set<string>` of
 CLI flag names that were explicitly provided by the user. Every time a flag
 is parsed, its corresponding field name is added to the set:
 
@@ -252,7 +268,7 @@ args.provider = val as ProviderName;
 explicitFlags.add("provider");  // marks "provider" as explicit
 ```
 
-During the merge step in `resolveCliConfig()` (`src/orchestrator/cli-config.ts:50-55`),
+During the merge step in `resolveCliConfig()` (`src/orchestrator/cli-config.ts:52-57`),
 each config key is checked against `explicitFlags`:
 
 ```
@@ -283,7 +299,7 @@ even if the config file says `"provider": "copilot"`.
 
 ### Why the config subcommand runs before `parseArgs`
 
-The `config` subcommand is intercepted at `src/cli.ts:192` before `parseArgs()`
+The `config` subcommand is intercepted at `src/cli.ts:238` before `parseArgs()`
 is called:
 
 ```
@@ -308,7 +324,7 @@ If this check ran after `parseArgs`, the following would break:
 ## Mandatory configuration validation
 
 After merging config-file defaults, `resolveCliConfig()` validates that two
-mandatory fields are configured (`src/orchestrator/cli-config.ts:57-80`):
+mandatory fields are configured (`src/orchestrator/cli-config.ts:59-82`):
 
 1. **`provider`** -- must be set via CLI flag (`--provider`) or config file
    (`dispatch config set provider <name>`).
@@ -329,10 +345,18 @@ remediation guidance:
 The process exits with code `1`.
 
 Note that `provider` has a hardcoded default of `"opencode"` in `parseArgs()`
-(`src/cli.ts:88`), so in practice the provider validation only fails if the
+(`src/cli.ts:103`), so in practice the provider validation only fails if the
 user has not set a provider in the config file AND the hardcoded default is
-somehow cleared. The `source` field has no hardcoded default, making it the
-field most likely to trigger the validation error on first use.
+somehow cleared. The validation checks `explicitFlags.has("provider") ||
+config.provider !== undefined` (`src/orchestrator/cli-config.ts:60-61`), which
+means it checks whether the flag was explicitly provided OR the config file has
+a value -- it does NOT check the merged value. Because `parseArgs` always sets
+`provider: "opencode"` as a default, the merged args always have a provider
+value, but the validation ignores that default. In practice this means provider
+validation only fails when neither the CLI flag nor the config file provides a
+value, even though the merged args contain `"opencode"`. The `source` field
+has no hardcoded default, making it the field most likely to trigger the
+validation error on first use.
 
 ## The `serverUrl` config option
 
@@ -465,10 +489,10 @@ The CLI produces the following exit codes:
 |-----------|---------|-----------------|
 | `0` | Success | `--help`, `--version`, `config` subcommand, or all tasks completed |
 | `1` | Failure | Any tasks failed, validation error, or unhandled exception |
-| `130` | SIGINT | User pressed Ctrl+C (`src/cli.ts:206`) |
-| `143` | SIGTERM | Process received SIGTERM (`src/cli.ts:212`) |
+| `130` | SIGINT | User pressed Ctrl+C (`src/cli.ts:252`) |
+| `143` | SIGTERM | Process received SIGTERM (`src/cli.ts:258`) |
 
-Exit code determination (`src/cli.ts:231-232`):
+Exit code determination (`src/cli.ts:277-278`):
 
 ```
 const failed = "failed" in summary ? summary.failed : 0;
@@ -481,7 +505,7 @@ of 10 tasks succeed but 1 fails, the exit code is `1`.
 ## Graceful shutdown and cleanup
 
 The CLI installs signal handlers for `SIGINT` and `SIGTERM` at
-`src/cli.ts:203-213`. Both handlers follow the same pattern:
+`src/cli.ts:249-258`. Both handlers follow the same pattern:
 
 1. Log a debug message (visible with `--verbose`).
 2. Call `runCleanup()` from the [cleanup registry](../shared-types/cleanup.md).
@@ -524,7 +548,7 @@ to force termination.
 ## Orchestrator boot process
 
 The CLI delegates to the orchestrator via a two-step process
-(`src/cli.ts:226-228`):
+(`src/cli.ts:272-274`):
 
 1. **`bootOrchestrator({ cwd })`**: Creates an `OrchestratorAgent` instance
    bound to the working directory. This is a lightweight operation that does
@@ -571,7 +595,8 @@ If the config file is deleted between `loadConfig()` and a subsequent
 ### Unknown config key error
 
 If `dispatch config set <key> <value>` reports an unknown key, the key must be
-one of: `provider`, `concurrency`, `source`, `org`, `project`, `serverUrl`.
+one of: `provider`, `concurrency`, `source`, `org`, `project`, `serverUrl`,
+`planTimeout`, `planRetries`.
 Keys like `dryRun`, `noPlan`, `noBranch`, and `verbose` are CLI-only flags and
 cannot be persisted. See [the --no-branch flag](cli.md#the---no-branch-flag)
 for details on that flag's behavior.

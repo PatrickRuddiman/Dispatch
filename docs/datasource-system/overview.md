@@ -501,7 +501,5 @@ that all consumers handle the new backend at compile time.
   `--project`, and `--output-dir` flags
 - [CLI Orchestrator](../cli-orchestration/orchestrator.md) -- How the
   orchestrator invokes datasource operations and helpers
-- [Testing](./testing.md) -- Test suite covering the markdown datasource
-  and datasource registry
 - [Git Operations](../planning-and-dispatch/git.md) -- Post-completion git
   commits that run after datasource lifecycle operations

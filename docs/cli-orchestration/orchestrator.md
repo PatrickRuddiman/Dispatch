@@ -13,7 +13,7 @@ The orchestrator exposes two entry points from the CLI:
 1. **`runFromCli(args)`**: Called by the CLI after `bootOrchestrator()`. This
    method first calls [`resolveCliConfig()`](configuration.md#three-tier-configuration-precedence)
    to merge config-file defaults with CLI flags, then routes to either the
-   spec pipeline (if `--spec` is present; see [Spec Generation](../spec-generation/overview.md)) or the dispatch pipeline.
+   spec pipeline (if `--spec` or `--respec` is present; see [Spec Generation](../spec-generation/overview.md)) or the dispatch pipeline.
 
 2. **`orchestrate()`**: The core dispatch function that accepts an
    `OrchestrateRunOptions` object and executes the dispatch pipeline
@@ -443,6 +443,8 @@ time via `bootOrchestrator({ cwd })` rather than passed per-invocation:
 | `source` | `DatasourceName?` | Datasource backend (`"github"`, `"azdevops"`, or `"md"`) |
 | `org` | `string?` | Azure DevOps organization URL |
 | `project` | `string?` | Azure DevOps project name |
+| `planTimeout` | `number?` | Planning timeout in minutes. Passed through from CLI `--plan-timeout` or config `planTimeout`. |
+| `planRetries` | `number?` | Number of retry attempts after planning timeout. Passed through from CLI `--plan-retries` or config `planRetries`. |
 
 ### DispatchSummary
 
