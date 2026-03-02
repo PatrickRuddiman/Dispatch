@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 
-vi.mock("../logger.js", () => ({
+vi.mock("../helpers/logger.js", () => ({
   log: {
     info: vi.fn(),
     success: vi.fn(),
@@ -26,7 +26,7 @@ vi.mock("../config.js", () => ({
   handleConfigCommand: vi.fn(),
 }));
 
-vi.mock("../cleanup.js", () => ({
+vi.mock("../helpers/cleanup.js", () => ({
   runCleanup: vi.fn(),
   registerCleanup: vi.fn(),
 }));

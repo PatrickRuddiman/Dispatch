@@ -10,7 +10,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { log } from "./logger.js";
+import { log } from "./helpers/logger.js";
 
 // ── Types ───────────────────────────────────────────────────────────
 

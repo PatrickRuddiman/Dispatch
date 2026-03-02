@@ -4,7 +4,7 @@
  */
 
 import chalk from "chalk";
-import { elapsed, renderHeaderLines } from "./format.js";
+import { elapsed, renderHeaderLines } from "./helpers/format.js";
 import type { Task } from "./parser.js";
 
 export type TaskStatus = "pending" | "planning" | "running" | "done" | "failed";

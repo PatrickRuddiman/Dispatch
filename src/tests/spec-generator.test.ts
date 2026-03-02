@@ -17,7 +17,7 @@ vi.mock("node:crypto", () => ({
   randomUUID: vi.fn().mockReturnValue("test-uuid-1234"),
 }));
 
-vi.mock("../logger.js", () => ({
+vi.mock("../helpers/logger.js", () => ({
   log: {
     info: vi.fn(),
     success: vi.fn(),
@@ -35,7 +35,7 @@ vi.mock("glob", () => ({
   glob: vi.fn().mockResolvedValue([]),
 }));
 
-vi.mock("../cleanup.js", () => ({
+vi.mock("../helpers/cleanup.js", () => ({
   registerCleanup: vi.fn(),
 }));
 
@@ -44,14 +44,14 @@ vi.mock("../providers/index.js", () => ({
   PROVIDER_NAMES: ["opencode", "copilot"],
 }));
 
-vi.mock("../format.js", () => ({
+vi.mock("../helpers/format.js", () => ({
   elapsed: vi.fn().mockReturnValue("0ms"),
   renderHeaderLines: vi.fn().mockReturnValue(["mock-header"]),
 }));
 
 import { mkdir, readFile, writeFile, unlink, rename } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { log } from "../logger.js";
+import { log } from "../helpers/logger.js";
 import { glob as globFn } from "glob";
 import { bootProvider } from "../providers/index.js";
 import { runSpecPipeline } from "../orchestrator/spec-pipeline.js";

@@ -10,8 +10,8 @@ import { execFile as execFileCb } from "node:child_process";
 import type { FixTestsSummary } from "./runner.js";
 import type { ProviderName } from "../providers/interface.js";
 import { bootProvider } from "../providers/index.js";
-import { registerCleanup } from "../cleanup.js";
-import { log } from "../logger.js";
+import { registerCleanup } from "../helpers/cleanup.js";
+import { log } from "../helpers/logger.js";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */

@@ -17,11 +17,11 @@ import { getDatasource } from "../datasources/index.js";
 import { extractTitle } from "../datasources/md.js";
 import { bootProvider } from "../providers/index.js";
 import { boot as bootSpecAgent } from "../agents/spec.js";
-import { registerCleanup } from "../cleanup.js";
-import { log } from "../logger.js";
+import { registerCleanup } from "../helpers/cleanup.js";
+import { log } from "../helpers/logger.js";
 import chalk from "chalk";
-import { elapsed, renderHeaderLines } from "../format.js";
-import { slugify } from "../slugify.js";
+import { elapsed, renderHeaderLines } from "../helpers/format.js";
+import { slugify } from "../helpers/slugify.js";
 
 /**
  * Run the spec-generation pipeline end-to-end.

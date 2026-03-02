@@ -11,7 +11,7 @@ import { PROVIDER_NAMES } from "./providers/index.js";
 import { DATASOURCE_NAMES } from "./datasources/index.js";
 import type { ProviderName } from "./providers/interface.js";
 import type { DatasourceName } from "./datasources/interface.js";
-import { log } from "./logger.js";
+import { log } from "./helpers/logger.js";
 import { runInteractiveConfigWizard } from "./config-prompts.js";
 
 /**

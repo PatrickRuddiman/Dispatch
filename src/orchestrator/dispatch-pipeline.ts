@@ -10,8 +10,8 @@ import { parseTaskFile, buildTaskContext, groupTasksByMode, type TaskFile } from
 import type { DispatchResult } from "../dispatcher.js";
 import { boot as bootPlanner, type PlanResult } from "../agents/planner.js";
 import { boot as bootExecutor } from "../agents/executor.js";
-import { log } from "../logger.js";
-import { registerCleanup } from "../cleanup.js";
+import { log } from "../helpers/logger.js";
+import { registerCleanup } from "../helpers/cleanup.js";
 import { createTui } from "../tui.js";
 import type { ProviderName } from "../providers/interface.js";
 import { bootProvider } from "../providers/index.js";
@@ -26,7 +26,7 @@ import {
   buildPrBody,
   buildPrTitle,
 } from "./datasource-helpers.js";
-import { withTimeout, TimeoutError } from "../timeout.js";
+import { withTimeout, TimeoutError } from "../helpers/timeout.js";
 
 /**
  * Run the full dispatch pipeline: discover tasks from a datasource,

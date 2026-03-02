@@ -16,7 +16,7 @@ import type { Agent, AgentBootOptions } from "./interface.js";
 import type { IssueDetails } from "../datasources/interface.js";
 import { extractSpecContent, validateSpecStructure } from "../spec-generator.js";
 import { extractTitle } from "../datasources/md.js";
-import { log } from "../logger.js";
+import { log } from "../helpers/logger.js";
 
 /**
  * Options passed to the spec agent's `generate()` method.

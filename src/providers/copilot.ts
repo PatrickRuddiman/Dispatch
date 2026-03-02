@@ -12,7 +12,7 @@
 
 import { CopilotClient, approveAll, type AssistantMessageEvent, type CopilotSession } from "@github/copilot-sdk";
 import type { ProviderInstance, ProviderBootOptions } from "./interface.js";
-import { log } from "../logger.js";
+import { log } from "../helpers/logger.js";
 
 /**
  * Boot a Copilot provider instance — starts or connects to a Copilot CLI server.

@@ -3,12 +3,12 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { log } from "../logger.js";
+import { log } from "../helpers/logger.js";
 import { getDatasource, detectDatasource } from "../datasources/index.js";
 import type { Datasource, DatasourceName, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
 import type { Task, TaskFile } from "../parser.js";
 import type { DispatchResult } from "../dispatcher.js";
-import { slugify } from "../slugify.js";
+import { slugify } from "../helpers/slugify.js";
 
 const exec = promisify(execFile);
 

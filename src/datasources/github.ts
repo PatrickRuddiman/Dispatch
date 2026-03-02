@@ -9,7 +9,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Datasource, IssueDetails, IssueFetchOptions, DispatchLifecycleOptions } from "./interface.js";
-import { slugify } from "../slugify.js";
+import { slugify } from "../helpers/slugify.js";
 
 const exec = promisify(execFile);
 

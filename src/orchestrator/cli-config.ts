@@ -7,7 +7,7 @@
  * coordinator thin and this logic independently testable.
  */
 
-import { log } from "../logger.js";
+import { log } from "../helpers/logger.js";
 import { loadConfig, type DispatchConfig } from "../config.js";
 import type { RawCliArgs } from "./runner.js";
 

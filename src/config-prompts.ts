@@ -7,7 +7,7 @@
 
 import { select, input, confirm, number } from "@inquirer/prompts";
 import chalk from "chalk";
-import { log } from "./logger.js";
+import { log } from "./helpers/logger.js";
 import {
   loadConfig,
   saveConfig,
