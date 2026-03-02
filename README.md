@@ -89,13 +89,13 @@ See [Copilot backend docs](./docs/provider-system/copilot-backend.md) for full s
 ## Installation
 
 ```bash
-npm install -g dispatch
+npm install -g @pruddiman/dispatch
 ```
 
 Or run directly without installing:
 
 ```bash
-npx dispatch
+npx @pruddiman/dispatch
 ```
 
 ## Quick Start
