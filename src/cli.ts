@@ -47,7 +47,7 @@ const HELP = `
     --spec <value>         Comma-separated issue numbers or glob pattern for .md files (creates specs in configured datasource)
     --respec [value]       Regenerate specs: issue numbers, glob, or omit to regenerate all existing specs
     --spec <value>         Comma-separated issue numbers, glob pattern for .md files, or inline text description
-    --source <name>        Issue source: ${DATASOURCE_NAMES.join(", ")} (auto-detected from git remote)
+    --source <name>        Issue source: ${DATASOURCE_NAMES.join(", ")} (optional; auto-detected from git remote, falls back to md)
     --org <url>            Azure DevOps organization URL
     --project <name>       Azure DevOps project name
     --output-dir <dir>     Output directory for specs (default: .dispatch/specs)
