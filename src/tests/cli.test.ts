@@ -127,3 +127,64 @@ describe("parseArgs --respec with other flags", () => {
     expect(args.respec).toEqual(["specs/a.md", "specs/b.md"]);
   });
 });
+
+describe("parseArgs --fix-tests", () => {
+  it("sets fixTests to true when --fix-tests is passed", () => {
+    const [args, flags] = parseArgs(["--fix-tests"]);
+    expect(args.fixTests).toBe(true);
+    expect(flags.has("fixTests")).toBe(true);
+  });
+
+  it("leaves fixTests undefined when --fix-tests is not provided", () => {
+    const [args, flags] = parseArgs([]);
+    expect(args.fixTests).toBeUndefined();
+    expect(flags.has("fixTests")).toBe(false);
+  });
+
+  it("combines --fix-tests with --verbose correctly", () => {
+    const [args] = parseArgs(["--fix-tests", "--verbose"]);
+    expect(args.fixTests).toBe(true);
+    expect(args.verbose).toBe(true);
+  });
+
+  it("combines --fix-tests with --provider correctly", () => {
+    const [args] = parseArgs(["--fix-tests", "--provider", "copilot"]);
+    expect(args.fixTests).toBe(true);
+    expect(args.provider).toBe("copilot");
+  });
+
+  it("combines --fix-tests with --dry-run correctly", () => {
+    const [args] = parseArgs(["--fix-tests", "--dry-run"]);
+    expect(args.fixTests).toBe(true);
+    expect(args.dryRun).toBe(true);
+  });
+});
+
+describe("parseArgs --fix-tests mutual exclusion (at parser level)", () => {
+  it("allows --fix-tests and --spec to both be set (mutual exclusion is enforced by orchestrator)", () => {
+    const [args, flags] = parseArgs(["--fix-tests", "--spec", "42"]);
+    expect(args.fixTests).toBe(true);
+    expect(args.spec).toBe("42");
+    expect(flags.has("fixTests")).toBe(true);
+    expect(flags.has("spec")).toBe(true);
+  });
+
+  it("allows --fix-tests and --respec to both be set (mutual exclusion is enforced by orchestrator)", () => {
+    const [args, flags] = parseArgs(["--fix-tests", "--respec", "42"]);
+    expect(args.fixTests).toBe(true);
+    expect(args.respec).toBe("42");
+    expect(flags.has("fixTests")).toBe(true);
+    expect(flags.has("respec")).toBe(true);
+  });
+
+  it("does not set fixTests when only --spec is provided", () => {
+    const [args] = parseArgs(["--spec", "42"]);
+    expect(args.fixTests).toBeUndefined();
+  });
+
+  it("does not set fixTests when only positional issue IDs are provided", () => {
+    const [args] = parseArgs(["42"]);
+    expect(args.fixTests).toBeUndefined();
+    expect(args.issueIds).toContain("42");
+  });
+});
