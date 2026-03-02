@@ -10,6 +10,7 @@
 import { log } from "../helpers/logger.js";
 import { loadConfig, type DispatchConfig } from "../config.js";
 import type { RawCliArgs } from "./runner.js";
+import { detectDatasource } from "../datasources/index.js";
 
 /**
  * Config key → RawCliArgs field mapping.
@@ -59,29 +60,29 @@ export async function resolveCliConfig(args: RawCliArgs): Promise<RawCliArgs> {
   // ── Mandatory config validation ────────────────────────────
   const providerConfigured =
     explicitFlags.has("provider") || config.provider !== undefined;
+
+  if (!providerConfigured) {
+    log.error("Missing required configuration: provider");
+    log.dim("  Configure defaults with:");
+    log.dim("    dispatch config set provider <name>");
+    log.dim("  Or pass it as a CLI flag: --provider <name>");
+    process.exit(1);
+  }
+
+  // ── Auto-detect datasource when not explicitly set ─────────
   const sourceConfigured =
     explicitFlags.has("issueSource") || config.source !== undefined;
-
-  // fix-tests mode does not require a datasource
   const needsSource = !merged.fixTests;
 
-  if (!providerConfigured || (needsSource && !sourceConfigured)) {
-    const missing: string[] = [];
-    if (!providerConfigured) missing.push("provider");
-    if (needsSource && !sourceConfigured) missing.push("source");
-
-    log.error(
-      `Missing required configuration: ${missing.join(", ")}`
-    );
-    log.dim("  Configure defaults with:");
-    if (!providerConfigured) {
-      log.dim("    dispatch config set provider <name>");
+  if (needsSource && !sourceConfigured) {
+    const detected = await detectDatasource(merged.cwd);
+    if (detected) {
+      log.info(`Auto-detected datasource from git remote: ${detected}`);
+      merged.issueSource = detected;
+    } else {
+      log.info("Could not detect datasource from git remote, falling back to: md");
+      merged.issueSource = "md";
     }
-    if (needsSource && !sourceConfigured) {
-      log.dim("    dispatch config set source <name>");
-    }
-    log.dim("  Or pass them as CLI flags: --provider <name> --source <name>");
-    process.exit(1);
   }
 
   // ── Enable verbose logging ─────────────────────────────────
