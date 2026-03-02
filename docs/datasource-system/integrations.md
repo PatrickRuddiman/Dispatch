@@ -44,7 +44,7 @@ means:
 - A slow `az` query against a large Azure DevOps organization will block until
   the query completes, regardless of how long that takes.
 - There is no cancellation mechanism -- the only way to terminate a stuck
-  subprocess is to kill the dispatch-tasks process itself (e.g., via Ctrl+C /
+  subprocess is to kill the dispatch process itself (e.g., via Ctrl+C /
   SIGINT).
 
 ### Buffer overflow risk
@@ -366,7 +366,7 @@ means:
 
 ## Cross-group dependencies
 
-The datasource system is consumed by several other groups in the dispatch-tasks
+The datasource system is consumed by several other groups in the dispatch
 pipeline:
 
 ### Orchestrator (`src/orchestrator/`)

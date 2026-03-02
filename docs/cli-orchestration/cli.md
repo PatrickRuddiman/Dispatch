@@ -24,7 +24,7 @@ the [CLI & Orchestration group](overview.md). It:
 
 ## Installation and distribution
 
-The `dispatch` CLI is distributed as the npm package `dispatch-tasks`.
+The `dispatch` CLI is distributed as the npm package `dispatch`.
 
 ### Requirements
 
@@ -37,13 +37,13 @@ The `dispatch` CLI is distributed as the npm package `dispatch-tasks`.
 
 ```bash
 # Global install — adds `dispatch` to PATH
-npm install -g dispatch-tasks
+npm install -g dispatch
 
 # Run without installing
-npx dispatch-tasks
+npx dispatch
 
 # Local project install
-npm install --save-dev dispatch-tasks
+npm install --save-dev dispatch
 npx dispatch           # runs via local node_modules/.bin
 ```
 

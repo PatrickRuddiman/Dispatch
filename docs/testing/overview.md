@@ -1,7 +1,7 @@
 # Test Suite Overview
 
 This document describes the testing infrastructure, strategy, and organization
-for the dispatch-tasks project. It covers how tests are run, what framework is
+for the dispatch project. It covers how tests are run, what framework is
 used, and how the four test files map to the production modules they verify.
 
 ## Test framework

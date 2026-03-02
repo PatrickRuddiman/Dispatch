@@ -2,13 +2,13 @@
 
 The Copilot provider wraps the
 [`@github/copilot-sdk`](https://docs.github.com/en/copilot/how-tos/copilot-sdk/sdk-getting-started)
-to conform to the [`ProviderInstance`](../shared-types/provider.md#providerinstance-interface) interface, enabling dispatch-tasks to use
+to conform to the [`ProviderInstance`](../shared-types/provider.md#providerinstance-interface) interface, enabling dispatch to use
 GitHub Copilot as its AI agent runtime.
 
 ## Why use Copilot
 
 GitHub Copilot integrates with your existing GitHub authentication and
-subscription. If your team already uses Copilot, this provider lets dispatch-tasks
+subscription. If your team already uses Copilot, this provider lets dispatch
 leverage that access without setting up a separate LLM provider.
 
 ## Prerequisites
@@ -93,7 +93,7 @@ The `@github/copilot-sdk` does not communicate directly with GitHub's API. The
 architecture is:
 
 ```
-dispatch-tasks → CopilotClient (SDK) → JSON-RPC → Copilot CLI (server mode) → GitHub API
+dispatch → CopilotClient (SDK) → JSON-RPC → Copilot CLI (server mode) → GitHub API
 ```
 
 When `client.start()` is called:
@@ -219,7 +219,7 @@ a side-by-side comparison.
 ## Rate limits and quotas
 
 GitHub Copilot applies rate limits to ensure fair access across all users. The
-rate limits are temporary and apply per-user. If dispatch-tasks encounters a rate
+rate limits are temporary and apply per-user. If dispatch encounters a rate
 limit during a prompt call, the `sendAndWait()` promise will reject with an error
 that propagates as a failed task.
 

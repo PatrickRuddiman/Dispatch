@@ -39,7 +39,7 @@ reasons:
 
 1. **Authentication reuse.** Users authenticate once via `gh auth login` or
    `az login`. The CLI tools manage token storage, refresh, and multi-account
-   switching. Using HTTP APIs directly would require dispatch-tasks to
+   switching. Using HTTP APIs directly would require dispatch to
    implement its own credential management.
 2. **Zero additional dependencies.** No GitHub REST/GraphQL client library or
    Azure DevOps SDK is added to the dependency tree. The only runtime
