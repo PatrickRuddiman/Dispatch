@@ -307,7 +307,7 @@ and delete the persistent config file at `~/.dispatch/config.json`.
 | `readFile` | Load config file contents as UTF-8 string | `src/config.ts:63` |
 | `writeFile` | Write pretty-printed JSON config to disk | `src/config.ts:81` |
 | `mkdir` | Create `~/.dispatch/` directory if it doesn't exist | `src/config.ts:80` |
-| `rm` | Delete config file during `config reset` | `src/config.ts:228` |
+| `rm` | Delete config file during config reset (via interactive wizard) | `src/config.ts:228` |
 
 ### Config file location and permissions
 
@@ -342,13 +342,13 @@ The config system uses a **silent-fallback** strategy for read errors and an
 |---------|-------------|------------|
 | `EACCES` on `saveConfig` | No write permission on `~/.dispatch/` | `chmod u+w ~/.dispatch/` or run as a user with home directory access |
 | `ENOSPC` on `writeFile` | Disk full | Free disk space in the home directory partition |
-| Config silently ignored | Corrupted JSON in config file | Run `dispatch config reset` to delete and re-create, or manually edit `~/.dispatch/config.json` |
+| Config silently ignored | Corrupted JSON in config file | Run `dispatch config` to reconfigure, or manually edit `~/.dispatch/config.json` |
 | `EROFS` on `mkdir` | Read-only filesystem (e.g., some container images) | Mount a writable volume at `$HOME` or use CLI flags exclusively |
 
 ### Concurrent access
 
 The config file has no locking mechanism. If two `dispatch` processes run
-`dispatch config set` simultaneously, the last write wins and the first
+`dispatch config` simultaneously, the last write wins and the first
 write's changes are lost. This is unlikely in practice since config
 commands are interactive and infrequent. For automated scenarios, external
 locking (e.g., `flock`) would be needed.

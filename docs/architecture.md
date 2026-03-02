@@ -409,7 +409,7 @@ There are no subprocess timeouts on `execFile` calls (except the 10 MB
 
 | Location | Purpose | Lifecycle |
 |----------|---------|-----------|
-| `~/.dispatch/config.json` | Persistent user configuration | Manual via `dispatch config reset` |
+| `~/.dispatch/config.json` | Persistent user configuration | Manual via `dispatch config` or by deleting the file |
 | `.dispatch/specs/` | Generated spec files; markdown datasource storage | Managed by datasource lifecycle |
 | `.dispatch/specs/archive/` | Closed specs (markdown datasource) | Manual recovery via file move |
 | `.dispatch/tmp/` | Temp spec files during AI generation (UUID-named) | Cleaned per-spec; may accumulate on crash |

@@ -99,17 +99,15 @@ dispatch --cwd /path/to/project
 dispatch --spec 42,43,44
 dispatch --spec "drafts/*.md" --source github
 
-# Config management
-dispatch config set provider copilot
-dispatch config set source github
-dispatch config list
+# Config management (interactive wizard)
+dispatch config
 ```
 
 ## Related documentation
 
 - [CLI argument parser](cli.md) -- command-line interface details and edge cases
 - [Configuration](configuration.md) -- persistent config file, three-tier
-  precedence, `dispatch config` subcommand
+  precedence, `dispatch config` interactive wizard
 - [Orchestrator pipeline](orchestrator.md) -- concurrency, error handling, and
   pipeline phases
 - [Terminal UI](tui.md) -- rendering, state machines, and TTY compatibility

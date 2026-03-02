@@ -173,29 +173,13 @@ dispatch --verbose "tasks.md"          # Show detailed debug output
 
 dispatch uses a three-tier configuration system: CLI flags > persistent config file (`~/.dispatch/config.json`) > defaults.
 
-### Config subcommand
+### Interactive configuration
 
 ```bash
-# Set a default config value
-dispatch config set provider copilot
-
-# Get a config value
-dispatch config get provider
-
-# List all config values
-dispatch config list
-
-# Show the config file path
-dispatch config path
-
-# Reset config (delete config file)
-dispatch config reset
-
-# Interactive configuration wizard
 dispatch config
 ```
 
-Running `dispatch config` with no subcommand launches an interactive wizard that guides you through setting up your configuration.
+Running `dispatch config` launches an interactive wizard that guides you through viewing, setting, and resetting your configuration.
 
 Valid config keys: `provider`, `concurrency`, `source`, `org`, `project`, `serverUrl`, `planTimeout`, `planRetries`.
 
