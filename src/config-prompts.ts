@@ -26,7 +26,7 @@ import type { DatasourceName } from "./datasources/interface.js";
  * selection, conditionally prompts for Azure DevOps fields, offers
  * advanced settings, displays a summary, and saves on confirmation.
  */
-export async function runConfigWizard(): Promise<void> {
+export async function runInteractiveConfigWizard(): Promise<void> {
   console.log();
   log.info(chalk.bold("Dispatch Configuration Wizard"));
   console.log();

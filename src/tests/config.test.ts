@@ -13,6 +13,11 @@ import {
   handleConfigCommand,
   type DispatchConfig,
 } from "../config.js";
+import { runInteractiveConfigWizard } from "../config-prompts.js";
+
+vi.mock("../config-prompts.js", () => ({
+  runInteractiveConfigWizard: vi.fn().mockResolvedValue(undefined),
+}));
 
 // ─── Config file I/O ─────────────────────────────────────────────────
 
@@ -451,9 +456,10 @@ describe("handleConfigCommand", () => {
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
-  it("missing operation exits with error", async () => {
-    await expect(handleConfigCommand([])).rejects.toThrow("process.exit called");
-    expect(mockExit).toHaveBeenCalledWith(1);
+  it("missing operation launches interactive wizard", async () => {
+    await handleConfigCommand([]);
+    expect(runInteractiveConfigWizard).toHaveBeenCalled();
+    expect(mockExit).not.toHaveBeenCalled();
   });
 
   it("path prints the config file path", async () => {
