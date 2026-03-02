@@ -22,6 +22,7 @@ export interface DispatchConfig {
   source?: DatasourceName;
   org?: string;
   project?: string;
+  workItemType?: string;
   serverUrl?: string;
   planTimeout?: number;
   planRetries?: number;
@@ -34,6 +35,7 @@ export const CONFIG_KEYS = [
   "source",
   "org",
   "project",
+  "workItemType",
   "serverUrl",
   "planTimeout",
   "planRetries",
@@ -108,6 +110,7 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
 
     case "org":
     case "project":
+    case "workItemType":
     case "serverUrl":
       if (!value || value.trim() === "") {
         return `Invalid ${key}: value must not be empty`;
