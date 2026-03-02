@@ -213,7 +213,7 @@ Both `readFile` and `writeFile` are called with `"utf-8"` encoding. This means:
 Dispatch installs signal handlers for `SIGINT` and `SIGTERM` to ensure
 graceful shutdown of provider resources. Before these handlers were added,
 signals caused immediate process termination, potentially leaving orphaned
-provider server processes (OpenCode or Copilot CLI servers).
+provider server processes ([OpenCode](../provider-system/opencode-backend.md) or [Copilot](../provider-system/copilot-backend.md) CLI servers).
 
 ### How signal handlers work
 
@@ -289,5 +289,11 @@ runs. This is a fundamental OS constraint, not a Dispatch limitation.
 - [TUI](../cli-orchestration/tui.md) -- How chalk is used in the TUI display
 - [CLI & Orchestration Integrations](../cli-orchestration/integrations.md) --
   Signal handling section in the CLI context
+- [Configuration](../cli-orchestration/configuration.md) -- Config file I/O
+  that also uses fs/promises
+- [Provider Interface](./provider.md) -- Provider lifecycle contract relevant
+  to cleanup on signal
 - [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) --
   File I/O safety, race conditions, and the read-modify-write pattern
+- [Testing Overview](../testing/overview.md) -- Test infrastructure for the
+  modules that depend on these integrations

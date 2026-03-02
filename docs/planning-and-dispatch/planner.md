@@ -38,7 +38,7 @@ This separation improves quality because:
 
 ### When to use `--no-plan`
 
-The `--no-plan` CLI flag skips the planning phase entirely, sending tasks
+The [`--no-plan`](../cli-orchestration/cli.md) CLI flag skips the planning phase entirely, sending tasks
 directly to the executor with a simple prompt. Use `--no-plan` when:
 
 - Tasks are simple and self-explanatory (e.g., "add a comment to function X")
@@ -133,7 +133,7 @@ instruction, it could make filesystem changes during the planning phase.
 
 Neither the OpenCode SDK nor the Copilot SDK expose a mechanism to create
 sessions with restricted tool access (e.g., read-only filesystem access). The
-`ProviderInstance` interface (`src/provider.ts`) defines only `createSession()`
+[`ProviderInstance`](../shared-types/provider.md#providerinstance-interface) interface (`src/provider.ts`) defines only `createSession()`
 and `prompt()` -- there is no parameter for capability restrictions.
 
 Adding provider-level enforcement would require:
@@ -208,5 +208,9 @@ or fallback to unplanned execution.
   calls `planTask()` and handles plan failures
 - [CLI Options](../cli-orchestration/cli.md) -- The `--no-plan` flag and other
   CLI arguments
+- [Markdown Syntax Reference](../task-parsing/markdown-syntax.md) -- Accepted
+  checkbox formats consumed by the planner's context
 - [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) --
   File I/O safety and concurrency analysis relevant to context filtering
+- [Timeout Utility](../shared-utilities/timeout.md) -- Plan timeout mechanism
+  wrapping `planTask()` calls in the orchestrator

@@ -162,7 +162,9 @@ npm install @example/agent-sdk
 1. **Unit test**: Verify your provider implements the interface correctly. Test
    the boot, session creation, prompt, and cleanup lifecycle.
 
-2. **Integration test**: Run a dispatch with your provider:
+2. **Integration test**: Run a dispatch with your provider (see the
+   [CLI Options Reference](../cli-orchestration/cli.md#options-reference) for
+   all available flags):
 
     ```sh
     dispatch "tasks/**/*.md" --provider example --dry-run
@@ -217,5 +219,7 @@ runtime flexibility.
   that also boots and uses providers
 - [CLI Options](../cli-orchestration/cli.md) -- The `--provider` flag and
   argument validation
+- [Configuration](../cli-orchestration/configuration.md) -- How the `--provider`
+  flag interacts with persistent config defaults
 - [Testing Overview](../testing/overview.md) -- Test coverage (note: provider
   backends are not unit tested)

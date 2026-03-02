@@ -239,3 +239,9 @@ creates a unique `/tmp/dispatch-test-*` directory and removes it in `afterEach`.
 - [Planning & Dispatch overview](../planning-and-dispatch/overview.md) — the planner and dispatcher that consume parser output
 - [Task context and lifecycle](../planning-and-dispatch/task-context-and-lifecycle.md) — task lifecycle from parsing through dispatch
 - [Spec generator tests](spec-generator-tests.md) — `(P)`/`(S)` prefix instructions in prompts
+- [Configuration tests](config-tests.md) — config I/O, validation, and merge
+  precedence tests for comparison
+- [Format utility tests](format-tests.md) — `elapsed()` duration formatting
+  tests using similar pure-function patterns
+- [Shared utilities testing](../shared-utilities/testing.md) — slugify and
+  timeout test patterns for comparison

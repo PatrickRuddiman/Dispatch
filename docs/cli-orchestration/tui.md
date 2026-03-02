@@ -9,11 +9,11 @@ visually rich display that updates in place.
 
 The TUI provides a live-updating terminal display that shows:
 
-- The current pipeline phase (discovering, parsing, booting, dispatching, done)
+- The current [pipeline phase](../planning-and-dispatch/overview.md#pipeline-stages) (discovering, parsing, booting, dispatching, done)
 - A progress bar with completion percentage
 - A windowed task list showing recent completions, active tasks, and upcoming
   tasks
-- Per-task status icons, elapsed time, and error messages
+- Per-task status icons, [elapsed time](../shared-types/format.md), and error messages
 - A summary line with pass/fail/remaining counts
 
 ## Why it exists
@@ -232,10 +232,12 @@ chalk's color detection**. These escape sequences are written directly via
 | CI pipelines (GitHub Actions, etc.) | Depends on CI runner. Most CI environments do not support cursor movement but may render some ANSI codes |
 | Windows cmd.exe | ANSI escapes may not be supported. Windows Terminal supports them. |
 
-**Current mitigation**: The orchestrator uses `--dry-run` mode for non-TUI
+**Current mitigation**: The orchestrator uses [`--dry-run`](cli.md#the---dry-run-flag) mode for non-TUI
 contexts, which uses the [logger](../shared-types/logger.md) instead of the TUI. However,
 there is no automatic detection — users must explicitly pass `--dry-run` when
-running in non-interactive environments.
+running in non-interactive environments. See the
+[Configuration System](configuration.md) for how CLI flags like `--dry-run`
+are resolved.
 
 **Recommendation**: Check `process.stdout.isTTY` before creating the TUI,
 and fall back to logger-based output in non-TTY environments:
@@ -299,6 +301,14 @@ Union type for per-task states: `"pending" | "planning" | "running" | "done" | "
 - [Orchestrator pipeline](orchestrator.md) -- how the orchestrator drives
   TUI state transitions
 - [CLI](cli.md) -- argument parsing and exit codes
+- [Configuration System](configuration.md) -- persistent defaults that affect
+  concurrency and `--dry-run` behavior
 - [Logger](../shared-types/logger.md) -- alternative output for non-TUI contexts
+- [Format Utilities](../shared-types/format.md) -- `elapsed()` function used
+  for per-task duration display
 - [Integrations](integrations.md) -- chalk color detection and ANSI behavior
 - [Task Parsing Overview](../task-parsing/overview.md) -- the `Task` type displayed by the TUI
+- [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) --
+  pipeline stages that drive TUI phase transitions
+- [Cleanup Registry](../shared-types/cleanup.md) -- signal handling and
+  graceful shutdown behavior

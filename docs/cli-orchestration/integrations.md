@@ -137,7 +137,7 @@ the server itself — the client simply sends HTTP requests.
 Rate limits and cost depend on the OpenCode server configuration and the
 underlying AI model it uses. The dispatch tool sends one prompt per task
 (or two if [planning is enabled](../planning-and-dispatch/planner.md): one plan prompt + one execute prompt). With
-`--concurrency N`, up to N prompts may be in flight simultaneously. Consult
+[`--concurrency N`](cli.md#options-reference), up to N prompts may be in flight simultaneously. Consult
 OpenCode documentation for specific rate limit and pricing details.
 
 ---
@@ -435,7 +435,7 @@ troubleshooting, and unhandleable signals, see
 error handlers)
 
 The cleanup registry is a simple module that allows sub-modules (orchestrator,
-spec-generator) to register their provider's `cleanup()` function at boot time.
+spec-generator) to register their provider's [`cleanup()`](../shared-types/provider.md#cleanup-promisevoid) function at boot time.
 The CLI's signal handlers and error handler drain the registry before exiting,
 ensuring provider resources are released even when the orchestrator's own error
 path doesn't call `instance.cleanup()`.
@@ -486,3 +486,8 @@ for how this interacts with the orchestrator's own error recovery.
 - [Provider Abstraction & Backends](../provider-system/provider-overview.md) -- provider SDK details
 - [OpenCode Backend](../provider-system/opencode-backend.md) -- OpenCode-specific setup and troubleshooting
 - [Copilot Backend](../provider-system/copilot-backend.md) -- Copilot-specific setup and authentication
+- [Cleanup Registry](../shared-types/cleanup.md) -- Process-level cleanup mechanism
+- [Shared Integrations](../shared-types/integrations.md) -- Chalk, fs/promises, and signal handling reference
+- [Planner Agent](../planning-and-dispatch/planner.md) -- Planning phase referenced by rate limits discussion
+- [Dispatcher](../planning-and-dispatch/dispatcher.md) -- Execution phase that consumes provider sessions
+- [Timeout Utility](../shared-utilities/timeout.md) -- Plan timeout mechanism used by the orchestrator

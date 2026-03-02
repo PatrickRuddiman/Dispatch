@@ -1,5 +1,57 @@
 # Changelog
 
+## 2026-03-02T17:54:11.459Z
+<!-- hem-sha: 173a6d5c0324de71edfe250c6e30ee5563d7ef63 -->
+- ocs/architecture.md
+- ocs/cli-orchestration/cli.md
+- ocs/cli-orchestration/configuration.md
+- ocs/cli-orchestration/integrations.md
+- ocs/cli-orchestration/orchestrator.md
+- ocs/cli-orchestration/overview.md
+- ocs/cli-orchestration/tui.md
+- ocs/datasource-system/azdevops-datasource.md
+- ocs/datasource-system/datasource-helpers.md
+- ocs/datasource-system/github-datasource.md
+- ocs/datasource-system/integrations.md
+- ocs/datasource-system/markdown-datasource.md
+- ocs/datasource-system/overview.md
+- ocs/datasource-system/testing.md
+- ocs/deprecated-compat/overview.md
+- ocs/index.md
+- ocs/issue-fetching/adding-a-fetcher.md
+- ocs/issue-fetching/azdevops-fetcher.md
+- ocs/issue-fetching/github-fetcher.md
+- ocs/issue-fetching/overview.md
+- ocs/planning-and-dispatch/dispatcher.md
+- ocs/planning-and-dispatch/git.md
+- ocs/planning-and-dispatch/integrations.md
+- ocs/planning-and-dispatch/overview.md
+- ocs/planning-and-dispatch/planner.md
+- ocs/planning-and-dispatch/task-context-and-lifecycle.md
+- ocs/provider-system/adding-a-provider.md
+- ocs/provider-system/copilot-backend.md
+- ocs/provider-system/opencode-backend.md
+- ocs/provider-system/provider-overview.md
+- ocs/shared-types/cleanup.md
+- ocs/shared-types/format.md
+- ocs/shared-types/integrations.md
+- ocs/shared-types/logger.md
+- ocs/shared-types/overview.md
+- ocs/shared-types/parser.md
+- ocs/shared-types/provider.md
+- ocs/spec-generation/integrations.md
+- ocs/spec-generation/overview.md
+- ocs/task-parsing/api-reference.md
+- ocs/task-parsing/architecture-and-concurrency.md
+- ocs/task-parsing/markdown-syntax.md
+- ocs/task-parsing/overview.md
+- ocs/task-parsing/testing-guide.md
+- ocs/testing/config-tests.md
+- ocs/testing/format-tests.md
+- ocs/testing/overview.md
+- ocs/testing/parser-tests.md
+- ocs/testing/spec-generator-tests.md
+
 ## 2026-03-01T02:29:09.017Z
 <!-- hem-sha: 880b9a4ff42ed1cf40fc1be3511ad287b2740337 -->
 - docs/datasource-system/datasource-helpers.md

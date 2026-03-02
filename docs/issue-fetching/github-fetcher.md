@@ -109,7 +109,9 @@ gh issue view <issueId> --json number,title,body,labels,state,url,comments
 The `--json` flag requests structured JSON output with the specified fields.
 The command is executed via `execFile('gh', [...args], { cwd })`, where `cwd`
 provides the repository context (the `gh` CLI infers the repository from the
-git remote in the working directory).
+git remote in the working directory). For subprocess behavior details and
+error-handling patterns, see
+[Datasource Integrations](../datasource-system/integrations.md).
 
 ### Field mapping
 
@@ -251,6 +253,10 @@ git repository with a GitHub remote, the `gh` command fails.
   timeouts, and error handling patterns
 - [Adding a Fetcher](./adding-a-fetcher.md) -- Guide for implementing new
   tracker integrations
+- [Deprecated Compatibility Layer](../deprecated-compat/overview.md) -- How the
+  `IssueFetcher` interface maps to the `Datasource` interface
+- [Testing Overview](../testing/overview.md) -- Test suite structure (note: the
+  GitHub fetcher has no unit tests; see [Datasource Testing](../datasource-system/testing.md))
 - [CLI argument parser](../cli-orchestration/cli.md) -- `--spec` and `--source`
   flag documentation
 - [Spec Generation](../spec-generation/overview.md) -- The `--spec` pipeline

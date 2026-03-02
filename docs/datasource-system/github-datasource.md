@@ -191,8 +191,10 @@ acceptanceCriteria are empty.
 ## Git lifecycle operation details
 
 The GitHub datasource implements all seven git lifecycle methods using the `git`
-and `gh` CLI tools. These operations are used by the dispatch pipeline to manage
-the branching, committing, and PR workflow after task completion.
+and `gh` CLI tools. These operations are used by the [dispatch pipeline](../planning-and-dispatch/overview.md) to manage
+the branching, committing, and PR workflow after task completion. See also the
+[`--no-branch` flag](../cli-orchestration/cli.md#the---no-branch-flag) for
+skipping the branch lifecycle.
 
 ### `getDefaultBranch()`
 
@@ -214,7 +216,7 @@ which makes step 1 work reliably.
 
 Pure synchronous function that produces `dispatch/<number>-<slug>`. The title
 is slugified (lowercased, non-alphanumeric runs replaced with hyphens, trimmed,
-truncated to 50 characters). See the
+truncated to 50 characters) using the [`slugify()`](../shared-utilities/slugify.md) utility. See the
 [branch naming convention](./overview.md#branch-naming-convention) in the
 overview.
 
@@ -341,5 +343,11 @@ uses only the `origin` remote. Use `--source github` to force GitHub.
   legacy fetcher shim that delegates to this datasource
 - [Deprecated Compatibility Layer](../deprecated-compat/overview.md) -- How
   the old `IssueFetcher` interface maps to the `Datasource` interface
+- [CLI Argument Parser](../cli-orchestration/cli.md) -- `--source` flag and
+  `--no-branch` flag documentation
+- [Slugify Utility](../shared-utilities/slugify.md) -- The `slugify()` function
+  used by `buildBranchName()` to sanitize titles
+- [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) -- The
+  pipeline that consumes datasource git lifecycle operations
 - [Spec Generation](../spec-generation/overview.md) -- The `--spec` pipeline
   that fetches issues via datasources

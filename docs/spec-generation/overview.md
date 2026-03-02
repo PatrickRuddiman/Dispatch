@@ -189,7 +189,7 @@ parser (`src/cli.ts:127`).
 Each spec file is named `<issue-id>-<slug>.md` where:
 
 1. `<issue-id>` is the issue number (e.g., `42`).
-2. `<slug>` is derived from the issue title by:
+2. `<slug>` is derived from the issue title by the [`slugify()`](../shared-utilities/slugify.md) utility:
     - Converting to lowercase
     - Replacing non-alphanumeric characters with hyphens
     - Removing leading/trailing hyphens
@@ -465,6 +465,16 @@ but ignored in spec mode. The shared options (`--provider`, `--server-url`,
 - [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) -- How
   generated spec files are consumed downstream
 - [Testing Overview](../testing/overview.md) -- Test coverage including
-  [spec generator tests](../testing/spec-generator-tests.md)
+  spec generator tests
+- [Spec Generator Tests](../testing/spec-generator-tests.md) -- Unit and
+  integration tests for the spec generation pipeline
+- [Slugify Utility](../shared-utilities/slugify.md) -- The `slugify()` function
+  used for spec filename generation
+- [Shared Interfaces & Utilities](../shared-types/overview.md) -- Shared types
+  used by the spec pipeline (provider, cleanup, logger, format)
+- [Task Parsing & Markdown](../task-parsing/overview.md) -- How the generated
+  `- [ ]` task items are parsed by the dispatch pipeline
+- [Configuration](../cli-orchestration/configuration.md) -- Persistent config
+  defaults that affect `--spec` mode (provider, source)
 - [Architecture Overview](../architecture.md) -- System-wide design and
   pipeline topology

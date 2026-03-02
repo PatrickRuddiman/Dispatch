@@ -3,9 +3,9 @@
 The configuration system provides persistent user defaults for Dispatch CLI
 options. It consists of three modules that work together: a data layer
 (`src/config.ts`) for reading and writing the config file, a config resolution
-layer (`src/orchestrator/cli-config.ts`) that merges file defaults with CLI
-flags, and config subcommand handling embedded in the CLI entry point
-(`src/cli.ts`).
+layer (`src/orchestrator/cli-config.ts`) that merges file defaults with
+[CLI](cli.md) flags, and config subcommand handling embedded in the CLI entry
+point (`src/cli.ts`).
 
 ## What it does
 
@@ -394,7 +394,8 @@ This formula ensures the default is:
 
 The computation runs at pipeline invocation time (`src/agents/orchestrator.ts:207`),
 not at argument parsing time, so it reflects the system's resource availability
-when the pipeline actually starts.
+when the pipeline actually starts. The [TUI](tui.md) displays active task counts
+driven by this concurrency value.
 
 | System | CPUs | Free memory | Default concurrency |
 |--------|------|-------------|-------------------|
@@ -599,7 +600,9 @@ one of: `provider`, `concurrency`, `source`, `org`, `project`, `serverUrl`,
 `planTimeout`, `planRetries`.
 Keys like `dryRun`, `noPlan`, `noBranch`, and `verbose` are CLI-only flags and
 cannot be persisted. See [the --no-branch flag](cli.md#the---no-branch-flag)
-for details on that flag's behavior.
+for details on that flag's behavior, and the
+[Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) for how
+`--no-plan` affects execution.
 
 ## Related documentation
 
@@ -607,8 +610,14 @@ for details on that flag's behavior.
   and argument parsing
 - [Orchestrator pipeline](orchestrator.md) -- how resolved options drive the
   dispatch pipeline
+- [TUI](tui.md) -- terminal dashboard that reflects configuration-driven
+  concurrency and phase state
 - [Provider Abstraction](../provider-system/provider-overview.md) -- provider
   selection and `--server-url` semantics
+- [Copilot Backend](../provider-system/copilot-backend.md) -- Copilot-specific
+  `serverUrl` and authentication details
+- [OpenCode Backend](../provider-system/opencode-backend.md) -- OpenCode-specific
+  `serverUrl` and server lifecycle
 - [Datasource System](../datasource-system/overview.md) -- datasource
   detection and `--source` options
 - [Spec Generation](../spec-generation/overview.md) -- how `--spec` mode
@@ -619,3 +628,5 @@ for details on that flag's behavior.
   mechanism used by signal handlers
 - [Integrations](integrations.md) -- Node.js fs/promises, chalk, and process
   signal details
+- [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) --
+  pipeline stages that consume resolved `--no-plan` and `--concurrency` options

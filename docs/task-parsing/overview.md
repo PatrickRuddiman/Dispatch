@@ -8,7 +8,8 @@ types and functions.
 
 ## What it does
 
-The parser module (`src/parser.ts`) provides five core capabilities:
+The parser module (`src/parser.ts`) provides five core capabilities
+(see [API Reference](./api-reference.md) for detailed function signatures):
 
 1. **Parse markdown content** into structured `Task` and `TaskFile` objects
 2. **Extract execution mode** from optional `(P)`/`(S)` prefixes on task text,
@@ -100,8 +101,12 @@ for a detailed analysis.
 - [Testing Guide](./testing-guide.md) -- how to run and extend the test suite
 - [Task Context & Lifecycle](../planning-and-dispatch/task-context-and-lifecycle.md) --
   how the parser functions fit in the dispatch pipeline
+- [Shared Interfaces & Utilities](../shared-types/overview.md) -- The shared
+  layer that provides Task, TaskFile, and provider types
 - [Shared Parser Types](../shared-types/parser.md) -- summary of `Task`,
   `TaskFile`, and exported functions
+- [Cleanup Registry](../shared-types/cleanup.md) -- Process-level cleanup
+  that ensures resources are released even when tasks fail
 - [Orchestrator](../cli-orchestration/orchestrator.md) -- the primary consumer
   of all parser functions
 - [Spec Generation](../spec-generation/overview.md) -- the `--spec` pipeline

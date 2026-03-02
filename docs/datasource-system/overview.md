@@ -292,7 +292,7 @@ dispatch/<issueNumber>-<slugified-title>
 ```
 
 The title is slugified identically to the markdown datasource's `create()`
-filename slug: lowercased, non-alphanumeric runs replaced with hyphens,
+filename slug (via [`slugify()`](../shared-utilities/slugify.md)): lowercased, non-alphanumeric runs replaced with hyphens,
 leading/trailing hyphens trimmed, truncated to 50 characters. Examples:
 
 | Issue number | Title | Branch name |
@@ -445,7 +445,7 @@ The `Datasource` interface is consumed by several parts of the pipeline:
 
 | Consumer | Import | Operations used |
 |----------|--------|-----------------|
-| Dispatch pipeline (`src/orchestrator/dispatch-pipeline.ts`) | `getDatasource` | `close` (auto-close issues when all tasks succeed), git lifecycle methods (branching, committing, pushing, PR creation) |
+| Dispatch pipeline (`src/orchestrator/dispatch-pipeline.ts`) | `getDatasource` | `close` (auto-close issues when all tasks succeed; see [Datasource Helpers](./datasource-helpers.md#closecompletedspecissues)), git lifecycle methods (branching, committing, pushing, PR creation) |
 | Spec pipeline (`src/orchestrator/spec-pipeline.ts`) | `getDatasource`, `detectDatasource` | `fetch`, `list`, `update` |
 | Datasource helpers (`src/orchestrator/datasource-helpers.ts`) | `getDatasource`, `detectDatasource` | `fetch` (via `fetchItemsById`), `close` (via `closeCompletedSpecIssues`) |
 | Spec generator (`src/spec-generator.ts`) | `getDatasource` | `fetch` (retrieve issue details for AI prompts) |
@@ -503,3 +503,9 @@ that all consumers handle the new backend at compile time.
   orchestrator invokes datasource operations and helpers
 - [Git Operations](../planning-and-dispatch/git.md) -- Post-completion git
   commits that run after datasource lifecycle operations
+- [Shared Utilities — Slugify](../shared-utilities/slugify.md) -- The `slugify()`
+  function used for branch name and filename generation
+- [Configuration](../cli-orchestration/configuration.md) -- Persistent config
+  including `source`, `org`, and `project` settings
+- [Datasource Testing](./testing.md) -- Test suite covering the markdown
+  datasource and datasource registry

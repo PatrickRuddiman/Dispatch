@@ -106,7 +106,7 @@ schema"), the planner will not see the dependency.
 - Express dependencies as prose: "This task depends on the database schema
   created by a previous task."
 - Order dependent tasks so prerequisites complete first (use
-  `--concurrency 1`)
+  `--concurrency 1`; see [CLI Options](../cli-orchestration/cli.md#options-reference))
 - Completed prerequisite tasks appear as `[x]` items, which are preserved in
   the filtered context
 
@@ -147,9 +147,12 @@ handling, see
 
 - [Pipeline Overview](./overview.md) -- Where parsing fits in the pipeline
 - [Planner Agent](./planner.md) -- How filtered context is consumed
+- [Dispatcher](./dispatcher.md) -- The execution phase that follows planning
 - [Git Operations](./git.md) -- The commit step after `markTaskComplete`
 - [Task Parsing & Markdown](../task-parsing/overview.md) -- Full parser API, testing,
   and edge cases
+- [Markdown Syntax Reference](../task-parsing/markdown-syntax.md) -- Supported
+  checkbox formats, `(P)`/`(S)` mode prefixes, and line ending handling
 - [Orchestrator](../cli-orchestration/orchestrator.md) -- How the orchestrator
   calls `parseTaskFile`, `buildTaskContext`, and `markTaskComplete`
 - [Shared Parser Types](../shared-types/parser.md) -- `Task` and `TaskFile` type
@@ -159,3 +162,5 @@ handling, see
   behavior, edge cases, and CRLF handling
 - [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) --
   File I/O safety and concurrent write analysis
+- [Provider Overview](../provider-system/provider-overview.md) -- The AI
+  provider sessions used by planner and dispatcher

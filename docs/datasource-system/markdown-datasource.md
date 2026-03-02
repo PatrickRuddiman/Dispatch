@@ -7,7 +7,7 @@ registry.
 
 ## What it does
 
-The markdown datasource maps the five CRUD `Datasource` interface operations
+The markdown datasource maps the five CRUD [`Datasource`](./overview.md#the-datasource-interface) interface operations
 onto local filesystem operations:
 
 | Operation | Filesystem operation | Target path |
@@ -71,7 +71,7 @@ with or without the `.md` extension (`src/datasources/md.ts:79`):
 
 ### Title slugification in `create()`
 
-When creating a new spec, the title is slugified to produce the filename
+When creating a new spec, the title is [slugified](../shared-utilities/slugify.md) to produce the filename
 (`src/datasources/md.ts:104`):
 
 ```
@@ -250,7 +250,7 @@ when using `--source md`.
 
 ### Impact on the dispatch pipeline
 
-When the dispatch pipeline runs with `--source md`:
+When the dispatch pipeline runs with [`--source md`](../cli-orchestration/cli.md):
 
 1. **Branching:** `createAndSwitchBranch()` is a no-op -- the pipeline stays
    on whatever branch is currently checked out.
@@ -309,7 +309,7 @@ Two specs with titles that produce the same slug (e.g., `"My Feature!"` and
 
 The auto-detection system (`detectDatasource()`) only matches GitHub and Azure
 DevOps remote URLs. It never auto-detects `"md"`. To use the markdown
-datasource, always pass `--source md` explicitly.
+datasource, always pass [`--source md`](../cli-orchestration/cli.md) explicitly.
 
 ## Related documentation
 
@@ -322,3 +322,8 @@ datasource, always pass `--source md` explicitly.
   consumes datasource operations, including `close()` for auto-archiving
 - [Integrations & Troubleshooting](./integrations.md) -- Cross-cutting
   error-handling concerns
+- [Spec Generation](../spec-generation/overview.md) -- Pipeline that may write
+  spec files consumed by this datasource
+- [Slugify Utility](../shared-utilities/slugify.md) -- General slug generation
+  used by `buildBranchName()` and related operations
+- [Datasource Testing](./testing.md) -- Test coverage for datasource implementations

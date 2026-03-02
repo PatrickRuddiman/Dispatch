@@ -21,7 +21,7 @@ The orchestrator exposes two entry points from the CLI:
 
     1. **Discover** work items from the configured [datasource](../datasource-system/overview.md) (GitHub, Azure DevOps, or local markdown), optionally filtered by issue IDs
     2. **Write** discovered items to temporary spec files via `writeItemsToTempDir()`
-    3. **Parse** unchecked tasks from the spec files using [`parseTaskFile()`](../task-parsing/api-reference.md#parsetaskfile)
+    3. **Parse** unchecked tasks from the spec files using [`parseTaskFile()`](../task-parsing/api-reference.md#parsetaskfile) (see [Markdown Syntax Reference](../task-parsing/markdown-syntax.md) for supported checkbox formats)
     4. **Boot** the selected [AI provider](../provider-system/provider-overview.md) (OpenCode or Copilot)
     5. **Group** tasks by source file (one file = one issue), then by execution mode using [`groupTasksByMode()`](../task-parsing/api-reference.md#grouptasksbymode)
     6. **Branch** (unless `--no-branch`): create a per-issue feature branch, dispatch tasks, push, create PR, switch back (see [branch lifecycle](cli.md#the---no-branch-flag))
@@ -248,8 +248,8 @@ pattern matching. The pipeline (`src/orchestrator/dispatch-pipeline.ts:61-86`):
 1. **Fetches items**: If issue IDs were passed on the CLI, `fetchItemsById()`
    retrieves those specific items. Otherwise, `datasource.list()` retrieves all
    open items from the configured source.
-2. **Writes to temp files**: `writeItemsToTempDir()` writes each item's
-   content to a temporary spec file and returns the file paths along with an
+2. **Writes to temp files**: [`writeItemsToTempDir()`](../datasource-system/datasource-helpers.md#writeitemstotempdir) writes each item's
+   content to a temporary spec file (using [`slugify`](../shared-utilities/slugify.md) for filename generation) and returns the file paths along with an
    `issueDetailsByFile` map that associates each file with its `IssueDetails`.
 3. **Parses tasks**: Each temp file is parsed via `parseTaskFile()` to extract
    unchecked tasks.
@@ -332,7 +332,7 @@ cleanup registry:
 registerCleanup(() => instance.cleanup())
 ```
 
-The `registerCleanup` function (from `src/cleanup.ts`) adds the callback to a
+The `registerCleanup` function (from `src/cleanup.ts`; see [Cleanup Registry](../shared-types/cleanup.md)) adds the callback to a
 module-level array. The CLI's signal handlers and error handler call
 `runCleanup()` to drain all registered functions before the process exits. This
 is the **safety net** for the cleanup gap described below — even if the
@@ -443,7 +443,7 @@ time via `bootOrchestrator({ cwd })` rather than passed per-invocation:
 | `source` | `DatasourceName?` | Datasource backend (`"github"`, `"azdevops"`, or `"md"`) |
 | `org` | `string?` | Azure DevOps organization URL |
 | `project` | `string?` | Azure DevOps project name |
-| `planTimeout` | `number?` | Planning timeout in minutes. Passed through from CLI `--plan-timeout` or config `planTimeout`. |
+| `planTimeout` | `number?` | Planning timeout in minutes. Passed through from CLI `--plan-timeout` or config `planTimeout`. Used with [`withTimeout()`](../shared-utilities/timeout.md). |
 | `planRetries` | `number?` | Number of retry attempts after planning timeout. Passed through from CLI `--plan-retries` or config `planRetries`. |
 
 ### DispatchSummary
@@ -491,5 +491,9 @@ Returned from `orchestrate()` to the CLI:
   checkbox formats and `(P)`/`(S)` mode prefixes that drive grouping
 - [Git Operations](../planning-and-dispatch/git.md) -- how `commitTask()` creates
   conventional commits after task completion
+- [Shared Utilities](../shared-utilities/overview.md) -- `slugify` for file/branch
+  naming and `withTimeout` for planning deadlines
+- [Timeout Utility](../shared-utilities/timeout.md) -- `withTimeout()` used for
+  controlling planning execution timeouts (`planTimeout` option)
 - [Testing Overview](../testing/overview.md) -- project-wide test suite
   documentation (note: orchestrator is not directly tested)

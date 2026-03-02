@@ -28,7 +28,13 @@ documentation.
   Migration guidance and removal assessment for the old fetcher interface
 - [Issue Fetching Overview](./overview.md) -- Architecture and data flow of
   the deprecated fetcher system
+- [GitHub Fetcher](./github-fetcher.md) -- The equivalent deprecated shim
+  for GitHub issue fetching
+- [Adding a Fetcher](./adding-a-fetcher.md) -- Guide for adding new tracker
+  integrations (deprecated; use the Datasource interface instead)
 - [Datasource Overview](../datasource-system/overview.md) -- The datasource
   abstraction that supersedes this fetcher interface
 - [Spec Generation](../spec-generation/overview.md) -- How the spec pipeline
   uses datasources to fetch Azure DevOps work items for spec generation
+- [Spec Generation Integrations](../spec-generation/integrations.md) -- Azure
+  DevOps work item fetching in the context of spec generation

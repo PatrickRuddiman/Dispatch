@@ -9,9 +9,9 @@ planner, or dispatcher code.
 ## Why this exists
 
 dispatch orchestrates AI coding agents to complete [tasks parsed from
-markdown files](../task-parsing/overview.md). Different teams use different agent runtimes -- some prefer
+markdown files](../task-parsing/overview.md) (using the [checkbox syntax](../task-parsing/markdown-syntax.md)). Different teams use different agent runtimes -- some prefer
 OpenCode, others use GitHub Copilot. Rather than hardcoding a single agent, the
-provider layer lets users select their backend at the CLI level ([`--provider`](../cli-orchestration/cli.md))
+provider layer lets users select their backend at the CLI level ([`--provider`](../cli-orchestration/cli.md)) or via [persistent configuration](../cli-orchestration/configuration.md)
 while the rest of the pipeline remains agnostic.
 
 ## Key source files
@@ -236,7 +236,8 @@ same codebase but should not confuse the agent by mixing conversation contexts.
 ### The cleanup registry
 
 The process-level [cleanup registry](../shared-types/cleanup.md) (`src/cleanup.ts`) provides a safety net for
-resource cleanup on abnormal exit. It works as follows:
+resource cleanup on abnormal exit. See also the [Logger](../shared-types/logger.md) for how cleanup events
+are traced with `log.debug()`. It works as follows:
 
 1. When the orchestrator boots a provider, it immediately registers the
    provider's `cleanup()` function with the registry:
@@ -369,5 +370,15 @@ implementations normalize to `string | null`:
   `ProviderBootOptions`, and `ProviderInstance` type definitions
 - [Cleanup Registry](../shared-types/cleanup.md) -- Process-level cleanup
   registry that ensures provider sessions are terminated on exit
+- [Logger](../shared-types/logger.md) -- Structured logging facade used for
+  verbose debug tracing of provider boot, sessions, and cleanup
+- [Spec Generation](../spec-generation/overview.md) -- How the spec pipeline
+  boots and uses providers for AI-driven spec generation
+- [Spec Generation Integrations](../spec-generation/integrations.md) -- Provider
+  authentication, troubleshooting, and external server mode
+- [Datasource System](../datasource-system/overview.md) -- The datasource
+  abstraction that provides work items for provider-driven tasks
+- [Markdown Syntax Reference](../task-parsing/markdown-syntax.md) -- Checkbox
+  format and `(P)`/`(S)` mode prefixes that determine task execution order
 - [Testing Overview](../testing/overview.md) -- Test suite framework and
   coverage including provider-related test patterns

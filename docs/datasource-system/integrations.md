@@ -225,7 +225,9 @@ dispatch/<issueNumber>-<slugified-title>
 
 ### Slug construction
 
-The title is slugified using this algorithm (identical across all datasources):
+The title is slugified using the shared
+[`slugify()`](../shared-utilities/slugify.md) algorithm (identical across all
+datasources):
 
 1. Lowercase the title.
 2. Replace runs of non-alphanumeric characters with a single hyphen.
@@ -386,7 +388,9 @@ the spec generation prompt.
 
 The `--source` flag accepts values from `DATASOURCE_NAMES`. The `config.ts`
 module validates the `source` config key against these names. Invalid values
-are rejected with an error listing the available datasource names.
+are rejected with an error listing the available datasource names. See the
+[Configuration System](../cli-orchestration/configuration.md) for how
+`--source` defaults are persisted and merged with CLI flags.
 
 ### Deprecated compatibility layer (`src/issue-fetchers/`)
 
@@ -416,5 +420,9 @@ for migration guidance and removal assessment.
   consumes datasource `fetch()` results
 - [CLI Argument Parser](../cli-orchestration/cli.md) -- `--source`, `--org`,
   and `--project` flag documentation
+- [Configuration System](../cli-orchestration/configuration.md) -- Persistent
+  `--source` defaults and three-tier merge logic
+- [Slugify](../shared-utilities/slugify.md) -- Branch name and temp file slug
+  construction algorithm
 - [Shared Types: Integrations](../shared-types/integrations.md) -- Node.js
   fs/promises and child_process operational details

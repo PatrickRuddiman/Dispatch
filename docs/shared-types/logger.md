@@ -156,7 +156,7 @@ network error chains are typically 2-3 levels deep:
 2. `Error: connect ECONNREFUSED ...` (Node.js net layer)
 3. System-level error code (optional, e.g., `ECONNREFUSED`)
 
-The SDK wrappers used by Dispatch (OpenCode SDK, Copilot SDK) may add one
+The SDK wrappers used by Dispatch ([OpenCode SDK](../provider-system/opencode-backend.md), [Copilot SDK](../provider-system/copilot-backend.md)) may add one
 additional layer. A depth of 5 provides comfortable headroom for current and
 foreseeable error chains. If a chain is truncated, the deepest visible cause
 still provides significant diagnostic value.
@@ -315,13 +315,23 @@ a full log-level hierarchy.
   before draining cleanup
 - [Format utilities](./format.md) -- The `elapsed()` helper used alongside
   logger output for timing
+- [Format Tests](../testing/format-tests.md) -- Test suite covering the
+  `elapsed()` function that the logger displays
 - [Integrations reference](./integrations.md) -- Chalk color detection, CI
   behavior, and Node.js process signal details
 - [TUI](../cli-orchestration/tui.md) -- The alternative rich output mode that
   replaces the logger during normal dispatch
 - [CLI & Orchestration](../cli-orchestration/overview.md) -- Where the logger
   is consumed and verbose mode is initialized
+- [Configuration](../cli-orchestration/configuration.md) -- How `--verbose`
+  is persisted and merged with CLI flags
 - [Spec Generation](../spec-generation/overview.md) -- How the spec pipeline
   uses logger for progress reporting and error diagnostics
+- [Spec Generation Integrations](../spec-generation/integrations.md) -- Chalk
+  behavior in non-TTY environments during spec generation
 - [Dispatcher](../planning-and-dispatch/dispatcher.md) -- Debug tracing of
   prompt dispatch and error chain formatting
+- [Provider Overview](../provider-system/provider-overview.md) -- Debug
+  tracing of provider boot, session creation, and cleanup
+- [Datasource Helpers](../datasource-system/datasource-helpers.md) -- How
+  datasource helper functions use `log.warn()` and `log.success()`

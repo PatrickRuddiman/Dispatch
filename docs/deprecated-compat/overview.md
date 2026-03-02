@@ -234,8 +234,11 @@ underlying `Datasource.close()`.
 
 The compatibility shims delegate entirely to the
 [Datasource implementations](../datasource-system/overview.md), which shell out
-to external CLI tools. The shims themselves have no additional prerequisites
-beyond what the underlying datasource requires.
+to external CLI tools. See the
+[Datasource Integrations & Troubleshooting](../datasource-system/integrations.md)
+for subprocess execution details, timeout behavior, and error handling. The shims
+themselves have no additional prerequisites beyond what the underlying datasource
+requires.
 
 ### GitHub CLI (`gh`)
 
@@ -269,8 +272,10 @@ GitHub credentials.
 
 For GitHub Enterprise Server hosts, authenticate with
 `gh auth login --hostname github.mycompany.com`. Note that the
-[auto-detection logic](../issue-fetching/overview.md#auto-detection-of-issue-source)
+[auto-detection logic](../datasource-system/integrations.md#git-based-auto-detection)
 only matches `github.com`, so GHES users must pass `--source github` explicitly.
+See the [Configuration System](../cli-orchestration/configuration.md) for how to
+persist `--source` as a default.
 
 **What happens if `gh` is not installed:** Node.js `execFile` throws an error
 with `code: 'ENOENT'`. The spec generator catches this and logs
@@ -484,6 +489,8 @@ interface).
   `Datasource` interface and registry that supersedes `IssueFetcher`
 - [Datasource Integrations & Troubleshooting](../datasource-system/integrations.md) --
   Subprocess behavior, timeouts, and error handling
+- [Configuration System](../cli-orchestration/configuration.md) -- Persistent
+  `--source` defaults and validation rules
 - [Spec Generation](../spec-generation/overview.md) -- How the spec pipeline
   uses issue fetching
 - [CLI Argument Parser](../cli-orchestration/cli.md) -- `--source` flag
