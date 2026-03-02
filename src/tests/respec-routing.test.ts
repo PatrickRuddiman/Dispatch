@@ -54,7 +54,7 @@ vi.mock("../orchestrator/dispatch-pipeline.js", () => ({
 
 // ─── Imports (AFTER vi.mock calls) ──────────────────────────────────
 
-import { boot, type RawCliArgs } from "../agents/orchestrator.js";
+import { boot, type RawCliArgs } from "../orchestrator/runner.js";
 import { log } from "../logger.js";
 import { resolveCliConfig } from "../orchestrator/cli-config.js";
 import { resolveSource } from "../spec-generator.js";

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { readFile, writeFile, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parseIssueFilename } from "../agents/orchestrator.js";
+import { parseIssueFilename } from "../orchestrator/runner.js";
 import { markTaskComplete, type Task } from "../parser.js";
 import type { Datasource, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
 

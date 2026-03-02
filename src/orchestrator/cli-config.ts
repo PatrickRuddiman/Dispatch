@@ -9,7 +9,7 @@
 
 import { log } from "../logger.js";
 import { loadConfig, type DispatchConfig } from "../config.js";
-import type { RawCliArgs } from "../agents/orchestrator.js";
+import type { RawCliArgs } from "./runner.js";
 
 /**
  * Config key → RawCliArgs field mapping.

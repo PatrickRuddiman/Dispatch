@@ -17,7 +17,7 @@ import type { ProviderName } from "../providers/interface.js";
 import { bootProvider } from "../providers/index.js";
 import { getDatasource } from "../datasources/index.js";
 import type { DatasourceName, DispatchLifecycleOptions, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
-import type { OrchestrateRunOptions, DispatchSummary } from "../agents/orchestrator.js";
+import type { OrchestrateRunOptions, DispatchSummary } from "./runner.js";
 import {
   fetchItemsById,
   writeItemsToTempDir,
