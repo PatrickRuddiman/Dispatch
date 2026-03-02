@@ -8,7 +8,7 @@
  */
 
 import { join } from "node:path";
-import { mkdir, readFile, unlink } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink } from "node:fs/promises";
 import { glob } from "glob";
 import type { SpecOptions, SpecSummary } from "../spec-generator.js";
 import { isIssueNumbers, isGlobOrFilePath, resolveSource, defaultConcurrency } from "../spec-generator.js";
@@ -21,6 +21,7 @@ import { registerCleanup } from "../cleanup.js";
 import { log } from "../logger.js";
 import chalk from "chalk";
 import { elapsed, renderHeaderLines } from "../format.js";
+import { slugify } from "../slugify.js";
 
 /**
  * Run the spec-generation pipeline end-to-end.
@@ -99,11 +100,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     // Inline text mode: construct IssueDetails from the raw text
     const text = Array.isArray(issues) ? issues.join(" ") : issues;
     const title = text.length > 80 ? text.slice(0, 80).trimEnd() + "…" : text;
-    const slug = text
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 60);
+    const slug = slugify(text, 60);
     const filename = `${slug}.md`;
     const filepath = join(outputDir, filename);
 
@@ -208,11 +205,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
         let filepath: string;
         if (isTrackerMode) {
           // Issue-tracker: write to outputDir with slug filename
-          const slug = details!.title
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, "-")
-            .replace(/^-|-$/g, "")
-            .slice(0, 60);
+          const slug = slugify(details!.title, 60);
           const filename = `${id}-${slug}.md`;
           filepath = join(outputDir, filename);
         } else if (isInlineText) {
@@ -236,6 +229,18 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
 
           if (!result.success) {
             throw new Error(result.error ?? "Spec generation failed");
+          }
+
+          // Derive final filename from H1 heading in the generated spec
+          if (isTrackerMode || isInlineText) {
+            const h1Title = extractTitle(result.content, filepath);
+            const h1Slug = slugify(h1Title, 60);
+            const finalFilename = isTrackerMode ? `${id}-${h1Slug}.md` : `${h1Slug}.md`;
+            const finalFilepath = join(outputDir, finalFilename);
+            if (finalFilepath !== filepath) {
+              await rename(filepath, finalFilepath);
+              filepath = finalFilepath;
+            }
           }
 
           const specDuration = Date.now() - specStart;
