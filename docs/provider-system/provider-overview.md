@@ -1,6 +1,6 @@
 # Provider Abstraction Layer
 
-The provider abstraction layer is the strategy pattern at the heart of dispatch-tasks
+The provider abstraction layer is the strategy pattern at the heart of dispatch
 that decouples the orchestration pipeline from any specific AI agent runtime. It
 allows the system to swap between OpenCode, GitHub Copilot, or future backends
 through a single `ProviderInstance` interface without changing the orchestrator,
@@ -8,7 +8,7 @@ planner, or dispatcher code.
 
 ## Why this exists
 
-dispatch-tasks orchestrates AI coding agents to complete [tasks parsed from
+dispatch orchestrates AI coding agents to complete [tasks parsed from
 markdown files](../task-parsing/overview.md). Different teams use different agent runtimes -- some prefer
 OpenCode, others use GitHub Copilot. Rather than hardcoding a single agent, the
 provider layer lets users select their backend at the CLI level ([`--provider`](../cli-orchestration/cli.md))

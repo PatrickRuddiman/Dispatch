@@ -2,7 +2,7 @@
 
 The OpenCode provider wraps the
 [`@opencode-ai/sdk`](https://opencode.ai/docs/sdk/) to conform to the
-[`ProviderInstance`](../shared-types/provider.md#providerinstance-interface) interface, enabling dispatch-tasks to use
+[`ProviderInstance`](../shared-types/provider.md#providerinstance-interface) interface, enabling dispatch to use
 [OpenCode](https://opencode.ai) as its AI agent runtime.
 
 ## Why use OpenCode

@@ -1,6 +1,6 @@
-# dispatch-tasks -- Architecture Overview
+# dispatch -- Architecture Overview
 
-dispatch-tasks is a Node.js CLI tool that orchestrates AI coding agents to
+dispatch is a Node.js CLI tool that orchestrates AI coding agents to
 implement software tasks described in markdown files. It bridges issue trackers
 (GitHub Issues, Azure DevOps Work Items) and AI agent runtimes (OpenCode, GitHub
 Copilot) through a multi-stage pipeline: fetch issues, generate structured specs,
@@ -9,7 +9,7 @@ parse tasks, plan execution, dispatch to AI agents, and commit results.
 ## Why it exists
 
 Manual orchestration of AI coding agents is tedious when a project has many
-small, well-defined units of work. dispatch-tasks solves three problems:
+small, well-defined units of work. dispatch solves three problems:
 
 1. **Context isolation** -- each task runs in a fresh agent session so context
    from one task does not leak into another.
@@ -34,11 +34,11 @@ and issue trackers.
 
 ```mermaid
 C4Context
-    title dispatch-tasks -- System Topology
+    title dispatch -- System Topology
 
     Person(user, "Developer", "Runs the dispatch CLI")
 
-    System_Boundary(dispatch, "dispatch-tasks") {
+    System_Boundary(dispatch, "dispatch") {
 
         Container(cli, "CLI Entry Point", "src/cli.ts", "Parses arguments, routes to orchestrator or config subcommand")
         Container(config, "Configuration", "src/config.ts + orchestrator/cli-config.ts", "Three-tier merge: CLI flags > ~/.dispatch/config.json > defaults")
@@ -89,7 +89,7 @@ C4Context
 
 ## End-to-end data flow
 
-dispatch-tasks operates in two modes, selected by the presence of the `--spec`
+dispatch operates in two modes, selected by the presence of the `--spec`
 flag. Both modes share the same CLI entry point, configuration system, datasource
 layer, and provider layer.
 
@@ -369,7 +369,7 @@ concern links to the feature pages where it is discussed in detail.
 
 ### Authentication and secrets
 
-dispatch-tasks does **not** manage credentials directly. Authentication is
+dispatch does **not** manage credentials directly. Authentication is
 delegated entirely to external CLI tools and SDKs:
 
 | Backend | Auth mechanism | Managed by |
@@ -379,7 +379,7 @@ delegated entirely to external CLI tools and SDKs:
 | OpenCode provider | Server-level config; no credentials passed by dispatch | [OpenCode SDK](provider-system/opencode-backend.md) |
 | Copilot provider | Copilot CLI login, `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` | [Copilot SDK](provider-system/copilot-backend.md) |
 
-There is no secrets rotation mechanism within dispatch-tasks. Token lifecycle is
+There is no secrets rotation mechanism within dispatch. Token lifecycle is
 managed by the underlying tools. For CI/CD environments, use environment
 variables instead of interactive login. See
 [Datasource Integrations](datasource-system/integrations.md),
@@ -430,7 +430,7 @@ between partial and total failure. See [CLI](cli-orchestration/cli.md).
 
 ### Monitoring and observability
 
-dispatch-tasks provides two output modes with no external monitoring integration:
+dispatch provides two output modes with no external monitoring integration:
 
 - **[TUI Dashboard](cli-orchestration/tui.md)**: Real-time terminal rendering
   with spinner, progress bar, and per-task status tracking. Uses ANSI escape
@@ -476,7 +476,7 @@ orchestrator level. See
 
 ### External tool availability
 
-dispatch-tasks depends on several CLI tools at runtime but performs no pre-flight
+dispatch depends on several CLI tools at runtime but performs no pre-flight
 checks for their presence. A missing tool surfaces as an `ENOENT` error from
 Node's `execFile`:
 

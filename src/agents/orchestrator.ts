@@ -43,6 +43,7 @@ export interface RawCliArgs {
   verbose: boolean;
   spec?: string | string[];
   respec?: string | string[];
+  fixTests?: boolean;
   issueSource?: DatasourceName;
   org?: string;
   project?: string;
@@ -60,6 +61,12 @@ export interface DispatchSummary {
   results: DispatchResult[];
 }
 
+export interface FixTestsSummary {
+  mode: "fix-tests";
+  success: boolean;
+  error?: string;
+}
+
 /** Dispatch-mode run options with explicit mode discriminator. */
 export interface DispatchRunOptions extends OrchestrateRunOptions {
   mode: "dispatch";
@@ -70,11 +77,16 @@ export interface SpecRunOptions extends Omit<SpecOptions, "cwd"> {
   mode: "spec";
 }
 
+/** Fix-tests-mode run options with explicit mode discriminator. */
+export interface FixTestsRunOptions {
+  mode: "fix-tests";
+}
+
 /** Discriminated union of all orchestrator run options. */
-export type UnifiedRunOptions = DispatchRunOptions | SpecRunOptions;
+export type UnifiedRunOptions = DispatchRunOptions | SpecRunOptions | FixTestsRunOptions;
 
 /** Unified result type — DispatchSummary or SpecSummary depending on mode. */
-export type RunResult = DispatchSummary | SpecSummary;
+export type RunResult = DispatchSummary | SpecSummary | FixTestsSummary;
 
 /** A booted orchestrator that coordinates dispatch and spec pipelines. */
 export interface OrchestratorAgent {
@@ -98,6 +110,10 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
         const { mode: _, ...rest } = opts;
         return agent.generateSpecs({ ...rest, cwd });
       }
+      if (opts.mode === "fix-tests") {
+        const { runFixTestsPipeline } = await import("../orchestrator/fix-tests-pipeline.js");
+        return runFixTestsPipeline({ cwd, provider: "opencode", serverUrl: undefined, verbose: false });
+      }
       const { mode: _, ...rest } = opts;
       return agent.orchestrate(rest);
     },
@@ -105,10 +121,27 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
     async runFromCli(args: RawCliArgs): Promise<RunResult> {
       const m = await resolveCliConfig(args);
 
-      // ── Mutual exclusion: --spec and --respec ───────────────
-      if (m.spec && m.respec) {
-        log.error("--spec and --respec are mutually exclusive");
+      // ── Mutual exclusion: --spec, --respec, --fix-tests ────
+      const modeFlags = [
+        m.spec !== undefined && "--spec",
+        m.respec !== undefined && "--respec",
+        m.fixTests && "--fix-tests",
+      ].filter(Boolean) as string[];
+
+      if (modeFlags.length > 1) {
+        log.error(`${modeFlags.join(" and ")} are mutually exclusive`);
         process.exit(1);
+      }
+
+      // --fix-tests is mutually exclusive with positional issue IDs
+      if (m.fixTests && m.issueIds.length > 0) {
+        log.error("--fix-tests cannot be combined with issue IDs");
+        process.exit(1);
+      }
+
+      if (m.fixTests) {
+        const { runFixTestsPipeline } = await import("../orchestrator/fix-tests-pipeline.js");
+        return runFixTestsPipeline({ cwd: m.cwd, provider: m.provider, serverUrl: m.serverUrl, verbose: m.verbose });
       }
 
       if (m.spec) {

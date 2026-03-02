@@ -85,7 +85,7 @@ The minimum scopes depend on the operations used:
 For the full dispatch pipeline (including `createPullRequest()`), the `repo`
 scope is required because PR creation needs write access. The `gh auth login`
 interactive flow requests `repo`, `read:org`, and `gist` scopes by default,
-which covers all dispatch-tasks operations.
+which covers all dispatch operations.
 
 When authenticating with `--with-token` (piping a PAT via stdin), ensure the
 token has at least the `repo` scope. Tokens with insufficient scopes will
@@ -101,7 +101,7 @@ gh auth login --hostname github.mycompany.com
 
 Note that the [datasource auto-detection](./overview.md#auto-detection) only matches `github.com` in the remote
 URL. GitHub Enterprise hosts require explicit `--source github` on the
-dispatch-tasks CLI. See the
+dispatch CLI. See the
 [auto-detection limitations](./overview.md#auto-detection-limitations).
 
 ### Verifying authentication
@@ -172,7 +172,7 @@ interface.
 
 Closes an issue by calling `gh issue close <id>`. This sets the issue state to
 "closed" on GitHub. The operation is reversible using `gh issue reopen <id>`
-outside of dispatch-tasks.
+outside of dispatch.
 
 ### `create()`
 
@@ -272,7 +272,7 @@ and stderr output indicating the rate limit. This surfaces as an unhandled
 error from `execFile`.
 
 For large-scale operations (e.g., listing hundreds of issues), consider using
-`gh` CLI's built-in `--limit` flag outside of dispatch-tasks, or paginating
+`gh` CLI's built-in `--limit` flag outside of dispatch, or paginating
 manually.
 
 ## Error handling

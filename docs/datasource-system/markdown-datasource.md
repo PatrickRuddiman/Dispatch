@@ -31,7 +31,7 @@ serve as the source of truth for work items. Use cases include:
   required.
 - **Quick prototyping.** Create specs as markdown files without setting up a
   tracker.
-- **Testing and development.** Use local files to test dispatch-tasks pipelines
+- **Testing and development.** Use local files to test dispatch pipelines
   without connecting to GitHub or Azure DevOps.
 - **Version-controlled specs.** Markdown files can be committed to git, giving
   the spec lifecycle full version control.
@@ -231,7 +231,7 @@ active. If the markdown datasource threw errors for these operations, the
 pipeline would fail when used with `--source md`. By implementing them as
 silent no-ops, the pipeline runs to completion -- it just skips the git
 workflow steps. The markdown datasource user is expected to manage their own
-git workflow (if any) outside of dispatch-tasks.
+git workflow (if any) outside of dispatch.
 
 ### `buildBranchName()` is not a no-op
 
@@ -269,13 +269,13 @@ Markdown spec files live in the project directory and can be version-controlled
 with git:
 
 - **Committing specs:** Run `git add .dispatch/specs/` to stage spec files.
-  The dispatch-tasks orchestrator may auto-commit changes during the dispatch
+  The dispatch orchestrator may auto-commit changes during the dispatch
   pipeline.
 - **Archived specs:** The `archive/` subdirectory should also be committed if
   you want to track closed specs.
 - **`.gitignore`:** If you do not want specs committed, add `.dispatch/specs/`
   to `.gitignore`.
-- **Concurrent access:** There is no file locking. If multiple dispatch-tasks
+- **Concurrent access:** There is no file locking. If multiple dispatch
   processes or users modify the same spec file concurrently, data loss may
   occur from write conflicts.
 
