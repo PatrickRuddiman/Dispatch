@@ -66,8 +66,7 @@ export async function resolveCliConfig(args: RawCliArgs): Promise<RawCliArgs> {
 
   if (!providerConfigured) {
     log.error("Missing required configuration: provider");
-    log.dim("  Configure defaults with:");
-    log.dim("    dispatch config set provider <name>");
+    log.dim("  Run 'dispatch config' to configure defaults interactively.");
     log.dim("  Or pass it as a CLI flag: --provider <name>");
     process.exit(1);
   }

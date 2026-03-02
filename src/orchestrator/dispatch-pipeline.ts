@@ -99,7 +99,7 @@ export async function runDispatchPipeline(
     if (!source) {
       tui.state.phase = "done";
       tui.stop();
-      log.error("No datasource configured. Use --source or run: dispatch config set source <name>");
+      log.error("No datasource configured. Use --source or run 'dispatch config' to set up defaults.");
       return { total: 0, completed: 0, failed: 0, skipped: 0, results: [] };
     }
 
@@ -411,7 +411,7 @@ export async function dryRunMode(
   project?: string,
 ): Promise<DispatchSummary> {
   if (!source) {
-    log.error("No datasource configured. Use --source or run: dispatch config set source <name>");
+    log.error("No datasource configured. Use --source or run 'dispatch config' to set up defaults.");
     return { total: 0, completed: 0, failed: 0, skipped: 0, results: [] };
   }
 
