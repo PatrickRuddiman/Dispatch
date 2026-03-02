@@ -10,7 +10,7 @@
  *   - COPILOT_GITHUB_TOKEN / GH_TOKEN / GITHUB_TOKEN env vars
  */
 
-import { CopilotClient, type AssistantMessageEvent, type CopilotSession } from "@github/copilot-sdk";
+import { CopilotClient, approveAll, type AssistantMessageEvent, type CopilotSession } from "@github/copilot-sdk";
 import type { ProviderInstance, ProviderBootOptions } from "./interface.js";
 import { log } from "../logger.js";
 
@@ -54,7 +54,7 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
     async createSession(): Promise<string> {
       log.debug("Creating Copilot session...");
       try {
-        const session = await client.createSession();
+        const session = await client.createSession({ onPermissionRequest: approveAll });
         sessions.set(session.sessionId, session);
         log.debug(`Session created: ${session.sessionId}`);
         return session.sessionId;

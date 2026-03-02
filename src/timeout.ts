@@ -46,20 +46,34 @@ export function withTimeout<T>(
   ms: number,
   label?: string,
 ): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
+  const p = new Promise<T>((resolve, reject) => {
+    let settled = false;
+
     const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
       reject(new TimeoutError(ms, label));
     }, ms);
 
     promise.then(
       (value) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
         resolve(value);
       },
       (err) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
         reject(err);
       },
     );
   });
+
+  // Attach a no-op handler so the rejection is never briefly "unhandled"
+  // when the losing side of the race fires during fake-timer advancement.
+  p.catch(() => {});
+
+  return p;
 }
