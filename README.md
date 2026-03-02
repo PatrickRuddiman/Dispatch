@@ -43,10 +43,10 @@ The tool is backend-agnostic: it supports multiple issue trackers via a datasour
 
 ### Node.js and npm
 
-Install [Node.js](https://nodejs.org/) **>= 18** (npm is included). Verify your installation:
+Install [Node.js](https://nodejs.org/) **>= 20.12.0** (npm is included). Verify your installation:
 
 ```sh
-node --version   # must be >= 18
+node --version   # must be >= 20.12.0
 ```
 
 ### AI Agent Runtime
@@ -89,13 +89,13 @@ See [Copilot backend docs](./docs/provider-system/copilot-backend.md) for full s
 ## Installation
 
 ```bash
-npm install -g dispatch
+npm install -g @pruddiman/dispatch
 ```
 
 Or run directly without installing:
 
 ```bash
-npx dispatch
+npx @pruddiman/dispatch
 ```
 
 ## Quick Start
@@ -107,10 +107,30 @@ dispatch operates as a three-stage pipeline:
 Fetch issues from your tracker and generate structured markdown specs with task checkboxes:
 
 ```bash
+# From issue numbers
 dispatch --spec 42,43,44
+
+# From local markdown files using a glob pattern
+dispatch --spec "drafts/*.md"
+
+# From an inline text description
+dispatch --spec "add dark mode toggle to settings page"
 ```
 
 This creates spec files in `.dispatch/specs/` (e.g., `42-add-auth.md`) with `- [ ]` task items.
+
+To regenerate existing specs, use `--respec`:
+
+```bash
+# Regenerate all existing specs
+dispatch --respec
+
+# Regenerate specs for specific issues
+dispatch --respec 42,43,44
+
+# Regenerate specs matching a glob pattern
+dispatch --respec "specs/*.md"
+```
 
 ### 2. Execute tasks
 
@@ -126,20 +146,64 @@ For each task, dispatch will:
 3. **Commit** — changes are staged and committed with an inferred conventional commit message
 4. **Mark complete** — the `- [ ]` checkbox is updated to `- [x]` in the source file
 
+### 3. Fix failing tests
+
+Run tests and automatically fix failures via an AI agent:
+
+```bash
+dispatch --fix-tests
+```
+
 ### Common options
 
 ```bash
 dispatch --no-plan "tasks.md"          # Skip the planning phase
+dispatch --no-branch "tasks.md"        # Skip branch creation, push, and PR lifecycle
 dispatch --provider copilot "tasks.md" # Use GitHub Copilot instead of OpenCode
 dispatch --source github "tasks.md"    # Explicitly set the datasource
 dispatch --concurrency 3 "tasks.md"    # Run up to 3 tasks in parallel
+dispatch --server-url http://localhost:3000 "tasks.md"  # Use a running provider server
+dispatch --plan-timeout 15 "tasks.md"  # Set planning timeout to 15 minutes
+dispatch --plan-retries 2 "tasks.md"   # Retry planning up to 2 times
+dispatch --output-dir ./my-specs --spec 42  # Custom output directory for specs
+dispatch --verbose "tasks.md"          # Show detailed debug output
 ```
+
+## Configuration
+
+dispatch uses a three-tier configuration system: CLI flags > persistent config file (`~/.dispatch/config.json`) > defaults.
+
+### Config subcommand
+
+```bash
+# Set a default config value
+dispatch config set provider copilot
+
+# Get a config value
+dispatch config get provider
+
+# List all config values
+dispatch config list
+
+# Show the config file path
+dispatch config path
+
+# Reset config (delete config file)
+dispatch config reset
+
+# Interactive configuration wizard
+dispatch config
+```
+
+Running `dispatch config` with no subcommand launches an interactive wizard that guides you through setting up your configuration.
+
+Valid config keys: `provider`, `concurrency`, `source`, `org`, `project`, `serverUrl`, `planTimeout`, `planRetries`.
 
 ## Requirements
 
 | Requirement | Version | Notes |
 |-------------|---------|-------|
-| Node.js | >= 18 | Required — ESM-only runtime |
+| Node.js | >= 20.12.0 | Required — ESM-only runtime |
 | git | Any | Required — auto-detection, conventional commits |
 | `gh` CLI | Any | Optional — required for GitHub datasource |
 | `az` CLI + azure-devops extension | Any | Optional — required for Azure DevOps datasource |

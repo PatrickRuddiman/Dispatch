@@ -12,7 +12,7 @@ import { boot as bootPlanner, type PlanResult } from "../agents/planner.js";
 import { boot as bootExecutor } from "../agents/executor.js";
 import { log } from "../helpers/logger.js";
 import { registerCleanup } from "../helpers/cleanup.js";
-import { createTui } from "../tui.js";
+import { createTui, type TuiState } from "../tui.js";
 import type { ProviderName } from "../providers/interface.js";
 import { bootProvider } from "../providers/index.js";
 import { getDatasource } from "../datasources/index.js";
@@ -27,6 +27,8 @@ import {
   buildPrTitle,
 } from "./datasource-helpers.js";
 import { withTimeout, TimeoutError } from "../helpers/timeout.js";
+import chalk from "chalk";
+import { elapsed, renderHeaderLines } from "../helpers/format.js";
 
 /**
  * Run the full dispatch pipeline: discover tasks from a datasource,
@@ -61,10 +63,34 @@ export async function runDispatchPipeline(
     return dryRunMode(issueIds, cwd, source, org, project);
   }
 
-  // ── Start TUI ───────────────────────────────────────────────
-  const tui = createTui();
-  tui.state.provider = provider;
-  tui.state.source = source;
+  // ── Start TUI (or inline logging for verbose mode) ──────────
+  const verbose = log.verbose;
+  let tui: ReturnType<typeof createTui>;
+
+  if (verbose) {
+    // Print inline header banner (same pattern as spec pipeline)
+    const headerLines = renderHeaderLines({ provider, source });
+    console.log("");
+    for (const line of headerLines) console.log(line);
+    console.log(chalk.dim("  ─".repeat(24)));
+    console.log("");
+    log.info("Discovering task files...");
+
+    // Silent state container — no animated rendering
+    const state: TuiState = {
+      tasks: [],
+      phase: "discovering",
+      startTime: Date.now(),
+      filesFound: 0,
+      provider,
+      source,
+    };
+    tui = { state, update: () => {}, stop: () => {} };
+  } else {
+    tui = createTui();
+    tui.state.provider = provider;
+    tui.state.source = source;
+  }
 
   try {
     // ── 1. Discover task files ──────────────────────────────────
@@ -93,9 +119,11 @@ export async function runDispatchPipeline(
 
     const { files, issueDetailsByFile } = await writeItemsToTempDir(items);
     tui.state.filesFound = files.length;
+    if (verbose) log.debug(`Found ${files.length} task file(s)`);
 
     // ── 2. Parse all tasks ──────────────────────────────────────
     tui.state.phase = "parsing";
+    if (verbose) log.info("Parsing tasks...");
     const taskFiles: TaskFile[] = [];
 
     for (const file of files) {
@@ -128,14 +156,17 @@ export async function runDispatchPipeline(
 
     // ── 3. Boot provider ────────────────────────────────────────
     tui.state.phase = "booting";
+    if (verbose) log.info(`Booting ${provider} provider...`);
     const instance = await bootProvider(provider, { url: serverUrl, cwd });
     registerCleanup(() => instance.cleanup());
     if (serverUrl) {
       tui.state.serverUrl = serverUrl;
     }
+    if (verbose && serverUrl) log.debug(`Server URL: ${serverUrl}`);
     if (instance.model) {
       tui.state.model = instance.model;
     }
+    if (verbose && instance.model) log.debug(`Model: ${instance.model}`);
 
     // ── 4. Boot planner agent (unless --no-plan) ────────────────
     const planner = noPlan ? null : await bootPlanner({ provider: instance, cwd });
@@ -143,6 +174,7 @@ export async function runDispatchPipeline(
 
     // ── 5. Dispatch tasks ───────────────────────────────────────
     tui.state.phase = "dispatching";
+    if (verbose) log.info(`Dispatching ${allTasks.length} task(s)...`);
     const results: DispatchResult[] = [];
     let completed = 0;
     let failed = 0;
@@ -197,6 +229,7 @@ export async function runDispatchPipeline(
               let plan: string | undefined;
               if (planner) {
                 tuiTask.status = "planning";
+              if (verbose) log.info(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: planning — "${task.text}"`);
                 const rawContent = fileContentMap.get(task.file);
                 const fileContext = rawContent ? buildTaskContext(rawContent, task) : undefined;
 
@@ -244,6 +277,7 @@ export async function runDispatchPipeline(
                   tuiTask.status = "failed";
                   tuiTask.error = `Planning failed: ${planResult.error}`;
                   tuiTask.elapsed = Date.now() - startTime;
+                  if (verbose) log.error(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: failed — ${tuiTask.error} (${elapsed(tuiTask.elapsed)})`);
                   failed++;
                   return { task, success: false, error: tuiTask.error } as DispatchResult;
                 }
@@ -253,6 +287,7 @@ export async function runDispatchPipeline(
 
               // ── Phase B: Execute via executor agent ──────────────
               tuiTask.status = "running";
+              if (verbose) log.info(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: executing — "${task.text}"`);
               const execResult = await executor.execute({
                 task,
                 cwd,
@@ -277,11 +312,13 @@ export async function runDispatchPipeline(
 
                 tuiTask.status = "done";
                 tuiTask.elapsed = Date.now() - startTime;
+                if (verbose) log.success(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: done — "${task.text}" (${elapsed(tuiTask.elapsed)})`);
                 completed++;
               } else {
                 tuiTask.status = "failed";
                 tuiTask.error = execResult.error;
                 tuiTask.elapsed = Date.now() - startTime;
+                if (verbose) log.error(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: failed — "${task.text}" (${elapsed(tuiTask.elapsed)})${tuiTask.error ? `: ${tuiTask.error}` : ""}`);
                 failed++;
               }
 
@@ -348,6 +385,7 @@ export async function runDispatchPipeline(
 
     tui.state.phase = "done";
     tui.stop();
+    if (verbose) log.success(`Done — ${completed} completed, ${failed} failed (${elapsed(Date.now() - tui.state.startTime)})`);
 
     return { total: allTasks.length, completed, failed, skipped: 0, results };
   } catch (err) {

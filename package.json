@@ -1,5 +1,5 @@
 {
-  "name": "dispatch",
+  "name": "@pruddiman/dispatch",
   "version": "0.0.1",
   "description": "AI agent orchestration CLI — parse markdown task files, dispatch each unit of work to code agents (OpenCode, GitHub Copilot, etc.), and commit results with conventional commits",
   "type": "module",
@@ -29,6 +29,9 @@
     "markdown"
   ],
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=20.12.0"
   },

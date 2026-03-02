@@ -32,24 +32,18 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
     throw err;
   }
 
-  // ── Retrieve the active model (best-effort) ──────────────────
+  // Model is detected lazily after the first session is created
   let model: string | undefined;
-  try {
-    const models = await client.listModels();
-    if (models.length > 0) {
-      model = models[0].id;
-      log.debug(`Detected model: ${model}`);
-    }
-  } catch (err) {
-    log.debug(`Failed to retrieve model from Copilot: ${log.formatErrorChain(err)}`);
-  }
+  let modelDetected = false;
 
   // Track live sessions for prompt routing and cleanup
   const sessions = new Map<string, CopilotSession>();
 
   return {
     name: "copilot",
-    model,
+    get model() {
+      return model;
+    },
 
     async createSession(): Promise<string> {
       log.debug("Creating Copilot session...");
@@ -57,6 +51,21 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
         const session = await client.createSession({ onPermissionRequest: approveAll });
         sessions.set(session.sessionId, session);
         log.debug(`Session created: ${session.sessionId}`);
+
+        // Detect actual default model from the first session (best-effort, once only)
+        if (!modelDetected) {
+          modelDetected = true;
+          try {
+            const result = await session.rpc.model.getCurrent();
+            if (result.modelId) {
+              model = result.modelId;
+              log.debug(`Detected model: ${model}`);
+            }
+          } catch (err) {
+            log.debug(`Failed to detect model from session: ${log.formatErrorChain(err)}`);
+          }
+        }
+
         return session.sessionId;
       } catch (err) {
         log.debug(`Session creation failed: ${log.formatErrorChain(err)}`);
