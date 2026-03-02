@@ -140,6 +140,6 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
  *
  * Launches the interactive configuration wizard.
  */
-export async function handleConfigCommand(_argv: string[]): Promise<void> {
-  await runInteractiveConfigWizard();
+export async function handleConfigCommand(_argv: string[], configDir?: string): Promise<void> {
+  await runInteractiveConfigWizard(configDir);
 }

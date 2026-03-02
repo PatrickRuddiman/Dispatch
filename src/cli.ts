@@ -9,7 +9,7 @@
  * Process-level concerns (signal handlers, config subcommand) remain here.
  */
 
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
 import { boot as bootOrchestrator, type RawCliArgs } from "./orchestrator/runner.js";
 import { log } from "./helpers/logger.js";
 import { runCleanup } from "./helpers/cleanup.js";
@@ -232,7 +232,15 @@ async function main() {
 
   // ── Config subcommand — must run before parseArgs ──────────
   if (rawArgv[0] === "config") {
-    await handleConfigCommand(rawArgv.slice(1));
+    let cwd = process.cwd();
+    for (let i = 1; i < rawArgv.length; i++) {
+      if (rawArgv[i] === "--cwd" && i + 1 < rawArgv.length) {
+        cwd = resolve(rawArgv[i + 1]);
+        break;
+      }
+    }
+    const configDir = join(cwd, ".dispatch");
+    await handleConfigCommand(rawArgv.slice(1), configDir);
     process.exit(0);
   }
 
