@@ -313,6 +313,36 @@ describe("resolveCliConfig()", () => {
       expect(result.issueSource).toBeUndefined();
     });
 
+    it("skips auto-detection in spec mode", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+
+      const args = createRawCliArgs({
+        explicitFlags: new Set(),
+        provider: undefined as never,
+        issueSource: undefined,
+        spec: "drafts/*.md",
+      });
+
+      const result = await resolveCliConfig(args);
+      expect(detectDatasource).not.toHaveBeenCalled();
+      expect(result.issueSource).toBeUndefined();
+    });
+
+    it("skips auto-detection in respec mode", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+
+      const args = createRawCliArgs({
+        explicitFlags: new Set(),
+        provider: undefined as never,
+        issueSource: undefined,
+        respec: "1,2",
+      });
+
+      const result = await resolveCliConfig(args);
+      expect(detectDatasource).not.toHaveBeenCalled();
+      expect(result.issueSource).toBeUndefined();
+    });
+
     it("detects azdevops from git remote", async () => {
       vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
       vi.mocked(detectDatasource).mockResolvedValue("azdevops");
