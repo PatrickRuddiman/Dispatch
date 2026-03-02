@@ -2,7 +2,7 @@
 
 The datasource system test suite is located at `src/tests/datasource.test.ts`
 (300 lines). It uses Vitest with real filesystem I/O (no mocks) and covers
-three areas: the [markdown datasource](./markdown-datasource.md) operations, configuration validation for
+three areas: the [markdown datasource](./markdown-datasource.md) operations, [configuration validation](../cli-orchestration/configuration.md) for
 datasource names, and the [datasource registry](./overview.md#the-datasource-registry).
 
 ## What is tested
@@ -164,5 +164,7 @@ directories.
   that also cover datasource name validation
 - [Datasource Helpers](./datasource-helpers.md) -- Helper utilities used by
   datasource implementations
+- [Shared Utilities Testing](../shared-utilities/testing.md) -- Test patterns
+  for the slugify and timeout utilities used by datasources
 - [Spec Generator Tests](../testing/spec-generator-tests.md) -- Tests for the
   spec pipeline that consumes datasource output

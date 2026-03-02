@@ -2,7 +2,7 @@
 
 > **Deprecated.** The `IssueFetcher` interface and the `src/issue-fetchers/`
 > registry described below are deprecated compatibility shims. New integrations
-> should implement the `Datasource` interface in `src/datasource.ts` and
+> should implement the [`Datasource`](../datasource-system/overview.md) interface in `src/datasource.ts` and
 > register in `src/datasources/index.ts`. The `Datasource` interface is a
 > superset of `IssueFetcher`, adding `list()` and `create()` methods.
 > See the [Deprecated Compatibility Layer](../deprecated-compat/overview.md)
@@ -20,7 +20,7 @@ optionally a fourth for auto-detection.
 
 > **Note:** The instructions below reference the deprecated `IssueFetcher` path.
 > For new implementations, create a datasource module in `src/datasources/`
-> implementing the `Datasource` interface from `src/datasource.ts`, and register
+> implementing the [`Datasource`](../datasource-system/overview.md) interface from `src/datasource.ts`, and register
 > it in the `DATASOURCES` map in `src/datasources/index.ts`. The deprecated
 > shim layer will automatically pick up any new datasource whose name is in the
 > `IssueSourceName` type (i.e., excludes `"md"`).
@@ -92,9 +92,9 @@ export const fetcher: IssueFetcher = {
   for authentication simplicity. You may also use HTTP APIs directly if
   preferred -- the interface does not mandate the implementation strategy.
 - **Error handling:** The main `fetch()` method should let errors propagate.
-  The spec generator handles per-issue failures. Optional data (like comments)
+  The [spec generator](../spec-generation/overview.md) handles per-issue failures. Optional data (like comments)
   can be fetched in a try/catch that returns defaults on failure.
-- **Field mapping:** Map the tracker's native fields to `IssueDetails`.
+- **Field mapping:** Map the tracker's native fields to [`IssueDetails`](./overview.md#issuedetails-interface).
   Fields that have no equivalent should use sensible defaults (empty string
   for `acceptanceCriteria`, empty array for `labels`).
 - **HTML vs markdown:** Document whether the `body` field contains HTML or
@@ -214,6 +214,12 @@ free of implementation imports at the cost of manual synchronization.
   a CLI tool
 - [Azure DevOps Fetcher](./azdevops-fetcher.md) -- Reference implementation
   with optional comment fetching
+- [Datasource System Overview](../datasource-system/overview.md) -- The newer
+  `Datasource` interface that supersedes `IssueFetcher`
+- [Deprecated Compatibility Layer](../deprecated-compat/overview.md) -- Migration
+  guide from `IssueFetcher` to `Datasource`
 - [Integrations](../datasource-system/integrations.md) -- Subprocess patterns and error handling
 - [Adding a Provider](../provider-system/adding-a-provider.md) -- Analogous
   guide for the AI provider abstraction layer
+- [Spec Generation](../spec-generation/overview.md) -- The pipeline that
+  consumes fetched issue data

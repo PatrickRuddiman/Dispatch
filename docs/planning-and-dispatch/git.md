@@ -10,7 +10,9 @@ After the [dispatcher](./dispatcher.md) reports a successful task and the [parse
 marks the task complete](../task-parsing/api-reference.md#marktaskcomplete), `commitTask()` stages all working directory changes
 with `git add -A`, checks whether anything was staged, and if so, creates a
 commit with an automatically generated
-[Conventional Commits](https://www.conventionalcommits.org/) message.
+[Conventional Commits](https://www.conventionalcommits.org/) message. Branch
+creation and management are handled separately by the
+[datasource layer](../datasource-system/overview.md#git-lifecycle-operations).
 
 ## Why it exists
 
@@ -226,6 +228,8 @@ If this becomes an issue, the `git()` helper can be modified to pass a larger
 - [Dispatcher](./dispatcher.md) -- The execution phase that precedes commit
 - [Task Context & Lifecycle](./task-context-and-lifecycle.md) -- The
   `markTaskComplete()` call that precedes commit
+- [Planner Agent](./planner.md) -- The planning phase that precedes dispatch
+  and commit
 - [Integrations & Troubleshooting](./integrations.md) -- Node.js `execFile`
   details
 - [Orchestrator](../cli-orchestration/orchestrator.md) -- How the orchestrator
@@ -236,3 +240,9 @@ If this becomes an issue, the `git()` helper can be modified to pass a larger
   format that the parser uses to identify tasks before commit
 - [Datasource Overview](../datasource-system/overview.md) -- Branch naming
   convention and git lifecycle operations managed by the datasource layer
+- [Datasource Helpers](../datasource-system/datasource-helpers.md) -- Issue
+  ID extraction from filenames used alongside git operations
+- [Cleanup Registry](../shared-types/cleanup.md) -- Process-level cleanup
+  that runs on signal exit alongside git operations
+- [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) --
+  Concurrent write safety analysis relevant to git add races

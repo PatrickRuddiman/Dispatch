@@ -40,10 +40,18 @@ mocking, temporary files, or setup/teardown is needed.
 
 ## Related documentation
 
-- [Test suite overview](overview.md) — framework, patterns, and coverage map
-- [Format Utilities](../shared-types/format.md) — full API documentation for
+- [Test suite overview](overview.md) -- framework, patterns, and coverage map
+- [Format Utilities](../shared-types/format.md) -- full API documentation for
   the `elapsed()` function including behavior details and design rationale
-- [Logger](../shared-types/logger.md) — logger module that uses `elapsed()`
+- [Logger](../shared-types/logger.md) -- logger module that uses `elapsed()`
   output for timing display in pipeline messages
-- [TUI documentation](../cli-orchestration/tui.md) — primary consumer of `elapsed()`
-- [Shared types overview](../shared-types/overview.md) — formatting utilities context
+- [TUI documentation](../cli-orchestration/tui.md) -- primary consumer of `elapsed()`
+- [Shared types overview](../shared-types/overview.md) -- formatting utilities context
+- [Parser Tests](./parser-tests.md) -- Another pure-function test suite in
+  the project, using similar assertion patterns
+- [Config Tests](./config-tests.md) -- Configuration test suite covering
+  persistent settings and merge logic
+- [Spec Generator Tests](./spec-generator-tests.md) -- Test suite for spec
+  generation utility functions
+- [Shared Utilities Testing](../shared-utilities/testing.md) -- Slugify and
+  timeout test suites that follow similar pure-function testing patterns

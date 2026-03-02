@@ -1,11 +1,11 @@
-# dispatch Documentation
+# Dispatch Documentation
 
-dispatch is a Node.js CLI tool that orchestrates AI coding agents to
-implement software tasks described in markdown files. It bridges issue trackers
-(GitHub Issues, Azure DevOps Work Items) and AI agent runtimes (OpenCode,
-GitHub Copilot) through a multi-stage pipeline: fetch issues, generate
-structured specs, parse tasks, plan execution, dispatch to AI agents, and
-commit results.
+Dispatch is a command-line tool that automates software engineering work by
+delegating tasks from issue trackers to AI coding agents. It reads work items
+from GitHub Issues, Azure DevOps Work Items, or local markdown files, converts
+them into structured specification and task files, and orchestrates AI agents
+(OpenCode or GitHub Copilot) to plan and execute each task — committing changes,
+pushing branches, and opening pull requests automatically.
 
 The tool solves three problems that arise when automating AI-driven development
 at scale. First, it provides **context isolation** so that each task runs in a
@@ -16,10 +16,12 @@ makes changes. Third, it handles **automated record-keeping** by marking tasks
 complete in the source markdown and creating conventional git commits tied
 directly to the original task list.
 
-dispatch is backend-agnostic: it supports multiple issue trackers via a
-datasource abstraction and multiple AI runtimes via a provider abstraction,
-letting teams use their existing tools without lock-in. It also supports fully
-offline workflows where local markdown files replace cloud-hosted trackers.
+Dispatch is backend-agnostic across three dimensions — issue trackers, AI
+runtimes, and agent roles — each implemented as a strategy-pattern plugin behind
+a formal TypeScript interface. It also supports fully offline workflows where
+local markdown files replace cloud-hosted trackers. The tool is intended for
+developers and teams who want to automate repetitive implementation work across
+repositories that use GitHub, Azure DevOps, or local markdown-based workflows.
 
 ## Key concepts
 
@@ -31,57 +33,58 @@ offline workflows where local markdown files replace cloud-hosted trackers.
 - **Datasource**: A strategy-pattern abstraction that normalizes access to work
   items across GitHub Issues (`gh` CLI), Azure DevOps Work Items (`az` CLI),
   and local markdown files (`fs`). All backends satisfy a twelve-method
-  interface covering CRUD operations and git lifecycle management, producing
-  normalized `IssueDetails` objects.
+  interface covering CRUD operations and git lifecycle management (branching,
+  committing, pushing, PR creation), producing normalized `IssueDetails`
+  objects consumed by the rest of the pipeline.
 
 - **Provider**: An abstraction over AI agent runtimes. Each provider implements
   a `createSession` / `prompt` / `cleanup` lifecycle. Two backends are
   supported: OpenCode (async, SSE-based) and GitHub Copilot (synchronous,
   JSON-RPC-based). Selected via the `--provider` flag.
 
-- **Spec file**: A structured markdown document generated from an issue tracker
-  item by the spec agent. Specs describe what needs to change and why, with a
-  `## Tasks` section containing `- [ ]` checkboxes that the dispatch pipeline
-  treats as individual units of work.
+- **Agent**: A named role in the AI pipeline. Three agent roles exist: the
+  **spec agent** (explores the codebase and generates high-level specs), the
+  **planner agent** (produces detailed execution plans in a read-only session),
+  and the **executor agent** (implements code changes following the plan).
 
-- **Planner / Executor**: The two-phase agent architecture. The planner is a
-  read-only AI session that explores the codebase and produces a detailed
-  execution plan. The executor follows that plan to make code changes. The
-  planning phase is optional (`--no-plan` skips it).
+- **Pipeline mode**: Dispatch operates in three mutually exclusive modes:
+  **spec generation** (`--spec`) converts issues into structured markdown specs,
+  **dispatch** (default) plans and executes tasks with git lifecycle management,
+  and **fix-tests** (`--fix-tests`) detects and auto-fixes failing tests via AI.
 
 - **Orchestrator**: The central pipeline coordinator that drives task
   discovery, parsing, provider lifecycle, planning, execution, markdown
-  mutation, git commits, and datasource synchronization. It routes to either
-  the dispatch pipeline or the spec-generation pipeline based on the `--spec`
-  flag.
+  mutation, git commits, and datasource synchronization.
 
 - **Registry**: A compile-time map pattern used for providers, agents, and
   datasources. Adding a new implementation requires a code change and
-  recompilation rather than runtime plugin discovery, giving exhaustiveness
-  checks at compile time.
+  recompilation rather than runtime plugin discovery, providing TypeScript
+  exhaustiveness checks at compile time.
+
+- **Three-tier configuration**: CLI flags override config file values
+  (`~/.dispatch/config.json`), which override hardcoded defaults. An
+  interactive wizard (`dispatch config`) guides first-time setup.
 
 ## Reading guide
 
-New to dispatch? Start with the
+New to Dispatch? Start with the
 [Architecture Overview](./architecture.md). It covers the full system topology,
-both pipeline modes (dispatch and spec generation), the task lifecycle state
-machine, and all key design decisions including the strategy patterns,
-CLI-over-REST approach, and three-tier configuration precedence.
+all three pipeline modes, the task lifecycle state machine, data flow diagrams,
+and key design decisions including the strategy patterns, CLI-over-REST
+approach, and session-per-task isolation model.
 
 From there, the documentation is organized by subsystem:
 
 **CLI and orchestration** covers the command-line interface, argument parsing,
-persistent configuration (`~/.dispatch/config.json` with three-tier
-precedence), the orchestrator pipeline that coordinates all stages, and the
-real-time terminal dashboard. Start here to understand how user input flows
-into the system.
+persistent configuration with three-tier precedence, the orchestrator pipeline
+that coordinates all stages, and the real-time terminal dashboard. Start here
+to understand how user input flows into the system.
 
 **Datasource system** explains the strategy-pattern layer that normalizes
 access to GitHub Issues, Azure DevOps Work Items, and local markdown files. It
 covers auto-detection from git remote URLs, per-backend operation semantics,
-git lifecycle management (branching, committing, pushing, PR creation),
-authentication delegation to external CLI tools, and a guide for adding new
-datasource implementations.
+git lifecycle management, authentication delegation to external CLI tools, and
+a guide for adding new datasource implementations.
 
 **Provider system** describes the abstraction that decouples the pipeline from
 specific AI runtimes. Dedicated pages cover the OpenCode and Copilot backends,
@@ -99,16 +102,18 @@ tasks to AI agents in isolated sessions, git operations with conventional
 commit type inference, and the task context lifecycle.
 
 **Spec generation** covers the `--spec` pipeline that converts issue tracker
-items into structured specification files. It explains the end-to-end flow,
-AI prompt structure, output format and naming conventions, and error handling.
+items into structured specification files. It explains the three-stage
+end-to-end flow (spec agent, planner agent, executor agent), AI prompt
+structure, output format and naming conventions, and error handling.
 
 **Shared interfaces and utilities** documents the foundational types and
 contracts that every other module depends on: the cleanup registry, logger,
-duration formatting, `Task`/`TaskFile` types, and `ProviderInstance` interface.
+duration formatting, `Task`/`TaskFile` types, `ProviderInstance` interface,
+and the slugify and timeout helper functions.
 
 **Testing** describes the Vitest-based test suite covering configuration,
-format utilities, the parser, and the spec generator, with patterns using both
-real filesystem I/O and module mocking for external dependencies.
+format utilities, the parser, and the spec generator, with patterns using real
+filesystem I/O and fake timers.
 
 **Deprecated compatibility layer** documents the legacy `IssueFetcher` shims
 that delegate to the new datasource system. These are slated for removal and
@@ -173,6 +178,13 @@ no production code imports from them.
 - [Overview](./shared-types/overview.md)
 - [Parser](./shared-types/parser.md)
 - [Provider](./shared-types/provider.md)
+
+## Shared Utilities
+
+- [Overview](./shared-utilities/overview.md)
+- [Slugify](./shared-utilities/slugify.md)
+- [Testing](./shared-utilities/testing.md)
+- [Timeout](./shared-utilities/timeout.md)
 
 ## Spec Generation
 

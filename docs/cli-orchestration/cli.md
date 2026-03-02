@@ -73,9 +73,9 @@ The package has four runtime dependencies:
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `@opencode-ai/sdk` | ^1.2.10 | OpenCode provider SDK |
-| `@github/copilot-sdk` | ^0.1.0 | GitHub Copilot provider SDK |
-| `chalk` | ^5.4.1 | Terminal color output |
+| `@opencode-ai/sdk` | ^1.2.10 | [OpenCode provider](../provider-system/opencode-backend.md) SDK |
+| `@github/copilot-sdk` | ^0.1.0 | [GitHub Copilot provider](../provider-system/copilot-backend.md) SDK |
+| `chalk` | ^5.4.1 | Terminal color output (see [chalk integration](../shared-types/integrations.md#chalk)) |
 | `glob` | ^11.0.1 | File pattern matching for task discovery |
 
 ## Why a custom parser instead of commander/yargs?
@@ -150,7 +150,7 @@ issue IDs are not required and the dispatch-specific flags (`--dry-run`,
 |--------|------|---------|-------------|
 | `--spec <values...>` | string (one or more) | *none* | Comma-separated issue numbers, multiple space-separated args, glob pattern for local `.md` files, or inline text description. Activates spec mode. See [issue IDs vs glob patterns](configuration.md#the---spec-flag-issue-ids-vs-glob-patterns). |
 | `--respec [values...]` | string (zero or more) | *none* | Regenerate existing specs. Accepts the same value types as `--spec` (issue numbers, glob, multiple args), or can be passed with no arguments to regenerate all existing specs. Uses variadic collection — consumes all subsequent non-flag arguments. An empty invocation (`--respec` with no args or immediately followed by another flag) produces an empty array. |
-| `--source <name>` | string | *auto-detected* | Datasource: `github`, `azdevops`, or `md`. Auto-detected from `git remote get-url origin` if omitted. See [datasource detection](configuration.md#auto-detection-from-git-remote) and [Datasource Overview](../datasource-system/overview.md). |
+| `--source <name>` | string | *auto-detected* | Datasource: `github`, `azdevops`, or `md`. Auto-detected from `git remote get-url origin` if omitted. See [datasource detection](configuration.md#auto-detection-from-git-remote), [Datasource Overview](../datasource-system/overview.md), and individual datasource docs: [GitHub](../datasource-system/github-datasource.md), [Azure DevOps](../datasource-system/azdevops-datasource.md), [Markdown](../datasource-system/markdown-datasource.md). |
 | `--org <url>` | string | *none* | Azure DevOps organization URL (e.g., `https://dev.azure.com/myorg`). Required when `--source azdevops`. |
 | `--project <name>` | string | *none* | Azure DevOps project name. Required when `--source azdevops`. |
 | `--output-dir <dir>` | string | `.dispatch/specs` | Output directory for generated spec files. Resolved to an absolute path. Created automatically if it does not exist. |
@@ -328,7 +328,7 @@ codes (e.g., `2` for partial failure).
 
 Unhandled exceptions from `main()` are caught by the top-level `.catch()`
 handler (`src/cli.ts:281-284`), which logs the error message, calls
-`runCleanup()` to release provider resources, and exits with code `1`.
+[`runCleanup()`](../shared-types/cleanup.md) to release provider resources, and exits with code `1`.
 
 ## Version string and tsup define
 
@@ -439,6 +439,8 @@ flags before routing to the appropriate pipeline. See
   files are parsed and mutated
 - [Datasource System](../datasource-system/overview.md) -- datasource
   abstraction and `--source` flag semantics
+- [Cleanup Registry](../shared-types/cleanup.md) -- process-level cleanup
+  invoked from signal handlers and error handler
 - [Testing Overview](../testing/overview.md) -- test suite structure and
-  coverage (config tests cover `--respec` variadic parsing and
+  coverage ([config tests](../testing/config-tests.md) cover `--respec` variadic parsing and
   `--spec`/`--respec` mutual exclusion)

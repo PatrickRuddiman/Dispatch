@@ -104,6 +104,10 @@ only the task metadata and working directory.
 | `dispatcher.ts` | Send tasks to an AI agent in isolated sessions | `src/dispatcher.ts` — see [Dispatcher](./dispatcher.md) |
 | `git.ts` | Stage changes and create conventional commits | `src/git.ts` — see [Git Operations](./git.md) |
 
+See the [Testing Guide](../task-parsing/testing-guide.md) for how the parser
+functions are tested, and the [Parser Tests](../testing/parser-tests.md) for
+a detailed breakdown of all 62 test cases.
+
 ## Key design decisions
 
 ### Two-phase planner-then-executor (optional)
@@ -166,17 +170,27 @@ concurrency-related concerns.
 - [CLI & Orchestration](../cli-orchestration/overview.md) -- Orchestrator loop and CLI flags
 - [CLI Argument Parser](../cli-orchestration/cli.md) -- `--no-plan`,
   `--concurrency`, and `--dry-run` flag documentation
+- [Configuration System](../cli-orchestration/configuration.md) -- Persistent
+  defaults for `--concurrency`, `--provider`, and other pipeline options
 - [Provider Abstraction](../provider-system/provider-overview.md) -- Provider interface and backends
 - [OpenCode Backend](../provider-system/opencode-backend.md) -- OpenCode
   provider setup and async prompt model
 - [Copilot Backend](../provider-system/copilot-backend.md) -- Copilot
   provider setup and synchronous prompt model
+- [Cleanup Registry](../shared-types/cleanup.md) -- Process-level cleanup
+  for graceful shutdown during pipeline execution
 - [Shared Interfaces & Utilities](../shared-types/overview.md) -- `Task`, `TaskFile`, and
   `ProviderInstance` type definitions
+- [Shared Parser Types](../shared-types/parser.md) -- Summary of `Task`,
+  `TaskFile`, and exported parser functions
 - [Task Parsing API Reference](../task-parsing/api-reference.md) --
   `parseTaskFile`, `buildTaskContext`, `markTaskComplete`, and `groupTasksByMode`
   function contracts
+- [Task Parsing Testing Guide](../task-parsing/testing-guide.md) -- How to
+  run and extend parser tests
 - [Spec Generation](../spec-generation/overview.md) -- How the spec pipeline
   produces the markdown task files consumed by this pipeline
 - [Testing Overview](../testing/overview.md) -- Test suite structure (note:
   planner, dispatcher, and git modules are not currently unit-tested)
+- [Parser Tests](../testing/parser-tests.md) -- Detailed breakdown of all 62
+  parser tests covering the functions this pipeline depends on

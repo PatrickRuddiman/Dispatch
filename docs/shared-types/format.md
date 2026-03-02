@@ -1,16 +1,19 @@
 # Format Utilities
 
+## What it does
+
 The format module (`src/format.ts`, 19 lines) provides a single
 human-readable duration formatter used across Dispatch for progress
 reporting and timing output.
 
-## Why this module exists
+## Why it exists
 
-Several modules need to display elapsed time to the user: the TUI shows
-per-task durations, the spec generator logs generation time, and debug output
-includes timing information. Rather than scattering `Math.floor` arithmetic
-and string formatting across every call site, `elapsed()` centralizes the
-conversion from raw milliseconds into a compact `"Ns"` or `"Nm Ns"` string.
+Several modules need to display elapsed time to the user: the
+[TUI](../cli-orchestration/tui.md) shows per-task durations, the
+[spec generator](../spec-generation/overview.md) logs generation time, and
+debug output includes timing information. Rather than scattering `Math.floor`
+arithmetic and string formatting across every call site, `elapsed()` centralizes
+the conversion from raw milliseconds into a compact `"Ns"` or `"Nm Ns"` string.
 
 ## API
 
@@ -96,6 +99,8 @@ The `elapsed()` function is imported by:
 - [TUI](../cli-orchestration/tui.md) -- Primary consumer of `elapsed()`
 - [Format Utility Tests](../testing/format-tests.md) -- Detailed test
   breakdown for `elapsed()` covering edge cases and large durations
+- [Testing Overview](../testing/overview.md) -- Project-wide test framework,
+  patterns, and coverage map
 - [Spec Generation](../spec-generation/overview.md) -- Uses `elapsed()` for
   logging generation duration
 - [Integrations](./integrations.md) -- Node.js operational details for the

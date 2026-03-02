@@ -114,9 +114,10 @@ process would be orphaned.
 
 - **Default (no URL)**: `new CopilotClient()` discovers and starts the Copilot
   CLI automatically.
-- **Explicit URL**: When `--server-url` is provided, the client is constructed
-  with `{ cliUrl: opts.url }`, connecting to an already-running Copilot CLI
-  server at that address.
+- **Explicit URL**: When `--server-url` is provided (or persisted via the
+  [Configuration System](../cli-orchestration/configuration.md#the-serverurl-config-option)),
+  the client is constructed with `{ cliUrl: opts.url }`, connecting to an
+  already-running Copilot CLI server at that address.
 
 Unlike the [OpenCode provider](./opencode-backend.md) (which uses separate `createOpencode()` vs
 `createOpencodeClient()` functions), the Copilot SDK uses a single
@@ -312,6 +313,8 @@ dispatch "tasks/**/*.md" --provider copilot
   definition and lifecycle contract
 - [Cleanup Registry](../shared-types/cleanup.md) -- Process-level cleanup for
   graceful shutdown and signal handling
+- [Configuration System](../cli-orchestration/configuration.md) -- Persistent
+  `--provider` and `--server-url` defaults, including the `serverUrl` config option
 - [Dispatcher](../planning-and-dispatch/dispatcher.md) -- how the dispatcher
   creates sessions and sends prompts
 - [Planner](../planning-and-dispatch/planner.md) -- how the planner creates

@@ -11,8 +11,11 @@ The parser is the data extraction and mutation layer for the Dispatch pipeline.
 It:
 
 1. Parses markdown files containing GitHub-style checkbox syntax (`- [ ]` /
-   `- [x]`) into structured `Task` and `TaskFile` objects
-2. Builds filtered views of markdown content for individual task planning
+   `- [x]`) into structured `Task` and `TaskFile` objects (see the
+   [Markdown Syntax Reference](../task-parsing/markdown-syntax.md) for
+   accepted formats)
+2. Builds filtered views of markdown content for individual task
+   [planning](../planning-and-dispatch/planner.md)
 3. Performs targeted line-level mutations to check off completed tasks
 
 ## Why it exists
@@ -22,10 +25,13 @@ parser provides this by:
 
 - Separating **pure parsing** (`parseTaskContent`) from **file I/O**
   (`parseTaskFile`), enabling direct unit testing without filesystem access
+  (see [Testing Guide](../task-parsing/testing-guide.md))
 - Providing a **context filtering** function (`buildTaskContext`) that prevents
-  planner agents from being confused by sibling tasks
+  [planner agents](../planning-and-dispatch/planner.md) from being confused by
+  sibling tasks
 - Encapsulating the **read-modify-write** mutation pattern for task completion in
-  a single function with clear error semantics
+  a single function with clear error semantics (see
+  [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md))
 
 ## Data types
 
@@ -88,6 +94,8 @@ concurrency analysis, and testing:
   How `buildTaskContext` and `markTaskComplete` fit in the dispatch pipeline
 - [Provider Interface](./provider.md) -- The `ProviderInstance` abstraction that
   consumes parser output
+- [Configuration System](../cli-orchestration/configuration.md) -- `--concurrency`
+  and `--no-plan` flags that affect how grouped tasks are dispatched
 - [Testing Guide](../task-parsing/testing-guide.md) -- How to run and extend
   the parser test suite
 - [Parser Tests (detailed)](../testing/parser-tests.md) -- Comprehensive

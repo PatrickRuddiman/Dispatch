@@ -20,7 +20,7 @@ The module exports three types and no runtime code:
 Dispatch supports multiple AI agent backends. Without a shared interface, the
 [orchestrator](../cli-orchestration/orchestrator.md), [dispatcher](../planning-and-dispatch/dispatcher.md), and [planner](../planning-and-dispatch/planner.md) would each need provider-specific branches.
 The `ProviderInstance` interface acts as a **strategy pattern** boundary: the
-orchestrator calls `createSession()`, `prompt()`, and `cleanup()` without
+orchestrator calls `createSession()`, `prompt()`, and [`cleanup()`](./cleanup.md) without
 knowing whether the underlying agent is OpenCode, Copilot, or something else.
 
 ## Provider lifecycle
@@ -37,7 +37,7 @@ For the full provider lifecycle (boot → session → prompt → cleanup), see
 
 ### What the `url` field enables
 
-The `url` option allows providers to connect to a **pre-existing agent server**
+The [`url` option](../cli-orchestration/cli.md) allows providers to connect to a **pre-existing agent server**
 rather than spawning a new one. This enables several operational modes:
 
 - **Shared development servers:** Multiple Dispatch runs can share a single
@@ -93,7 +93,8 @@ behavior, crash recovery, and how `null` responses are handled, see
 
 ### `cleanup(): Promise<void>`
 
-Tears down the provider -- stops servers, releases resources. Documented as safe
+Tears down the provider -- stops servers, releases resources via the
+[cleanup registry](./cleanup.md). Documented as safe
 to call multiple times (idempotent). For details on cleanup behavior and
 in-flight session handling, see
 [Provider Abstraction Layer -- Cleanup and in-flight sessions](../provider-system/provider-overview.md#cleanup-and-in-flight-sessions).
@@ -119,9 +120,14 @@ see [Adding a New Provider](../provider-system/adding-a-provider.md).
 ## Related documentation
 
 - [Overview](./overview.md) -- Shared Interfaces & Utilities layer
+- [Cleanup Registry](./cleanup.md) -- Process-level cleanup used by `cleanup()` implementations
 - [Provider Abstraction & Backends](../provider-system/provider-overview.md) -- Concrete implementations
 - [OpenCode Backend](../provider-system/opencode-backend.md) -- OpenCode-specific setup and behavior
 - [Copilot Backend](../provider-system/copilot-backend.md) -- Copilot-specific setup and authentication
 - [Adding a provider](../provider-system/adding-a-provider.md) -- Step-by-step guide
 - [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) -- How the provider is consumed
+- [Dispatcher](../planning-and-dispatch/dispatcher.md) -- Concurrent task dispatch using `ProviderInstance`
+- [Planner](../planning-and-dispatch/planner.md) -- Plan generation using `ProviderInstance.prompt()`
 - [CLI & Orchestration](../cli-orchestration/overview.md) -- Provider boot and cleanup lifecycle
+- [Timeout Utility](../shared-utilities/timeout.md) -- Deadline enforcement for provider prompt calls
+- [Integrations Reference](./integrations.md) -- External dependencies of the shared types layer

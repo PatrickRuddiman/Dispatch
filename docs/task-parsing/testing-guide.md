@@ -183,6 +183,8 @@ When adding tests for the parser:
   concerns and the read-modify-write pattern tested by `markTaskComplete` tests
 - [Shared Parser Types](../shared-types/parser.md) -- summary of `Task`,
   `TaskFile`, and exported functions from the shared-types perspective
+- [Shared Utilities Testing](../shared-utilities/testing.md) -- slugify and
+  timeout test patterns for comparison (pure-function and fake-timer testing)
 - [Planning & Dispatch Overview](../planning-and-dispatch/overview.md) -- the
   planner and dispatcher that consume parser output
 

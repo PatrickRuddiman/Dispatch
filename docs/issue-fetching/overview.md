@@ -20,10 +20,14 @@ When a user runs `dispatch --spec 42,43,44`, the system needs to fetch the
 details of each issue from the appropriate tracker. The issue fetching group:
 
 1. **Detects the issue source** by inspecting the git `origin` remote URL
-   (or accepts an explicit `--source` flag).
+   (or accepts an explicit `--source` flag; see the
+   [Configuration System](../cli-orchestration/configuration.md) for how to
+   persist `--source` as a default).
 2. **Selects the correct fetcher** from a strategy-pattern registry.
 3. **Fetches issue data** by shelling out to the platform's official CLI tool
-   (`gh` for GitHub, `az` for Azure DevOps).
+   (`gh` for GitHub, `az` for Azure DevOps). See
+   [Datasource Integrations](../datasource-system/integrations.md) for
+   subprocess execution details.
 4. **Normalizes the response** into a common `IssueDetails` interface that
    the spec generator consumes.
 
@@ -310,8 +314,12 @@ documentation and the `--spec` invocation details.
   guidance, removal safety assessment, and adapter pattern details
 - [Datasource Overview](../datasource-system/overview.md) -- The current
   `Datasource` interface that supersedes `IssueFetcher`
+- [Datasource Integrations & Troubleshooting](../datasource-system/integrations.md) --
+  Subprocess behavior, auto-detection, and error handling for all datasource backends
 - [Spec Generation](../spec-generation/overview.md) -- How the spec pipeline
   consumes `IssueDetails` for AI prompt construction
+- [Configuration System](../cli-orchestration/configuration.md) -- Persistent
+  `--source` defaults and three-tier merge logic
 - [CLI Argument Parser](../cli-orchestration/cli.md) -- `--spec`, `--source`,
   `--org`, and `--project` flag documentation
 - [Provider Abstraction](../provider-system/provider-overview.md) -- AI provider

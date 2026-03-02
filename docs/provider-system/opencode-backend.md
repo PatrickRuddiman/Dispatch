@@ -49,7 +49,7 @@ The boot function in `src/providers/opencode.ts:32-51` supports two modes:
 
 ### Spawn a local server (default)
 
-When no `--server-url` is provided, the provider calls `createOpencode()` from
+When no [`--server-url`](../cli-orchestration/cli.md) is provided, the provider calls `createOpencode()` from
 the SDK with `port: 0` (`src/providers/opencode.ts:43`), which:
 
 1. Starts an OpenCode HTTP server on `127.0.0.1` with an **OS-assigned
@@ -79,7 +79,7 @@ port, which:
 
 ### Connect to an existing server
 
-When `--server-url` is provided (e.g., `--server-url http://localhost:4096`), the
+When [`--server-url`](../cli-orchestration/cli.md) is provided (e.g., `--server-url http://localhost:4096`), the
 provider calls `createOpencodeClient({ baseUrl: opts.url })` instead. This
 creates a client that connects to an already-running OpenCode server without
 spawning a new one.
@@ -278,7 +278,7 @@ This guard is important because cleanup can be triggered from two paths:
 1. **Explicit call**: The orchestrator calls `instance.cleanup()` on the success
    path after all tasks complete (`src/agents/orchestrator.ts:165`).
 2. **Safety net**: The orchestrator registers `instance.cleanup()` with the
-   process-level cleanup registry (`src/cleanup.ts`) at boot time
+   process-level [cleanup registry](../shared-types/cleanup.md) (`src/cleanup.ts`) at boot time
    (`src/agents/orchestrator.ts:151`). Signal handlers (SIGINT, SIGTERM) drain
    this registry on exit.
 
@@ -389,3 +389,9 @@ reference.
   sessions for read-only exploration
 - [CLI Options](../cli-orchestration/cli.md) -- `--provider opencode` and
   `--server-url` flags
+- [Cleanup Registry](../shared-types/cleanup.md) -- Process-level cleanup
+  mechanism used for idempotent server shutdown
+- [Orchestrator](../cli-orchestration/orchestrator.md) -- Boot, dispatch, and
+  cleanup lifecycle that drives the OpenCode provider
+- [CLI Integrations](../cli-orchestration/integrations.md) -- OpenCode SDK
+  integration details and troubleshooting from the CLI perspective

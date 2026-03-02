@@ -10,7 +10,7 @@ The spec generator module converts issue tracker items (or local files) into
 high-level markdown spec files. The test file covers four exported functions
 that handle input classification, prompt construction, output validation, and
 content extraction. The tests do **not** cover the top-level `generateSpecs()`
-orchestration function, which requires AI provider integration.
+orchestration function, which requires [AI provider](../shared-types/provider.md) integration.
 
 ## Describe blocks
 
@@ -54,7 +54,7 @@ file path or glob pattern.
 | relative subdirectory path | `"drafts/feature.md"` | Path syntax |
 | mixed numeric and alphabetic | `"42,foo"` | Non-numeric token |
 
-This function is the first decision point in the spec pipeline -- it determines
+This function is the first decision point in the [spec pipeline](../spec-generation/overview.md) -- it determines
 whether the `--spec` argument is treated as issue numbers to fetch or as a file
 path/glob to read from disk.
 
@@ -79,7 +79,7 @@ The function takes three parameters:
 | includes the spec agent preamble | Contains `"You are a **spec agent**"` |
 | includes the two-stage pipeline explanation | Mentions `planner agent` and `coder agent` |
 | includes all required spec sections in the template | All 7 H2 sections present |
-| includes `(P)`/`(S)` tagging instructions | Parallel/serial mode instructions |
+| includes `(P)`/`(S)` tagging instructions | Parallel/serial mode instructions ([parser](../task-parsing/overview.md)) |
 | includes the task example | Example tasks with `(P)` and `(S)` prefixes |
 | includes all five instructions | Numbered instruction list 1-5 |
 | does not include issue-specific metadata | No `**Number:**`, `**State:**`, `**URL:**`, etc. |
@@ -206,7 +206,7 @@ The four tested functions map to specific stages of the spec pipeline:
 | `extractSpecContent` | Output cleanup | Strips AI conversational artifacts |
 
 The untested `generateSpecs()` function orchestrates these stages together with
-the issue fetchers and AI provider.
+the [issue fetchers](../issue-fetching/overview.md) and [AI provider](../shared-types/provider.md).
 
 ## Related documentation
 
@@ -215,3 +215,9 @@ the issue fetchers and AI provider.
 - [Spec generation integrations](../spec-generation/integrations.md) — external dependencies
 - [Architecture overview](../architecture.md) — spec generation pipeline diagram
 - [Parser tests](parser-tests.md) — `(P)`/`(S)` mode prefix testing (consumer of spec output)
+- [Task parsing overview](../task-parsing/overview.md) — how `(P)`/`(S)` mode prefixes are parsed
+- [Issue fetching overview](../issue-fetching/overview.md) — issue fetchers consumed by `generateSpecs()`
+- [Provider interface](../shared-types/provider.md) — AI provider used by spec generation
+- [Datasource system](../datasource-system/overview.md) — datasources that feed issue data into spec generation
+- [Config tests](config-tests.md) — adjacent test documentation for the config module
+- [Slugify utility](../shared-utilities/slugify.md) — used by spec pipeline for filename generation

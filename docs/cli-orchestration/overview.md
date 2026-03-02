@@ -2,8 +2,8 @@
 
 The CLI & Orchestration group is the entry point and central nervous system of
 the `dispatch` tool. It accepts user input from the command line, discovers and
-parses markdown task files, boots an AI provider, dispatches tasks through a
-multi-phase pipeline, and renders real-time progress in the terminal.
+parses [markdown task files](../task-parsing/overview.md), boots an [AI provider](../provider-system/provider-overview.md), dispatches tasks through a
+multi-phase [pipeline](../planning-and-dispatch/overview.md), and renders real-time progress in the [terminal](tui.md).
 
 ## Why this group exists
 
@@ -107,19 +107,23 @@ dispatch config list
 
 ## Related documentation
 
-- [CLI argument parser](cli.md) — command-line interface details and edge cases
-- [Configuration](configuration.md) — persistent config file, three-tier
+- [CLI argument parser](cli.md) -- command-line interface details and edge cases
+- [Configuration](configuration.md) -- persistent config file, three-tier
   precedence, `dispatch config` subcommand
-- [Orchestrator pipeline](orchestrator.md) — concurrency, error handling, and
+- [Orchestrator pipeline](orchestrator.md) -- concurrency, error handling, and
   pipeline phases
-- [Terminal UI](tui.md) — rendering, state machines, and TTY compatibility
-- [Logger](../shared-types/logger.md) — structured logging for non-interactive contexts
-- [Integrations](integrations.md) — chalk, glob, tsup, Node.js process,
+- [Terminal UI](tui.md) -- rendering, state machines, and TTY compatibility
+- [Logger](../shared-types/logger.md) -- structured logging for non-interactive contexts
+- [Integrations](integrations.md) -- chalk, glob, tsup, Node.js process,
   and fs/promises config I/O details
-- [Spec Generation](../spec-generation/overview.md) — the spec pipeline invoked
+- [Spec Generation](../spec-generation/overview.md) -- the spec pipeline invoked
   by `--spec` mode
-- [Datasource System](../datasource-system/overview.md) — datasource detection
+- [Datasource System](../datasource-system/overview.md) -- datasource detection
   and `--source` flag semantics
-- [Deprecated Compatibility Layer](../deprecated-compat/overview.md) — legacy
+- [Adding a Provider](../provider-system/adding-a-provider.md) -- Guide for
+  implementing new AI provider backends
+- [Cleanup Registry](../shared-types/cleanup.md) -- Process-level cleanup for
+  graceful shutdown of provider resources
+- [Deprecated Compatibility Layer](../deprecated-compat/overview.md) -- legacy
   `IssueFetcher` shims (slated for removal)
-- [Testing Overview](../testing/overview.md) — test suite structure and coverage
+- [Testing Overview](../testing/overview.md) -- test suite structure and coverage

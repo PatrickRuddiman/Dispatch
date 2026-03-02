@@ -7,7 +7,7 @@ the datasource registry.
 
 ## What it does
 
-The Azure DevOps datasource translates the `Datasource` interface operations
+The Azure DevOps datasource translates the [`Datasource`](./overview.md#the-datasource-interface) interface operations
 into `az boards` and `az repos` CLI commands, plus `git` commands for lifecycle
 operations. It provides five CRUD operations for work item management and seven
 git lifecycle operations for branching, committing, pushing, and pull request
@@ -37,7 +37,7 @@ creation.
 
 All commands are executed via `execFile("az", [...args], { cwd })` with no
 shell interpolation. The `--org` and `--project` flags are appended when the
-corresponding `IssueFetchOptions` fields are provided.
+corresponding [`IssueFetchOptions`](../issue-fetching/overview.md) fields are provided.
 
 ## Why it shells out to `az`
 
@@ -101,7 +101,7 @@ Every `az boards` command requires an organization and project context. These
 are resolved in order of precedence:
 
 1. **Explicit options:** `opts.org` and `opts.project` from `IssueFetchOptions`,
-   which map to the dispatch `--org` and `--project` CLI flags.
+   which map to the dispatch [`--org` and `--project` CLI flags](../cli-orchestration/cli.md).
 2. **az CLI defaults:** Configured via `az devops configure --defaults
    organization=https://dev.azure.com/myorg project=myproject`. If defaults
    are set, the `--org` and `--project` flags can be omitted.
@@ -353,7 +353,7 @@ The N+1 fetch pattern means `list()` time scales linearly with the number of
 active work items. For projects with many open work items, consider:
 - Using the WIQL query directly via `az boards query` to get just IDs
 - Narrowing the query scope (not currently supported by the datasource)
-- Using `--source md` with local markdown files for faster iteration
+- Using [`--source md`](./markdown-datasource.md) with local markdown files for faster iteration
 
 ### Work item type error on `create()`
 
@@ -385,3 +385,8 @@ remain functional.
   consumes datasource operations for temp file writing and auto-close
 - [Integrations & Troubleshooting](./integrations.md) -- Cross-cutting
   subprocess and error-handling concerns
+- [Azure DevOps Fetcher (Deprecated)](../issue-fetching/azdevops-fetcher.md) --
+  Legacy shim that delegates to this datasource
+- [Spec Generation](../spec-generation/overview.md) -- Pipeline that consumes
+  datasource output for spec file generation
+- [Slugify Utility](../shared-utilities/slugify.md) -- Used by `buildBranchName()` for slug generation

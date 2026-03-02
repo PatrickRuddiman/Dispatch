@@ -1,9 +1,9 @@
 # Cleanup Registry
 
 The cleanup registry (`src/cleanup.ts`) implements a process-level callback
-registry that ensures AI provider resources are properly released before the
+registry that ensures AI [provider](../provider-system/provider-overview.md) resources are properly released before the
 Dispatch process exits. Sub-modules register their provider's `cleanup()`
-function at boot time, and the CLI's signal handlers and error handler drain
+function at boot time, and the [CLI's](../cli-orchestration/cli.md) signal handlers and error handler drain
 the registry before calling `process.exit()`.
 
 ## What it does
@@ -289,6 +289,8 @@ This would give each cleanup function 5 seconds before the loop moves on.
   cleanup is registered
 - [Provider Abstraction](../provider-system/provider-overview.md) -- The
   `cleanup()` method on ProviderInstance
+- [Provider Interface](./provider.md) -- The `ProviderInstance` type that
+  defines the `cleanup()` method
 - [Adding a Provider](../provider-system/adding-a-provider.md) -- Guide for
   implementing cleanup idempotency in new providers
 - [Testing Overview](../testing/overview.md) -- Test coverage (note: the

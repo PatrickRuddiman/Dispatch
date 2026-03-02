@@ -37,7 +37,7 @@ writing stale data.
 
 ### The problem
 
-When the orchestrator runs with `--concurrency > 1`, multiple agents may attempt
+When the orchestrator runs with [`--concurrency > 1`](../cli-orchestration/cli.md), multiple agents may attempt
 to mark tasks complete in the **same file** simultaneously. The sequence of
 concern is:
 
@@ -232,7 +232,7 @@ as passed to [`parseTaskContent`](./api-reference.md#parsetaskcontent) (`src/par
 4. The planner receives only this filtered context, not the raw `content` field
 
 The [planner](../planning-and-dispatch/planner.md) never sees `TaskFile.content` directly -- it always goes through
-`buildTaskContext` first. This is a deliberate design: the filtered context
+[`buildTaskContext`](./api-reference.md#buildtaskcontext) first. This is a deliberate design: the filtered context
 strips sibling unchecked tasks so the planner focuses on a single unit of work.
 See [Planner — File Context Filtering](../planning-and-dispatch/planner.md#file-context-filtering) for how
 this context is incorporated into the planner prompt.
@@ -250,7 +250,8 @@ task lines except the one being planned. This design serves several purposes:
    prose, notes, already-checked tasks. This gives the planner full access to
    implementation guidance without the noise of unrelated work items.
 
-3. **Agent isolation**: Each task is dispatched to an independent agent session.
+3. **Agent isolation**: Each task is dispatched to an independent agent session
+   via the [dispatcher](../planning-and-dispatch/dispatcher.md).
    The planner's context should match the scope of work for that session.
 
 Looking at `src/planner.ts:72-85`, the filtered context is embedded in the
@@ -298,3 +299,13 @@ modules that only need the types.
   the pipeline perspective on parsing, filtering, and mutation
 - [Shared Parser Types](../shared-types/parser.md) -- summary of exported types
   and functions
+- [Dispatcher](../planning-and-dispatch/dispatcher.md) -- concurrent task
+  dispatch that interacts with the concurrency model
+- [Planner](../planning-and-dispatch/planner.md) -- plan generation that
+  consumes `buildTaskContext` output
+- [CLI Reference](../cli-orchestration/cli.md) -- `--concurrency` flag that
+  controls parallel execution
+- [Timeout Utility](../shared-utilities/timeout.md) -- deadline enforcement
+  used alongside the concurrency model
+- [Provider Interface](../shared-types/provider.md) -- the `ProviderInstance`
+  lifecycle driven by the orchestrator batching loop

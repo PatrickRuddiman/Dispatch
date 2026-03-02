@@ -10,7 +10,8 @@ behavior, and troubleshooting.
 **Official docs:** [git-scm.com/docs/git-remote](https://git-scm.com/docs/git-remote)
 
 The spec generator uses `git remote get-url origin` to auto-detect the issue
-source when `--source` is not provided.
+source when `--source` is not provided. This is the same auto-detection
+mechanism used by the [datasource system](../datasource-system/overview.md#auto-detection).
 
 ### How auto-detection works
 
@@ -215,7 +216,8 @@ The spec generator uses `fs/promises` for two operations:
 
 ### Changing the output location
 
-Use `--output-dir` to specify an alternative output directory:
+Use `--output-dir` to specify an alternative output directory (see
+[CLI Options](../cli-orchestration/cli.md#options-reference)):
 
 ```bash
 dispatch --spec 42,43 --output-dir /path/to/specs
@@ -282,13 +284,23 @@ documentation on chalk color detection and level overrides.
   data normalization
 - [GitHub Fetcher](../issue-fetching/github-fetcher.md) -- GitHub CLI
   integration details
+- [Azure DevOps Fetcher](../issue-fetching/azdevops-fetcher.md) -- Azure
+  DevOps fetcher shim (delegates to datasource layer)
 - [Azure DevOps Datasource](../datasource-system/azdevops-datasource.md) --
   Azure CLI integration details
+- [Datasource Overview](../datasource-system/overview.md) -- Datasource
+  abstraction, auto-detection, and `IssueDetails` interface
 - [Provider Abstraction](../provider-system/provider-overview.md) -- Provider
   lifecycle and backend implementations
 - [CLI Argument Parser](../cli-orchestration/cli.md) -- `--spec` mode flags
   and exit codes
+- [Configuration](../cli-orchestration/configuration.md) -- Persistent config
+  for `source`, `provider`, and other settings
 - [Datasource Helpers](../datasource-system/datasource-helpers.md) -- Temp
   file writing and issue ID extraction used alongside spec generation
+- [Shared Utilities — Slugify](../shared-utilities/slugify.md) -- Slug
+  generation used for spec output filenames
 - [Logger](../shared-types/logger.md) -- Structured logging facade used for
   spec generation progress and error reporting
+- [Spec Generator Tests](../testing/spec-generator-tests.md) -- Test suite
+  covering spec generation utility functions

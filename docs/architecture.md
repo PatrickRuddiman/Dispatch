@@ -1,562 +1,497 @@
-# dispatch -- Architecture Overview
+# Dispatch — Architecture Overview
 
-dispatch is a Node.js CLI tool that orchestrates AI coding agents to
-implement software tasks described in markdown files. It bridges issue trackers
-(GitHub Issues, Azure DevOps Work Items) and AI agent runtimes (OpenCode, GitHub
-Copilot) through a multi-stage pipeline: fetch issues, generate structured specs,
-parse tasks, plan execution, dispatch to AI agents, and commit results.
+Dispatch is a command-line tool that automates software engineering work by
+delegating tasks from issue trackers to AI coding agents. It reads work items
+from GitHub Issues, Azure DevOps Work Items, or local markdown files, converts
+them into structured specification and task files, and orchestrates AI agents
+(OpenCode or GitHub Copilot) to plan and execute each task — committing changes,
+pushing branches, and opening pull requests automatically.
 
-## Why it exists
+## Why Dispatch exists
 
 Manual orchestration of AI coding agents is tedious when a project has many
-small, well-defined units of work. dispatch solves three problems:
+small, well-defined units of work. Dispatch closes that gap by:
 
-1. **Context isolation** -- each task runs in a fresh agent session so context
-   from one task does not leak into another.
-2. **Precision through planning** -- an optional two-phase pipeline lets a
-   read-only planner agent explore the codebase first, producing a focused
-   execution plan that the executor agent follows.
-3. **Automated record-keeping** -- after each task, the markdown file is
-   updated and a conventional commit is created, giving a clean, reviewable
-   git history tied directly to the original task list.
+1. **Fetching issues** from the team's existing tracker (GitHub, Azure DevOps)
+   or reading local markdown specs.
+2. **Generating structured specs** via an AI agent that explores the codebase
+   and produces strategic task lists.
+3. **Planning and executing** each task through isolated AI sessions, with an
+   optional two-phase planner-then-executor architecture for higher-quality
+   results.
+4. **Managing the full git lifecycle** — branching, committing with conventional
+   commit messages, pushing, and opening pull requests that auto-close the
+   originating issue.
 
-The tool is backend-agnostic: it supports multiple issue trackers via the
-[datasource abstraction](datasource-system/overview.md) and multiple AI runtimes
-via the [provider abstraction](provider-system/provider-overview.md), letting
-teams use their existing tools without lock-in.
+The tool is backend-agnostic across three dimensions — issue trackers
+(datasources), AI runtimes (providers), and agent roles — each implemented as
+a strategy-pattern plugin behind a formal TypeScript interface.
 
-## System topology
-
-The following diagram shows every major component and its relationships. Data
-flows from external issue trackers through the datasource layer, into the
-orchestrator pipelines, through AI provider sessions, and back to the filesystem
-and issue trackers.
+## System architecture
 
 ```mermaid
 C4Context
-    title dispatch -- System Topology
+    title Dispatch — System Topology
 
-    Person(user, "Developer", "Runs the dispatch CLI")
+    Person(dev, "Developer", "Runs dispatch CLI")
 
-    System_Boundary(dispatch, "dispatch") {
+    System_Boundary(dispatch, "Dispatch CLI") {
+        Container(cli, "CLI Entry Point", "src/cli.ts", "Argument parsing, signal handlers, config routing")
+        Container(config, "Configuration", "src/config.ts, config-prompts.ts, orchestrator/cli-config.ts", "Persistent config (~/.dispatch/config.json), interactive wizard, three-tier merge")
+        Container(runner, "Orchestrator Runner", "src/orchestrator/runner.ts", "Pipeline router: dispatch, spec, fix-tests modes")
 
-        Container(cli, "CLI Entry Point", "src/cli.ts", "Parses arguments, routes to orchestrator or config subcommand")
-        Container(config, "Configuration", "src/config.ts + orchestrator/cli-config.ts", "Three-tier merge: CLI flags > ~/.dispatch/config.json > defaults")
-        Container(orchestrator, "Orchestrator", "src/agents/orchestrator.ts", "Pipeline coordinator: routes to dispatch or spec pipeline")
+        Container(spec_pipe, "Spec Pipeline", "src/orchestrator/spec-pipeline.ts", "Issue-to-spec generation with batch concurrency")
+        Container(dispatch_pipe, "Dispatch Pipeline", "src/orchestrator/dispatch-pipeline.ts", "Task planning, execution, git lifecycle, PR creation")
+        Container(fix_pipe, "Fix-Tests Pipeline", "src/orchestrator/fix-tests-pipeline.ts", "Detect and auto-fix failing tests via AI")
 
-        Container(spec_pipeline, "Spec Pipeline", "src/orchestrator/spec-pipeline.ts", "Fetches issues, generates specs via AI, syncs back to datasource")
-        Container(dispatch_pipeline, "Dispatch Pipeline", "src/orchestrator/dispatch-pipeline.ts", "Discovers tasks, plans, executes, marks complete, commits")
+        Container(ds_layer, "Datasource Layer", "src/datasources/", "Unified CRUD + git lifecycle across backends")
+        Container(prov_layer, "Provider Layer", "src/providers/", "AI runtime abstraction: boot, session, prompt, cleanup")
+        Container(agent_layer, "Agent Layer", "src/agents/", "Planner, executor, spec agent roles")
 
-        Container(ds_registry, "Datasource Layer", "src/datasource.ts + src/datasources/", "Strategy pattern: GitHub (gh CLI), AzDevOps (az CLI), Markdown (fs)")
-        Container(provider_registry, "Provider Layer", "src/provider.ts + src/providers/", "Strategy pattern: OpenCode (@opencode-ai/sdk), Copilot (@github/copilot-sdk)")
-
-        Container(agents, "Agent System", "src/agent.ts + src/agents/", "Planner, Executor, Spec agents with shared Agent interface")
-        Container(parser, "Task Parser", "src/parser.ts", "Extracts tasks from markdown checkboxes, marks complete")
-        Container(git, "Git Operations", "src/git.ts", "Stages changes and commits with conventional messages")
-        Container(tui, "TUI / Logger", "src/tui.ts + src/logger.ts", "Real-time terminal dashboard or structured log output")
-        Container(cleanup, "Cleanup Registry", "src/cleanup.ts", "Process-level resource teardown on exit/signal")
+        Container(parser, "Task Parser", "src/parser.ts", "Markdown checkbox extraction, context filtering, completion marking")
+        Container(specgen, "Spec Generator", "src/spec-generator.ts", "Input classification, post-processing, validation")
+        Container(tui, "Terminal UI", "src/tui.ts", "Real-time progress dashboard with spinner and task list")
+        Container(shared, "Shared Utilities", "src/cleanup.ts, logger.ts, format.ts, slugify.ts, timeout.ts", "Cleanup registry, logging, formatting, slugification, timeout")
     }
 
-    System_Ext(github, "GitHub", "Issues via gh CLI")
-    System_Ext(azdevops, "Azure DevOps", "Work Items via az CLI")
-    System_Ext(filesystem, "Local Filesystem", ".dispatch/specs/ markdown files")
-    System_Ext(opencode, "OpenCode Runtime", "AI agent via @opencode-ai/sdk")
-    System_Ext(copilot, "GitHub Copilot", "AI agent via @github/copilot-sdk")
-    System_Ext(git_ext, "Git CLI", "Version control operations")
+    System_Ext(github, "GitHub", "Issues, PRs via gh CLI")
+    System_Ext(azdevops, "Azure DevOps", "Work items, PRs via az CLI")
+    System_Ext(localfs, "Local Filesystem", ".dispatch/specs/ markdown files")
+    System_Ext(git, "Git CLI", "Branch, commit, push operations")
+    System_Ext(opencode, "OpenCode", "AI agent runtime via @opencode-ai/sdk")
+    System_Ext(copilot, "GitHub Copilot", "AI agent runtime via @github/copilot-sdk")
 
-    Rel(user, cli, "dispatch [options]")
-    Rel(cli, config, "dispatch config set/get/list")
-    Rel(cli, orchestrator, "bootOrchestrator + runFromCli")
-    Rel(orchestrator, spec_pipeline, "--spec mode")
-    Rel(orchestrator, dispatch_pipeline, "default mode")
-    Rel(spec_pipeline, ds_registry, "fetch / update / create issues")
-    Rel(spec_pipeline, provider_registry, "boot AI provider")
-    Rel(spec_pipeline, agents, "spec agent generates specs")
-    Rel(dispatch_pipeline, parser, "parseTaskFile, markTaskComplete")
-    Rel(dispatch_pipeline, agents, "planner + executor agents")
-    Rel(dispatch_pipeline, git, "commitTask per completed task")
-    Rel(dispatch_pipeline, tui, "real-time progress updates")
-    Rel(dispatch_pipeline, ds_registry, "sync / close completed issues")
-    Rel(agents, provider_registry, "createSession / prompt / cleanup")
-    Rel(ds_registry, github, "gh issue view/list/edit/close/create")
-    Rel(ds_registry, azdevops, "az boards work-item show/update/create/query")
-    Rel(ds_registry, filesystem, "readFile / writeFile / readdir / rename")
-    Rel(provider_registry, opencode, "HTTP + SSE sessions")
-    Rel(provider_registry, copilot, "JSON-RPC sessions")
-    Rel(git, git_ext, "git add -A / git commit")
-    Rel(orchestrator, cleanup, "registerCleanup on provider boot")
+    Rel(dev, cli, "invokes")
+    Rel(cli, config, "config subcommand")
+    Rel(cli, runner, "delegates pipeline execution")
+    Rel(runner, spec_pipe, "--spec / --respec")
+    Rel(runner, dispatch_pipe, "default mode")
+    Rel(runner, fix_pipe, "--fix-tests (dynamic import)")
+    Rel(spec_pipe, ds_layer, "fetch, update, create")
+    Rel(spec_pipe, prov_layer, "boot, session, prompt")
+    Rel(spec_pipe, agent_layer, "spec agent")
+    Rel(dispatch_pipe, ds_layer, "fetch, close, git lifecycle")
+    Rel(dispatch_pipe, prov_layer, "boot, session, prompt")
+    Rel(dispatch_pipe, agent_layer, "planner + executor agents")
+    Rel(dispatch_pipe, parser, "parse, mark complete, group by mode")
+    Rel(dispatch_pipe, tui, "real-time progress")
+    Rel(fix_pipe, prov_layer, "boot, session, prompt")
+    Rel(ds_layer, github, "gh CLI")
+    Rel(ds_layer, azdevops, "az CLI")
+    Rel(ds_layer, localfs, "fs/promises")
+    Rel(ds_layer, git, "git commands")
+    Rel(prov_layer, opencode, "@opencode-ai/sdk")
+    Rel(prov_layer, copilot, "@github/copilot-sdk")
 ```
 
-## End-to-end data flow
+## Pipeline modes
 
-dispatch operates in two modes, selected by the presence of the `--spec`
-flag. Both modes share the same CLI entry point, configuration system, datasource
-layer, and provider layer.
+Dispatch operates in three mutually exclusive modes, routed by the
+[orchestrator runner](cli-orchestration/orchestrator.md). Mode exclusion is
+enforced by the orchestrator, not the argument parser.
+
+| Mode | Trigger | Purpose | Detail page |
+|------|---------|---------|-------------|
+| **Spec generation** | `--spec` or `--respec` | Convert issues into structured markdown specs | [Spec generation](spec-generation/overview.md) |
+| **Dispatch** | Default (no mode flag) | Plan and execute tasks, commit, push, open PRs | [Planning & dispatch](planning-and-dispatch/overview.md) |
+| **Fix tests** | `--fix-tests` | Detect failing tests and prompt AI to fix them | [CLI orchestration](cli-orchestration/overview.md) |
+
+The three-stage end-to-end workflow connects these modes:
 
 ```mermaid
-flowchart TD
-    subgraph "User Input"
-        CLI["dispatch CLI<br/>src/cli.ts"]
-    end
-
-    CLI --> CONFIG["Config Resolution<br/>CLI flags > config file > defaults<br/>src/orchestrator/cli-config.ts"]
-    CONFIG --> ROUTE{"--spec<br/>provided?"}
-
-    ROUTE -->|Yes| SPEC_MODE
-    ROUTE -->|No| DISPATCH_MODE
-
-    subgraph SPEC_MODE["Spec Generation Pipeline"]
-        direction TB
-        S1["1. Resolve datasource<br/>(auto-detect from git remote or --source)"]
-        S2["2. Fetch issues from tracker<br/>or read local .md files via glob"]
-        S3["3. Boot AI provider<br/>(OpenCode or Copilot)"]
-        S4["4. For each issue:<br/>create session, prompt AI,<br/>post-process and validate spec"]
-        S5["5. Write spec to .dispatch/specs/<br/><id>-<slug>.md"]
-        S6["6. Sync back to datasource<br/>(update existing or create new issue)"]
-        S1 --> S2 --> S3 --> S4 --> S5 --> S6
-    end
-
-    subgraph DISPATCH_MODE["Dispatch Pipeline"]
-        direction TB
-        D1["1. Discover task files<br/>(glob pattern or datasource fetch)"]
-        D2["2. Parse markdown tasks<br/>(extract unchecked checkboxes)"]
-        D3["3. Boot AI provider"]
-        D4["4. Group tasks by mode<br/>(P)arallel / (S)erial batches"]
-        D5["5. For each batch:"]
-        D6["Plan task<br/>(optional planner agent)"]
-        D7["Execute task<br/>(executor agent)"]
-        D8["Mark complete in .md<br/>([ ] to [x])"]
-        D9["Git commit<br/>(conventional commit)"]
-        D10["Sync to datasource<br/>(update/close issue)"]
-        D1 --> D2 --> D3 --> D4 --> D5
-        D5 --> D6 --> D7 --> D8 --> D9 --> D10
-        D10 -->|"next batch"| D5
-    end
-
-    SPEC_MODE -->|"produces .md task files"| DISPATCH_MODE
+flowchart LR
+    A["Issue Tracker<br/>(GitHub / AzDevOps / .md)"] -->|"dispatch --spec 42"| B["Spec Agent<br/>Explores codebase,<br/>writes spec file"]
+    B -->|".dispatch/specs/*.md"| C["dispatch 42"]
+    C --> D["Planner Agent<br/>Read-only exploration,<br/>detailed plan per task"]
+    D --> E["Executor Agent<br/>Implements changes<br/>per plan"]
+    E --> F["Git: branch, commit,<br/>push, open PR"]
 ```
 
-### The three-stage pipeline
-
-The full end-to-end workflow is a three-stage pipeline where each stage uses a
-different AI agent role:
-
-| Stage | Command | Agent | Input | Output |
-|-------|---------|-------|-------|--------|
-| 1. Spec | `dispatch --spec 42,43` | [Spec agent](spec-generation/overview.md) | Issue tracker items | Structured markdown specs with `- [ ]` tasks |
-| 2. Plan | `dispatch ".dispatch/specs/*.md"` | [Planner agent](planning-and-dispatch/planner.md) | Individual task + codebase | Detailed execution plan |
-| 3. Execute | (same command) | [Executor agent](planning-and-dispatch/dispatcher.md) | Task + plan | Code changes + conventional commits |
+| Stage | Command | Agent | Output |
+|-------|---------|-------|--------|
+| 1. Spec | `dispatch --spec 42,43` | [Spec agent](spec-generation/overview.md) | Structured markdown specs with `- [ ]` tasks |
+| 2. Plan | `dispatch 42` | [Planner agent](planning-and-dispatch/planner.md) | Detailed execution plan per task |
+| 3. Execute | (same command) | [Executor agent](planning-and-dispatch/dispatcher.md) | Code changes + conventional commits + PRs |
 
 Stages 2 and 3 run within the same `dispatch` invocation. Stage 1 is a separate
 invocation that produces the markdown files consumed by stages 2 and 3.
 
-```bash
-# Stage 1: Generate specs from issues
-dispatch --spec 42,43,44
+## Data flow
 
-# Stage 2+3: Execute the generated specs
-dispatch ".dispatch/specs/*.md"
-```
+### Configuration resolution
 
-## Pipeline data flow: dispatch mode
-
-Every `dispatch` invocation in default mode follows a seven-stage pipeline. The
-orchestrator drives the stages sequentially, with configurable concurrency in
-stage 5. Tasks are partitioned into execution groups by their `(P)` / `(S)` mode
-prefix before dispatch begins.
+User configuration flows through a [three-tier merge](cli-orchestration/configuration.md)
+before reaching any pipeline:
 
 ```mermaid
-flowchart LR
-    A["1. Discover<br/>glob for task files"] --> B["2. Parse<br/>extract unchecked tasks"]
-    B --> C["3. Boot<br/>start AI provider"]
-    C --> D["4. Group<br/>groupTasksByMode()"]
-    D --> E["5. Dispatch<br/>plan + execute per group"]
-    E --> F["6. Mutate<br/>mark [ ] → [x] in file"]
-    F --> G["7. Close<br/>auto-close issues on tracker"]
+flowchart TD
+    A["CLI flags<br/>(--provider, --source, etc.)"] --> D["resolveCliConfig()<br/>src/orchestrator/cli-config.ts"]
+    B["Config file<br/>(~/.dispatch/config.json)"] --> D
+    C["Hardcoded defaults<br/>(opencode, auto-detect, etc.)"] --> D
+    D -->|"explicitFlags set<br/>distinguishes intentional args"| E["Resolved options"]
+    E --> F{"Mode?"}
+    F -->|"--spec"| G["Spec pipeline"]
+    F -->|"default"| H["Dispatch pipeline"]
+    F -->|"--fix-tests"| I["Fix-tests pipeline"]
 ```
 
-| Stage | Module | What happens |
-|-------|--------|-------------|
-| Discover | `src/agents/orchestrator.ts` | Glob pattern resolves to absolute file paths, sorted by leading filename digits. |
-| Parse | `src/parser.ts` | Each file is read and regex-matched for `- [ ] ...` lines, producing `Task` and `TaskFile` objects. See [Task Parsing](task-parsing/overview.md). |
-| Boot | `src/providers/index.ts` | The selected provider (OpenCode or Copilot) is booted via the registry. Provider cleanup is registered with `registerCleanup()`. See [Provider System](provider-system/provider-overview.md). |
-| Group | `src/parser.ts` | `groupTasksByMode()` partitions tasks into contiguous groups of same-mode `(P)` or `(S)` tasks. See [Task Parsing API](task-parsing/api-reference.md). |
-| Dispatch | `src/agents/orchestrator.ts` | Per group (sequential): per task within group (batch-concurrent): orchestrator calls `planner.plan()` then passes the plan to `executor.execute()`. See [Planning & Dispatch](planning-and-dispatch/overview.md). |
-| Mutate | `src/parser.ts` | `markTaskComplete` re-reads the file, validates the target line, replaces `[ ]` with `[x]`, and writes back. See [Task Lifecycle](planning-and-dispatch/task-context-and-lifecycle.md). |
-| Close | `src/agents/orchestrator.ts` | For each spec file where all tasks succeeded, extract issue ID from `<id>-<slug>.md` filename and close the issue on the tracker. See [Orchestrator](cli-orchestration/orchestrator.md). |
+The `explicitFlags` set tracks which CLI arguments were user-provided versus
+defaulted, so config-file values fill gaps without overriding intentional flags.
+See [configuration](cli-orchestration/configuration.md) for the full merge logic.
 
-## Pipeline data flow: spec mode
+### Dispatch pipeline phases
 
-When invoked with `--spec <ids>` or `--spec <glob>`, the orchestrator runs the
-spec-generation pipeline. This converts issue tracker items (or local markdown
-files) into high-level spec files that can be fed into dispatch mode.
-
-```mermaid
-flowchart LR
-    A["1. Detect<br/>identify datasource"] --> B["2. Fetch<br/>retrieve issue details"]
-    B --> C["3. Boot<br/>start AI provider"]
-    C --> D["4. Generate<br/>prompt AI per issue"]
-    D --> E["5. Write<br/>save spec files to disk"]
-    E --> F["6. Sync<br/>update/create on tracker"]
-```
-
-| Stage | Module | What happens |
-|-------|--------|-------------|
-| Detect | `src/datasources/index.ts` | If `--source` is not given, `detectDatasource()` runs `git remote get-url origin` and matches the URL against patterns for GitHub and Azure DevOps. See [Datasource Auto-Detection](datasource-system/overview.md#auto-detection). |
-| Fetch | `src/datasources/*.ts` | Each issue is fetched via the datasource's `fetch()` method and normalized into `IssueDetails`. Failed fetches are recorded but do not abort the pipeline. See [Datasource System](datasource-system/overview.md). |
-| Boot | `src/providers/index.ts` | Same `bootProvider` call as dispatch mode -- starts or connects to the AI backend. |
-| Generate | `src/orchestrator/spec-pipeline.ts` | For each successfully fetched issue, a fresh AI session is created, the issue details are wrapped in a prompt instructing the AI to explore the codebase and produce a high-level spec, and the response is post-processed and validated. See [Spec Generation](spec-generation/overview.md). |
-| Write | `src/orchestrator/spec-pipeline.ts` | The validated spec is written to `<output-dir>/<id>-<slug>.md`. The output directory (default `.dispatch/specs`) is created automatically. |
-| Sync | `src/orchestrator/spec-pipeline.ts` | In tracker mode, existing issues are updated with a link to the spec. In file/glob mode with a tracker datasource, new issues are created and local files may be deleted. |
-
-## Task lifecycle
-
-Each task transitions through a state machine as it moves through the dispatch
-pipeline. The `--no-plan` flag bypasses the planning state.
-
-```mermaid
-stateDiagram-v2
-    [*] --> pending : task parsed from markdown
-    pending --> planning : planner session created
-    pending --> running : --no-plan flag set
-    planning --> running : plan produced
-    planning --> failed : planner error
-    running --> done : agent responds + file mutated + committed
-    running --> failed : agent error or no response
-    done --> [*]
-    failed --> [*]
-```
-
-The TUI tracks both this per-task state machine and a global phase state
-machine (discovering, parsing, booting, dispatching, done). See the
-[TUI documentation](cli-orchestration/tui.md) for rendering details.
-
-## Provider abstraction
-
-The `ProviderInstance` interface (`src/provider.ts`) defines a three-method
-contract that decouples the pipeline from any specific AI runtime:
+The dispatch pipeline is a multi-phase workflow. Each phase has distinct error
+handling and the pipeline manages per-issue git branch isolation:
 
 ```mermaid
 sequenceDiagram
-    participant Orch as orchestrator.ts
-    participant Reg as providers/index.ts
-    participant Prov as Provider (OpenCode / Copilot)
-    participant Plan as planner.ts
-    participant Exec as executor.ts
-    participant Disp as dispatcher.ts
+    participant DS as Datasource
+    participant DP as Dispatch Pipeline
+    participant Parser as Task Parser
+    participant Planner as Planner Agent
+    participant Executor as Executor Agent
+    participant Git as Git CLI
+    participant Tracker as Issue Tracker
 
-    Orch->>Reg: bootProvider(name, opts)
-    Reg->>Prov: boot(opts)
-    Prov-->>Orch: ProviderInstance
-    Orch->>Orch: registerCleanup(() => instance.cleanup())
+    DP->>DS: fetch issues (by ID or list all)
+    DS-->>DP: IssueDetails[]
 
-    loop for each task
-        Orch->>Plan: plan(task, fileContext)
-        Plan->>Prov: createSession()
-        Prov-->>Plan: sessionId
-        Plan->>Prov: prompt(sessionId, plannerPrompt)
-        Prov-->>Plan: plan text
+    DP->>DP: writeItemsToTempDir() — stage to temp markdown files
 
-        Orch->>Exec: execute({ task, cwd, plan })
-        Exec->>Disp: dispatchTask(provider, task, cwd, plan)
-        Disp->>Prov: createSession()
-        Prov-->>Disp: sessionId
-        Disp->>Prov: prompt(sessionId, executorPrompt)
-        Prov-->>Disp: response
+    DP->>Parser: parseTaskFile() per file
+    Parser-->>DP: TaskFile[] with Task[]
+
+    DP->>DP: bootProvider(), register cleanup
+
+    loop Per issue file
+        DP->>DS: createAndSwitchBranch("dispatch/N-slug")
+
+        DP->>Parser: groupTasksByMode() — (P)arallel/(S)erial batches
+
+        loop Per task batch (concurrency N)
+            DP->>Planner: plan(task, context) [withTimeout + retry]
+            Planner-->>DP: execution plan
+
+            DP->>Executor: execute(task, plan)
+            Executor-->>DP: result
+
+            DP->>Parser: markTaskComplete(file, task)
+            DP->>DS: commitAllChanges()
+            DP->>DS: update() — sync task state back to datasource
+        end
+
+        DP->>DS: pushBranch()
+        DP->>DS: createPullRequest() [Closes #N / Resolves AB#N]
+        DP->>DS: switchBranch(defaultBranch)
     end
 
-    Orch->>Prov: cleanup()
+    DP->>DS: closeCompletedSpecIssues()
+    DP->>DP: cleanup provider resources
 ```
 
-Two backends are implemented:
+For full phase details, see [dispatch pipeline](planning-and-dispatch/overview.md)
+and [datasource helpers](datasource-system/datasource-helpers.md).
 
-| Backend | SDK | Prompt model | Session model |
-|---------|-----|--------------|---------------|
-| OpenCode | `@opencode-ai/sdk` ^1.2.10 | Async: fire-and-forget + SSE event stream | Server-side sessions |
-| Copilot | `@github/copilot-sdk` ^0.1.0 | Synchronous: blocking `sendAndWait()` | Client-side `Map<id, CopilotSession>` |
+### Spec generation pipeline phases
 
-Both support `--server-url` to connect to an already-running server instead of
-spawning one. For backend-specific setup and troubleshooting, see
-[OpenCode Backend](provider-system/opencode-backend.md) and
-[Copilot Backend](provider-system/copilot-backend.md).
+When invoked with `--spec`, the pipeline converts issues into AI-generated
+specification files:
 
-## Key design decisions
+```mermaid
+flowchart LR
+    A["1. Resolve datasource<br/>auto-detect or --source"] --> B["2. Fetch issues<br/>or read files/globs"]
+    B --> C["3. Boot AI provider"]
+    C --> D["4. Generate specs<br/>batch with concurrency"]
+    D --> E["5. Post-process<br/>strip fences, validate"]
+    E --> F["6. Write + rename<br/>H1-derived filename"]
+    F --> G["7. Sync back<br/>update/create on tracker"]
+```
 
-### Strategy patterns for extensibility
+Three input modes are supported: tracker issue IDs (`dispatch --spec 42,43`),
+file/glob patterns (`dispatch --spec "drafts/*.md"`), and inline text
+(`dispatch --spec "Add dark mode"`). The input type determines the
+sync-back behavior. See [spec generation](spec-generation/overview.md) for
+details.
 
-Two core abstractions use the strategy pattern to decouple the pipeline from
-specific backends:
+## Key abstractions
 
-- **[Datasource](datasource-system/overview.md)**: Normalizes GitHub Issues,
-  Azure DevOps Work Items, and local markdown files behind a common five-method
-  CRUD interface (`list/fetch/update/close/create`). Implementations shell out
-  to `gh` and `az` CLIs rather than using REST SDKs, delegating authentication
-  entirely to those tools.
-- **[Provider](provider-system/provider-overview.md)**: Abstracts AI agent
-  runtimes behind a `createSession/prompt/cleanup` interface.
+Dispatch is built on three parallel strategy-pattern registries. Each has a
+formal TypeScript interface, a static `Record<Name, BootFn>` map with
+compile-time string literal union keys, and a boot/get function:
 
-### Compile-time registries
+| Registry | Key type | Location | Extension guide |
+|----------|----------|----------|-----------------|
+| Providers | `ProviderName` (`"opencode"` \| `"copilot"`) | `src/providers/index.ts` | [Adding a provider](provider-system/adding-a-provider.md) |
+| Agents | `AgentName` (`"planner"` \| `"executor"` \| `"spec"`) | `src/agents/index.ts` | `src/agents/interface.ts` docstring |
+| Datasources | `DatasourceName` (`"github"` \| `"azdevops"` \| `"md"`) | `src/datasources/index.ts` | [Adding a datasource](datasource-system/overview.md#adding-a-new-datasource) |
 
-Three subsystems use the same registry pattern: a static `Record<Name, BootFn>`
-map with compile-time string literal union keys and no runtime plugin discovery.
+### Datasource layer
 
-| Registry | Key type | Location |
-|----------|----------|----------|
-| Providers | `ProviderName` (`"opencode" \| "copilot"`) | `src/providers/index.ts` |
-| Agents | `AgentName` (`"planner" \| "executor" \| "spec"`) | `src/agents/index.ts` |
-| Datasources | `DatasourceName` (`"github" \| "azdevops" \| "md"`) | `src/datasources/index.ts` |
+The [datasource interface](datasource-system/overview.md) defines a twelve-method
+contract covering five CRUD operations (`list`, `fetch`, `update`, `close`,
+`create`) and seven git lifecycle operations (`getDefaultBranch`,
+`buildBranchName`, `createAndSwitchBranch`, `switchBranch`, `pushBranch`,
+`commitAllChanges`, `createPullRequest`).
 
-Each registry exports a `boot` or `get` function and a list of valid names for
-CLI validation. Adding a new implementation requires a code change (new file,
-import, map entry, union member) but gives exhaustiveness checks at compile
-time. See [Adding a Provider](provider-system/adding-a-provider.md) and
-[Adding a Datasource](datasource-system/overview.md#adding-a-new-datasource).
+| Datasource | Backend | Auth method | Detail page |
+|------------|---------|-------------|-------------|
+| `github` | `gh` CLI | `gh auth login` / `GH_TOKEN` | [GitHub datasource](datasource-system/github-datasource.md) |
+| `azdevops` | `az` CLI + azure-devops extension | `az login` / PAT | [Azure DevOps datasource](datasource-system/azdevops-datasource.md) |
+| `md` | Local filesystem (`fs/promises`) | None | [Markdown datasource](datasource-system/markdown-datasource.md) |
 
-### CLI tools over REST SDKs
+Auto-detection from `git remote get-url origin` matches `github.com`,
+`dev.azure.com`, and `visualstudio.com` patterns. Both SSH and HTTPS URL
+formats are supported. See [auto-detection](datasource-system/overview.md#auto-detection)
+for limitations (no GitHub Enterprise, only checks `origin` remote).
 
-The GitHub and Azure DevOps datasources shell out to `gh` and `az` CLIs instead
-of using native HTTP clients. This eliminates credential management from the
-codebase (users authenticate via `gh auth login` / `az login`), avoids SDK
-dependencies, and keeps the implementation simple at the cost of requiring
-external binaries on PATH. See
-[Datasource Overview](datasource-system/overview.md#why-it-exists) for the
-full rationale.
+All three implementations use a shared `dispatch/<number>-<slug>` branch naming
+convention via [slugify](shared-utilities/slugify.md), and platform-specific
+PR auto-close syntax (`Closes #N` for GitHub, `Resolves AB#N` for Azure DevOps).
 
-### Two-phase planner-then-executor
+### Provider layer
 
-Tasks are optionally processed in two phases: a read-only planner agent explores
-the codebase and produces a detailed execution plan, then an executor agent
-follows that plan to make changes. The `--no-plan` flag skips the planning phase
-for simple tasks or faster iteration. Planner read-only enforcement is
-prompt-only -- neither SDK exposes capability restrictions. See
-[Planner Agent](planning-and-dispatch/planner.md).
+The [provider interface](provider-system/provider-overview.md) abstracts AI
+agent runtimes behind a session-based lifecycle: `boot` → `createSession` →
+`prompt` → `cleanup`.
 
-### Session-per-task isolation
+| Provider | SDK | Prompt model | Detail page |
+|----------|-----|-------------|-------------|
+| `opencode` | `@opencode-ai/sdk` | Async (fire-and-forget + SSE events) | [OpenCode backend](provider-system/opencode-backend.md) |
+| `copilot` | `@github/copilot-sdk` | Sync (blocking `sendAndWait`) | [Copilot backend](provider-system/copilot-backend.md) |
 
-Every task gets a fresh provider session for both planning and execution.
-Sessions share the filesystem and environment variables but have isolated
-conversation histories. This prevents context leakage and avoids context window
-exhaustion. See
-[Provider -- Session Isolation](provider-system/provider-overview.md#session-isolation-model).
+Each task gets an isolated session to prevent context leakage between tasks.
+Providers manage their own server lifecycle (spawning or connecting to external
+processes via `--server-url`). See
+[session isolation](provider-system/provider-overview.md#session-isolation-model).
 
-### Markdown as source of truth
+### Agent layer
 
-Task files are plain markdown with GitHub-style checkboxes (`- [ ]`). This
-keeps task definitions human-readable, version-controllable, and editable with
-any text editor. The `(P)` and `(S)` prefixes control parallel vs. serial
-execution mode. See [Task Parsing](task-parsing/overview.md) and
-[Markdown Syntax](task-parsing/markdown-syntax.md).
+Three [agent roles](planning-and-dispatch/overview.md) power the AI-driven
+pipeline:
 
-### Three-tier configuration precedence
+| Agent | Purpose | Key behavior | Detail page |
+|-------|---------|-------------|-------------|
+| **Spec** | Explore codebase, generate strategic specs | Writes to `.dispatch/tmp/` via AI, reads back, post-processes | [Spec generation](spec-generation/overview.md) |
+| **Planner** | Read-only exploration, produce execution plan | Read-only enforcement via prompt instructions (not tool restrictions) | [Planner](planning-and-dispatch/planner.md) |
+| **Executor** | Follow plan, make code changes | Gets plan context from planner output | [Dispatcher](planning-and-dispatch/dispatcher.md) |
 
-Configuration resolves through three layers: explicit CLI flags override
-persistent config file values (`~/.dispatch/config.json`), which override
-hardcoded defaults. This allows users to set project-wide defaults while
-retaining per-invocation control. See
-[Configuration](cli-orchestration/configuration.md).
-
-### Automatic conventional commit inference
-
-After each task completes, `git.ts` stages all changes (`git add -A`) and
-creates a conventional commit. The commit type (feat, fix, docs, refactor,
-test, chore, style, perf, ci) is inferred from the task text via cascading
-regex patterns. See [Git Operations](planning-and-dispatch/git.md).
+The optional `--no-plan` flag bypasses the planner for simpler tasks.
 
 ## Cross-cutting concerns
 
-This section surfaces system-wide patterns that span multiple modules. Each
-concern links to the feature pages where it is discussed in detail.
-
 ### Authentication and secrets
 
-dispatch does **not** manage credentials directly. Authentication is
-delegated entirely to external CLI tools and SDKs:
+Dispatch stores no credentials. Authentication is delegated entirely to
+external CLI tools and SDKs:
 
 | Backend | Auth mechanism | Managed by |
 |---------|---------------|------------|
 | GitHub datasource | `gh auth login`, `GH_TOKEN`, `GITHUB_TOKEN` env vars | [gh CLI](https://cli.github.com/manual/gh_auth_login) |
-| Azure DevOps datasource | `az login`, PAT via `az devops login`, `--org`/`--project` flags | [az CLI](https://learn.microsoft.com/en-us/cli/azure/authenticate-azure-cli) |
+| Azure DevOps datasource | `az login`, PAT via `az devops login` | [az CLI](https://learn.microsoft.com/en-us/cli/azure/authenticate-azure-cli) |
 | OpenCode provider | Server-level config; no credentials passed by dispatch | [OpenCode SDK](provider-system/opencode-backend.md) |
-| Copilot provider | Copilot CLI login, `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` | [Copilot SDK](provider-system/copilot-backend.md) |
+| Copilot provider | `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`, or logged-in `gh` CLI user | [Copilot SDK](provider-system/copilot-backend.md) |
 
-There is no secrets rotation mechanism within dispatch. Token lifecycle is
+There is no secrets rotation mechanism within Dispatch. Token lifecycle is
 managed by the underlying tools. For CI/CD environments, use environment
-variables instead of interactive login. See
-[Datasource Integrations](datasource-system/integrations.md),
-[GitHub Datasource](datasource-system/github-datasource.md),
-[Azure DevOps Datasource](datasource-system/azdevops-datasource.md), and
-[Provider Backends](provider-system/provider-overview.md).
+variables instead of interactive login. The only persistent data is
+`~/.dispatch/config.json`, which contains user preferences but no secrets.
+See [datasource integrations](datasource-system/integrations.md) and
+[provider overview](provider-system/provider-overview.md).
 
-### Process cleanup and resource management
+### Process cleanup and graceful shutdown
 
 The [cleanup registry](shared-types/cleanup.md) (`src/cleanup.ts`) provides a
 safety net for resource teardown:
 
 1. When a provider boots, its `cleanup()` is registered immediately via
    `registerCleanup()`.
-2. On **normal completion**, the orchestrator calls `cleanup()` explicitly.
+2. On **normal completion**, the pipeline calls `cleanup()` explicitly.
 3. On **signal exit** (SIGINT, SIGTERM), the CLI's signal handlers drain the
    registry via `runCleanup()`.
 4. After draining, `cleanups.splice(0)` clears the array so repeated calls are
    harmless.
 
-This dual-path design ensures spawned AI server processes are terminated even on
-abnormal exit. Both providers handle double-cleanup safely (OpenCode via a
-boolean guard, Copilot via error swallowing). SIGINT exits with code 130,
-SIGTERM with 143 (standard Unix conventions).
+This dual-path design (explicit + registry) ensures spawned server processes
+are terminated even on abnormal exit. Both providers handle double-cleanup
+safely (OpenCode via a `cleaned` boolean guard, Copilot via error swallowing).
+Exit codes follow Unix conventions: 0 for success, 1 for failures, 130 for
+SIGINT, 143 for SIGTERM. See
+[provider cleanup](provider-system/provider-overview.md#cleanup-and-resource-management).
 
-See [Provider Cleanup](provider-system/provider-overview.md#cleanup-and-resource-management)
-and [Shared Cleanup](shared-types/cleanup.md).
+### Error handling strategy
 
-### Error handling patterns
-
-The system uses a consistent **catch-and-continue** pattern for batch operations:
+The system uses a consistent **catch-and-continue** pattern for batch
+operations:
 
 | Scenario | Behavior | Detail page |
 |----------|----------|-------------|
-| Individual issue fetch fails in spec pipeline | Logged, skipped; others continue | [Spec Generation](spec-generation/overview.md#error-handling-and-exit-codes) |
-| Spec generation fails for one issue | Logged, `failed` counter incremented; others continue | [Spec Generation](spec-generation/overview.md#error-handling-and-exit-codes) |
-| Planner fails or times out for a task | Task marked failed and skipped; retried once by default (10 min timeout, configurable via `--plan-timeout` / `--plan-retries`) | [Orchestrator](cli-orchestration/orchestrator.md) |
-| Executor returns null response | Task marked failed | [Dispatcher](planning-and-dispatch/dispatcher.md) |
-| Datasource sync fails after task completion | Warning logged; task still counted as completed | [Orchestrator](cli-orchestration/orchestrator.md) |
-| Provider boot fails | Entire run aborts; no retry (indicates misconfiguration) | [Provider -- Error Recovery](provider-system/provider-overview.md#error-recovery-on-boot-failure) |
-| `commitTask()` fails after `markTaskComplete()` | Markdown left in modified-but-uncommitted state; no rollback | [Orchestrator](cli-orchestration/orchestrator.md) |
-| Branch creation fails | Execution continues without branching; results not lost | [Orchestrator](cli-orchestration/orchestrator.md) |
-| PR creation fails or PR already exists | Warning logged; falls back to returning existing PR URL | [Datasource Overview](datasource-system/overview.md#existing-pr-handling) |
-| Config file corrupted (invalid JSON) | `loadConfig()` silently returns empty object; defaults apply | [Configuration](cli-orchestration/configuration.md) |
+| Issue fetch fails | Logged, skipped; others continue | [Spec generation](spec-generation/overview.md#error-handling-and-exit-codes) |
+| Spec generation fails for one issue | `failed` counter incremented; others continue | [Spec generation](spec-generation/overview.md#error-handling-and-exit-codes) |
+| Planner times out | Retried up to `--plan-retries` (default 1) with `--plan-timeout` (default 10 min) | [Orchestrator](cli-orchestration/orchestrator.md) |
+| Executor returns null | Task marked failed; pipeline continues | [Dispatcher](planning-and-dispatch/dispatcher.md) |
+| Datasource sync fails post-execution | Warning logged; task still counted as done | [Orchestrator](cli-orchestration/orchestrator.md) |
+| Provider boot fails | Entire run aborts (misconfiguration — no retry) | [Provider error recovery](provider-system/provider-overview.md#error-recovery-on-boot-failure) |
+| PR already exists for branch | Falls back to returning existing PR URL | [Datasource overview](datasource-system/overview.md#existing-pr-handling) |
+| Config file corrupted | `loadConfig()` returns `{}` silently; defaults apply | [Configuration](cli-orchestration/configuration.md) |
+| `execFile` target not found | `ENOENT` error; fetch/operation marked failed | [Datasource integrations](datasource-system/integrations.md) |
 
-**Exit codes**: `0` if all tasks/specs succeed, `1` if any fail. No distinction
-between partial and total failure. See [CLI](cli-orchestration/cli.md).
+Exit code is `0` if all tasks/specs succeed, `1` if any fail. No distinction
+between partial and total failure.
 
 ### Monitoring and observability
 
-dispatch provides two output modes with no external monitoring integration:
+Dispatch provides two output modes with no external monitoring integration:
 
-- **[TUI Dashboard](cli-orchestration/tui.md)**: Real-time terminal rendering
-  with spinner, progress bar, and per-task status tracking. Uses ANSI escape
-  sequences. Active in interactive mode.
-- **[Logger](shared-types/logger.md)**: Structured chalk-formatted log output
-  with `--verbose` support for debug-level messages. Active in dry-run mode,
-  non-TTY environments, and spec generation. The `formatErrorChain` utility
-  provides error cause chain formatting for debugging.
+- **[TUI dashboard](cli-orchestration/tui.md)**: Real-time terminal rendering
+  with spinner, progress bar, per-task status tracking, and elapsed time.
+  Tracks both per-task states (pending → planning → running → done/failed) and
+  global phase states (discovering → parsing → booting → dispatching → done).
+- **[Logger](shared-types/logger.md)**: Structured chalk-formatted output with
+  `--verbose` for debug-level messages. `formatErrorChain()` traverses nested
+  `.cause` properties up to five levels. Active in dry-run, non-TTY, and spec
+  generation contexts.
 
-There is no structured JSON log output, no metrics export, no timestamps, and
-no health checks for backing AI providers. Color output can be controlled via
-`FORCE_COLOR`, `NO_COLOR`, or `--no-color`. See
-[Chalk Reference](shared-types/integrations.md#chalk).
+Color output is controlled by `FORCE_COLOR`, `NO_COLOR`, or `--no-color`. There
+is no structured JSON log output, no metrics export, and no health checks for
+AI providers.
 
-### Concurrency and file safety
+### Concurrency model
 
 Both pipelines support configurable concurrency:
 
-- **Dispatch pipeline**: `--concurrency N` (default 1) controls how many tasks
-  run in parallel per batch via `Promise.all()`.
-- **Spec pipeline**: Concurrency defaults to `min(cpuCount, freeMB / 500)`,
-  clamped to at least 1.
+- **Dispatch pipeline**: `--concurrency N` (default: `min(cpuCount, freeMB/500)`,
+  at least 1) controls how many tasks run in parallel per batch via
+  `Promise.all()`.
+- **Spec pipeline**: Same default calculation, batch-concurrent generation.
 
-Concurrent task execution (`--concurrency > 1`) introduces risks:
+Concurrent task execution (`--concurrency > 1`) introduces risks documented in
+[architecture & concurrency](task-parsing/architecture-and-concurrency.md):
 
-1. **Markdown file corruption.** `markTaskComplete` performs a read-modify-write
-   cycle without file locking. Two tasks from the same file completing
-   simultaneously can overwrite each other. See
-   [Concurrency Analysis](task-parsing/architecture-and-concurrency.md).
-2. **Git commit cross-contamination.** `git add -A` stages *all* changes. With
-   concurrent tasks, one task's commit can include another's uncommitted changes.
-   The safe default is `--concurrency 1`. See
-   [Git Operations](planning-and-dispatch/git.md).
+1. **Markdown file corruption**: `markTaskComplete` performs a read-modify-write
+   cycle without file locking.
+2. **Git commit cross-contamination**: `git add -A` stages all changes; one
+   task's commit can include another's uncommitted work.
 
-### Prompt timeouts and cancellation
+### Timeout and retry
 
-Neither the `ProviderInstance` interface nor either backend exposes a timeout or
-cancellation mechanism for `prompt()` calls. A hung agent blocks the pipeline
-indefinitely. If this becomes a problem, the recommended approach is wrapping
-`prompt()` calls in `Promise.race()` with a configurable timeout at the
-orchestrator level. See
-[Provider Overview](provider-system/provider-overview.md#prompt-timeouts-and-cancellation).
+The planner agent is wrapped in [`withTimeout()`](shared-utilities/timeout.md)
+with configurable bounds:
 
-### External tool availability
+| Setting | CLI flag | Default | Config key |
+|---------|----------|---------|------------|
+| Planning timeout | `--plan-timeout` | 10 minutes | `planTimeout` |
+| Planning retries | `--plan-retries` | 1 | `planRetries` |
 
-dispatch depends on several CLI tools at runtime but performs no pre-flight
-checks for their presence. A missing tool surfaces as an `ENOENT` error from
-Node's `execFile`:
+On `TimeoutError`, the pipeline retries up to `maxPlanAttempts`. Non-timeout
+errors break immediately. Provider `prompt()` calls themselves have no timeout
+or cancellation mechanism — a hung agent blocks the pipeline indefinitely. See
+[provider timeouts](provider-system/provider-overview.md#prompt-timeouts-and-cancellation).
 
-| Tool | Required when | What fails |
-|------|--------------|------------|
-| `git` | Always (dispatch mode commits) | `commitTask()` throws |
-| `gh` | GitHub datasource operations | `github.fetch()` / `.update()` / `.close()` throw |
-| `az` + `azure-devops` extension | Azure DevOps datasource operations | `azdevops.fetch()` etc. throw |
+### External tool dependencies
+
+Dispatch depends on external CLI tools at runtime but performs no pre-flight
+checks for their presence:
+
+| Tool | Required when | Failure mode |
+|------|--------------|-------------|
+| `git` | Always in dispatch mode | `commitTask()` throws |
+| `gh` | GitHub datasource operations | ENOENT from `execFile` |
+| `az` + `azure-devops` extension | Azure DevOps operations | ENOENT or "not a recognized command" |
 | OpenCode CLI or server | `--provider opencode` | `bootProvider()` throws |
 | Copilot CLI | `--provider copilot` | `client.start()` throws |
 
-There are no subprocess timeouts on any `execFile` call. See
-[Datasource Integrations](datasource-system/integrations.md) and
-[CLI Integrations](cli-orchestration/integrations.md).
+There are no subprocess timeouts on `execFile` calls (except the 10 MB
+`maxBuffer` limit in the fix-tests pipeline). See
+[datasource integrations](datasource-system/integrations.md).
 
-### Datasource auto-detection
+### On-disk storage
 
-When `--source` is not explicitly provided, `detectDatasource()` inspects the
-`origin` git remote URL and matches against patterns:
-
-| Pattern | Detected source |
-|---------|----------------|
-| `/github\.com/i` | `github` |
-| `/dev\.azure\.com/i` | `azdevops` |
-| `/visualstudio\.com/i` | `azdevops` |
-
-Limitations: only checks the `origin` remote; does not detect GitHub Enterprise
-hostnames; returns `null` if no pattern matches (user must specify `--source`).
-Both SSH and HTTPS formats are supported. See
-[Datasource Auto-Detection](datasource-system/overview.md#auto-detection).
-
-### Temporary files and on-disk storage
-
-| Location | Purpose | Cleanup |
-|----------|---------|---------|
+| Location | Purpose | Lifecycle |
+|----------|---------|-----------|
 | `~/.dispatch/config.json` | Persistent user configuration | Manual via `dispatch config reset` |
 | `.dispatch/specs/` | Generated spec files; markdown datasource storage | Managed by datasource lifecycle |
-| `.dispatch/specs/archive/` | Closed/resolved specs (markdown datasource) | Manual recovery |
-| `.dispatch/tmp/` | Temporary spec files during AI generation | Cleaned up per-spec; may accumulate on crash |
-| `/tmp/dispatch-*` | Temporary directories for datasource-fetched issues | Cleaned up on completion; orphaned on crash |
+| `.dispatch/specs/archive/` | Closed specs (markdown datasource) | Manual recovery via file move |
+| `.dispatch/tmp/` | Temp spec files during AI generation (UUID-named) | Cleaned per-spec; may accumulate on crash |
+| `/tmp/dispatch-*` | Temp directories for datasource-fetched issues | Cleaned on completion; orphaned on crash |
 
-No external databases are used. See
-[Markdown Datasource](datasource-system/markdown-datasource.md) and
-[Configuration](cli-orchestration/configuration.md).
+No external databases are used. All state is file-based.
 
 ### Shared data model
 
-The `Task` and `TaskFile` interfaces defined in `src/parser.ts` are the core
-data model consumed by every module in the pipeline:
+Two core interfaces flow through the entire pipeline:
 
-| Consumer | Imports | Usage |
-|----------|---------|-------|
-| Orchestrator | `Task`, `TaskFile`, `parseTaskFile`, `buildTaskContext`, `groupTasksByMode` | Drives the full lifecycle |
-| Planner | `Task` | Builds the planning prompt |
-| Executor | `Task`, `markTaskComplete` | Executes planned tasks, marks complete |
-| Dispatcher | `Task` | Builds the execution prompt |
-| TUI | `Task` | Displays task text and status |
-| Git | `Task` | Builds conventional commit messages |
+- **`Task` / `TaskFile`** (`src/parser.ts`): Extracted from markdown checkboxes,
+  consumed by the orchestrator, planner, executor, TUI, and git modules. See
+  [task parsing](task-parsing/overview.md) and [parser types](shared-types/parser.md).
+- **`IssueDetails`** (`src/datasources/interface.ts`): Normalized work item
+  representation consumed by all datasource operations. Fields include `number`,
+  `title`, `body`, `labels`, `state`, `url`, `comments`, and
+  `acceptanceCriteria`. See [datasource overview](datasource-system/overview.md#the-issuedetails-interface).
 
-The `IssueDetails` interface defined in `src/datasource.ts` is the shared data
-model for all datasource operations, normalized from GitHub, Azure DevOps, and
-local markdown. See [Shared Types](shared-types/overview.md) and
-[Task Parsing](task-parsing/overview.md).
+The `(P)`/`(S)` prefix syntax on task text controls parallel vs. serial
+execution grouping via `groupTasksByMode()`. See
+[markdown syntax](task-parsing/markdown-syntax.md).
 
-### File encoding
+## Key design decisions
 
-The parser normalizes CRLF to LF during both `parseTaskContent` and
-`buildTaskContext`. `markTaskComplete` always writes LF line endings regardless
-of the original file's style. All file I/O assumes UTF-8 encoding with no BOM
-handling. See [Markdown Syntax](task-parsing/markdown-syntax.md).
+### CLI tools over REST APIs
 
-### Deprecated compatibility layer
+The GitHub and Azure DevOps datasources shell out to `gh` and `az` CLIs rather
+than using REST client libraries. This reuses the user's existing
+authentication, adds zero dependencies, and simplifies the implementation at
+the cost of a runtime dependency on external binaries being installed. See
+[datasource overview](datasource-system/overview.md#why-it-exists).
 
-The `IssueFetcher` interface and `src/issue-fetchers/` modules are deprecated
-shims that delegate to the [Datasource](datasource-system/overview.md) layer
-via `.bind()`. No code outside the deprecated layer imports from these paths.
-The shims filter out the `"md"` datasource name that did not exist in the
-original API. All exports are marked `@deprecated` and are slated for removal.
-See [Deprecated Compatibility Layer](deprecated-compat/overview.md) for
-migration guidance and removal safety assessment.
+### Two-phase planner-then-executor
+
+The optional planning phase uses a read-only AI session to explore the codebase
+before the executor acts, producing higher-quality results. Read-only
+enforcement is prompt-based (not tool-restricted) — a deliberate trade-off for
+simplicity. See [planner agent](planning-and-dispatch/planner.md).
+
+### Spec generation stays high-level
+
+The spec agent intentionally avoids code-level details because the downstream
+planner re-explores the codebase with individual task context. This prevents
+duplication and keeps specs resilient to codebase changes between generation
+and execution. See [spec generation](spec-generation/overview.md).
+
+### Compile-time type unions
+
+`ProviderName`, `DatasourceName`, and `AgentName` are string literal union types
+rather than runtime-discovered plugins. This provides TypeScript exhaustiveness
+checking at the cost of requiring a code change to add new backends — acceptable
+for a system with two providers and three datasources. See
+[provider types](shared-types/provider.md).
+
+### Session-per-task isolation
+
+Each task gets an isolated provider session. Sessions share the filesystem but
+not conversation context, preventing context rot while allowing tasks to operate
+on the same codebase. See
+[session isolation](provider-system/provider-overview.md#session-isolation-model).
+
+### Markdown as the source of truth
+
+Plain markdown files with GitHub-style checkboxes serve as the intermediate
+format between specs and execution. This makes task files human-readable,
+version-controllable, and editable. The parser normalizes CRLF to LF and always
+writes LF line endings. See [task parsing](task-parsing/overview.md).
+
+### Automatic conventional commit inference
+
+After each task completes, `git.ts` stages all changes (`git add -A`) and
+creates a conventional commit. The commit type (`feat`, `fix`, `docs`,
+`refactor`, etc.) is inferred from the task text via regex patterns. See
+[git operations](planning-and-dispatch/git.md).
+
+### Three-tier configuration precedence
+
+CLI flags override config file values (`~/.dispatch/config.json`), which
+override hardcoded defaults. An interactive wizard (`dispatch config`) guides
+first-time setup with conditional prompts based on datasource selection. See
+[configuration](cli-orchestration/configuration.md).
 
 ## Infrastructure
 
@@ -564,20 +499,21 @@ migration guidance and removal safety assessment.
 
 | Requirement | Version | Purpose |
 |-------------|---------|---------|
-| Node.js | >= 18 | Runtime (ESM-only, `"type": "module"`) |
-| Git | Any | Auto-detection, conventional commits |
-| `gh` CLI | Any | GitHub datasource (optional) |
-| `az` CLI + azure-devops extension | Any | Azure DevOps datasource (optional) |
+| Node.js | >= 20.12.0 | Runtime (ESM-only, `"type": "module"`) |
+| Git | Any | Auto-detection, conventional commits, branch lifecycle |
+| `gh` CLI | Any | GitHub datasource (required only if using GitHub) |
+| `az` CLI + azure-devops extension | Any | Azure DevOps datasource (required only if using AzDevOps) |
 | OpenCode or Copilot runtime | Varies | AI agent backend (at least one required) |
 
 ### Dependencies
 
-| Package | Version | Purpose |
-|---------|---------|---------|
-| `@opencode-ai/sdk` | ^1.2.10 | OpenCode AI agent SDK |
-| `@github/copilot-sdk` | ^0.1.0 | GitHub Copilot agent SDK |
-| `chalk` | ^5.4.1 | Terminal color styling (ESM-only) |
-| `glob` | ^11.0.1 | File pattern matching |
+| Package | Purpose |
+|---------|---------|
+| `@opencode-ai/sdk` | OpenCode AI agent SDK |
+| `@github/copilot-sdk` | GitHub Copilot agent SDK |
+| `@inquirer/prompts` | Interactive configuration wizard |
+| `chalk` | Terminal color styling (ESM-only) |
+| `glob` | File pattern matching |
 
 ### Build and test
 
@@ -586,123 +522,98 @@ migration guidance and removal safety assessment.
 | `npm run build` | Build with tsup |
 | `npm test` | Run tests with Vitest (`vitest run`) |
 | `npm run test:watch` | Watch mode tests |
-| `npm run typecheck` | Type-check with `tsc --noEmit` |
 
-See [Testing Overview](testing/overview.md) for test suite details, coverage
-map, and testing patterns.
+The project uses [Vitest](https://vitest.dev/) v4 with ~2,378 lines of test
+code covering six production modules. Tests use real filesystem I/O (temp
+directories via `mkdtemp()`) rather than mocks, and fake timers for
+timeout-related tests. Modules interacting with external services are not
+unit-tested. See [testing overview](testing/overview.md).
+
+### Deprecated compatibility layer
+
+The `IssueFetcher` interface and `src/issue-fetchers/` modules are deprecated
+shims that delegate to the [datasource](datasource-system/overview.md) layer.
+No code outside the deprecated layer imports from these paths. All exports are
+marked `@deprecated` and slated for removal. See
+[deprecated compatibility](deprecated-compat/overview.md) for migration
+guidance and removal safety assessment.
 
 ## Component index
 
-### [CLI & Orchestration](cli-orchestration/overview.md)
+### Core pipelines
 
-The entry point and centralized pipeline controller.
+- [CLI & orchestration](cli-orchestration/overview.md) — Entry point, argument
+  parsing, pipeline routing, TUI
+  - [CLI reference](cli-orchestration/cli.md)
+  - [Configuration](cli-orchestration/configuration.md)
+  - [Orchestrator](cli-orchestration/orchestrator.md)
+  - [Terminal UI](cli-orchestration/tui.md)
+  - [Integrations](cli-orchestration/integrations.md)
+- [Spec generation](spec-generation/overview.md) — Issue-to-spec pipeline
+  - [Integrations](spec-generation/integrations.md)
+- [Planning & dispatch](planning-and-dispatch/overview.md) — Task execution
+  engine
+  - [Planner agent](planning-and-dispatch/planner.md)
+  - [Dispatcher](planning-and-dispatch/dispatcher.md)
+  - [Git operations](planning-and-dispatch/git.md)
+  - [Task context & lifecycle](planning-and-dispatch/task-context-and-lifecycle.md)
+  - [Integrations](planning-and-dispatch/integrations.md)
 
-- [CLI argument parser](cli-orchestration/cli.md) -- argument parsing, help text,
-  exit codes
-- [Configuration](cli-orchestration/configuration.md) -- persistent config,
-  three-tier precedence, `dispatch config` subcommand
-- [Orchestrator pipeline](cli-orchestration/orchestrator.md) -- multi-phase
-  pipeline, concurrency, cleanup
-- [Terminal UI](cli-orchestration/tui.md) -- real-time dashboard, state machine,
-  TTY compatibility
-- [Integrations](cli-orchestration/integrations.md) -- chalk, glob, tsup,
-  process signals
+### Extensible backends
 
-### [Datasource Abstraction & Implementations](datasource-system/overview.md)
+- [Datasource system](datasource-system/overview.md) — GitHub, Azure DevOps,
+  markdown implementations
+  - [GitHub datasource](datasource-system/github-datasource.md)
+  - [Azure DevOps datasource](datasource-system/azdevops-datasource.md)
+  - [Markdown datasource](datasource-system/markdown-datasource.md)
+  - [Datasource helpers](datasource-system/datasource-helpers.md)
+  - [Integrations](datasource-system/integrations.md)
+  - [Testing](datasource-system/testing.md)
+- [Provider system](provider-system/provider-overview.md) — OpenCode and
+  Copilot AI runtime backends
+  - [OpenCode backend](provider-system/opencode-backend.md)
+  - [Copilot backend](provider-system/copilot-backend.md)
+  - [Adding a provider](provider-system/adding-a-provider.md)
 
-The strategy-pattern layer normalizing access to work items across backends.
+### Data layer
 
-- [GitHub Datasource](datasource-system/github-datasource.md) -- `gh` CLI
-  integration, auth, operations
-- [Azure DevOps Datasource](datasource-system/azdevops-datasource.md) -- `az`
-  CLI integration, WIQL, operations
-- [Markdown Datasource](datasource-system/markdown-datasource.md) -- local
-  filesystem, file naming, archival
-- [Integrations & Troubleshooting](datasource-system/integrations.md) --
-  subprocess behavior, error handling, external tool deps
-- [Testing](datasource-system/testing.md) -- test suite coverage
+- [Task parsing & markdown](task-parsing/overview.md) — Checkbox extraction,
+  context filtering, completion marking
+  - [Markdown syntax](task-parsing/markdown-syntax.md)
+  - [API reference](task-parsing/api-reference.md)
+  - [Architecture & concurrency](task-parsing/architecture-and-concurrency.md)
+  - [Testing guide](task-parsing/testing-guide.md)
 
-### [Provider Abstraction & Backends](provider-system/provider-overview.md)
+### Shared infrastructure
 
-The strategy pattern decoupling the pipeline from specific AI runtimes.
+- [Shared types & interfaces](shared-types/overview.md) — Foundational
+  contracts every module depends on
+  - [Cleanup registry](shared-types/cleanup.md)
+  - [Format utilities](shared-types/format.md)
+  - [Logger](shared-types/logger.md)
+  - [Parser types](shared-types/parser.md)
+  - [Provider interface](shared-types/provider.md)
+  - [Integrations](shared-types/integrations.md)
+- [Shared utilities](shared-utilities/overview.md) — Slugify and timeout
+  - [Slugify](shared-utilities/slugify.md)
+  - [Timeout](shared-utilities/timeout.md)
+  - [Testing](shared-utilities/testing.md)
 
-- [OpenCode Backend](provider-system/opencode-backend.md) -- setup, async prompt
-  model, SSE events
-- [Copilot Backend](provider-system/copilot-backend.md) -- setup, synchronous
-  prompt model, auth
-- [Adding a Provider](provider-system/adding-a-provider.md) -- step-by-step
-  implementation guide
+### Testing
 
-### [Task Parsing & Markdown](task-parsing/overview.md)
+- [Testing overview](testing/overview.md) — Vitest framework, strategy,
+  coverage map
+  - [Config tests](testing/config-tests.md)
+  - [Format tests](testing/format-tests.md)
+  - [Parser tests](testing/parser-tests.md)
+  - [Spec generator tests](testing/spec-generator-tests.md)
 
-The foundational data extraction and mutation layer.
+### Deprecated
 
-- [Markdown Syntax Reference](task-parsing/markdown-syntax.md) -- supported
-  checkbox formats, `(P)`/`(S)` prefixes
-- [API Reference](task-parsing/api-reference.md) -- `parseTaskFile`,
-  `buildTaskContext`, `markTaskComplete`, `groupTasksByMode`
-- [Architecture & Concurrency](task-parsing/architecture-and-concurrency.md) --
-  file I/O patterns, race conditions
-- [Testing Guide](task-parsing/testing-guide.md) -- parser test patterns
-
-### [Planning & Dispatch Pipeline](planning-and-dispatch/overview.md)
-
-The core task execution engine.
-
-- [Planner Agent](planning-and-dispatch/planner.md) -- two-phase architecture,
-  read-only enforcement
-- [Dispatcher](planning-and-dispatch/dispatcher.md) -- session isolation, prompt
-  construction
-- [Git Operations](planning-and-dispatch/git.md) -- conventional commits,
-  staging, commit type inference
-- [Task Context & Lifecycle](planning-and-dispatch/task-context-and-lifecycle.md) --
-  context filtering, concurrent writes
-- [Integrations](planning-and-dispatch/integrations.md) -- git CLI, child
-  process, fs operations
-
-### [Spec Generation](spec-generation/overview.md)
-
-The pipeline converting issue tracker items into structured spec files.
-
-- [Spec Generation Overview](spec-generation/overview.md) -- end-to-end flow,
-  prompt structure, output format
-- [Integrations](spec-generation/integrations.md) -- external dependencies,
-  auth, troubleshooting
-
-### [Shared Interfaces & Utilities](shared-types/overview.md)
-
-The foundational contracts and utilities every other module depends on.
-
-- [Cleanup Registry](shared-types/cleanup.md) -- process-level cleanup
-- [Format Utilities](shared-types/format.md) -- duration formatting
-- [Logger](shared-types/logger.md) -- structured terminal output
-- [Parser Types](shared-types/parser.md) -- `Task`, `TaskFile` definitions
-- [Provider Interface](shared-types/provider.md) -- `ProviderName`,
-  `ProviderInstance` definitions
-- [Integrations](shared-types/integrations.md) -- chalk, fs/promises, process
-  signals
-
-### [Issue Fetching](issue-fetching/overview.md) (deprecated)
-
-> The `IssueFetcher` interface and `src/issue-fetchers/` modules are deprecated
-> compatibility shims. See [Deprecated Compatibility Layer](deprecated-compat/overview.md).
-
-- [GitHub Fetcher](issue-fetching/github-fetcher.md) (deprecated shim)
-- [Azure DevOps Fetcher](issue-fetching/azdevops-fetcher.md) (deprecated shim)
-- [Adding a Fetcher](issue-fetching/adding-a-fetcher.md) (deprecated -- use
-  Datasource interface)
-
-### [Deprecated Compatibility Layer](deprecated-compat/overview.md)
-
-Backwards-compatible shims mapping the legacy `IssueFetcher` interface onto the
-`Datasource` abstraction. Documents the adapter pattern, interface differences,
-migration path, and removal safety assessment.
-
-### [Testing](testing/overview.md)
-
-The project test suite using Vitest v4.x with real filesystem I/O.
-
-- [Configuration Tests](testing/config-tests.md)
-- [Format Utility Tests](testing/format-tests.md)
-- [Parser Tests](testing/parser-tests.md)
-- [Spec Generator Tests](testing/spec-generator-tests.md)
+- [Deprecated compatibility layer](deprecated-compat/overview.md) —
+  `IssueFetcher` shims delegating to datasource system
+- [Issue fetching (legacy)](issue-fetching/overview.md) — Superseded by the
+  datasource system
+  - [GitHub fetcher](issue-fetching/github-fetcher.md) (deprecated)
+  - [Azure DevOps fetcher](issue-fetching/azdevops-fetcher.md) (deprecated)
+  - [Adding a fetcher](issue-fetching/adding-a-fetcher.md) (deprecated)

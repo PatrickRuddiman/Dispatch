@@ -42,7 +42,8 @@ CHECKED_SUB  = "$1[x] $2"
 ### Rejected formats
 
 The following are intentionally **not** recognized as task items. These are
-verified by the negative test cases in `src/parser.test.ts:182-196`:
+verified by the negative test cases in `src/parser.test.ts:182-196` (see
+[Parser Tests](../testing/parser-tests.md#parsetaskcontent--basic-extraction-19-tests)):
 
 | Format | Example | Why rejected |
 |---|---|---|
@@ -132,7 +133,8 @@ for how the orchestrator processes these groups.
 
 ## How the CHECKED_SUB replacement works
 
-When `markTaskComplete` converts a task, it uses `String.replace` with the
+When `markTaskComplete` converts a task (see
+[API Reference](./api-reference.md#marktaskcomplete)), it uses `String.replace` with the
 `UNCHECKED_RE` regex and the `CHECKED_SUB` template:
 
 ```
@@ -200,7 +202,8 @@ for the implications.
 
 The parser accepts **any file path** -- `parseTaskFile` does not check or
 enforce a `.md` extension. The [CLI entry point](../cli-orchestration/cli.md) (`src/cli.ts`) supplies file
-paths via a glob pattern (e.g., `tasks/**/*.md`), so in practice files are
+paths via a glob pattern (e.g., `tasks/**/*.md`) or via
+[datasource discovery](../datasource-system/overview.md), so in practice files are
 typically `.md`, but the parser itself is extension-agnostic.
 
 ### File encoding
@@ -224,3 +227,12 @@ would contain mojibake characters.
   and rejected syntax patterns, CRLF handling, and mode prefix parsing
 - [Format Tests](../testing/format-tests.md) -- Related pure-function test
   patterns used in the testing suite
+- [Orchestrator — Concurrency Model](../cli-orchestration/orchestrator.md#concurrency-model) --
+  How mode prefixes drive group-aware batch-sequential execution
+- [Shared Parser Types](../shared-types/parser.md) -- `Task` and `TaskFile`
+  type definitions exported by the parser
+- [Datasource Helpers](../datasource-system/datasource-helpers.md) -- How
+  `parseIssueFilename()` extracts issue IDs from the temp files that contain
+  these task markdown formats
+- [Git Operations](../planning-and-dispatch/git.md) -- How `commitTask()`
+  creates commits after `markTaskComplete` modifies the checkbox

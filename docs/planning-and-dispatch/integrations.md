@@ -102,7 +102,7 @@ Commit messages follow the
 ```
 
 The `<type>` is inferred from task text (see [Git Operations](./git.md#commit-type-inference)).
-The `<description>` is the task text, truncated to 60 characters with `...`
+The `<description>` is the [task text](../task-parsing/overview.md), truncated to 60 characters with `...`
 appended if necessary. No scope, body, or footer is generated.
 
 The type cannot be overridden by the task author. To control the commit type,
@@ -115,7 +115,8 @@ bug" produces `fix:`, "add user endpoint" produces `feat:`).
 **Official documentation**: [Node.js child_process.execFile](https://nodejs.org/api/child_process.html#child_processexecfilefile-args-options-callback)
 
 The pipeline uses `util.promisify(execFile)` to run git commands. Key
-characteristics:
+characteristics. For subprocess timeout concerns, see also the
+[`withTimeout()` utility](../shared-utilities/timeout.md):
 
 - **No shell**: `execFile` spawns the git binary directly, avoiding shell
   injection risks
@@ -260,6 +261,8 @@ teardown runs even if the process exits via signal or unhandled error.
 - [CLI & Orchestration](../cli-orchestration/overview.md) -- CLI flags and orchestrator loop
 - [Cleanup Registry](../shared-types/cleanup.md) -- Process-level cleanup
   that drains provider teardown on exit
+- [Shared Types Integrations](../shared-types/integrations.md) -- chalk, Node.js
+  fs/promises, and process signal details
 - [Testing Overview](../testing/overview.md) -- Test coverage (note: the
   orchestrator, planner, dispatcher, and git modules are not unit tested)
 - [Datasource Integrations](../datasource-system/integrations.md) -- Similar

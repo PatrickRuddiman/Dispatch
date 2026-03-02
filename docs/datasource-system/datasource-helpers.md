@@ -115,7 +115,7 @@ writeItemsToTempDir(items: IssueDetails[]): Promise<WriteItemsResult>
 
 1. Creates a temp directory: `mkdtemp(join(tmpdir(), "dispatch-"))`.
 2. For each `IssueDetails` item:
-    - Slugifies the title (lowercase, replace non-alphanumeric with hyphens,
+    - Slugifies the title using [`slugify()`](../shared-utilities/slugify.md) (lowercase, replace non-alphanumeric with hyphens,
       trim, truncate to 60 characters).
     - Constructs filename as `<item.number>-<slug>.md`.
     - Writes `item.body` to the file.
@@ -136,7 +136,7 @@ logging, error reporting, and issue auto-close.
 
 ### Temp file naming vs branch naming
 
-Both temp files and branch names use slugified titles, but with different
+Both temp files and branch names use slugified titles (via [`slugify()`](../shared-utilities/slugify.md)), but with different
 truncation limits:
 
 | Context | Pattern | Slug length limit |
@@ -170,7 +170,7 @@ closeCompletedSpecIssues(
 **Behavior:**
 
 1. **Resolve datasource:** If `source` is provided, uses it directly. If not,
-   calls `detectDatasource(cwd)` to auto-detect from the git remote URL. If
+   calls `detectDatasource(cwd)` (see [Auto-Detection](./overview.md#auto-detection)) to auto-detect from the git remote URL. If
    neither produces a datasource name, the function returns silently (no
    issues are closed).
 2. **Build success set:** Creates a `Set` of all task identifiers from
@@ -292,5 +292,7 @@ flowchart TD
   type consumed by `closeCompletedSpecIssues`
 - [Markdown Syntax Reference](../task-parsing/markdown-syntax.md) -- Task
   checkbox format that the parser extracts
+- [Shared Utilities — Slugify](../shared-utilities/slugify.md) -- The `slugify()`
+  function used for temp filename and branch name generation
 - [Datasource Testing](./testing.md) -- Test suite covering the md
   datasource and registry

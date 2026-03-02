@@ -57,7 +57,7 @@ is available (`src/dispatcher.ts:32`):
 
 #### Simple prompt (`buildPrompt`)
 
-Used when `--no-plan` is active or when no plan is provided. Contains:
+Used when [`--no-plan`](../cli-orchestration/cli.md) is active or when no plan is provided. Contains:
 
 - Working directory path
 - Source file path and line number
@@ -227,7 +227,7 @@ Timeout behavior depends entirely on the provider backend:
 **Mitigation**: If a task hangs, the only recourse is to kill the Dispatch
 process (Ctrl+C / SIGINT). There is no per-task timeout configuration.
 This is a known limitation. To add timeout support, wrap the `prompt()` call
-with `Promise.race()` against a timer, or use the `AbortSignal` option
+with [`Promise.race()`](../shared-utilities/timeout.md) against a timer, or use the `AbortSignal` option
 supported by Node.js `fetch` if the provider SDK exposes it.
 
 ## Maximum prompt size
@@ -283,5 +283,9 @@ Returned by `dispatchTask()`:
 - [Orchestrator](../cli-orchestration/orchestrator.md) -- How the orchestrator
   coordinates dispatch within the batch loop
 - [Logger](../shared-types/logger.md) -- Logger interface used during dispatch
+- [Timeout Utility](../shared-utilities/timeout.md) -- `withTimeout` function
+  used for plan generation timeout
+- [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) --
+  File I/O safety relevant to `markTaskComplete` after dispatch
 - [Datasource Helpers](../datasource-system/datasource-helpers.md) -- Helper
   utilities for datasource operations referenced by the dispatcher

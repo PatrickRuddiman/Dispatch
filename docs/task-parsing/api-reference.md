@@ -215,7 +215,7 @@ function groupTasksByMode(tasks: Task[]): Task[][]
 
 Group a flat task list into ordered execution groups based on each task's
 `mode` field. The [orchestrator](../cli-orchestration/orchestrator.md) runs
-each group concurrently (up to `--concurrency`), waiting for the group to
+each group concurrently (up to [`--concurrency`](../cli-orchestration/configuration.md#configurable-keys)), waiting for the group to
 complete before starting the next one.
 
 **Parameters:**
@@ -315,7 +315,11 @@ The parser uses `readFile` and `writeFile` from `node:fs/promises`:
   functions from the shared-types perspective
 - [Task Context & Lifecycle](../planning-and-dispatch/task-context-and-lifecycle.md) --
   how the parser functions are used within the dispatch pipeline
+- [Configuration System](../cli-orchestration/configuration.md) -- `--concurrency`
+  setting that controls how `groupTasksByMode` groups are dispatched
 - [Orchestrator](../cli-orchestration/orchestrator.md) -- the primary consumer
   of `parseTaskFile`, `buildTaskContext`, and `markTaskComplete`
 - [Planning & Dispatch Overview](../planning-and-dispatch/overview.md) --
   pipeline stages that consume parser output
+- [Slugify](../shared-utilities/slugify.md) -- slug algorithm used for
+  branch naming from task titles in the dispatch pipeline

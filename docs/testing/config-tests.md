@@ -12,7 +12,7 @@ The configuration module manages persistent user settings stored at
 - File I/O operations (load, save, path resolution)
 - Key and value validation logic
 - Value parsing (type coercion)
-- Merge precedence between CLI flags, config file, and defaults
+- Merge precedence between [CLI flags](../cli-orchestration/cli.md), config file, and defaults
 - The `handleConfigCommand` CLI subcommand
 
 ## Describe blocks
@@ -103,7 +103,7 @@ values or an error message string for invalid ones.
 
 | Config key | Valid values | Validation rule |
 |------------|-------------|-----------------|
-| `provider` | `"opencode"`, `"copilot"` | Must be in `PROVIDER_NAMES` |
+| `provider` | `"opencode"`, `"copilot"` | Must be in [`PROVIDER_NAMES`](../shared-types/provider.md) |
 | `source` | `"github"`, `"azdevops"` | Must be in `ISSUE_SOURCE_NAMES` |
 | `concurrency` | `"1"`, `"2"`, ... | Must parse to positive integer |
 | `org` | Any non-empty string | Must not be empty or whitespace-only |
@@ -130,7 +130,7 @@ keys remain strings.
 
 ### merge precedence (5 tests)
 
-Tests the three-way merge logic: **CLI flags > config file > defaults**.
+Tests the three-way merge logic: **[CLI flags](../cli-orchestration/cli.md) > config file > defaults**.
 
 This describe block replicates the merge logic from `src/cli.ts` as a local
 `applyMerge()` helper. It uses a `CONFIG_TO_CLI` mapping that mirrors the
@@ -148,7 +148,7 @@ production code's field name translation:
 Note that `source` maps to `issueSource` in CLI args -- this is the only
 field where the config key differs from the CLI field name. The test's local
 `CONFIG_TO_CLI` mapping covers the original 6 keys; the production code's
-mapping in `src/orchestrator/cli-config.ts:21-30` additionally includes
+mapping in [`src/orchestrator/cli-config.ts:21-30`](../cli-orchestration/configuration.md) additionally includes
 `planTimeout` and `planRetries`.
 
 ```mermaid
@@ -205,8 +205,14 @@ unique `/tmp/dispatch-test-*` directory and removes it in `afterEach`.
 
 ## Related documentation
 
-- [Test suite overview](overview.md) — framework, patterns, and coverage map
-- [Architecture overview](../architecture.md) — system-wide context
-- [CLI documentation](../cli-orchestration/cli.md) — CLI argument parsing and config integration
-- [Provider overview](../provider-system/provider-overview.md) — provider names validated by config
-- [Issue fetching overview](../issue-fetching/overview.md) — issue source names validated by config
+- [Test suite overview](overview.md) -- framework, patterns, and coverage map
+- [Architecture overview](../architecture.md) -- system-wide context
+- [CLI documentation](../cli-orchestration/cli.md) -- CLI argument parsing and config integration
+- [Configuration](../cli-orchestration/configuration.md) -- `DispatchConfig` type and merge logic
+- [Provider overview](../provider-system/provider-overview.md) -- provider names validated by config
+- [Provider interface](../shared-types/provider.md) -- `ProviderName` type used in config validation
+- [Issue fetching overview](../issue-fetching/overview.md) -- issue source names validated by config
+- [Timeout utility](../shared-utilities/timeout.md) -- `planTimeout` and `planRetries` consumed by timeout wrapping
+- [Spec generator tests](spec-generator-tests.md) -- adjacent test documentation
+- [Parser tests](parser-tests.md) -- another test file using real filesystem I/O pattern
+- [Format utility tests](format-tests.md) -- adjacent test documentation

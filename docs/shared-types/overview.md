@@ -1,15 +1,17 @@
 # Shared Interfaces & Utilities
 
 The shared layer defines the foundational contracts and utilities that every
-other module in the Dispatch CLI depends on. Five files compose this layer:
+other module in the Dispatch CLI depends on. Seven files compose this layer:
 
 | File | Purpose |
 |------|---------|
-| `src/cleanup.ts` | Process-level cleanup registry for graceful shutdown of provider resources |
-| `src/format.ts` | Duration formatting helper (`elapsed()`) for progress reporting |
-| `src/logger.ts` | Minimal chalk-based structured logger for CLI output with verbose/debug support |
-| `src/parser.ts` | Task/TaskFile data types and pure + async helpers for markdown checkbox parsing |
-| `src/provider.ts` | ProviderName, ProviderBootOptions, and ProviderInstance abstractions for AI agent runtimes |
+| `src/cleanup.ts` | Process-level [cleanup registry](./cleanup.md) for graceful shutdown of provider resources |
+| `src/format.ts` | Duration [formatting helper](./format.md) (`elapsed()`) for progress reporting |
+| `src/logger.ts` | Minimal chalk-based structured [logger](./logger.md) for CLI output with verbose/debug support |
+| `src/parser.ts` | [Task/TaskFile data types](./parser.md) and pure + async helpers for markdown checkbox parsing |
+| `src/provider.ts` | [ProviderName, ProviderBootOptions, and ProviderInstance](./provider.md) abstractions for AI agent runtimes |
+| `src/slugify.ts` | Pure function to convert arbitrary text into URL/filesystem-safe identifiers ([slugify](../shared-utilities/slugify.md)) |
+| `src/timeout.ts` | Promise deadline wrapper ([`withTimeout`](../shared-utilities/timeout.md)) and `TimeoutError` for bounded async execution |
 
 ## Why this layer exists
 
@@ -26,6 +28,10 @@ types and utilities decouple:
   [cleanup registry](./cleanup.md))
 - The **TUI and logger** from raw time arithmetic (via
   [`elapsed()`](./format.md))
+- The **datasources** from slug-generation details (via
+  [`slugify()`](../shared-utilities/slugify.md))
+- The **orchestrator** from timeout mechanics (via
+  [`withTimeout()`](../shared-utilities/timeout.md))
 
 ## How modules depend on this layer
 
@@ -38,6 +44,9 @@ graph TD
     Orchestrator --> Parser["parser.ts"]
     Orchestrator --> ProviderTypes
     Orchestrator --> Cleanup
+    Orchestrator --> Timeout["timeout.ts"]
+    Datasources["datasources/*"] --> Slugify["slugify.ts"]
+    SpecPipeline["spec-pipeline.ts"] --> Slugify
     SpecGen["spec-generator.ts"] --> Cleanup
     SpecGen --> Format["format.ts"]
     SpecGen --> Logger
@@ -68,6 +77,8 @@ graph TD
   lifecycle contract
 - [Integrations reference](./integrations.md) -- chalk, Node.js fs/promises,
   and Node.js process signals operational details
+- [Shared Utilities](../shared-utilities/overview.md) -- Slugify and timeout
+  utilities that complement this shared layer
 
 ## Related documentation
 
@@ -83,5 +94,10 @@ graph TD
   that uses cleanup, provider, and logger utilities
 - [Datasource System](../datasource-system/overview.md) -- Datasource
   interface and registry that consumes shared types
+- [Adding a Provider](../provider-system/adding-a-provider.md) -- Guide for
+  implementing the `ProviderInstance` interface
+- [Deprecated Compatibility Layer](../deprecated-compat/overview.md) -- Legacy
+  `IssueFetcher` shims that re-export shared types
 - [Testing Overview](../testing/overview.md) -- Project-wide test suite
-  covering config, format, parser, and spec-generator modules
+  covering config, format, parser, spec-generator, slugify, and timeout
+  modules
