@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 
 vi.mock("../helpers/logger.js", () => ({
   log: {
@@ -186,5 +186,198 @@ describe("parseArgs --fix-tests mutual exclusion (at parser level)", () => {
     const [args] = parseArgs(["42"]);
     expect(args.fixTests).toBeUndefined();
     expect(args.issueIds).toContain("42");
+  });
+});
+
+// ─── parseArgs basic flags ──────────────────────────────────────────
+
+describe("parseArgs basic flags", () => {
+  it("parses --help", () => {
+    const [args, flags] = parseArgs(["--help"]);
+    expect(args.help).toBe(true);
+    expect(flags.has("help")).toBe(true);
+  });
+
+  it("parses -h", () => {
+    const [args] = parseArgs(["-h"]);
+    expect(args.help).toBe(true);
+  });
+
+  it("parses --version", () => {
+    const [args, flags] = parseArgs(["--version"]);
+    expect(args.version).toBe(true);
+    expect(flags.has("version")).toBe(true);
+  });
+
+  it("parses -v", () => {
+    const [args] = parseArgs(["-v"]);
+    expect(args.version).toBe(true);
+  });
+
+  it("parses --dry-run", () => {
+    const [args, flags] = parseArgs(["--dry-run"]);
+    expect(args.dryRun).toBe(true);
+    expect(flags.has("dryRun")).toBe(true);
+  });
+
+  it("parses --no-plan", () => {
+    const [args, flags] = parseArgs(["--no-plan"]);
+    expect(args.noPlan).toBe(true);
+    expect(flags.has("noPlan")).toBe(true);
+  });
+
+  it("parses --no-branch", () => {
+    const [args, flags] = parseArgs(["--no-branch"]);
+    expect(args.noBranch).toBe(true);
+    expect(flags.has("noBranch")).toBe(true);
+  });
+
+  it("parses --verbose", () => {
+    const [args, flags] = parseArgs(["--verbose"]);
+    expect(args.verbose).toBe(true);
+    expect(flags.has("verbose")).toBe(true);
+  });
+});
+
+// ─── parseArgs value flags ──────────────────────────────────────────
+
+describe("parseArgs value flags", () => {
+  it("parses --source github", () => {
+    const [args, flags] = parseArgs(["--source", "github"]);
+    expect(args.issueSource).toBe("github");
+    expect(flags.has("issueSource")).toBe(true);
+  });
+
+  it("parses --source azdevops", () => {
+    const [args] = parseArgs(["--source", "azdevops"]);
+    expect(args.issueSource).toBe("azdevops");
+  });
+
+  it("parses --org <url>", () => {
+    const [args, flags] = parseArgs(["--org", "https://dev.azure.com/myorg"]);
+    expect(args.org).toBe("https://dev.azure.com/myorg");
+    expect(flags.has("org")).toBe(true);
+  });
+
+  it("parses --project <name>", () => {
+    const [args, flags] = parseArgs(["--project", "MyProject"]);
+    expect(args.project).toBe("MyProject");
+    expect(flags.has("project")).toBe(true);
+  });
+
+  it("parses --output-dir <dir>", () => {
+    const [args, flags] = parseArgs(["--output-dir", "/tmp/out"]);
+    expect(args.outputDir).toContain("tmp/out");
+    expect(flags.has("outputDir")).toBe(true);
+  });
+
+  it("parses --concurrency <n>", () => {
+    const [args, flags] = parseArgs(["--concurrency", "4"]);
+    expect(args.concurrency).toBe(4);
+    expect(flags.has("concurrency")).toBe(true);
+  });
+
+  it("parses --provider opencode", () => {
+    const [args, flags] = parseArgs(["--provider", "opencode"]);
+    expect(args.provider).toBe("opencode");
+    expect(flags.has("provider")).toBe(true);
+  });
+
+  it("parses --provider copilot", () => {
+    const [args] = parseArgs(["--provider", "copilot"]);
+    expect(args.provider).toBe("copilot");
+  });
+
+  it("parses --server-url <url>", () => {
+    const [args, flags] = parseArgs(["--server-url", "http://localhost:3000"]);
+    expect(args.serverUrl).toBe("http://localhost:3000");
+    expect(flags.has("serverUrl")).toBe(true);
+  });
+
+  it("parses --plan-timeout <n>", () => {
+    const [args, flags] = parseArgs(["--plan-timeout", "5"]);
+    expect(args.planTimeout).toBe(5);
+    expect(flags.has("planTimeout")).toBe(true);
+  });
+
+  it("parses --plan-timeout with decimal", () => {
+    const [args] = parseArgs(["--plan-timeout", "1.5"]);
+    expect(args.planTimeout).toBe(1.5);
+  });
+
+  it("parses --plan-retries <n>", () => {
+    const [args, flags] = parseArgs(["--plan-retries", "3"]);
+    expect(args.planRetries).toBe(3);
+    expect(flags.has("planRetries")).toBe(true);
+  });
+
+  it("parses --plan-retries 0", () => {
+    const [args] = parseArgs(["--plan-retries", "0"]);
+    expect(args.planRetries).toBe(0);
+  });
+
+  it("parses --cwd <dir>", () => {
+    const [args, flags] = parseArgs(["--cwd", "/tmp/work"]);
+    expect(args.cwd).toContain("tmp/work");
+    expect(flags.has("cwd")).toBe(true);
+  });
+
+  it("parses positional issue IDs", () => {
+    const [args] = parseArgs(["14", "15", "16"]);
+    expect(args.issueIds).toEqual(["14", "15", "16"]);
+  });
+});
+
+// ─── parseArgs error cases ──────────────────────────────────────────
+
+describe("parseArgs error cases", () => {
+  const mockExit = vi.spyOn(process, "exit").mockImplementation((() => {
+    throw new Error("process.exit called");
+  }) as never);
+
+  afterEach(() => {
+    mockExit.mockClear();
+  });
+
+  it("exits for invalid --source", () => {
+    expect(() => parseArgs(["--source", "invalid"])).toThrow("process.exit called");
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
+
+  it("exits for invalid --provider", () => {
+    expect(() => parseArgs(["--provider", "invalid"])).toThrow("process.exit called");
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
+
+  it("exits for non-positive --concurrency", () => {
+    expect(() => parseArgs(["--concurrency", "-1"])).toThrow("process.exit called");
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
+
+  it("exits for non-numeric --concurrency", () => {
+    expect(() => parseArgs(["--concurrency", "abc"])).toThrow("process.exit called");
+  });
+
+  it("exits for non-positive --plan-timeout", () => {
+    expect(() => parseArgs(["--plan-timeout", "0"])).toThrow("process.exit called");
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
+
+  it("exits for non-numeric --plan-timeout", () => {
+    expect(() => parseArgs(["--plan-timeout", "abc"])).toThrow("process.exit called");
+  });
+
+  it("exits for negative --plan-retries", () => {
+    expect(() => parseArgs(["--plan-retries", "-1"])).toThrow("process.exit called");
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
+
+  it("exits for non-numeric --plan-retries", () => {
+    expect(() => parseArgs(["--plan-retries", "abc"])).toThrow("process.exit called");
+  });
+
+  it("exits for unknown flag", () => {
+    expect(() => parseArgs(["--unknown-flag"])).toThrow("process.exit called");
+    expect(mockExit).toHaveBeenCalledWith(1);
   });
 });

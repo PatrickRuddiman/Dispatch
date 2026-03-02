@@ -150,7 +150,7 @@ vi.mock("node:fs/promises", () => ({
 
 // ─── Import function under test (after mocks) ──────────────────────
 
-import { runDispatchPipeline } from "../orchestrator/dispatch-pipeline.js";
+import { runDispatchPipeline, dryRunMode } from "../orchestrator/dispatch-pipeline.js";
 import { log } from "../helpers/logger.js";
 import { createTui } from "../tui.js";
 
@@ -420,5 +420,143 @@ describe("verbose mode", () => {
     await resultPromise;
 
     expect(createTui).toHaveBeenCalled();
+  });
+});
+
+// ─── dryRunMode ─────────────────────────────────────────────────────
+
+describe("dryRunMode", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns empty summary when no source is configured", async () => {
+    const result = await dryRunMode([], "/tmp/test", undefined);
+
+    expect(result).toEqual({ total: 0, completed: 0, failed: 0, skipped: 0, results: [] });
+    expect(vi.mocked(log.error)).toHaveBeenCalledWith(expect.stringContaining("No datasource"));
+  });
+
+  it("returns empty summary when no items found", async () => {
+    const { fetchItemsById } = await import("../orchestrator/datasource-helpers.js");
+    vi.mocked(fetchItemsById).mockResolvedValueOnce([]);
+
+    const result = await dryRunMode(["999"], "/tmp/test", "md");
+
+    expect(result).toEqual({ total: 0, completed: 0, failed: 0, skipped: 0, results: [] });
+    expect(vi.mocked(log.warn)).toHaveBeenCalledWith(expect.stringContaining("No work items"));
+  });
+
+  it("returns skipped count when tasks are found", async () => {
+    const result = await dryRunMode(["1"], "/tmp/test", "md");
+
+    expect(result.skipped).toBe(result.total);
+    expect(result.completed).toBe(0);
+    expect(result.failed).toBe(0);
+    expect(result.results).toEqual([]);
+  });
+});
+
+// ─── runDispatchPipeline edge cases ─────────────────────────────────
+
+describe("runDispatchPipeline edge cases", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    mocks.mockExecute.mockResolvedValue({
+      success: true,
+      dispatchResult: { task: TASK_FIXTURE, success: true },
+      elapsedMs: 100,
+    });
+    mocks.mockPlan.mockImplementation(() =>
+      new Promise<PlanResult>((resolve) => {
+        setTimeout(() => resolve({ prompt: "Execute step 1", success: true }), 100);
+      }),
+    );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("returns empty summary when no source configured", async () => {
+    const result = await runDispatchPipeline(baseOpts({ source: undefined }), "/tmp/test");
+
+    expect(result).toEqual({ total: 0, completed: 0, failed: 0, skipped: 0, results: [] });
+    expect(vi.mocked(log.error)).toHaveBeenCalledWith(expect.stringContaining("No datasource"));
+  });
+
+  it("returns empty summary when no items found", async () => {
+    const { fetchItemsById } = await import("../orchestrator/datasource-helpers.js");
+    vi.mocked(fetchItemsById).mockResolvedValueOnce([]);
+
+    const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result).toEqual({ total: 0, completed: 0, failed: 0, skipped: 0, results: [] });
+  });
+
+  it("returns empty summary when no unchecked tasks found", async () => {
+    const { parseTaskFile } = await import("../parser.js");
+    vi.mocked(parseTaskFile).mockResolvedValueOnce({
+      path: "/tmp/dispatch-test/1-test.md",
+      tasks: [],
+      content: "# No tasks",
+    });
+
+    const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result).toEqual({ total: 0, completed: 0, failed: 0, skipped: 0, results: [] });
+  });
+
+  it("delegates to dryRunMode when dryRun is true", async () => {
+    const result = await runDispatchPipeline(baseOpts({ dryRun: true }), "/tmp/test");
+
+    expect(result.skipped).toBe(result.total);
+    expect(result.completed).toBe(0);
+  });
+
+  it("exercises branch lifecycle when noBranch is false", async () => {
+    mocks.mockPlan.mockImplementation(() =>
+      new Promise<PlanResult>((resolve) => {
+        setTimeout(() => resolve({ prompt: "Execute step 1", success: true }), 50);
+      }),
+    );
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ noBranch: false }),
+      "/tmp/test",
+    );
+    await vi.advanceTimersByTimeAsync(50);
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result.completed).toBe(1);
+  });
+
+  it("handles executor failure", async () => {
+    mocks.mockExecute.mockResolvedValue({
+      success: false,
+      dispatchResult: { task: TASK_FIXTURE, success: false, error: "exec error" },
+      elapsedMs: 50,
+    });
+    mocks.mockPlan.mockImplementation(() =>
+      new Promise<PlanResult>((resolve) => {
+        setTimeout(() => resolve({ prompt: "Plan", success: true }), 50);
+      }),
+    );
+
+    const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+    await vi.advanceTimersByTimeAsync(50);
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result.failed).toBe(1);
+    expect(result.completed).toBe(0);
   });
 });
