@@ -304,10 +304,10 @@ and delete the persistent config file at `~/.dispatch/config.json`.
 
 | Function | Usage | Location |
 |----------|-------|----------|
-| `readFile` | Load config file contents as UTF-8 string | `src/config.ts:59` |
-| `writeFile` | Write pretty-printed JSON config to disk | `src/config.ts:77` |
-| `mkdir` | Create `~/.dispatch/` directory if it doesn't exist | `src/config.ts:76` |
-| `rm` | Delete config file during `config reset` | `src/config.ts:205` |
+| `readFile` | Load config file contents as UTF-8 string | `src/config.ts:63` |
+| `writeFile` | Write pretty-printed JSON config to disk | `src/config.ts:81` |
+| `mkdir` | Create `~/.dispatch/` directory if it doesn't exist | `src/config.ts:80` |
+| `rm` | Delete config file during `config reset` | `src/config.ts:228` |
 
 ### Config file location and permissions
 
@@ -357,7 +357,7 @@ locking (e.g., `flock`) would be needed.
 
 ## Node.js process (stdout, argv, exit)
 
-**Used in**: `src/cli.ts:119`, `src/cli.ts:148`, `src/tui.ts:130`,
+**Used in**: `src/cli.ts:234`, `src/cli.ts:240`, `src/tui.ts:130`,
 `src/tui.ts:201-204`
 **Official docs**: [nodejs.org/api/process.html](https://nodejs.org/api/process.html)
 
@@ -381,14 +381,15 @@ The CLI calls `process.exit()` at several points:
 
 | Location | Exit code | Reason |
 |----------|-----------|--------|
-| `src/cli.ts:123` | `0` | `--help` displayed |
-| `src/cli.ts:129` | `0` | `--version` displayed |
-| `src/cli.ts:135` | `1` | Missing glob pattern |
-| `src/cli.ts:148` | `0` or `1` | Normal completion (`1` if any task failed) |
-| `src/cli.ts:153` | `1` | Unhandled exception in `main()` |
-| `src/cli.ts:87` | `1` | Invalid `--concurrency` value |
-| `src/cli.ts:96` | `1` | Unknown `--provider` value |
-| `src/cli.ts:109` | `1` | Unknown CLI option |
+| `src/cli.ts:264` | `0` | `--help` displayed |
+| `src/cli.ts:268` | `0` | `--version` displayed |
+| `src/cli.ts:278` | `0` or `1` | Normal completion (`1` if any task failed) |
+| `src/cli.ts:284` | `1` | Unhandled exception in `main()` |
+| `src/cli.ts:183` | `1` | Invalid `--concurrency` value |
+| `src/cli.ts:192` | `1` | Unknown `--provider` value |
+| `src/cli.ts:205` | `1` | Invalid `--plan-timeout` value |
+| `src/cli.ts:213` | `1` | Invalid `--plan-retries` value |
+| `src/cli.ts:225` | `1` | Unknown CLI option |
 
 ### Raw ANSI escape codes in non-TTY environments
 
@@ -407,7 +408,7 @@ for the full impact assessment.
 
 ### Signal handling
 
-Dispatch installs `SIGINT` and `SIGTERM` handlers at `src/cli.ts:242-252`
+Dispatch installs `SIGINT` and `SIGTERM` handlers at `src/cli.ts:249-258`
 that call `runCleanup()` from the [cleanup registry](../shared-types/cleanup.md)
 before exiting. This ensures provider server processes are stopped on Ctrl+C
 or container shutdown.
@@ -418,7 +419,7 @@ or container shutdown.
 | SIGTERM | 143 | `kill <pid>`, container stop, process manager |
 
 Additionally, the `.catch()` handler on the `main()` promise
-(`src/cli.ts:304-307`) calls `runCleanup()` before `process.exit(1)` to
+(`src/cli.ts:281-284`) calls `runCleanup()` before `process.exit(1)` to
 handle unhandled exceptions.
 
 For full details on exit codes, double-signal behavior, hung shutdown

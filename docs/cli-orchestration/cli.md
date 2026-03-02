@@ -81,7 +81,7 @@ The package has four runtime dependencies:
 ## Why a custom parser instead of commander/yargs?
 
 The project uses a hand-rolled `parseArgs()` function
-(`src/cli.ts:83-186`) rather than an established CLI framework like
+(`src/cli.ts:97-232`) rather than an established CLI framework like
 [commander](https://github.com/tj/commander.js),
 [yargs](https://yargs.js.org/), or
 [citty](https://github.com/unjs/citty).
@@ -92,8 +92,8 @@ The likely reasons are:
   The only runtime dependencies are `chalk`, `glob`, and the two provider SDKs.
   Adding a CLI framework would add another dependency (and its transitive
   dependencies) for a relatively simple argument surface.
-- **Small option set**: Dispatch has 14 options across two modes. A hand-rolled
-  parser for this surface area is straightforward and fits in ~100 lines.
+- **Small option set**: Dispatch has 17 options across two modes. A hand-rolled
+  parser for this surface area is straightforward and fits in ~135 lines.
 - **Full control**: The parser can exit immediately with targeted error messages
   (e.g., provider validation against [`PROVIDER_NAMES`](../provider-system/provider-overview.md#the-provider-registry)) without mapping through
   a framework's validation API.
@@ -133,6 +133,8 @@ checks for `--server-url` and `--cwd`.
 | `--concurrency <n>` | integer | `min(cpus, freeMB/500)` | Maximum parallel dispatches per batch (see [concurrency model](orchestrator.md#concurrency-model) and [default computation](configuration.md#default-concurrency-computation)) |
 | `--provider <name>` | string | `"opencode"` | AI agent backend (`opencode` or `copilot`); see [Provider Abstraction](../provider-system/provider-overview.md) |
 | `--server-url <url>` | string | *none* | Connect to a running provider server instead of starting one |
+| `--plan-timeout <min>` | float | `10` | Planning timeout in minutes. Must be a positive number. Parsed via `parseFloat`. Configurable via `dispatch config set planTimeout`. |
+| `--plan-retries <n>` | integer | `1` | Number of retry attempts after planning timeout. Must be a non-negative integer. Parsed via `parseInt`. Configurable via `dispatch config set planRetries`. |
 | `--cwd <dir>` | string | `process.cwd()` | Working directory for file discovery and agent execution |
 | `--verbose` | boolean | `false` | Show detailed debug output for troubleshooting |
 | `-h`, `--help` | boolean | `false` | Show usage information |
@@ -140,25 +142,28 @@ checks for `--server-url` and `--cwd`.
 
 ### Spec mode options
 
-Spec mode is activated by passing `--spec`. When active, the issue IDs are
-not required and the dispatch-specific flags (`--dry-run`, `--no-plan`,
-`--concurrency`) are ignored.
+Spec mode is activated by passing `--spec` or `--respec`. When active, the
+issue IDs are not required and the dispatch-specific flags (`--dry-run`,
+`--no-plan`, `--concurrency`) are ignored.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `--spec <values...>` | string (one or more) | *none* | Comma-separated issue numbers, multiple space-separated args, or a glob pattern for local `.md` files. Activates spec mode. See [issue IDs vs glob patterns](configuration.md#the---spec-flag-issue-ids-vs-glob-patterns). |
+| `--spec <values...>` | string (one or more) | *none* | Comma-separated issue numbers, multiple space-separated args, glob pattern for local `.md` files, or inline text description. Activates spec mode. See [issue IDs vs glob patterns](configuration.md#the---spec-flag-issue-ids-vs-glob-patterns). |
+| `--respec [values...]` | string (zero or more) | *none* | Regenerate existing specs. Accepts the same value types as `--spec` (issue numbers, glob, multiple args), or can be passed with no arguments to regenerate all existing specs. Uses variadic collection — consumes all subsequent non-flag arguments. An empty invocation (`--respec` with no args or immediately followed by another flag) produces an empty array. |
 | `--source <name>` | string | *auto-detected* | Datasource: `github`, `azdevops`, or `md`. Auto-detected from `git remote get-url origin` if omitted. See [datasource detection](configuration.md#auto-detection-from-git-remote) and [Datasource Overview](../datasource-system/overview.md). |
 | `--org <url>` | string | *none* | Azure DevOps organization URL (e.g., `https://dev.azure.com/myorg`). Required when `--source azdevops`. |
 | `--project <name>` | string | *none* | Azure DevOps project name. Required when `--source azdevops`. |
 | `--output-dir <dir>` | string | `.dispatch/specs` | Output directory for generated spec files. Resolved to an absolute path. Created automatically if it does not exist. |
 | `--provider <name>` | string | `"opencode"` | AI agent backend (shared with dispatch mode) |
 | `--server-url <url>` | string | *none* | Connect to a running provider server (shared with dispatch mode) |
+| `--plan-timeout <min>` | float | `10` | Planning timeout in minutes (shared with dispatch mode) |
+| `--plan-retries <n>` | integer | `1` | Retry attempts after planning timeout (shared with dispatch mode) |
 
 #### Spec mode validation
 
 The `--source` flag is validated against `DATASOURCE_NAMES` (currently
 `["github", "azdevops", "md"]`). An unknown value exits with code `1` and a
-descriptive error message (`src/cli.ts:129-134`).
+descriptive error message (`src/cli.ts:157-161`).
 
 When `--source` is omitted, auto-detection runs `git remote get-url origin` and
 matches the output against regex patterns for `github.com` (SSH and HTTPS) and
@@ -166,6 +171,37 @@ matches the output against regex patterns for `github.com` (SSH and HTTPS) and
 the pipeline aborts with an error suggesting `--source` be specified explicitly.
 See the [Spec Generation overview](../spec-generation/overview.md) for the
 full detection logic.
+
+#### `--spec` and `--respec` variadic parsing
+
+Both `--spec` and `--respec` use variadic collection loops
+(`src/cli.ts:134-143` and `src/cli.ts:144-153`) that consume all subsequent
+non-flag arguments (arguments not starting with `--`). The collection stops
+when the next `--`-prefixed flag is encountered or the argument list is
+exhausted.
+
+- **Single value**: stored as a string (e.g., `--spec 42` produces `"42"`)
+- **Multiple values**: stored as an array (e.g., `--spec 42 43` produces
+  `["42", "43"]`)
+- **Empty** (no args before next flag or end of input): produces an empty
+  array for `--respec` (e.g., `--respec --verbose` produces `[]`); `--spec`
+  with no arguments also produces an empty array.
+
+The `--spec` and `--respec` flags are not mutually exclusive at the parser
+level. Both can be set simultaneously in `ParsedArgs`. Mutual exclusion is
+enforced downstream by the orchestrator (`src/agents/orchestrator.ts`), which
+checks for both and produces an error.
+
+Examples:
+
+```bash
+dispatch --respec                        # respec = []     (regenerate all)
+dispatch --respec 42                     # respec = "42"   (single issue)
+dispatch --respec 42 43 44              # respec = ["42", "43", "44"]
+dispatch --respec "specs/*.md"          # respec = "specs/*.md"
+dispatch --respec --verbose             # respec = []     (empty, --verbose consumed separately)
+dispatch --spec 1,2 --respec 3,4       # spec = "1,2", respec = "3,4" (both set)
+```
 
 ## The `--server-url` option
 
@@ -190,7 +226,7 @@ process and manages its lifecycle internally.
 
 ## The `--no-branch` flag
 
-The `--no-branch` flag (`src/cli.ts:122-124`) disables the per-issue branch
+The `--no-branch` flag (`src/cli.ts:128-130`) disables the per-issue branch
 lifecycle that the dispatch pipeline normally performs. It is a boolean flag
 parsed into `explicitFlags` as `"noBranch"` and passed through to the
 orchestrator's `OrchestrateRunOptions.noBranch` field.
@@ -270,7 +306,7 @@ sequenceDiagram
 ## Exit code contract
 
 The CLI uses a binary exit code scheme with additional signal codes.
-The primary exit logic is at `src/cli.ts:231-232`:
+The primary exit logic is at `src/cli.ts:277-278`:
 
 | Exit code | Meaning |
 |-----------|---------|
@@ -291,13 +327,13 @@ information. A future enhancement could add `--json` output or distinct exit
 codes (e.g., `2` for partial failure).
 
 Unhandled exceptions from `main()` are caught by the top-level `.catch()`
-handler (`src/cli.ts:235-238`), which logs the error message, calls
+handler (`src/cli.ts:281-284`), which logs the error message, calls
 `runCleanup()` to release provider resources, and exits with code `1`.
 
 ## Version string and tsup define
 
 The version string is currently hardcoded as `"dispatch v0.1.0"` at
-`src/cli.ts:221`. The adjacent comment says `// Read version from package.json
+`src/cli.ts:267`. The adjacent comment says `// Read version from package.json
 at build time via tsup define`, indicating the intent to inject the version at
 build time.
 
@@ -339,7 +375,7 @@ export default defineConfig({
 });
 ```
 
-Then `src/cli.ts:128` would become:
+Then `src/cli.ts` would become:
 
 ```typescript
 console.log(`dispatch v${__VERSION__}`);
@@ -362,7 +398,7 @@ flowchart TD
     G -->|No| I["bootOrchestrator({ cwd })"]
     I --> J["orchestrator.runFromCli(args)"]
     J --> K["resolveCliConfig(args)<br/>merge config + validate"]
-    K --> L{"--spec?"}
+    K --> L{"--spec or --respec?"}
     L -->|Yes| M["Spec pipeline"]
     L -->|No| N["Dispatch pipeline"]
     M --> O["Summary"]
@@ -376,8 +412,8 @@ flowchart TD
 
 The key architectural change from earlier versions is that the CLI no longer
 directly calls `generateSpecs()` or `orchestrate()`. Instead, it delegates to
-`bootOrchestrator()` (`src/cli.ts:226`) which returns an orchestrator instance,
-then calls `orchestrator.runFromCli(args)` (`src/cli.ts:228`). The orchestrator
+`bootOrchestrator()` (`src/cli.ts:272`) which returns an orchestrator instance,
+then calls `orchestrator.runFromCli(args)` (`src/cli.ts:274`). The orchestrator
 internally calls `resolveCliConfig()` to merge config-file defaults with CLI
 flags before routing to the appropriate pipeline. See
 [Configuration](configuration.md) for full details on the resolution process.
@@ -404,4 +440,5 @@ flags before routing to the appropriate pipeline. See
 - [Datasource System](../datasource-system/overview.md) -- datasource
   abstraction and `--source` flag semantics
 - [Testing Overview](../testing/overview.md) -- test suite structure and
-  coverage (CLI is not currently unit-tested)
+  coverage (config tests cover `--respec` variadic parsing and
+  `--spec`/`--respec` mutual exclusion)

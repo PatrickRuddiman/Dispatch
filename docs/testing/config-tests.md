@@ -17,7 +17,7 @@ The configuration module manages persistent user settings stored at
 
 ## Describe blocks
 
-The test file contains **8 describe blocks** with **27 tests** total.
+The test file contains **8 describe blocks** with **48 tests** total.
 
 ### loadConfig (5 tests)
 
@@ -30,7 +30,7 @@ directory and returns a `DispatchConfig` object.
 | returns empty object for empty config file | Empty file treated as no-config |
 | loads a valid config file | Standard JSON round-trip |
 | returns empty object for corrupt JSON | Malformed JSON does not throw |
-| loads config with all fields populated | All 6 `DispatchConfig` fields load correctly |
+| loads config with all fields populated | All 8 `DispatchConfig` fields load correctly |
 
 All tests use real filesystem I/O with temporary directories.
 
@@ -69,13 +69,13 @@ Tests the `isValidConfigKey()` type guard function.
 
 | Test | What it verifies |
 |------|------------------|
-| returns true for each valid config key | All 6 keys from `CONFIG_KEYS` are valid |
+| returns true for each valid config key | All 8 keys from `CONFIG_KEYS` are valid |
 | returns false for unknown keys | `"unknown"`, `"dryRun"`, `"noPlan"`, `"verbose"`, `""` all rejected |
 
 The valid config keys are: `provider`, `concurrency`, `source`, `org`,
-`project`, `serverUrl`.
+`project`, `serverUrl`, `planTimeout`, `planRetries`.
 
-### validateConfigValue (7 tests)
+### validateConfigValue (16 tests)
 
 Tests the `validateConfigValue()` function, which returns `null` for valid
 values or an error message string for invalid ones.
@@ -89,6 +89,15 @@ values or an error message string for invalid ones.
 | accepts valid concurrency (positive integer) | `"1"`, `"5"`, `"100"` all valid |
 | rejects non-positive concurrency | `"0"` and `"-1"` return error containing `"positive integer"` |
 | rejects non-integer concurrency | `"1.5"` and `"abc"` both rejected |
+| accepts non-empty string for org, project, serverUrl | `"some-value"` returns `null` for all three keys |
+| rejects empty string for org, project, serverUrl | `""` returns error containing `"must not be empty"` |
+| rejects whitespace-only for org, project, serverUrl | `"   "` returns error containing `"must not be empty"` |
+| accepts valid planTimeout (positive number) | `"1"`, `"10"`, `"1.5"`, `"0.5"` all valid |
+| rejects non-positive planTimeout | `"0"` and `"-5"` return error containing `"positive number"` |
+| rejects non-numeric planTimeout | `"abc"` returns error containing `"positive number"`; `""` rejected |
+| accepts valid planRetries (non-negative integer) | `"0"`, `"1"`, `"5"` all valid |
+| rejects negative planRetries | `"-1"` returns error containing `"non-negative integer"` |
+| rejects non-integer planRetries | `"1.5"` and `"abc"` return error containing `"non-negative integer"` |
 
 **Validation rules by key:**
 
@@ -100,8 +109,10 @@ values or an error message string for invalid ones.
 | `org` | Any non-empty string | Must not be empty or whitespace-only |
 | `project` | Any non-empty string | Must not be empty or whitespace-only |
 | `serverUrl` | Any non-empty string | Must not be empty or whitespace-only |
+| `planTimeout` | `"1"`, `"10"`, `"1.5"`, `"0.5"` | Must parse to positive finite number |
+| `planRetries` | `"0"`, `"1"`, `"5"` | Must parse to non-negative integer |
 
-### parseConfigValue (2 tests)
+### parseConfigValue (4 tests)
 
 Tests the `parseConfigValue()` function, which converts string values to the
 appropriate type for storage.
@@ -110,9 +121,12 @@ appropriate type for storage.
 |------|------------------|
 | converts concurrency to a number | `parseConfigValue("concurrency", "5")` returns `5` (number) |
 | returns string for non-concurrency keys | `parseConfigValue("provider", "copilot")` returns `"copilot"` (string) |
+| converts planTimeout to a number via parseFloat | `parseConfigValue("planTimeout", "10.5")` returns `10.5` (number) |
+| converts planRetries to a number via parseInt | `parseConfigValue("planRetries", "3")` returns `3` (number) |
 
-**Key behavior:** Only `concurrency` is coerced to a number. All other keys
-remain strings.
+**Key behavior:** `concurrency` and `planRetries` are coerced to integers via
+`parseInt`. `planTimeout` is coerced to a float via `parseFloat`. All other
+keys remain strings.
 
 ### merge precedence (5 tests)
 
@@ -132,7 +146,10 @@ production code's field name translation:
 | `serverUrl` | `serverUrl` |
 
 Note that `source` maps to `issueSource` in CLI args -- this is the only
-field where the config key differs from the CLI field name.
+field where the config key differs from the CLI field name. The test's local
+`CONFIG_TO_CLI` mapping covers the original 6 keys; the production code's
+mapping in `src/orchestrator/cli-config.ts:21-30` additionally includes
+`planTimeout` and `planRetries`.
 
 ```mermaid
 flowchart TD
@@ -150,7 +167,7 @@ flowchart TD
 | merge applies to each configurable field | All 5 non-provider fields merge correctly |
 | partially explicit flags still allow config for other fields | Per-field independence |
 
-### handleConfigCommand (9 tests)
+### handleConfigCommand (10 tests)
 
 Tests the `dispatch config` CLI subcommand handler.
 
