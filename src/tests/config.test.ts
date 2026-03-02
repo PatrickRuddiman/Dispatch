@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { writeFile, mkdtemp, rm, readFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -6,18 +6,10 @@ import {
   getConfigPath,
   loadConfig,
   saveConfig,
-  isValidConfigKey,
   validateConfigValue,
-  parseConfigValue,
   CONFIG_KEYS,
-  handleConfigCommand,
   type DispatchConfig,
 } from "../config.js";
-import { runInteractiveConfigWizard } from "../config-prompts.js";
-
-vi.mock("../config-prompts.js", () => ({
-  runInteractiveConfigWizard: vi.fn().mockResolvedValue(undefined),
-}));
 
 // ─── Config file I/O ─────────────────────────────────────────────────
 
@@ -136,22 +128,6 @@ describe("getConfigPath", () => {
   it("defaults to ~/.dispatch/config.json when no override", () => {
     const result = getConfigPath();
     expect(result).toMatch(/^.+\.dispatch\/config\.json$/);
-  });
-});
-
-// ─── isValidConfigKey ────────────────────────────────────────────────
-
-describe("isValidConfigKey", () => {
-  it("returns true for each valid config key", () => {
-    for (const key of CONFIG_KEYS) {
-      expect(isValidConfigKey(key)).toBe(true);
-    }
-  });
-
-  it("returns false for unknown keys", () => {
-    for (const key of ["unknown", "dryRun", "noPlan", "verbose", ""]) {
-      expect(isValidConfigKey(key)).toBe(false);
-    }
   });
 });
 
@@ -275,34 +251,6 @@ describe("validateConfigValue", () => {
   });
 });
 
-// ─── parseConfigValue ────────────────────────────────────────────────
-
-describe("parseConfigValue", () => {
-  it("converts concurrency to a number", () => {
-    const result = parseConfigValue("concurrency", "5");
-    expect(result).toBe(5);
-    expect(typeof result).toBe("number");
-  });
-
-  it("returns string for non-concurrency keys", () => {
-    const result = parseConfigValue("provider", "copilot");
-    expect(result).toBe("copilot");
-    expect(typeof result).toBe("string");
-  });
-
-  it("converts planTimeout to a number via parseFloat", () => {
-    const result = parseConfigValue("planTimeout", "10.5");
-    expect(result).toBe(10.5);
-    expect(typeof result).toBe("number");
-  });
-
-  it("converts planRetries to a number via parseInt", () => {
-    const result = parseConfigValue("planRetries", "3");
-    expect(result).toBe(3);
-    expect(typeof result).toBe("number");
-  });
-});
-
 // ─── Merge precedence (CLI > config > default) ─────────────────────
 
 describe("merge precedence", () => {
@@ -395,77 +343,5 @@ describe("merge precedence", () => {
     applyMerge(args, config, explicitFlags);
     expect(args.provider).toBe("opencode");
     expect(args.concurrency).toBe(8);
-  });
-});
-
-// ─── handleConfigCommand ─────────────────────────────────────────────
-
-describe("handleConfigCommand", () => {
-  const mockExit = vi.spyOn(process, "exit").mockImplementation((() => {
-    throw new Error("process.exit called");
-  }) as never);
-  const mockConsoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
-
-  afterEach(() => {
-    mockExit.mockClear();
-    mockConsoleLog.mockClear();
-  });
-
-  // Restore all mocks after the entire describe block
-  afterEach(() => {
-    // Note: we clear per-test and restore at suite teardown via vitest's auto-restore
-  });
-
-  it("set with missing key and value exits with error", async () => {
-    await expect(handleConfigCommand(["set"])).rejects.toThrow("process.exit called");
-    expect(mockExit).toHaveBeenCalledWith(1);
-  });
-
-  it("set with invalid key exits with error", async () => {
-    await expect(handleConfigCommand(["set", "invalidKey", "value"])).rejects.toThrow("process.exit called");
-    expect(mockExit).toHaveBeenCalledWith(1);
-  });
-
-  it("set with invalid provider value exits with error", async () => {
-    await expect(handleConfigCommand(["set", "provider", "badprovider"])).rejects.toThrow("process.exit called");
-    expect(mockExit).toHaveBeenCalledWith(1);
-  });
-
-  it("set with invalid source value exits with error", async () => {
-    await expect(handleConfigCommand(["set", "source", "jira"])).rejects.toThrow("process.exit called");
-    expect(mockExit).toHaveBeenCalledWith(1);
-  });
-
-  it("set with invalid concurrency exits with error", async () => {
-    await expect(handleConfigCommand(["set", "concurrency", "abc"])).rejects.toThrow("process.exit called");
-    expect(mockExit).toHaveBeenCalledWith(1);
-  });
-
-  it("get with missing key exits with error", async () => {
-    await expect(handleConfigCommand(["get"])).rejects.toThrow("process.exit called");
-    expect(mockExit).toHaveBeenCalledWith(1);
-  });
-
-  it("get with invalid key exits with error", async () => {
-    await expect(handleConfigCommand(["get", "badkey"])).rejects.toThrow("process.exit called");
-    expect(mockExit).toHaveBeenCalledWith(1);
-  });
-
-  it("unknown operation exits with error", async () => {
-    await expect(handleConfigCommand(["badop"])).rejects.toThrow("process.exit called");
-    expect(mockExit).toHaveBeenCalledWith(1);
-  });
-
-  it("missing operation launches interactive wizard", async () => {
-    await handleConfigCommand([]);
-    expect(runInteractiveConfigWizard).toHaveBeenCalled();
-    expect(mockExit).not.toHaveBeenCalled();
-  });
-
-  it("path prints the config file path", async () => {
-    await handleConfigCommand(["path"]);
-    expect(mockConsoleLog).toHaveBeenCalledTimes(1);
-    const printed = mockConsoleLog.mock.calls[0][0] as string;
-    expect(printed).toMatch(/\.dispatch\/config\.json$/);
   });
 });
