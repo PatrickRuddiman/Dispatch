@@ -26,6 +26,7 @@ const CONFIG_TO_CLI: Record<string, keyof RawCliArgs> = {
   source: "issueSource",
   org: "org",
   project: "project",
+  workItemType: "workItemType",
   serverUrl: "serverUrl",
   planTimeout: "planTimeout",
   planRetries: "planRetries",

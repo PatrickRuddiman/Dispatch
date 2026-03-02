@@ -132,6 +132,7 @@ describe("resolveCliConfig()", () => {
         source: "azdevops",
         org: "test-org",
         project: "test-proj",
+        workItemType: "User Story",
         serverUrl: "https://example.com",
         planTimeout: 15,
         planRetries: 3,
@@ -147,6 +148,7 @@ describe("resolveCliConfig()", () => {
       expect(result.issueSource).toBe("azdevops");
       expect(result.org).toBe("test-org");
       expect(result.project).toBe("test-proj");
+      expect(result.workItemType).toBe("User Story");
       expect(result.serverUrl).toBe("https://example.com");
       expect(result.planTimeout).toBe(15);
       expect(result.planRetries).toBe(3);

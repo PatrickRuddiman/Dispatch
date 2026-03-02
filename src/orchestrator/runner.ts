@@ -47,6 +47,7 @@ export interface RawCliArgs {
   issueSource?: DatasourceName;
   org?: string;
   project?: string;
+  workItemType?: string;
   planTimeout?: number;
   planRetries?: number;
   outputDir?: string;
