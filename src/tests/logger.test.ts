@@ -1,0 +1,224 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { log } from "../helpers/logger.js";
+
+describe("log", () => {
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    log.verbose = false;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // ─── info ───────────────────────────────────────────────────────────
+
+  describe("info", () => {
+    it("prints the message to console.log", () => {
+      log.info("hello");
+      expect(logSpy).toHaveBeenCalledOnce();
+      expect(logSpy.mock.calls[0][1]).toBe("hello");
+    });
+
+    it("prefixes with the info icon", () => {
+      log.info("test");
+      const prefix = logSpy.mock.calls[0][0] as string;
+      expect(prefix).toContain("ℹ");
+    });
+  });
+
+  // ─── success ────────────────────────────────────────────────────────
+
+  describe("success", () => {
+    it("prints the message to console.log", () => {
+      log.success("done");
+      expect(logSpy).toHaveBeenCalledOnce();
+      expect(logSpy.mock.calls[0][1]).toBe("done");
+    });
+
+    it("prefixes with the success icon", () => {
+      log.success("test");
+      const prefix = logSpy.mock.calls[0][0] as string;
+      expect(prefix).toContain("✔");
+    });
+  });
+
+  // ─── warn ───────────────────────────────────────────────────────────
+
+  describe("warn", () => {
+    it("prints the message to console.log", () => {
+      log.warn("careful");
+      expect(logSpy).toHaveBeenCalledOnce();
+      expect(logSpy.mock.calls[0][1]).toBe("careful");
+    });
+
+    it("prefixes with the warning icon", () => {
+      log.warn("test");
+      const prefix = logSpy.mock.calls[0][0] as string;
+      expect(prefix).toContain("⚠");
+    });
+  });
+
+  // ─── error ──────────────────────────────────────────────────────────
+
+  describe("error", () => {
+    it("prints the message to console.error", () => {
+      log.error("fail");
+      expect(errorSpy).toHaveBeenCalledOnce();
+      expect(errorSpy.mock.calls[0][1]).toBe("fail");
+    });
+
+    it("does not use console.log", () => {
+      log.error("fail");
+      expect(logSpy).not.toHaveBeenCalled();
+    });
+
+    it("prefixes with the error icon", () => {
+      log.error("test");
+      const prefix = errorSpy.mock.calls[0][0] as string;
+      expect(prefix).toContain("✖");
+    });
+  });
+
+  // ─── task ───────────────────────────────────────────────────────────
+
+  describe("task", () => {
+    it("prints 1-based index out of total", () => {
+      log.task(0, 5, "doing stuff");
+      expect(logSpy).toHaveBeenCalledOnce();
+      const prefix = logSpy.mock.calls[0][0] as string;
+      expect(prefix).toContain("[1/5]");
+    });
+
+    it("passes the message as the second argument", () => {
+      log.task(2, 10, "my task");
+      expect(logSpy.mock.calls[0][1]).toBe("my task");
+    });
+
+    it("correctly increments index for last task", () => {
+      log.task(4, 5, "last");
+      const prefix = logSpy.mock.calls[0][0] as string;
+      expect(prefix).toContain("[5/5]");
+    });
+  });
+
+  // ─── dim ────────────────────────────────────────────────────────────
+
+  describe("dim", () => {
+    it("prints the message to console.log", () => {
+      log.dim("subtle");
+      expect(logSpy).toHaveBeenCalledOnce();
+    });
+
+    it("passes the message through chalk.dim", () => {
+      log.dim("subtle text");
+      const output = logSpy.mock.calls[0][0] as string;
+      expect(output).toContain("subtle text");
+    });
+  });
+
+  // ─── debug ──────────────────────────────────────────────────────────
+
+  describe("debug", () => {
+    it("does not print when verbose is false", () => {
+      log.verbose = false;
+      log.debug("hidden");
+      expect(logSpy).not.toHaveBeenCalled();
+    });
+
+    it("prints when verbose is true", () => {
+      log.verbose = true;
+      log.debug("visible");
+      expect(logSpy).toHaveBeenCalledOnce();
+    });
+
+    it("includes the message text in the output", () => {
+      log.verbose = true;
+      log.debug("detail");
+      const output = logSpy.mock.calls[0][0] as string;
+      expect(output).toContain("detail");
+    });
+
+    it("includes the arrow prefix", () => {
+      log.verbose = true;
+      log.debug("test");
+      const output = logSpy.mock.calls[0][0] as string;
+      expect(output).toContain("⤷");
+    });
+
+    it("respects toggling verbose on and off", () => {
+      log.verbose = true;
+      log.debug("first");
+      expect(logSpy).toHaveBeenCalledOnce();
+
+      log.verbose = false;
+      log.debug("second");
+      expect(logSpy).toHaveBeenCalledOnce(); // still 1 call
+
+      log.verbose = true;
+      log.debug("third");
+      expect(logSpy).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // ─── formatErrorChain ──────────────────────────────────────────────
+
+  describe("formatErrorChain", () => {
+    it("formats a single Error", () => {
+      const result = log.formatErrorChain(new Error("boom"));
+      expect(result).toBe("Error: boom");
+    });
+
+    it("formats an error with one level of cause", () => {
+      const inner = new Error("root cause");
+      const outer = new Error("wrapper", { cause: inner });
+      const result = log.formatErrorChain(outer);
+      expect(result).toBe("Error: wrapper\n  ⤷ Cause: root cause");
+    });
+
+    it("formats a deeply nested cause chain", () => {
+      const e1 = new Error("level 0");
+      const e2 = new Error("level 1", { cause: e1 });
+      const e3 = new Error("level 2", { cause: e2 });
+      const result = log.formatErrorChain(e3);
+      expect(result).toBe(
+        "Error: level 2\n  ⤷ Cause: level 1\n  ⤷ Cause: level 0",
+      );
+    });
+
+    it("stops at depth 5 to prevent infinite loops", () => {
+      let current: Error = new Error("base");
+      for (let i = 0; i < 5; i++) {
+        current = new Error(`level ${i + 1}`, { cause: current });
+      }
+      const result = log.formatErrorChain(current);
+      const parts = result.split("\n  ⤷ ");
+      expect(parts.length).toBeLessThanOrEqual(5);
+    });
+
+    it("formats a non-Error value", () => {
+      const result = log.formatErrorChain("string error");
+      expect(result).toBe("Error: string error");
+    });
+
+    it("formats a number value", () => {
+      const result = log.formatErrorChain(404);
+      expect(result).toBe("Error: 404");
+    });
+
+    it("formats null", () => {
+      const result = log.formatErrorChain(null);
+      expect(result).toBe("");
+    });
+
+    it("formats an error whose cause is a non-Error value", () => {
+      const err = new Error("outer", { cause: "inner string" });
+      const result = log.formatErrorChain(err);
+      expect(result).toBe("Error: outer\n  ⤷ Cause: inner string");
+    });
+  });
+});
