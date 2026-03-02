@@ -38,7 +38,10 @@ const CONFIG_TO_CLI: Record<string, keyof RawCliArgs> = {
  * 2. Merges config defaults beneath CLI flags (CLI wins when explicit)
  * 3. Validates that mandatory configuration (provider + source) is present
  *    — calls `process.exit(1)` on validation failure, matching current behavior
- * 4. Enables verbose logging if requested
+ * 4. Auto-detects the datasource from the git remote when not explicitly set
+ *    — skipped for spec/respec modes, which defer source resolution to the
+ *      pipeline's own `resolveSource()` (context-aware fallback logic)
+ * 5. Enables verbose logging if requested
  *
  * @param args - Raw CLI arguments as parsed by the CLI entry point
  * @returns The merged `RawCliArgs` with config defaults applied
@@ -72,7 +75,7 @@ export async function resolveCliConfig(args: RawCliArgs): Promise<RawCliArgs> {
   // ── Auto-detect datasource when not explicitly set ─────────
   const sourceConfigured =
     explicitFlags.has("issueSource") || config.source !== undefined;
-  const needsSource = !merged.fixTests;
+  const needsSource = !merged.fixTests && !merged.spec && !merged.respec;
 
   if (needsSource && !sourceConfigured) {
     const detected = await detectDatasource(merged.cwd);
