@@ -133,8 +133,8 @@ checks for `--server-url` and `--cwd`.
 | `--concurrency <n>` | integer | `min(cpus, freeMB/500)` | Maximum parallel dispatches per batch (see [concurrency model](orchestrator.md#concurrency-model) and [default computation](configuration.md#default-concurrency-computation)) |
 | `--provider <name>` | string | `"opencode"` | AI agent backend (`opencode` or `copilot`); see [Provider Abstraction](../provider-system/provider-overview.md) |
 | `--server-url <url>` | string | *none* | Connect to a running provider server instead of starting one |
-| `--plan-timeout <min>` | float | `10` | Planning timeout in minutes. Must be a positive number. Parsed via `parseFloat`. Configurable via `dispatch config set planTimeout`. |
-| `--plan-retries <n>` | integer | `1` | Number of retry attempts after planning timeout. Must be a non-negative integer. Parsed via `parseInt`. Configurable via `dispatch config set planRetries`. |
+| `--plan-timeout <min>` | float | `10` | Planning timeout in minutes. Must be a positive number. Parsed via `parseFloat`. Configurable via `dispatch config`. |
+| `--plan-retries <n>` | integer | `1` | Number of retry attempts after planning timeout. Must be a non-negative integer. Parsed via `parseInt`. Configurable via `dispatch config`. |
 | `--cwd <dir>` | string | `process.cwd()` | Working directory for file discovery and agent execution |
 | `--verbose` | boolean | `false` | Show detailed debug output for troubleshooting |
 | `-h`, `--help` | boolean | `false` | Show usage information |
@@ -270,7 +270,7 @@ Use `--no-branch` when:
 ### CLI-only flag
 
 `--no-branch` is a CLI-only flag. It is **not** in `CONFIG_KEYS` and cannot be
-persisted via `dispatch config set`. This is intentional -- branch lifecycle
+persisted via `dispatch config`. This is intentional -- branch lifecycle
 behavior is typically per-invocation rather than a persistent default.
 
 ```mermaid

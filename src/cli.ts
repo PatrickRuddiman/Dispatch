@@ -58,13 +58,7 @@ const HELP = `
     -v, --version          Show version
 
   Config:
-    dispatch config set <key> <value>   Set a default config value
-    dispatch config get <key>           Get a config value
-    dispatch config list                List all config values
-    dispatch config reset               Reset config (delete config file)
-    dispatch config path                Show config file path
-
-    Valid keys: provider, concurrency, source, org, project, serverUrl, planTimeout, planRetries
+    dispatch config                     Launch interactive configuration wizard
 
   Examples:
     dispatch 14
@@ -84,9 +78,7 @@ const HELP = `
     dispatch --respec "specs/*.md"
     dispatch --spec "add dark mode toggle to settings page"
     dispatch --spec "feature A should do x" --provider copilot
-    dispatch config set provider copilot
-    dispatch config list
-    dispatch config reset
+    dispatch config
 `.trimStart();
 
 /** Parsed CLI arguments including shell-only flags (help, version). */

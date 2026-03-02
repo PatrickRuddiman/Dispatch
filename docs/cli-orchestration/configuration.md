@@ -77,7 +77,7 @@ be read for any reason, the function silently returns an empty object (`{}`).
 
 - A corrupted config file is treated identically to a missing one.
 - There is no warning that stored configuration was ignored.
-- The user must re-set their configuration via `dispatch config set`.
+- The user must re-configure via `dispatch config`.
 
 This is a deliberate simplicity choice: the config file is not critical
 infrastructure, and the merge logic applies hardcoded defaults when config
@@ -163,69 +163,20 @@ is because the CLI uses `--source` (matching the config key), but the internal
 `RawCliArgs` interface uses `issueSource` to avoid confusion with other uses
 of "source" in the codebase.
 
-## The `dispatch config` subcommand
+## The `dispatch config` command
 
-The config subcommand (`src/config.ts:166-253`) supports five operations:
-
-### `dispatch config set <key> <value>`
-
-Sets a persistent default value. The key is validated against `CONFIG_KEYS`,
-and the value is validated by `validateConfigValue()`. If validation passes,
-the current config is loaded, the key is updated, and the config is saved.
+Running `dispatch config` launches an interactive wizard that guides the user
+through viewing current configuration, setting new values, and resetting
+configuration. It is the sole interface for managing persistent configuration.
 
 ```bash
-dispatch config set provider copilot
-dispatch config set source github
-dispatch config set concurrency 3
-dispatch config set serverUrl http://localhost:4096
-dispatch config set org https://dev.azure.com/myorg
-dispatch config set project MyProject
-dispatch config set planTimeout 10
-dispatch config set planRetries 2
+dispatch config
 ```
 
-### `dispatch config get <key>`
-
-Prints the value of a single key to stdout. If the key is not set, nothing is
-printed (no error, no default value). Output goes to `console.log` (not the
-logger) so it can be captured in scripts:
-
-```bash
-PROVIDER=$(dispatch config get provider)
-```
-
-### `dispatch config list`
-
-Prints all set configuration values in `key=value` format, one per line. If no
-configuration is set, prints a dim hint: `"No configuration set."` Output is
-pipe-friendly:
-
-```bash
-dispatch config list
-# provider=copilot
-# source=github
-# concurrency=3
-```
-
-### `dispatch config reset`
-
-Deletes the config file entirely using `rm(configPath, { force: true })`. This
-removes all stored configuration, reverting to hardcoded defaults.
-
-**Why delete rather than write an empty config?** Deleting the file is simpler
-and produces the same observable behavior: `loadConfig()` returns `{}` whether
-the file is absent or contains `{}`. Deletion avoids leaving a zero-content
-file that might confuse users inspecting the `.dispatch/` directory, and it
-also removes the file from the filesystem entirely, which is cleaner when
-users want to completely reset their Dispatch state.
-
-### `dispatch config path`
-
-Prints the absolute path to the config file. Useful for scripts and debugging:
-
-```bash
-cat "$(dispatch config path)"
-```
+The wizard uses `@inquirer/prompts` to present an interactive menu where the
+user can view current settings, modify individual keys, or reset the config
+file. All validation (provider names, datasource names, numeric bounds) is
+handled within the wizard flow.
 
 ## Three-tier configuration precedence
 
@@ -297,9 +248,9 @@ even if the config file says `"provider": "copilot"`.
 | Neither | (none) | (none) | `opencode` (hardcoded default in `parseArgs`) |
 | Partial overlap | `provider: "copilot", source: "github"` | `--provider opencode` | provider=`opencode`, source=`github` |
 
-### Why the config subcommand runs before `parseArgs`
+### Why the config command runs before `parseArgs`
 
-The `config` subcommand is intercepted at `src/cli.ts:238` before `parseArgs()`
+The `config` command is intercepted at `src/cli.ts:238` before `parseArgs()`
 is called:
 
 ```
@@ -309,17 +260,10 @@ if (rawArgv[0] === "config") {
 }
 ```
 
-This early interception is necessary because `parseArgs()` would reject config
-subcommand arguments as unknown options. For example, `dispatch config set provider copilot`
-would cause `parseArgs` to fail on `"config"`, `"set"`, and the positional
-arguments. By checking for `config` first and delegating to
-`handleConfigCommand()` before any argument parsing occurs, the config
-subcommand operates independently of the dispatch argument grammar.
-
-If this check ran after `parseArgs`, the following would break:
-- `dispatch config set <key> <value>` -- `config` is not a valid flag
-- `dispatch config list` -- `list` is not a valid flag
-- `dispatch config reset` -- `reset` is not a valid flag
+This early interception is necessary because `parseArgs()` would reject
+`"config"` as an unknown option. By checking for `config` first and delegating
+to `handleConfigCommand()` before any argument parsing occurs, the config
+command operates independently of the dispatch argument grammar.
 
 ## Mandatory configuration validation
 
@@ -327,18 +271,16 @@ After merging config-file defaults, `resolveCliConfig()` validates that two
 mandatory fields are configured (`src/orchestrator/cli-config.ts:59-82`):
 
 1. **`provider`** -- must be set via CLI flag (`--provider`) or config file
-   (`dispatch config set provider <name>`).
+   (`dispatch config`).
 2. **`source`** (mapped to `issueSource`) -- must be set via CLI flag
-   (`--source`) or config file (`dispatch config set source <name>`).
+   (`--source`) or config file (`dispatch config`).
 
 If either is missing, the user receives a targeted error message with
 remediation guidance:
 
 ```
 ✖ Missing required configuration: provider, source
-    Configure defaults with:
-      dispatch config set provider <name>
-      dispatch config set source <name>
+    Run `dispatch config` to configure defaults.
     Or pass them as CLI flags: --provider <name> --source <name>
 ```
 
@@ -416,8 +358,8 @@ Two AI agent backends are currently registered in `src/providers/index.ts`:
 Provider names are validated at two points:
 1. **CLI level** (`src/cli.ts:161`): `--provider` is checked against
    `PROVIDER_NAMES` at parse time.
-2. **Config level** (`src/config.ts:94`): `dispatch config set provider` is
-   validated against the same list.
+2. **Config level** (`src/config.ts:94`): The interactive wizard validates
+   provider names against the same list.
 
 To add a new provider, see the
 [Adding a Provider guide](../provider-system/adding-a-provider.md).
@@ -435,8 +377,8 @@ Three datasource backends are currently registered in `src/datasources/index.ts`
 Datasource names are validated at two points:
 1. **CLI level** (`src/cli.ts:129`): `--source` is checked against
    `DATASOURCE_NAMES` at parse time.
-2. **Config level** (`src/config.ts:100`): `dispatch config set source` is
-   validated against the same list.
+2. **Config level** (`src/config.ts:100`): The interactive wizard validates
+   datasource names against the same list.
 
 ### Auto-detection from git remote
 
@@ -593,11 +535,11 @@ If the config file is deleted between `loadConfig()` and a subsequent
   `mkdir(dirname(configPath), { recursive: true })`.
 - No data loss occurs beyond the deleted configuration values.
 
-### Unknown config key error
+### Config keys reference
 
-If `dispatch config set <key> <value>` reports an unknown key, the key must be
-one of: `provider`, `concurrency`, `source`, `org`, `project`, `serverUrl`,
-`planTimeout`, `planRetries`.
+The interactive wizard supports the following config keys: `provider`,
+`concurrency`, `source`, `org`, `project`, `serverUrl`, `planTimeout`,
+`planRetries`.
 Keys like `dryRun`, `noPlan`, `noBranch`, and `verbose` are CLI-only flags and
 cannot be persisted. See [the --no-branch flag](cli.md#the---no-branch-flag)
 for details on that flag's behavior, and the

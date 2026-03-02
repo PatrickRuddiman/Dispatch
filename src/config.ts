@@ -4,14 +4,13 @@
  * Manages persistent user configuration stored in ~/.dispatch/config.json.
  * Provides functions for loading, saving, and validating config values.
  */
-import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { PROVIDER_NAMES } from "./providers/index.js";
 import { DATASOURCE_NAMES } from "./datasources/index.js";
 import type { ProviderName } from "./providers/interface.js";
 import type { DatasourceName } from "./datasources/interface.js";
-import { log } from "./helpers/logger.js";
 import { runInteractiveConfigWizard } from "./config-prompts.js";
 
 /**
@@ -83,13 +82,6 @@ export async function saveConfig(
 }
 
 /**
- * Check whether a string is a valid config key.
- */
-export function isValidConfigKey(key: string): key is ConfigKey {
-  return (CONFIG_KEYS as readonly string[]).includes(key);
-}
-
-/**
  * Validate a value for a given config key.
  * Returns `null` if valid, or an error message string if invalid.
  */
@@ -145,112 +137,10 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
 }
 
 /**
- * Parse a string value into the appropriate type for a config key.
- */
-export function parseConfigValue(key: ConfigKey, value: string): string | number {
-  if (key === "concurrency" || key === "planRetries") {
-    return parseInt(value, 10);
-  }
-  if (key === "planTimeout") {
-    return parseFloat(value);
-  }
-  return value;
-}
-
-/**
  * Handle the `dispatch config` subcommand.
  *
- * Supports: set, get, list, reset, path.
- * Uses `log` for error/success output and plain `console.log` for
- * pipe-friendly output (get, list, path).
+ * Launches the interactive configuration wizard.
  */
-export async function handleConfigCommand(argv: string[]): Promise<void> {
-  const [operation, ...rest] = argv;
-
-  switch (operation) {
-    case "set": {
-      const [key, value] = rest;
-      if (!key || value === undefined) {
-        log.error("Usage: dispatch config set <key> <value>");
-        log.dim(`  Valid keys: ${CONFIG_KEYS.join(", ")}`);
-        process.exit(1);
-      }
-      if (!isValidConfigKey(key)) {
-        log.error(`Unknown config key "${key}". Valid keys: ${CONFIG_KEYS.join(", ")}`);
-        process.exit(1);
-      }
-      const error = validateConfigValue(key, value);
-      if (error) {
-        log.error(error);
-        process.exit(1);
-      }
-      const config = await loadConfig();
-      const parsed = parseConfigValue(key, value);
-      (config as Record<string, string | number>)[key] = parsed;
-      await saveConfig(config);
-      log.success(`Set ${key} = ${value}`);
-      break;
-    }
-
-    case "get": {
-      const [key] = rest;
-      if (!key) {
-        log.error("Usage: dispatch config get <key>");
-        process.exit(1);
-      }
-      if (!isValidConfigKey(key)) {
-        log.error(`Unknown config key "${key}". Valid keys: ${CONFIG_KEYS.join(", ")}`);
-        process.exit(1);
-      }
-      const config = await loadConfig();
-      const value = config[key];
-      if (value !== undefined) {
-        console.log(value);
-      }
-      break;
-    }
-
-    case "list": {
-      const config = await loadConfig();
-      const entries = Object.entries(config).filter(([, v]) => v !== undefined);
-      if (entries.length === 0) {
-        log.dim("No configuration set.");
-      } else {
-        for (const [k, v] of entries) {
-          console.log(`${k}=${v}`);
-        }
-      }
-      break;
-    }
-
-    case "reset": {
-      const configPath = getConfigPath();
-      try {
-        await rm(configPath, { force: true });
-        log.success("Configuration reset.");
-      } catch {
-        log.success("Configuration reset.");
-      }
-      break;
-    }
-
-    case "path": {
-      console.log(getConfigPath());
-      break;
-    }
-
-    default: {
-      if (operation) {
-        log.error(`Unknown config operation "${operation}".`);
-        log.dim("  Usage: dispatch config <set|get|list|reset|path>");
-        log.dim("  Example: dispatch config set provider copilot");
-        log.dim("  Example: dispatch config get provider");
-        log.dim("  Example: dispatch config list");
-        process.exit(1);
-      } else {
-        await runInteractiveConfigWizard();
-      }
-      break;
-    }
-  }
+export async function handleConfigCommand(_argv: string[]): Promise<void> {
+  await runInteractiveConfigWizard();
 }
