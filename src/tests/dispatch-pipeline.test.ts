@@ -152,6 +152,7 @@ vi.mock("node:fs/promises", () => ({
 
 import { runDispatchPipeline } from "../orchestrator/dispatch-pipeline.js";
 import { log } from "../logger.js";
+import { createTui } from "../tui.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
@@ -334,5 +335,90 @@ describe("planning timeout and retry", () => {
 
     expect(result.failed).toBe(1);
     expect(mocks.mockPlan).toHaveBeenCalledTimes(2); // 1 retry = 2 attempts
+  });
+});
+
+describe("verbose mode", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    mocks.mockExecute.mockResolvedValue({
+      success: true,
+      dispatchResult: { task: TASK_FIXTURE, success: true },
+      elapsedMs: 100,
+    });
+    mocks.mockPlan.mockImplementation(() =>
+      new Promise<PlanResult>((resolve) => {
+        setTimeout(() => resolve({ prompt: "Execute step 1", success: true }), 100);
+      }),
+    );
+  });
+
+  afterEach(() => {
+    log.verbose = false;
+    vi.useRealTimers();
+  });
+
+  it("does not create TUI when log.verbose is true", async () => {
+    log.verbose = true;
+
+    const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.runAllTimersAsync();
+
+    await resultPromise;
+
+    expect(createTui).not.toHaveBeenCalled();
+  });
+
+  it("logs phase transitions inline when verbose", async () => {
+    log.verbose = true;
+
+    const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.runAllTimersAsync();
+
+    await resultPromise;
+
+    // Phase progress should be logged inline via log.info or log.debug
+    const infoCalls = vi.mocked(log.info).mock.calls.map(([msg]) => msg);
+    const debugCalls = vi.mocked(log.debug).mock.calls.map(([msg]) => msg);
+    const allMessages = [...infoCalls, ...debugCalls];
+
+    // Expect at least some phase-related messages (discovering, parsing, booting, dispatching)
+    expect(allMessages.some((msg) => /discover/i.test(msg))).toBe(true);
+    expect(allMessages.some((msg) => /pars/i.test(msg))).toBe(true);
+    expect(allMessages.some((msg) => /boot/i.test(msg))).toBe(true);
+    expect(allMessages.some((msg) => /dispatch/i.test(msg))).toBe(true);
+  });
+
+  it("logs task progress inline when verbose", async () => {
+    log.verbose = true;
+
+    const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.runAllTimersAsync();
+
+    await resultPromise;
+
+    const infoCalls = vi.mocked(log.info).mock.calls.map(([msg]) => msg);
+    const debugCalls = vi.mocked(log.debug).mock.calls.map(([msg]) => msg);
+    const successCalls = vi.mocked(log.success).mock.calls.map(([msg]) => msg);
+    const allMessages = [...infoCalls, ...debugCalls, ...successCalls];
+
+    // Expect task-related progress messages
+    expect(allMessages.some((msg) => /task/i.test(msg) || /implement/i.test(msg))).toBe(true);
+  });
+
+  it("still creates TUI when log.verbose is false", async () => {
+    log.verbose = false;
+
+    const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.runAllTimersAsync();
+
+    await resultPromise;
+
+    expect(createTui).toHaveBeenCalled();
   });
 });
