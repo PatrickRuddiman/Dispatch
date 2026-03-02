@@ -65,19 +65,28 @@ export async function runInteractiveConfigWizard(): Promise<void> {
 
   // ── Auto-detect datasource from git remote ─────────────────
   const detectedSource = await detectDatasource(process.cwd());
-  const datasourceDefault = existing.source ?? detectedSource ?? undefined;
-  if (detectedSource && !existing.source) {
+  const datasourceDefault: DatasourceName | "auto" = existing.source ?? "auto";
+  if (detectedSource) {
     log.info(
-      `Detected datasource ${chalk.cyan(detectedSource)} from git remote (override below if needed)`,
+      `Detected datasource ${chalk.cyan(detectedSource)} from git remote`,
     );
   }
 
   // ── Datasource selection ───────────────────────────────────
-  const source = await select<DatasourceName>({
+  const selectedSource = await select<DatasourceName | "auto">({
     message: "Select a datasource:",
-    choices: DATASOURCE_NAMES.map((name) => ({ name, value: name })),
+    choices: [
+      {
+        name: "auto",
+        value: "auto" as const,
+        description: "detect from git remote at runtime",
+      },
+      ...DATASOURCE_NAMES.map((name) => ({ name, value: name })),
+    ],
     default: datasourceDefault,
   });
+  const source: DatasourceName | undefined =
+    selectedSource === "auto" ? undefined : selectedSource;
 
   // ── Azure DevOps-specific fields ───────────────────────────
   let org: string | undefined;
@@ -179,6 +188,11 @@ export async function runInteractiveConfigWizard(): Promise<void> {
     if (value !== undefined) {
       console.log(`  ${chalk.cyan(key)} = ${value}`);
     }
+  }
+  if (selectedSource === "auto") {
+    console.log(
+      `  ${chalk.cyan("source")} = auto (detect from git remote at runtime)`,
+    );
   }
   console.log();
 

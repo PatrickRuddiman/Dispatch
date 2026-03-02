@@ -158,7 +158,7 @@ describe("runInteractiveConfigWizard", () => {
     );
   });
 
-  it("auto-detected datasource is used as default when no existing config", async () => {
+  it("default is auto when no existing source (regardless of detection)", async () => {
     vi.mocked(detectDatasource).mockResolvedValueOnce("github");
     vi.mocked(loadConfig).mockResolvedValueOnce({});
     vi.mocked(select)
@@ -171,7 +171,7 @@ describe("runInteractiveConfigWizard", () => {
     expect(select).toHaveBeenCalledWith(
       expect.objectContaining({
         message: "Select a datasource:",
-        default: "github",
+        default: "auto",
       }),
     );
   });
@@ -195,7 +195,7 @@ describe("runInteractiveConfigWizard", () => {
     );
   });
 
-  it("no auto-detection and no existing config — default is undefined", async () => {
+  it("default is auto when no existing source and no detection", async () => {
     vi.mocked(detectDatasource).mockResolvedValueOnce(null);
     vi.mocked(loadConfig).mockResolvedValueOnce({});
     vi.mocked(select)
@@ -208,8 +208,35 @@ describe("runInteractiveConfigWizard", () => {
     expect(select).toHaveBeenCalledWith(
       expect.objectContaining({
         message: "Select a datasource:",
-        default: undefined,
+        default: "auto",
       }),
     );
+  });
+
+  it("selecting auto saves config without source field", async () => {
+    vi.mocked(loadConfig).mockResolvedValueOnce({});
+    vi.mocked(select)
+      .mockResolvedValueOnce("copilot")
+      .mockResolvedValueOnce("auto");
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // advanced settings
+      .mockResolvedValueOnce(true); // save
+    await runInteractiveConfigWizard();
+    const savedConfig = vi.mocked(saveConfig).mock.calls[0][0];
+    expect(savedConfig.source).toBeUndefined();
+    expect(savedConfig.provider).toBe("copilot");
+  });
+
+  it("datasource choices include auto as first option", async () => {
+    vi.mocked(loadConfig).mockResolvedValueOnce({});
+    vi.mocked(select)
+      .mockResolvedValueOnce("copilot")
+      .mockResolvedValueOnce("github");
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // advanced settings
+      .mockResolvedValueOnce(true); // save
+    await runInteractiveConfigWizard();
+    const datasourceCall = vi.mocked(select).mock.calls[1][0];
+    expect(datasourceCall.choices[0]).toMatchObject({ name: "auto", value: "auto" });
   });
 });
