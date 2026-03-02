@@ -343,6 +343,50 @@ describe("resolveCliConfig()", () => {
       expect(result.issueSource).toBeUndefined();
     });
 
+    it("still auto-detects for dispatch mode (no spec/respec)", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+      vi.mocked(detectDatasource).mockResolvedValue("github");
+
+      const args = createRawCliArgs({
+        explicitFlags: new Set(),
+        provider: undefined as never,
+        issueSource: undefined,
+      });
+
+      const result = await resolveCliConfig(args);
+      expect(detectDatasource).toHaveBeenCalledWith("/tmp/test-cwd");
+      expect(result.issueSource).toBe("github");
+    });
+
+    it("explicit --source flag still works in spec mode", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+
+      const args = createRawCliArgs({
+        explicitFlags: new Set(["provider", "issueSource"]),
+        issueSource: "github",
+        spec: "1,2",
+      });
+
+      const result = await resolveCliConfig(args);
+      expect(detectDatasource).not.toHaveBeenCalled();
+      expect(result.issueSource).toBe("github");
+    });
+
+    it("config-file source still applies in spec mode", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot", source: "azdevops" });
+
+      const args = createRawCliArgs({
+        explicitFlags: new Set(),
+        provider: undefined as never,
+        issueSource: undefined,
+        spec: "drafts/*.md",
+      });
+
+      const result = await resolveCliConfig(args);
+      expect(detectDatasource).not.toHaveBeenCalled();
+      expect(result.issueSource).toBe("azdevops");
+    });
+
     it("detects azdevops from git remote", async () => {
       vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
       vi.mocked(detectDatasource).mockResolvedValue("azdevops");
