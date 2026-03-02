@@ -27,7 +27,7 @@ The datasource system:
 
 ## Why it exists
 
-dispatch-tasks supports teams using different issue trackers and local-first
+dispatch supports teams using different issue trackers and local-first
 workflows. Rather than coupling the [spec generator](../spec-generation/overview.md) and [orchestrator](../cli-orchestration/orchestrator.md) to a single
 tracker's API, the datasource layer provides a uniform interface so the rest of
 the pipeline is agnostic to the data source.
@@ -37,7 +37,7 @@ for three reasons:
 
 1. **Authentication reuse.** Users authenticate once via `gh auth login` or
    `az login`. The CLI tools manage token storage, refresh, and multi-account
-   switching. Using HTTP APIs would require dispatch-tasks to implement its own
+   switching. Using HTTP APIs would require dispatch to implement its own
    credential management.
 2. **Zero additional dependencies.** No GitHub REST/GraphQL client library
    (`@octokit/rest`) or Azure DevOps SDK (`azure-devops-node-api`) is added to
@@ -93,7 +93,7 @@ C4Context
 
     Person(user, "Developer", "Runs dispatch CLI")
 
-    System_Boundary(dispatch, "dispatch-tasks") {
+    System_Boundary(dispatch, "dispatch") {
         Container(cli, "CLI", "src/cli.ts", "Parses --source, --spec flags")
         Container(orch, "Orchestrator", "src/orchestrator/", "Drives dispatch and spec pipelines")
         Container(helpers, "Datasource Helpers", "src/orchestrator/datasource-helpers.ts", "Temp file writing, issue-ID extraction, auto-close")

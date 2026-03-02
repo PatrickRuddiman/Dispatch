@@ -1,7 +1,7 @@
 # Adding a New Provider Backend
 
 This guide walks through the complete process of adding a new AI agent backend to
-dispatch-tasks. The provider system uses a strategy pattern that makes this
+dispatch. The provider system uses a strategy pattern that makes this
 straightforward -- you implement an interface, export a boot function, and
 register it. See the [Provider Overview](./provider-overview.md) for the
 architectural context.

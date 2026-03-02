@@ -101,7 +101,7 @@ Every `az boards` command requires an organization and project context. These
 are resolved in order of precedence:
 
 1. **Explicit options:** `opts.org` and `opts.project` from `IssueFetchOptions`,
-   which map to the dispatch-tasks `--org` and `--project` CLI flags.
+   which map to the dispatch `--org` and `--project` CLI flags.
 2. **az CLI defaults:** Configured via `az devops configure --defaults
    organization=https://dev.azure.com/myorg project=myproject`. If defaults
    are set, the `--org` and `--project` flags can be omitted.
@@ -342,7 +342,7 @@ Run `az login` to authenticate. In CI, use a service principal or set
 
 ### "--organization is required"
 
-Either pass `--org` to dispatch-tasks, or configure `az` CLI defaults:
+Either pass `--org` to dispatch, or configure `az` CLI defaults:
 ```sh
 az devops configure --defaults organization=https://dev.azure.com/myorg project=myproject
 ```

@@ -1,6 +1,6 @@
-# dispatch-tasks Documentation
+# dispatch Documentation
 
-dispatch-tasks is a Node.js CLI tool that orchestrates AI coding agents to
+dispatch is a Node.js CLI tool that orchestrates AI coding agents to
 implement software tasks described in markdown files. It bridges issue trackers
 (GitHub Issues, Azure DevOps Work Items) and AI agent runtimes (OpenCode,
 GitHub Copilot) through a multi-stage pipeline: fetch issues, generate
@@ -16,7 +16,7 @@ makes changes. Third, it handles **automated record-keeping** by marking tasks
 complete in the source markdown and creating conventional git commits tied
 directly to the original task list.
 
-dispatch-tasks is backend-agnostic: it supports multiple issue trackers via a
+dispatch is backend-agnostic: it supports multiple issue trackers via a
 datasource abstraction and multiple AI runtimes via a provider abstraction,
 letting teams use their existing tools without lock-in. It also supports fully
 offline workflows where local markdown files replace cloud-hosted trackers.
@@ -62,7 +62,7 @@ offline workflows where local markdown files replace cloud-hosted trackers.
 
 ## Reading guide
 
-New to dispatch-tasks? Start with the
+New to dispatch? Start with the
 [Architecture Overview](./architecture.md). It covers the full system topology,
 both pipeline modes (dispatch and spec generation), the task lifecycle state
 machine, and all key design decisions including the strategy patterns,

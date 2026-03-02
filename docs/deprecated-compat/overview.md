@@ -264,7 +264,7 @@ gh auth login
 
 The `gh` CLI supports interactive OAuth, device code flow, and token-based
 authentication via the `GH_TOKEN` or `GITHUB_TOKEN` environment variables.
-Credentials are stored locally by the `gh` tool. dispatch-tasks does not manage
+Credentials are stored locally by the `gh` tool. dispatch does not manage
 GitHub credentials.
 
 For GitHub Enterprise Server hosts, authenticate with
@@ -354,7 +354,7 @@ references are:
 All other source files (`src/agents/orchestrator.ts`, `src/spec-generator.ts`,
 etc.) import from `src/datasource.ts` and `src/datasources/` directly.
 
-**Pending confirmation:** If dispatch-tasks is published as an npm package and
+**Pending confirmation:** If dispatch is published as an npm package and
 external consumers import from `issue-fetcher` or `issue-fetchers/`, those
 consumers would break on removal. Verify with downstream consumers before
 removing.

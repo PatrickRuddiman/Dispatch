@@ -1,10 +1,10 @@
-# dispatch-tasks
+# dispatch
 
 AI agent orchestration CLI — parse markdown task files, dispatch each unit of work to code agents (OpenCode, GitHub Copilot, etc.), and commit results with conventional commits.
 
-## Why dispatch-tasks?
+## Why dispatch?
 
-Manual orchestration of AI coding agents is tedious when a project has many small, well-defined units of work. dispatch-tasks solves three problems:
+Manual orchestration of AI coding agents is tedious when a project has many small, well-defined units of work. dispatch solves three problems:
 
 - **Context isolation** — each task runs in a fresh agent session so context from one task does not leak into another.
 - **Precision through planning** — an optional two-phase pipeline lets a read-only planner agent explore the codebase first, producing a focused execution plan that the executor agent follows.
@@ -42,18 +42,18 @@ The tool is backend-agnostic: it supports multiple issue trackers via a datasour
 ## Installation
 
 ```bash
-npm install -g dispatch-tasks
+npm install -g dispatch
 ```
 
 Or run directly without installing:
 
 ```bash
-npx dispatch-tasks
+npx dispatch
 ```
 
 ## Quick Start
 
-dispatch-tasks operates as a three-stage pipeline:
+dispatch operates as a three-stage pipeline:
 
 ### 1. Generate specs from issues
 
@@ -73,7 +73,7 @@ Run the generated specs through the plan-and-execute pipeline:
 dispatch ".dispatch/specs/*.md"
 ```
 
-For each task, dispatch-tasks will:
+For each task, dispatch will:
 1. **Plan** — a read-only planner agent explores the codebase and produces a detailed execution plan
 2. **Execute** — an executor agent follows the plan to make code changes
 3. **Commit** — changes are staged and committed with an inferred conventional commit message
