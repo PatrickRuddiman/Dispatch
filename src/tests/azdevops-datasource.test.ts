@@ -5,7 +5,7 @@ const { mockExecFile } = vi.hoisted(() => ({ mockExecFile: vi.fn() }));
 vi.mock("node:child_process", () => ({ execFile: mockExecFile }));
 vi.mock("node:util", () => ({ promisify: () => mockExecFile }));
 
-import { datasource } from "../datasources/azdevops.js";
+import { datasource, detectWorkItemType } from "../datasources/azdevops.js";
 
 beforeEach(() => {
   mockExecFile.mockReset();
@@ -160,8 +160,13 @@ describe("azdevops datasource — close", () => {
 });
 
 describe("azdevops datasource — create", () => {
-  it("creates a work item and returns details", async () => {
-    mockExecFile.mockResolvedValue({
+  it("creates a work item using detected type when workItemType not provided", async () => {
+    // First call: detectWorkItemType
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([{ name: "User Story" }, { name: "Bug" }]),
+    });
+    // Second call: az boards work-item create
+    mockExecFile.mockResolvedValueOnce({
       stdout: JSON.stringify({
         id: 99,
         fields: {
@@ -179,6 +184,133 @@ describe("azdevops datasource — create", () => {
     expect(result.number).toBe("99");
     expect(result.title).toBe("New Item");
     expect(result.state).toBe("New");
+    // Verify the create call used the detected type
+    const createArgs = mockExecFile.mock.calls[1][1] as string[];
+    expect(createArgs).toContain("--type");
+    expect(createArgs[createArgs.indexOf("--type") + 1]).toBe("User Story");
+  });
+
+  it("uses opts.workItemType when provided", async () => {
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        id: 100,
+        fields: {
+          "System.Title": "Item",
+          "System.Description": "body",
+          "System.Tags": "",
+          "System.State": "New",
+        },
+        _links: { html: { href: "https://dev.azure.com/100" } },
+      }),
+    });
+
+    const result = await datasource.create("Item", "body", {
+      cwd: "/tmp",
+      workItemType: "Product Backlog Item",
+    });
+
+    expect(result.number).toBe("100");
+    // Should NOT have called detectWorkItemType — only one exec call (the create)
+    expect(mockExecFile).toHaveBeenCalledTimes(1);
+    const createArgs = mockExecFile.mock.calls[0][1] as string[];
+    expect(createArgs[createArgs.indexOf("--type") + 1]).toBe("Product Backlog Item");
+  });
+
+  it("throws descriptive error when type cannot be determined", async () => {
+    // detectWorkItemType fails
+    mockExecFile.mockRejectedValueOnce(new Error("az not found"));
+
+    await expect(
+      datasource.create("Title", "Body", { cwd: "/tmp" }),
+    ).rejects.toThrow("Could not determine work item type");
+  });
+});
+
+describe("detectWorkItemType", () => {
+  it("returns 'User Story' when available", async () => {
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        { name: "Bug" },
+        { name: "User Story" },
+        { name: "Task" },
+      ]),
+    });
+
+    const result = await detectWorkItemType({ cwd: "/tmp", org: "org-url", project: "proj" });
+
+    expect(result).toBe("User Story");
+    const args = mockExecFile.mock.calls[0][1] as string[];
+    expect(args).toContain("--project");
+    expect(args).toContain("proj");
+    expect(args).toContain("--org");
+    expect(args).toContain("org-url");
+  });
+
+  it("returns 'Product Backlog Item' for Scrum template", async () => {
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        { name: "Bug" },
+        { name: "Product Backlog Item" },
+        { name: "Task" },
+      ]),
+    });
+
+    const result = await detectWorkItemType({ cwd: "/tmp" });
+    expect(result).toBe("Product Backlog Item");
+  });
+
+  it("returns 'Requirement' for CMMI template", async () => {
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        { name: "Bug" },
+        { name: "Requirement" },
+        { name: "Task" },
+      ]),
+    });
+
+    const result = await detectWorkItemType({ cwd: "/tmp" });
+    expect(result).toBe("Requirement");
+  });
+
+  it("returns 'Issue' when no higher-priority types exist", async () => {
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        { name: "Bug" },
+        { name: "Issue" },
+        { name: "Task" },
+      ]),
+    });
+
+    const result = await detectWorkItemType({ cwd: "/tmp" });
+    expect(result).toBe("Issue");
+  });
+
+  it("falls back to first type when no preferred types match", async () => {
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        { name: "Custom Item" },
+        { name: "Task" },
+      ]),
+    });
+
+    const result = await detectWorkItemType({ cwd: "/tmp" });
+    expect(result).toBe("Custom Item");
+  });
+
+  it("returns null on failure", async () => {
+    mockExecFile.mockRejectedValueOnce(new Error("az not found"));
+
+    const result = await detectWorkItemType({ cwd: "/tmp" });
+    expect(result).toBeNull();
+  });
+
+  it("returns null for empty type list", async () => {
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([]),
+    });
+
+    const result = await detectWorkItemType({ cwd: "/tmp" });
+    expect(result).toBeNull();
   });
 });
 
