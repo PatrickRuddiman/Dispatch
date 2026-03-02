@@ -1,18 +1,18 @@
 /**
- * Orchestrator — thin coordinator that delegates to extracted pipeline modules.
+ * Runner — thin coordinator that delegates to extracted pipeline modules.
  */
 
 import type { DispatchResult } from "../dispatcher.js";
-import type { AgentBootOptions } from "./interface.js";
+import type { AgentBootOptions } from "../agents/interface.js";
 import type { ProviderName } from "../providers/interface.js";
 import type { DatasourceName } from "../datasources/interface.js";
 import type { SpecOptions, SpecSummary } from "../spec-generator.js";
 import { defaultConcurrency, resolveSource } from "../spec-generator.js";
 import { getDatasource } from "../datasources/index.js";
 import { log } from "../logger.js";
-import { resolveCliConfig } from "../orchestrator/cli-config.js";
-import { runSpecPipeline } from "../orchestrator/spec-pipeline.js";
-import { runDispatchPipeline } from "../orchestrator/dispatch-pipeline.js";
+import { resolveCliConfig } from "./cli-config.js";
+import { runSpecPipeline } from "./spec-pipeline.js";
+import { runDispatchPipeline } from "./dispatch-pipeline.js";
 
 /** Runtime options passed to `orchestrate()`. */
 export interface OrchestrateRunOptions {
@@ -82,13 +82,13 @@ export interface FixTestsRunOptions {
   mode: "fix-tests";
 }
 
-/** Discriminated union of all orchestrator run options. */
+/** Discriminated union of all runner run options. */
 export type UnifiedRunOptions = DispatchRunOptions | SpecRunOptions | FixTestsRunOptions;
 
 /** Unified result type — DispatchSummary or SpecSummary depending on mode. */
 export type RunResult = DispatchSummary | SpecSummary | FixTestsSummary;
 
-/** A booted orchestrator that coordinates dispatch and spec pipelines. */
+/** A booted runner that coordinates dispatch and spec pipelines. */
 export interface OrchestratorAgent {
   orchestrate(opts: OrchestrateRunOptions): Promise<DispatchSummary>;
   generateSpecs(opts: SpecOptions): Promise<SpecSummary>;
@@ -96,11 +96,11 @@ export interface OrchestratorAgent {
   runFromCli(args: RawCliArgs): Promise<RunResult>;
 }
 
-/** Boot an orchestrator agent. */
+/** Boot a runner. */
 export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
   const { cwd } = opts;
 
-  const agent: OrchestratorAgent = {
+  const runner: OrchestratorAgent = {
     orchestrate: (runOpts) => runDispatchPipeline(runOpts, cwd),
 
     generateSpecs: (specOpts) => runSpecPipeline(specOpts),
@@ -108,14 +108,14 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
     async run(opts: UnifiedRunOptions): Promise<RunResult> {
       if (opts.mode === "spec") {
         const { mode: _, ...rest } = opts;
-        return agent.generateSpecs({ ...rest, cwd });
+        return runner.generateSpecs({ ...rest, cwd });
       }
       if (opts.mode === "fix-tests") {
-        const { runFixTestsPipeline } = await import("../orchestrator/fix-tests-pipeline.js");
+        const { runFixTestsPipeline } = await import("./fix-tests-pipeline.js");
         return runFixTestsPipeline({ cwd, provider: "opencode", serverUrl: undefined, verbose: false });
       }
       const { mode: _, ...rest } = opts;
-      return agent.orchestrate(rest);
+      return runner.orchestrate(rest);
     },
 
     async runFromCli(args: RawCliArgs): Promise<RunResult> {
@@ -140,7 +140,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
       }
 
       if (m.fixTests) {
-        const { runFixTestsPipeline } = await import("../orchestrator/fix-tests-pipeline.js");
+        const { runFixTestsPipeline } = await import("./fix-tests-pipeline.js");
         return runFixTestsPipeline({ cwd: m.cwd, provider: m.provider, serverUrl: m.serverUrl, verbose: m.verbose });
       }
 
@@ -193,7 +193,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
     },
   };
 
-  return agent;
+  return runner;
 }
 
-export { parseIssueFilename } from "../orchestrator/datasource-helpers.js";
+export { parseIssueFilename } from "./datasource-helpers.js";

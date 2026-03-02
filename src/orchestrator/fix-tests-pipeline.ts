@@ -7,7 +7,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { execFile as execFileCb } from "node:child_process";
-import type { FixTestsSummary } from "../agents/orchestrator.js";
+import type { FixTestsSummary } from "./runner.js";
 import type { ProviderName } from "../providers/interface.js";
 import { bootProvider } from "../providers/index.js";
 import { registerCleanup } from "../cleanup.js";

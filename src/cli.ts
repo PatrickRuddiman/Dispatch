@@ -10,7 +10,7 @@
  */
 
 import { resolve } from "node:path";
-import { bootOrchestrator, type RawCliArgs } from "./agents/index.js";
+import { boot as bootOrchestrator, type RawCliArgs } from "./orchestrator/runner.js";
 import { log } from "./logger.js";
 import { runCleanup } from "./cleanup.js";
 import type { ProviderName } from "./providers/interface.js";

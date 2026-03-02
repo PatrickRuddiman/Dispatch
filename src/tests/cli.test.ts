@@ -31,8 +31,8 @@ vi.mock("../cleanup.js", () => ({
   registerCleanup: vi.fn(),
 }));
 
-vi.mock("../agents/index.js", () => ({
-  bootOrchestrator: vi.fn().mockReturnValue(new Promise(() => {})),
+vi.mock("../orchestrator/runner.js", () => ({
+  boot: vi.fn().mockReturnValue(new Promise(() => {})),
 }));
 
 import { parseArgs } from "../cli.js";
