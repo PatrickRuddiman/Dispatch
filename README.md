@@ -39,6 +39,53 @@ The tool is backend-agnostic: it supports multiple issue trackers via a datasour
 | Azure DevOps Work Items | `az` CLI | `az login` |
 | Local Markdown | Filesystem | None |
 
+## Prerequisites
+
+### Node.js and npm
+
+Install [Node.js](https://nodejs.org/) **>= 18** (npm is included). Verify your installation:
+
+```sh
+node --version   # must be >= 18
+```
+
+### AI Agent Runtime
+
+At least one AI agent runtime must be installed and authenticated with a default model configured. dispatch-tasks cannot function without a provider backend.
+
+**OpenCode**
+
+```sh
+# Install
+curl -fsSL https://opencode.ai/install | bash
+# or: npm install -g opencode-ai
+```
+
+Launch `opencode` and run the `/connect` command to configure your LLM provider. Then verify:
+
+```sh
+opencode --version
+```
+
+See [OpenCode backend docs](./docs/provider-system/opencode-backend.md) for full setup options.
+
+**GitHub Copilot**
+
+Requires an active [GitHub Copilot subscription](https://github.com/features/copilot/plans).
+
+```sh
+# Install
+npm install -g @github/copilot
+```
+
+Launch `copilot` and follow the `/login` prompt to authenticate. Then verify:
+
+```sh
+copilot --version
+```
+
+See [Copilot backend docs](./docs/provider-system/copilot-backend.md) for full setup options.
+
 ## Installation
 
 ```bash
