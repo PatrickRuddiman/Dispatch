@@ -335,6 +335,20 @@ export async function runDispatchPipeline(
         }
       }
 
+      // ── Safety-net commit (stage any uncommitted changes) ─────
+      if (!noBranch && branchName && defaultBranch && details) {
+        try {
+          await datasource.commitAllChanges(
+            `chore: stage uncommitted changes for issue #${details.number}`,
+            lifecycleOpts,
+          );
+          log.debug(`Staged uncommitted changes for issue #${details.number}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.warn(`Could not commit uncommitted changes for issue #${details.number}: ${message}`);
+        }
+      }
+
       // ── Branch teardown (push, PR, switch back) ──────────────
       if (!noBranch && branchName && defaultBranch && details) {
         try {
