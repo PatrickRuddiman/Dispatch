@@ -331,6 +331,67 @@ describe("resolveCliConfig()", () => {
     });
   });
 
+  describe("datasource auto-detection", () => {
+    it("uses detected source when no explicit source is set and detection succeeds", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+      vi.mocked(detectDatasource).mockResolvedValue("github");
+
+      const args = createRawCliArgs({
+        explicitFlags: new Set(["provider"]),
+        issueSource: undefined,
+      });
+      const result = await resolveCliConfig(args);
+
+      expect(detectDatasource).toHaveBeenCalledWith("/tmp/test-cwd");
+      expect(result.issueSource).toBe("github");
+    });
+
+    it("falls back to 'md' when no explicit source is set and detection fails", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+      vi.mocked(detectDatasource).mockResolvedValue(null);
+
+      const args = createRawCliArgs({
+        explicitFlags: new Set(["provider"]),
+        issueSource: undefined,
+      });
+      const result = await resolveCliConfig(args);
+
+      expect(detectDatasource).toHaveBeenCalledWith("/tmp/test-cwd");
+      expect(result.issueSource).toBe("md");
+    });
+
+    it("explicit --source flag overrides auto-detection", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+      vi.mocked(detectDatasource).mockResolvedValue("github");
+
+      const args = createRawCliArgs({
+        explicitFlags: new Set(["provider", "issueSource"]),
+        issueSource: "azdevops",
+      });
+      const result = await resolveCliConfig(args);
+
+      expect(detectDatasource).not.toHaveBeenCalled();
+      expect(result.issueSource).toBe("azdevops");
+    });
+
+    it("config source value overrides auto-detection", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({
+        provider: "copilot",
+        source: "azdevops",
+      });
+      vi.mocked(detectDatasource).mockResolvedValue("github");
+
+      const args = createRawCliArgs({
+        explicitFlags: new Set(),
+        issueSource: undefined,
+      });
+      const result = await resolveCliConfig(args);
+
+      expect(detectDatasource).not.toHaveBeenCalled();
+      expect(result.issueSource).toBe("azdevops");
+    });
+  });
+
   describe("verbose logging", () => {
     it("enables verbose logging when verbose is true", async () => {
       const args = createRawCliArgs({ verbose: true });
