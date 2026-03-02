@@ -11,6 +11,7 @@
 import { readFile, writeFile, readdir, mkdir, rename } from "node:fs/promises";
 import { join, parse as parsePath } from "node:path";
 import type { Datasource, IssueDetails, IssueFetchOptions, DispatchLifecycleOptions } from "./interface.js";
+import { slugify } from "../slugify.js";
 
 /** Default directory for markdown specs, relative to cwd. */
 const DEFAULT_DIR = ".dispatch/specs";
@@ -125,7 +126,7 @@ export const datasource: Datasource = {
   async create(title: string, body: string, opts?: IssueFetchOptions): Promise<IssueDetails> {
     const dir = resolveDir(opts);
     await mkdir(dir, { recursive: true });
-    const filename = `${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}.md`;
+    const filename = `${slugify(title)}.md`;
     const filePath = join(dir, filename);
     await writeFile(filePath, body, "utf-8");
     return toIssueDetails(filename, body, dir);
@@ -136,11 +137,7 @@ export const datasource: Datasource = {
   },
 
   buildBranchName(issueNumber: string, title: string): string {
-    const slug = title
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 50);
+    const slug = slugify(title, 50);
     return `dispatch/${issueNumber}-${slug}`;
   },
 

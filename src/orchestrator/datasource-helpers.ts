@@ -8,6 +8,7 @@ import { getDatasource, detectDatasource } from "../datasources/index.js";
 import type { Datasource, DatasourceName, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
 import type { Task, TaskFile } from "../parser.js";
 import type { DispatchResult } from "../dispatcher.js";
+import { slugify } from "../slugify.js";
 
 const exec = promisify(execFile);
 
@@ -67,11 +68,7 @@ export async function writeItemsToTempDir(items: IssueDetails[]): Promise<WriteI
   const issueDetailsByFile = new Map<string, IssueDetails>();
 
   for (const item of items) {
-    const slug = item.title
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 60);
+    const slug = slugify(item.title, 60);
     const filename = `${item.number}-${slug}.md`;
     const filepath = join(tempDir, filename);
     await writeFile(filepath, item.body, "utf-8");

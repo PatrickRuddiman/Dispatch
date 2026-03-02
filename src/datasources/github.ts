@@ -9,6 +9,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Datasource, IssueDetails, IssueFetchOptions, DispatchLifecycleOptions } from "./interface.js";
+import { slugify } from "../slugify.js";
 
 const exec = promisify(execFile);
 
@@ -29,11 +30,7 @@ async function gh(args: string[], cwd: string): Promise<string> {
  * Produces: `dispatch/<number>-<slugified-title>`
  */
 function buildBranchName(issueNumber: string, title: string): string {
-  const slug = title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 50);
+  const slug = slugify(title, 50);
   return `dispatch/${issueNumber}-${slug}`;
 }
 
