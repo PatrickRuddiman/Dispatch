@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { select, input, confirm, number } from "@inquirer/prompts";
 import { runInteractiveConfigWizard } from "../config-prompts.js";
 import { loadConfig, saveConfig } from "../config.js";
+import { detectDatasource } from "../datasources/index.js";
 
 vi.mock("@inquirer/prompts", () => ({
   select: vi.fn(),
@@ -16,6 +17,14 @@ vi.mock("../config.js", async (importOriginal) => {
     ...actual,
     loadConfig: vi.fn().mockResolvedValue({}),
     saveConfig: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
+vi.mock("../datasources/index.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../datasources/index.js")>();
+  return {
+    ...actual,
+    detectDatasource: vi.fn().mockResolvedValue(null),
   };
 });
 
@@ -146,6 +155,61 @@ describe("runInteractiveConfigWizard", () => {
     await runInteractiveConfigWizard();
     expect(saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({ provider: "copilot", source: "md" }),
+    );
+  });
+
+  it("auto-detected datasource is used as default when no existing config", async () => {
+    vi.mocked(detectDatasource).mockResolvedValueOnce("github");
+    vi.mocked(loadConfig).mockResolvedValueOnce({});
+    vi.mocked(select)
+      .mockResolvedValueOnce("copilot")
+      .mockResolvedValueOnce("github");
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // advanced settings
+      .mockResolvedValueOnce(true); // save
+    await runInteractiveConfigWizard();
+    expect(select).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Select a datasource:",
+        default: "github",
+      }),
+    );
+  });
+
+  it("existing config source takes precedence over auto-detected", async () => {
+    vi.mocked(detectDatasource).mockResolvedValueOnce("github");
+    vi.mocked(loadConfig).mockResolvedValueOnce({ source: "azdevops" });
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(true) // reconfigure
+      .mockResolvedValueOnce(false) // advanced settings
+      .mockResolvedValueOnce(true); // save
+    vi.mocked(select)
+      .mockResolvedValueOnce("copilot")
+      .mockResolvedValueOnce("azdevops");
+    await runInteractiveConfigWizard();
+    expect(select).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Select a datasource:",
+        default: "azdevops",
+      }),
+    );
+  });
+
+  it("no auto-detection and no existing config — default is undefined", async () => {
+    vi.mocked(detectDatasource).mockResolvedValueOnce(null);
+    vi.mocked(loadConfig).mockResolvedValueOnce({});
+    vi.mocked(select)
+      .mockResolvedValueOnce("copilot")
+      .mockResolvedValueOnce("md");
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // advanced settings
+      .mockResolvedValueOnce(true); // save
+    await runInteractiveConfigWizard();
+    expect(select).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Select a datasource:",
+        default: undefined,
+      }),
     );
   });
 });

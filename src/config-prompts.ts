@@ -16,7 +16,7 @@ import {
 } from "./config.js";
 import { PROVIDER_NAMES } from "./providers/index.js";
 import type { ProviderName } from "./providers/interface.js";
-import { DATASOURCE_NAMES } from "./datasources/index.js";
+import { DATASOURCE_NAMES, detectDatasource } from "./datasources/index.js";
 import type { DatasourceName } from "./datasources/interface.js";
 
 /**
@@ -63,11 +63,20 @@ export async function runInteractiveConfigWizard(): Promise<void> {
     default: existing.provider,
   });
 
+  // ── Auto-detect datasource from git remote ─────────────────
+  const detectedSource = await detectDatasource(process.cwd());
+  const datasourceDefault = existing.source ?? detectedSource ?? undefined;
+  if (detectedSource && !existing.source) {
+    log.info(
+      `Detected datasource ${chalk.cyan(detectedSource)} from git remote (override below if needed)`,
+    );
+  }
+
   // ── Datasource selection ───────────────────────────────────
   const source = await select<DatasourceName>({
     message: "Select a datasource:",
     choices: DATASOURCE_NAMES.map((name) => ({ name, value: name })),
-    default: existing.source,
+    default: datasourceDefault,
   });
 
   // ── Azure DevOps-specific fields ───────────────────────────
