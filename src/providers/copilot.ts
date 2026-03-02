@@ -10,7 +10,7 @@
  *   - COPILOT_GITHUB_TOKEN / GH_TOKEN / GITHUB_TOKEN env vars
  */
 
-import { CopilotClient, type CopilotSession } from "@github/copilot-sdk";
+import { CopilotClient, approveAll, type AssistantMessageEvent, type CopilotSession } from "@github/copilot-sdk";
 import type { ProviderInstance, ProviderBootOptions } from "./interface.js";
 import { log } from "../logger.js";
 
@@ -54,7 +54,7 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
     async createSession(): Promise<string> {
       log.debug("Creating Copilot session...");
       try {
-        const session = await client.createSession();
+        const session = await client.createSession({ onPermissionRequest: approveAll });
         sessions.set(session.sessionId, session);
         log.debug(`Session created: ${session.sessionId}`);
         return session.sessionId;
@@ -72,14 +72,34 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
 
       log.debug(`Sending prompt to session ${sessionId} (${text.length} chars)...`);
       try {
-        const event = await session.sendAndWait({ prompt: text });
+        // ── 1. Fire-and-forget: start LLM processing ──────────────
+        await session.send({ prompt: text });
+        log.debug("Async prompt accepted, waiting for session to become idle...");
 
-        // Extract response text from the completion event
-        if (!event) {
-          log.debug("Prompt returned null event");
-          return null;
-        }
-        const result = event.data?.content ?? null;
+        // ── 2. Wait for session.idle or session.error ─────────────
+        await new Promise<void>((resolve, reject) => {
+          const unsubIdle = session.on("session.idle", () => {
+            unsubIdle();
+            unsubErr();
+            resolve();
+          });
+
+          const unsubErr = session.on("session.error", (event) => {
+            unsubIdle();
+            unsubErr();
+            reject(new Error(`Copilot session error: ${event.data.message}`));
+          });
+        });
+
+        log.debug("Session went idle, fetching result...");
+
+        // ── 3. Fetch the completed messages ───────────────────────
+        const events = await session.getMessages();
+        const last = [...events]
+          .reverse()
+          .find((e) => e.type === "assistant.message") as AssistantMessageEvent | undefined;
+
+        const result = last?.data?.content ?? null;
         log.debug(`Prompt response received (${result?.length ?? 0} chars)`);
         return result;
       } catch (err) {

@@ -1,0 +1,128 @@
+# dispatch-tasks
+
+AI agent orchestration CLI — parse markdown task files, dispatch each unit of work to code agents (OpenCode, GitHub Copilot, etc.), and commit results with conventional commits.
+
+## Why dispatch-tasks?
+
+Manual orchestration of AI coding agents is tedious when a project has many small, well-defined units of work. dispatch-tasks solves three problems:
+
+- **Context isolation** — each task runs in a fresh agent session so context from one task does not leak into another.
+- **Precision through planning** — an optional two-phase pipeline lets a read-only planner agent explore the codebase first, producing a focused execution plan that the executor agent follows.
+- **Automated record-keeping** — after each task, the markdown file is updated and a conventional commit is created, giving a clean, reviewable git history tied directly to the original task list.
+
+The tool is backend-agnostic: it supports multiple issue trackers via a datasource abstraction and multiple AI runtimes via a provider abstraction, letting teams use their existing tools without lock-in.
+
+## Key Features
+
+- **Backend-agnostic** provider and datasource abstractions — no vendor lock-in
+- **Two-phase planner-executor pipeline** — optional read-only planner explores the codebase before the executor makes changes (`--no-plan` skips planning)
+- **Markdown as source of truth** — task files use `- [ ]` checkbox syntax with `(P)`arallel and `(S)`erial execution mode prefixes
+- **Automatic conventional commits** — commit type (feat, fix, docs, refactor, etc.) is inferred from task text
+- **Real-time TUI dashboard** — terminal UI with spinner, progress bar, and per-task status tracking
+- **Three-tier configuration** — CLI flags > persistent config file (`~/.dispatch/config.json`) > defaults
+- **Configurable concurrency** — control parallel task execution per batch
+
+## Supported Backends
+
+### Providers (AI Agent Runtimes)
+
+| Provider | SDK | Prompt Model |
+|----------|-----|-------------|
+| OpenCode | `@opencode-ai/sdk` | Async — fire-and-forget + SSE event stream |
+| GitHub Copilot | `@github/copilot-sdk` | Synchronous — blocking request/response |
+
+### Datasources (Issue Trackers)
+
+| Datasource | Tool | Auth |
+|------------|------|------|
+| GitHub Issues | `gh` CLI | `gh auth login` |
+| Azure DevOps Work Items | `az` CLI | `az login` |
+| Local Markdown | Filesystem | None |
+
+## Installation
+
+```bash
+npm install -g dispatch-tasks
+```
+
+Or run directly without installing:
+
+```bash
+npx dispatch-tasks
+```
+
+## Quick Start
+
+dispatch-tasks operates as a three-stage pipeline:
+
+### 1. Generate specs from issues
+
+Fetch issues from your tracker and generate structured markdown specs with task checkboxes:
+
+```bash
+dispatch --spec 42,43,44
+```
+
+This creates spec files in `.dispatch/specs/` (e.g., `42-add-auth.md`) with `- [ ]` task items.
+
+### 2. Execute tasks
+
+Run the generated specs through the plan-and-execute pipeline:
+
+```bash
+dispatch ".dispatch/specs/*.md"
+```
+
+For each task, dispatch-tasks will:
+1. **Plan** — a read-only planner agent explores the codebase and produces a detailed execution plan
+2. **Execute** — an executor agent follows the plan to make code changes
+3. **Commit** — changes are staged and committed with an inferred conventional commit message
+4. **Mark complete** — the `- [ ]` checkbox is updated to `- [x]` in the source file
+
+### Common options
+
+```bash
+dispatch --no-plan "tasks.md"          # Skip the planning phase
+dispatch --provider copilot "tasks.md" # Use GitHub Copilot instead of OpenCode
+dispatch --source github "tasks.md"    # Explicitly set the datasource
+dispatch --concurrency 3 "tasks.md"    # Run up to 3 tasks in parallel
+```
+
+## Requirements
+
+| Requirement | Version | Notes |
+|-------------|---------|-------|
+| Node.js | >= 18 | Required — ESM-only runtime |
+| git | Any | Required — auto-detection, conventional commits |
+| `gh` CLI | Any | Optional — required for GitHub datasource |
+| `az` CLI + azure-devops extension | Any | Optional — required for Azure DevOps datasource |
+| OpenCode or GitHub Copilot | Varies | At least one AI agent runtime required |
+
+## Development
+
+```bash
+git clone https://github.com/PatrickRuddiman/Dispatch.git
+cd Dispatch
+npm install
+npm run build        # Build with tsup
+npm test             # Run tests with Vitest
+npm run typecheck    # Type-check with tsc --noEmit
+```
+
+Additional commands:
+
+```bash
+npm run dev          # Watch mode build
+npm run test:watch   # Watch mode tests
+```
+
+## License
+
+MIT
+
+## Documentation
+
+For comprehensive documentation, see the [`docs/`](./docs/) directory:
+
+- **[Documentation Index](./docs/index.md)** — entry point with key concepts and navigation guide
+- **[Architecture Overview](./docs/architecture.md)** — system topology, pipeline flows, design decisions, and component index

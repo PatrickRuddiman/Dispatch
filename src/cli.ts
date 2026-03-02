@@ -264,7 +264,7 @@ async function main() {
   }
 
   if (args.version) {
-    console.log("dispatch v0.1.0");
+    console.log("dispatch v0.0.1");
     process.exit(0);
   }
 
