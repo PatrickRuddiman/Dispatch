@@ -5,7 +5,7 @@ import type { Datasource, IssueDetails, IssueFetchOptions } from "../datasources
 import type { Task } from "../parser.js";
 import type { DispatchResult } from "../dispatcher.js";
 
-vi.mock("../logger.js", () => ({
+vi.mock("../helpers/logger.js", () => ({
   log: {
     info: vi.fn(),
     success: vi.fn(),
@@ -32,7 +32,7 @@ vi.mock("node:util", () => ({
 }));
 
 // Must import log AFTER vi.mock to get the mocked version
-import { log } from "../logger.js";
+import { log } from "../helpers/logger.js";
 
 beforeEach(() => {
   mockExecFile.mockReset();

@@ -5,7 +5,7 @@
 
 import type { ProviderInstance } from "./providers/interface.js";
 import type { Task } from "./parser.js";
-import { log } from "./logger.js";
+import { log } from "./helpers/logger.js";
 
 export interface DispatchResult {
   task: Task;

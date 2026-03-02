@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { withTimeout, TimeoutError } from "../timeout.js";
+import { withTimeout, TimeoutError } from "../helpers/timeout.js";
 
 // ─── TimeoutError ────────────────────────────────────────────────────
 

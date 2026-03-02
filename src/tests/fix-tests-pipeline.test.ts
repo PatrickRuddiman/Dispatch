@@ -10,7 +10,7 @@ const { mocks } = vi.hoisted(() => {
   };
 });
 
-vi.mock("../logger.js", () => ({
+vi.mock("../helpers/logger.js", () => ({
   log: {
     verbose: false,
     info: vi.fn(),
@@ -34,7 +34,7 @@ vi.mock("../providers/index.js", () => ({
   }),
 }));
 
-vi.mock("../cleanup.js", () => ({
+vi.mock("../helpers/cleanup.js", () => ({
   registerCleanup: vi.fn(),
 }));
 
@@ -56,9 +56,9 @@ import {
 } from "../orchestrator/fix-tests-pipeline.js";
 import { readFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
-import { log } from "../logger.js";
+import { log } from "../helpers/logger.js";
 import { bootProvider } from "../providers/index.js";
-import { registerCleanup } from "../cleanup.js";
+import { registerCleanup } from "../helpers/cleanup.js";
 
 beforeEach(() => {
   vi.clearAllMocks();

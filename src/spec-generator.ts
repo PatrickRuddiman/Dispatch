@@ -22,7 +22,7 @@ import { cpus, freemem } from "node:os";
 import type { DatasourceName } from "./datasources/interface.js";
 import { getDatasource, detectDatasource, DATASOURCE_NAMES } from "./datasources/index.js";
 import type { ProviderName } from "./providers/interface.js";
-import { log } from "./logger.js";
+import { log } from "./helpers/logger.js";
 
 export interface SpecOptions {
   /** Comma-separated issue numbers, glob pattern(s), or "list" to use datasource.list() */

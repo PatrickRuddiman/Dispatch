@@ -92,11 +92,11 @@ vi.mock("../tui.js", () => ({
   }),
 }));
 
-vi.mock("../cleanup.js", () => ({
+vi.mock("../helpers/cleanup.js", () => ({
   registerCleanup: vi.fn(),
 }));
 
-vi.mock("../logger.js", () => ({
+vi.mock("../helpers/logger.js", () => ({
   log: {
     verbose: false,
     info: vi.fn(),
@@ -151,7 +151,7 @@ vi.mock("node:fs/promises", () => ({
 // ─── Import function under test (after mocks) ──────────────────────
 
 import { runDispatchPipeline } from "../orchestrator/dispatch-pipeline.js";
-import { log } from "../logger.js";
+import { log } from "../helpers/logger.js";
 import { createTui } from "../tui.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────

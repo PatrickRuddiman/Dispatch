@@ -10,8 +10,8 @@ import { parseTaskFile, buildTaskContext, groupTasksByMode, type TaskFile } from
 import type { DispatchResult } from "../dispatcher.js";
 import { boot as bootPlanner, type PlanResult } from "../agents/planner.js";
 import { boot as bootExecutor } from "../agents/executor.js";
-import { log } from "../logger.js";
-import { registerCleanup } from "../cleanup.js";
+import { log } from "../helpers/logger.js";
+import { registerCleanup } from "../helpers/cleanup.js";
 import { createTui, type TuiState } from "../tui.js";
 import type { ProviderName } from "../providers/interface.js";
 import { bootProvider } from "../providers/index.js";
@@ -26,9 +26,9 @@ import {
   buildPrBody,
   buildPrTitle,
 } from "./datasource-helpers.js";
-import { withTimeout, TimeoutError } from "../timeout.js";
+import { withTimeout, TimeoutError } from "../helpers/timeout.js";
 import chalk from "chalk";
-import { elapsed, renderHeaderLines } from "../format.js";
+import { elapsed, renderHeaderLines } from "../helpers/format.js";
 
 /**
  * Run the full dispatch pipeline: discover tasks from a datasource,
@@ -327,6 +327,11 @@ export async function runDispatchPipeline(
           );
 
           results.push(...batchResults);
+
+          // Update TUI once the provider detects the actual model (lazy detection)
+          if (!tui.state.model && instance.model) {
+            tui.state.model = instance.model;
+          }
         }
       }
 

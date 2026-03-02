@@ -11,8 +11,8 @@
 
 import { resolve } from "node:path";
 import { boot as bootOrchestrator, type RawCliArgs } from "./orchestrator/runner.js";
-import { log } from "./logger.js";
-import { runCleanup } from "./cleanup.js";
+import { log } from "./helpers/logger.js";
+import { runCleanup } from "./helpers/cleanup.js";
 import type { ProviderName } from "./providers/interface.js";
 import type { DatasourceName } from "./datasources/interface.js";
 import { PROVIDER_NAMES } from "./providers/index.js";

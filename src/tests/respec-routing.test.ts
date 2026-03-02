@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 
 // ─── Module-level mocks (MUST come before imports of mocked modules) ───
 
-vi.mock("../logger.js", () => ({
+vi.mock("../helpers/logger.js", () => ({
   log: {
     info: vi.fn(),
     success: vi.fn(),
@@ -55,7 +55,7 @@ vi.mock("../orchestrator/dispatch-pipeline.js", () => ({
 // ─── Imports (AFTER vi.mock calls) ──────────────────────────────────
 
 import { boot, type RawCliArgs } from "../orchestrator/runner.js";
-import { log } from "../logger.js";
+import { log } from "../helpers/logger.js";
 import { resolveCliConfig } from "../orchestrator/cli-config.js";
 import { resolveSource } from "../spec-generator.js";
 import { getDatasource } from "../datasources/index.js";

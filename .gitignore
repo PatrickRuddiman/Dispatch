@@ -3,3 +3,15 @@ dist/
 *.tgz
 .DS_Store
 .dispatch/*
+
+# Secrets / environment
+.env
+.env.*
+.env.local
+.env.production
+
+# Keys / certificates
+*.pem
+*.key
+*.p12
+*.pfx

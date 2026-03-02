@@ -23,7 +23,7 @@ import {
   type Event as SdkEvent,
 } from "@opencode-ai/sdk";
 import type { ProviderInstance, ProviderBootOptions } from "./interface.js";
-import { log } from "../logger.js";
+import { log } from "../helpers/logger.js";
 
 /**
  * Boot an OpenCode instance — either connect to a running server

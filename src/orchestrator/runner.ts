@@ -9,7 +9,7 @@ import type { DatasourceName } from "../datasources/interface.js";
 import type { SpecOptions, SpecSummary } from "../spec-generator.js";
 import { defaultConcurrency, resolveSource } from "../spec-generator.js";
 import { getDatasource } from "../datasources/index.js";
-import { log } from "../logger.js";
+import { log } from "../helpers/logger.js";
 import { resolveCliConfig } from "./cli-config.js";
 import { runSpecPipeline } from "./spec-pipeline.js";
 import { runDispatchPipeline } from "./dispatch-pipeline.js";
