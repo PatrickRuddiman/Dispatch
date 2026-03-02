@@ -79,7 +79,7 @@ The function takes three parameters:
 | includes the spec agent preamble | Contains `"You are a **spec agent**"` |
 | includes the two-stage pipeline explanation | Mentions `planner agent` and `coder agent` |
 | includes all required spec sections in the template | All 7 H2 sections present |
-| includes `(P)`/`(S)` tagging instructions | Parallel/serial mode instructions ([parser](../task-parsing/overview.md)) |
+| includes `(P)`/`(S)`/`(I)` tagging instructions | Parallel/serial/isolated mode instructions ([parser](../task-parsing/overview.md)) |
 | includes the task example | Example tasks with `(P)` and `(S)` prefixes |
 | includes all five instructions | Numbered instruction list 1-5 |
 | does not include issue-specific metadata | No `**Number:**`, `**State:**`, `**URL:**`, etc. |
@@ -105,7 +105,7 @@ The function takes three parameters:
 3. Explain WHAT, WHY, and HOW (strategically)
 4. Detail integration points
 5. Keep tasks atomic and ordered
-6. Tag every task with `(P)` or `(S)`
+6. Tag every task with `(P)`, `(S)`, or `(I)`
 7. Keep the markdown clean
 
 ### validateSpecStructure (11 tests)
@@ -214,8 +214,8 @@ the [issue fetchers](../issue-fetching/overview.md) and [AI provider](../shared-
 - [Spec generation overview](../spec-generation/overview.md) — full pipeline documentation
 - [Spec generation integrations](../spec-generation/integrations.md) — external dependencies
 - [Architecture overview](../architecture.md) — spec generation pipeline diagram
-- [Parser tests](parser-tests.md) — `(P)`/`(S)` mode prefix testing (consumer of spec output)
-- [Task parsing overview](../task-parsing/overview.md) — how `(P)`/`(S)` mode prefixes are parsed
+- [Parser tests](parser-tests.md) — `(P)`/`(S)`/`(I)` mode prefix testing (consumer of spec output)
+- [Task parsing overview](../task-parsing/overview.md) — how `(P)`/`(S)`/`(I)` mode prefixes are parsed
 - [Issue fetching overview](../issue-fetching/overview.md) — issue fetchers consumed by `generateSpecs()`
 - [Provider interface](../shared-types/provider.md) — AI provider used by spec generation
 - [Datasource system](../datasource-system/overview.md) — datasources that feed issue data into spec generation

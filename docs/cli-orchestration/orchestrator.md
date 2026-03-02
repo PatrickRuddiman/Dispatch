@@ -128,7 +128,7 @@ flowchart TD
 
 The orchestrator uses a **group-aware batch-sequential** concurrency model.
 Within each issue's tasks, tasks are first partitioned into
-execution groups by their `(P)` / `(S)` mode prefix, then each group is
+execution groups by their `(P)` / `(S)` / `(I)` mode prefix, then each group is
 dispatched using a batch-sequential loop.
 
 ### How grouping works
@@ -138,15 +138,17 @@ Before dispatch begins, `groupTasksByMode(allTasks)` (from
 flat task list into contiguous groups of same-mode tasks:
 
 - **`(P)` (parallel)** tasks are grouped together.
-- **`(S)` (serial)** tasks each become a group of size 1.
+- **`(S)` (serial)** tasks cap the current group and start a new one.
+- **`(I)` (isolated)** tasks flush the current group, run alone in a solo group,
+  then a new group begins.
 - Tasks with no prefix default to parallel mode.
 
-For example, given tasks `[A(P), B(P), C(S), D(S), E(P)]`, grouping produces:
+For example, given tasks `[A(P), B(P), C(I), D(S), E(P)]`, grouping produces:
 
 | Group | Tasks | Effective concurrency |
 |-------|-------|----------------------|
 | 1 | `[A, B]` | Up to `--concurrency` |
-| 2 | `[C]` | 1 (serial group) |
+| 2 | `[C]` | 1 (isolated group) |
 | 3 | `[D]` | 1 (serial group) |
 | 4 | `[E]` | Up to `--concurrency` |
 
@@ -173,12 +175,18 @@ for each group in groups:
    next batch within the same group.
 5. When the group queue is empty, the next group begins.
 
-### Serial group behavior
+### Serial and isolated group behavior
 
 A serial `(S)` group always contains exactly one task. Combined with the
 batch-sequential loop, this means the task runs alone — no other task from any
 group can overlap with it. This is useful for tasks that must not run
 concurrently with anything else (e.g., database migrations, config changes).
+
+An isolated `(I)` group also always contains exactly one task, but provides a
+stronger guarantee: it flushes all preceding accumulated tasks into their own
+group before running. This ensures the isolated task does not share a group
+with any preceding parallel tasks, making it ideal for tasks like running
+tests that depend on all prior file changes being complete.
 
 ### Performance implications
 
@@ -488,7 +496,7 @@ Returned from `orchestrate()` to the CLI:
 - [Cleanup Registry](../shared-types/cleanup.md) -- process-level cleanup for
   graceful provider shutdown
 - [Markdown Syntax Reference](../task-parsing/markdown-syntax.md) -- supported
-  checkbox formats and `(P)`/`(S)` mode prefixes that drive grouping
+  checkbox formats and `(P)`/`(S)`/`(I)` mode prefixes that drive grouping
 - [Git Operations](../planning-and-dispatch/git.md) -- how `commitTask()` creates
   conventional commits after task completion
 - [Shared Utilities](../shared-utilities/overview.md) -- `slugify` for file/branch

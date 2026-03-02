@@ -85,9 +85,9 @@ happens **after** each task's agent execution completes (`src/agents/orchestrato
 and the orchestrator does **not** re-parse the file between completions within
 the same batch.
 
-Serial `(S)` groups always contain exactly one task, so they never produce
-concurrent `markTaskComplete` calls. The race condition risk is limited to
-parallel `(P)` groups running with `--concurrency > 1`.
+Serial `(S)` and isolated `(I)` groups always contain exactly one task, so they
+never produce concurrent `markTaskComplete` calls. The race condition risk is
+limited to parallel `(P)` groups running with `--concurrency > 1`.
 
 See the [Orchestrator concurrency model](../cli-orchestration/orchestrator.md#concurrency-model)
 for full details on the group-aware batch-sequential algorithm.

@@ -55,23 +55,24 @@ verified by the negative test cases in `src/parser.test.ts:182-196` (see
 | No space after checkbox | `- [ ]Task` | Requires `\s+` between `]` and text |
 | Empty task text | `- [ ] ` | The `.+` requires at least one character |
 
-## Parallel and serial mode prefixes
+## Parallel, serial, and isolated mode prefixes
 
-Tasks can be annotated with a `(P)` or `(S)` prefix to control whether they
-execute in parallel or serial within the dispatch pipeline. This prefix appears
-immediately after the checkbox and before the task description.
+Tasks can be annotated with a `(P)`, `(S)`, or `(I)` prefix to control whether
+they execute in parallel, serial, or isolated mode within the dispatch pipeline.
+This prefix appears immediately after the checkbox and before the task
+description.
 
 ### Regex definition
 
 The mode prefix is parsed by `MODE_PREFIX_RE` defined at `src/parser.ts:36`:
 
 ```
-MODE_PREFIX_RE = /^\(([PS])\)\s+/
+MODE_PREFIX_RE = /^\(([PSI])\)\s+/
 ```
 
 This regex is applied to the **extracted task text** (group 2 of `UNCHECKED_RE`)
 after trimming, not to the raw line. It matches a literal `(`, a single letter
-`P` or `S`, a literal `)`, followed by one or more spaces.
+`P`, `S`, or `I`, a literal `)`, followed by one or more spaces.
 
 ### Syntax
 
@@ -79,15 +80,16 @@ after trimming, not to the raw line. It matches a literal `(`, a single letter
 |---|---|---|---|
 | Parallel prefix | `- [ ] (P) Run tests` | `"parallel"` | `"Run tests"` |
 | Serial prefix | `- [ ] (S) Deploy to staging` | `"serial"` | `"Deploy to staging"` |
+| Isolated prefix | `- [ ] (I) Run tests` | `"isolated"` | `"Run tests"` |
 | No prefix | `- [ ] Fix the login bug` | `"serial"` (default) | `"Fix the login bug"` |
 | Lowercase (not matched) | `- [ ] (p) Run tests` | `"serial"` (default) | `"(p) Run tests"` |
 
 **Key behaviors:**
 
-- The prefix is **case-sensitive**: only uppercase `(P)` and `(S)` are
-  recognized. Lowercase `(p)` or `(s)` is treated as part of the task text.
+- The prefix is **case-sensitive**: only uppercase `(P)`, `(S)`, and `(I)` are
+  recognized. Lowercase `(p)`, `(s)`, or `(i)` is treated as part of the task text.
 - The prefix is **stripped** from the `text` field. The stored `text` does not
-  include `(P)` or `(S)`.
+  include `(P)`, `(S)`, or `(I)`.
 - When no prefix is present, the task defaults to `mode: "serial"`.
 - A space is required between the closing `)` and the task description.
 
@@ -102,6 +104,9 @@ groups consecutive tasks into execution batches:
 - **Serial** (`(S)` or no prefix) tasks cap the current group and start a new
   one. The orchestrator waits for the entire group to complete before starting
   the next group.
+- **Isolated** (`(I)`) tasks flush the current group (so preceding tasks
+  complete first), then run alone in their own group, then a new group begins
+  for subsequent tasks. This provides a strict execution barrier.
 
 ### Example task file with mode prefixes
 
@@ -111,22 +116,22 @@ groups consecutive tasks into execution batches:
 - [ ] (P) Run unit tests
 - [ ] (P) Run integration tests
 - [ ] (P) Run linting checks
-- [ ] (S) Merge results and generate report
+- [ ] (I) Merge results and generate report
 - [ ] (P) Deploy to staging
 - [ ] (P) Run smoke tests
 - [ ] Notify team on Slack
 ```
 
-This produces three execution groups:
+This produces four execution groups:
 
-1. **Group 1** (4 tasks): Run unit tests, Run integration tests, Run linting
-   checks, Merge results and generate report -- the first three run in parallel
-   (up to `--concurrency`), the serial task caps the group.
-2. **Group 2** (2 tasks): Deploy to staging, Run smoke tests -- both run in
+1. **Group 1** (3 tasks): Run unit tests, Run integration tests, Run linting
+   checks -- all three run in parallel (up to `--concurrency`).
+2. **Group 2** (1 task): Merge results and generate report -- the isolated
+   `(I)` task flushes the preceding group and runs alone.
+3. **Group 3** (2 tasks): Deploy to staging, Run smoke tests -- both run in
    parallel within the group.
-3. **Group 3** (1 task): Notify team on Slack -- serial, runs alone since the
-   trailing parallel tasks in group 2 were flushed, and this task (with no
-   prefix, defaulting to serial) forms its own group.
+4. **Group 4** (1 task): Notify team on Slack -- serial (no prefix defaults to
+   serial), caps the previous group and runs alone.
 
 See [Orchestrator — Concurrency Model](../cli-orchestration/orchestrator.md#concurrency-model)
 for how the orchestrator processes these groups.

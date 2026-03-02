@@ -27,8 +27,8 @@ repositories that use GitHub, Azure DevOps, or local markdown-based workflows.
 
 - **Task file**: A markdown file containing `- [ ] ...` checkbox items. Each
   unchecked item is a unit of work dispatched to an AI agent. Tasks can carry
-  an optional `(P)` (parallel) or `(S)` (serial) mode prefix that controls
-  execution batching.
+  an optional `(P)` (parallel), `(S)` (serial), or `(I)` (isolated) mode prefix
+  that controls execution batching.
 
 - **Datasource**: A strategy-pattern abstraction that normalizes access to work
   items across GitHub Issues (`gh` CLI), Azure DevOps Work Items (`az` CLI),
@@ -93,7 +93,7 @@ for adding new providers.
 
 **Task parsing** documents the parser that converts markdown checkbox syntax
 into structured `Task` and `TaskFile` objects. It covers supported markdown
-formats, the `(P)`/`(S)` execution mode prefixes, the API for extracting and
+formats, the `(P)`/`(S)`/`(I)` execution mode prefixes, the API for extracting and
 completing tasks, and concurrency concerns around file mutation.
 
 **Planning and dispatch** explains the core execution engine: the optional

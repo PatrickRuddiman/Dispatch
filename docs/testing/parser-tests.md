@@ -72,7 +72,7 @@ Each extracted task has these fields:
 | `line` | `number` | 1-based line number in the source file |
 | `raw` | `string` | Original line including indentation and checkbox |
 | `file` | `string` | Absolute file path |
-| `mode` | `"parallel" \| "serial" \| undefined` | Execution mode from prefix |
+| `mode` | `"parallel" \| "serial" \| "isolated" \| undefined` | Execution mode from prefix |
 
 ### parseTaskContent — mode extraction (17 tests)
 
@@ -110,7 +110,7 @@ flowchart TD
 
 **Mode prefix rules:**
 
-- Case-sensitive: only uppercase `(P)` and `(S)` are recognized
+- Case-sensitive: only uppercase `(P)`, `(S)`, and `(I)` are recognized
 - A space (or tab) is required after the closing parenthesis
 - Only the first prefix is consumed when multiple appear
 - `(P)` or `(S)` appearing mid-text (not at start) is not treated as a prefix
@@ -238,7 +238,7 @@ creates a unique `/tmp/dispatch-test-*` directory and removes it in `afterEach`.
 - [Shared parser types](../shared-types/parser.md) — `Task`, `TaskFile`, and exported function signatures
 - [Planning & Dispatch overview](../planning-and-dispatch/overview.md) — the planner and dispatcher that consume parser output
 - [Task context and lifecycle](../planning-and-dispatch/task-context-and-lifecycle.md) — task lifecycle from parsing through dispatch
-- [Spec generator tests](spec-generator-tests.md) — `(P)`/`(S)` prefix instructions in prompts
+- [Spec generator tests](spec-generator-tests.md) — `(P)`/`(S)`/`(I)` prefix instructions in prompts
 - [Configuration tests](config-tests.md) — config I/O, validation, and merge
   precedence tests for comparison
 - [Format utility tests](format-tests.md) — `elapsed()` duration formatting
