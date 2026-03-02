@@ -102,6 +102,11 @@ vi.mock("glob", () => ({
   glob: mocks.mockGlob,
 }));
 
+vi.mock("../helpers/confirm-large-batch.js", () => ({
+  LARGE_BATCH_THRESHOLD: 100,
+  confirmLargeBatch: vi.fn().mockResolvedValue(true),
+}));
+
 // ─── Import function under test (after mocks) ──────────────────────
 
 import { runSpecPipeline } from "../orchestrator/spec-pipeline.js";
@@ -110,6 +115,7 @@ import { isIssueNumbers, isGlobOrFilePath, resolveSource } from "../spec-generat
 import { getDatasource } from "../datasources/index.js";
 import { readFile, rename, unlink } from "node:fs/promises";
 import { extractTitle } from "../datasources/md.js";
+import { confirmLargeBatch } from "../helpers/confirm-large-batch.js";
 import type { SpecOptions } from "../spec-generator.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -460,6 +466,40 @@ describe("runSpecPipeline", () => {
 
       expect(rename).toHaveBeenCalled();
       expect(result.files.length).toBe(1);
+    });
+  });
+
+  // ── Large batch confirmation ────────────────────────────────────
+
+  describe("large batch confirmation", () => {
+    it("prompts for confirmation when validItems exceeds threshold", async () => {
+      const issueNums = Array.from({ length: 101 }, (_, i) => String(i + 1)).join(",");
+      mocks.mockFetch.mockResolvedValue({
+        number: "1",
+        title: "Test Issue",
+        body: "Issue body",
+        labels: [],
+        state: "open",
+        url: "https://example.com/1",
+        comments: [],
+        acceptanceCriteria: "",
+      });
+
+      await runSpecPipeline(baseOpts({ issues: issueNums, concurrency: 10 }));
+
+      expect(confirmLargeBatch).toHaveBeenCalledWith(101);
+    });
+
+    it("returns early summary when user declines confirmation", async () => {
+      vi.mocked(confirmLargeBatch).mockResolvedValue(false);
+
+      const result = await runSpecPipeline(baseOpts({ issues: "1,2", concurrency: 1 }));
+
+      expect(result.total).toBe(0);
+      expect(result.generated).toBe(0);
+      expect(result.failed).toBe(0);
+      expect(result.files).toEqual([]);
+      expect(mocks.mockGenerate).not.toHaveBeenCalled();
     });
   });
 });

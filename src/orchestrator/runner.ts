@@ -10,6 +10,7 @@ import type { SpecOptions, SpecSummary } from "../spec-generator.js";
 import { defaultConcurrency, resolveSource } from "../spec-generator.js";
 import { getDatasource } from "../datasources/index.js";
 import { log } from "../helpers/logger.js";
+import { confirmLargeBatch } from "../helpers/confirm-large-batch.js";
 import { resolveCliConfig } from "./cli-config.js";
 import { runSpecPipeline } from "./spec-pipeline.js";
 import { runDispatchPipeline } from "./dispatch-pipeline.js";
@@ -172,6 +173,11 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
           const identifiers = existing.map((item) => item.number);
           const allNumeric = identifiers.every((id) => /^\d+$/.test(id));
           issues = allNumeric ? identifiers.join(",") : identifiers;
+
+          const confirmed = await confirmLargeBatch(existing.length);
+          if (!confirmed) {
+            process.exit(0);
+          }
         } else {
           // With arguments: pass directly (same as --spec)
           issues = respecArgs;
