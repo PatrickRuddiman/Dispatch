@@ -26,13 +26,13 @@ import type { DatasourceName } from "./datasources/interface.js";
  * selection, conditionally prompts for Azure DevOps fields, offers
  * advanced settings, displays a summary, and saves on confirmation.
  */
-export async function runInteractiveConfigWizard(): Promise<void> {
+export async function runInteractiveConfigWizard(configDir?: string): Promise<void> {
   console.log();
   log.info(chalk.bold("Dispatch Configuration Wizard"));
   console.log();
 
   // ── Load existing config ───────────────────────────────────
-  const existing = await loadConfig();
+  const existing = await loadConfig(configDir);
   const hasExisting = Object.keys(existing).length > 0;
 
   if (hasExisting) {
@@ -203,7 +203,7 @@ export async function runInteractiveConfigWizard(): Promise<void> {
   });
 
   if (shouldSave) {
-    await saveConfig(newConfig);
+    await saveConfig(newConfig, configDir);
     log.success("Configuration saved.");
   } else {
     log.dim("Configuration not saved.");

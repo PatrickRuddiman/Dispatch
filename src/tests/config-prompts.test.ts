@@ -49,6 +49,7 @@ describe("runInteractiveConfigWizard", () => {
     await runInteractiveConfigWizard();
     expect(saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({ provider: "copilot", source: "github" }),
+      undefined,
     );
     // No reconfigure prompt since config was empty
     expect(confirm).not.toHaveBeenCalledWith(
@@ -76,6 +77,7 @@ describe("runInteractiveConfigWizard", () => {
         org: "https://dev.azure.com/myorg",
         project: "my-project",
       }),
+      undefined,
     );
   });
 
@@ -137,6 +139,7 @@ describe("runInteractiveConfigWizard", () => {
         planTimeout: 10,
         planRetries: 2,
       }),
+      undefined,
     );
   });
 
@@ -155,6 +158,7 @@ describe("runInteractiveConfigWizard", () => {
     await runInteractiveConfigWizard();
     expect(saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({ provider: "copilot", source: "md" }),
+      undefined,
     );
   });
 

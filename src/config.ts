@@ -1,11 +1,10 @@
 /**
  * Configuration data layer for Dispatch.
  *
- * Manages persistent user configuration stored in ~/.dispatch/config.json.
+ * Manages persistent user configuration stored in {CWD}/.dispatch/config.json.
  * Provides functions for loading, saving, and validating config values.
  */
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { PROVIDER_NAMES } from "./providers/index.js";
 import { DATASOURCE_NAMES } from "./datasources/index.js";
@@ -48,7 +47,7 @@ export type ConfigKey = (typeof CONFIG_KEYS)[number];
  * Accepts an optional `configDir` override for testing.
  */
 export function getConfigPath(configDir?: string): string {
-  const dir = configDir ?? join(homedir(), ".dispatch");
+  const dir = configDir ?? join(process.cwd(), ".dispatch");
   return join(dir, "config.json");
 }
 
@@ -141,6 +140,6 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
  *
  * Launches the interactive configuration wizard.
  */
-export async function handleConfigCommand(_argv: string[]): Promise<void> {
-  await runInteractiveConfigWizard();
+export async function handleConfigCommand(_argv: string[], configDir?: string): Promise<void> {
+  await runInteractiveConfigWizard(configDir);
 }

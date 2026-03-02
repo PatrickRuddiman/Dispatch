@@ -7,6 +7,7 @@
  * coordinator thin and this logic independently testable.
  */
 
+import { join } from "node:path";
 import { log } from "../helpers/logger.js";
 import { loadConfig, type DispatchConfig } from "../config.js";
 import type { RawCliArgs } from "./runner.js";
@@ -15,7 +16,7 @@ import { detectDatasource } from "../datasources/index.js";
 /**
  * Config key → RawCliArgs field mapping.
  *
- * Maps persistent config keys (from `~/.dispatch/config.json`) to their
+ * Maps persistent config keys (from `{cwd}/.dispatch/config.json`) to their
  * corresponding field names on `RawCliArgs`. Used during the merge step
  * to fill in CLI flag defaults from the config file.
  */
@@ -34,7 +35,7 @@ const CONFIG_TO_CLI: Record<string, keyof RawCliArgs> = {
  * Resolve raw CLI arguments into a fully-merged and validated options
  * object, ready for pipeline delegation.
  *
- * 1. Loads the persistent config file (`~/.dispatch/config.json`)
+ * 1. Loads the persistent config file (`{cwd}/.dispatch/config.json`)
  * 2. Merges config defaults beneath CLI flags (CLI wins when explicit)
  * 3. Validates that mandatory configuration (provider + source) is present
  *    — calls `process.exit(1)` on validation failure, matching current behavior
@@ -50,7 +51,8 @@ export async function resolveCliConfig(args: RawCliArgs): Promise<RawCliArgs> {
   const { explicitFlags } = args;
 
   // ── Load and merge config-file defaults beneath CLI flags ───
-  const config = await loadConfig();
+  const configDir = join(args.cwd, ".dispatch");
+  const config = await loadConfig(configDir);
 
   const merged = { ...args };
   for (const [configKey, cliField] of Object.entries(CONFIG_TO_CLI)) {
