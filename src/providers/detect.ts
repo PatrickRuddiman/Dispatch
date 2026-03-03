@@ -17,6 +17,7 @@ export const PROVIDER_BINARIES: Record<ProviderName, string> = {
   opencode: "opencode",
   copilot: "copilot",
   claude: "claude",
+  codex: "codex",
 };
 
 /**
