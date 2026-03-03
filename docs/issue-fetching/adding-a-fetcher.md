@@ -223,3 +223,8 @@ free of implementation imports at the cost of manual synchronization.
   guide for the AI provider abstraction layer
 - [Spec Generation](../spec-generation/overview.md) -- The pipeline that
   consumes fetched issue data
+- [Prerequisites — External Integrations](../prereqs-and-safety/integrations.md) --
+  How CLI tools (`gh`, `az`) are detected at startup; new fetcher CLI
+  dependencies should follow the same `execFile("tool", ["--version"])` pattern
+- [Provider Binary Detection](../prereqs-and-safety/provider-detection.md) --
+  Similar binary detection pattern used for AI provider tools

@@ -318,6 +318,10 @@ The parser uses `readFile` and `writeFile` from `node:fs/promises`:
   breakdown of all 62 parser tests verifying these function contracts
 - [Shared Parser Types](../shared-types/parser.md) -- summary of types and
   functions from the shared-types perspective
+- [Run State Persistence](../git-and-worktree/run-state.md) -- The `buildTaskId`
+  function that constructs task identifiers from `Task.file` and `Task.line`
+- [Timeout Utility](../shared-utilities/timeout.md) -- Deadline enforcement
+  applied to planner calls that consume `buildTaskContext` output
 - [Task Context & Lifecycle](../planning-and-dispatch/task-context-and-lifecycle.md) --
   how the parser functions are used within the dispatch pipeline
 - [Configuration System](../cli-orchestration/configuration.md) -- `--concurrency`

@@ -293,5 +293,9 @@ This would give each cleanup function 5 seconds before the loop moves on.
   defines the `cleanup()` method
 - [Adding a Provider](../provider-system/adding-a-provider.md) -- Guide for
   implementing cleanup idempotency in new providers
+- [Prerequisites — External Integrations](../prereqs-and-safety/integrations.md) --
+  The `execFile` patterns and external CLI tool detection that run before cleanup
+  registration; understanding the pipeline startup sequence helps contextualize
+  when cleanup is registered
 - [Testing Overview](../testing/overview.md) -- Test coverage (note: the
   cleanup registry is not unit tested)

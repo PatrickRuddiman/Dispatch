@@ -144,3 +144,7 @@ The following edge case is not covered by the current test suite:
   demonstrating similar pure-logic and I/O testing patterns
 - [Datasource Integrations](../datasource-system/integrations.md) -- Slug
   construction in branch naming that depends on the slugify function
+- [Format Utility Tests](../testing/format-tests.md) -- Another example of
+  pure-function testing patterns (similar to slugify tests)
+- [Spec Generator Tests](../testing/spec-generator-tests.md) -- Test suite
+  demonstrating pure-logic validation testing patterns

@@ -100,8 +100,9 @@ only the task metadata and working directory.
 | Module | Responsibility | Source |
 |--------|---------------|--------|
 | `parser.ts` | Extract tasks from markdown; build filtered context; mark tasks complete | `src/parser.ts` — see [Task Parsing](../task-parsing/overview.md) and [API Reference](../task-parsing/api-reference.md) |
-| `planner.ts` | Run a read-only AI session to produce an execution plan | `src/planner.ts` — see [Planner Agent](./planner.md) |
+| `planner.ts` | Run a read-only AI session to produce an execution plan | `src/agents/planner.ts` — see [Planner Agent](./planner.md) |
 | `dispatcher.ts` | Send tasks to an AI agent in isolated sessions | `src/dispatcher.ts` — see [Dispatcher](./dispatcher.md) |
+| `executor.ts` | Coordinate dispatch + task completion for a single task | `src/agents/executor.ts` — see [Executor Agent](./executor.md) |
 | `git.ts` | Stage changes and create conventional commits | `src/git.ts` — see [Git Operations](./git.md) |
 
 See the [Testing Guide](../task-parsing/testing-guide.md) for how the parser
@@ -145,6 +146,21 @@ regex pattern matching, following the
 
 See [Git Operations](./git.md#commit-type-inference) for the full type mapping.
 
+### Worktree isolation for `(I)` mode tasks
+
+When tasks are marked with the `(I)` isolated mode prefix, the orchestrator
+creates a dedicated git worktree and passes a `worktreeRoot` path through the
+pipeline. Both the [planner](./planner.md#worktree-isolation) and
+[dispatcher](./dispatcher.md#worktree-isolation) append prompt instructions
+that confine the agent to the worktree directory. The
+[executor](./executor.md) passes the `worktreeRoot` through to the dispatcher
+via its `ExecuteInput`.
+
+This ensures isolated tasks cannot interfere with files outside their worktree,
+which is critical when multiple isolated tasks run in parallel across different
+worktrees. Enforcement is prompt-only — see the planner and dispatcher docs for
+limitations.
+
 ## Concurrency model
 
 The [orchestrator](../cli-orchestration/orchestrator.md) processes tasks in batches controlled by `--concurrency N`
@@ -159,6 +175,7 @@ concurrency-related concerns.
 
 - [Dispatcher](./dispatcher.md) -- Session isolation, prompt construction,
   success verification
+- [Executor Agent](./executor.md) -- Orchestration of dispatch + task completion
 - [Planner Agent](./planner.md) -- Two-phase architecture, read-only
   enforcement, file context
 - [Git Operations](./git.md) -- Conventional commits, staging behavior,
@@ -190,7 +207,18 @@ concurrency-related concerns.
   run and extend parser tests
 - [Spec Generation](../spec-generation/overview.md) -- How the spec pipeline
   produces the markdown task files consumed by this pipeline
+- [Datasource System](../datasource-system/overview.md) -- The datasource
+  abstraction that provides work items to the pipeline and manages git
+  lifecycle operations (branching, committing, pushing, PR creation)
+- [Datasource Helpers](../datasource-system/datasource-helpers.md) -- Temp file
+  writing, issue ID extraction, and auto-close logic bridging the datasource
+  layer with the orchestrator
 - [Testing Overview](../testing/overview.md) -- Test suite structure (note:
   planner, dispatcher, and git modules are not currently unit-tested)
 - [Parser Tests](../testing/parser-tests.md) -- Detailed breakdown of all 62
   parser tests covering the functions this pipeline depends on
+- [Prerequisites & Safety Checks](../prereqs-and-safety/overview.md) --
+  Environment validation (Node.js, git, CLI tools) that runs before this
+  pipeline starts
+- [Git & Worktree Management](../git-and-worktree/overview.md) -- Worktree
+  lifecycle and isolation model used by `(I)` mode tasks in this pipeline
