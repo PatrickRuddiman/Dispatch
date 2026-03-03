@@ -35,6 +35,7 @@ export interface OrchestrateRunOptions {
   workItemType?: string;
   planTimeout?: number;
   planRetries?: number;
+  retries?: number;
 }
 
 /** Raw CLI arguments before config resolution. */
@@ -61,6 +62,7 @@ export interface RawCliArgs {
   planTimeout?: number;
   planRetries?: number;
   testTimeout?: number;
+  retries?: number;
   outputDir?: string;
   explicitFlags: Set<string>;
 }
@@ -218,7 +220,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
         issueIds: m.issueIds, concurrency: m.concurrency ?? defaultConcurrency(),
         dryRun: m.dryRun, noPlan: m.noPlan, noBranch: m.noBranch, noWorktree: m.noWorktree, provider: m.provider,
         model: m.model, serverUrl: m.serverUrl, source: m.issueSource, org: m.org, project: m.project,
-        workItemType: m.workItemType, planTimeout: m.planTimeout, planRetries: m.planRetries,
+        workItemType: m.workItemType, planTimeout: m.planTimeout, planRetries: m.planRetries, retries: m.retries,
       });
     },
   };

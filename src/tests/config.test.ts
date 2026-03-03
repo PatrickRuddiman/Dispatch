@@ -229,6 +229,28 @@ describe("validateConfigValue", () => {
     expect(empty).not.toBe(null);
   });
 
+  it("accepts valid retries (non-negative integer)", () => {
+    expect(validateConfigValue("retries", "0")).toBe(null);
+    expect(validateConfigValue("retries", "1")).toBe(null);
+    expect(validateConfigValue("retries", "5")).toBe(null);
+  });
+
+  it("rejects negative retries", () => {
+    const negative = validateConfigValue("retries", "-1");
+    expect(negative).not.toBe(null);
+    expect(negative).toContain("non-negative integer");
+  });
+
+  it("rejects non-integer retries", () => {
+    const decimal = validateConfigValue("retries", "1.5");
+    expect(decimal).not.toBe(null);
+    expect(decimal).toContain("non-negative integer");
+
+    const text = validateConfigValue("retries", "abc");
+    expect(text).not.toBe(null);
+    expect(text).toContain("non-negative integer");
+  });
+
   it("accepts valid planRetries (non-negative integer)", () => {
     expect(validateConfigValue("planRetries", "0")).toBe(null);
     expect(validateConfigValue("planRetries", "1")).toBe(null);

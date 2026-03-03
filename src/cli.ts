@@ -19,6 +19,8 @@ import { PROVIDER_NAMES } from "./providers/index.js";
 import { DATASOURCE_NAMES } from "./datasources/index.js";
 import { handleConfigCommand } from "./config.js";
 
+export const MAX_CONCURRENCY = 64;
+
 const HELP = `
   dispatch — AI agent orchestration CLI
 
@@ -37,11 +39,12 @@ const HELP = `
     --no-plan              Skip the planner agent, dispatch directly
     --no-branch            Skip branch creation, push, and PR lifecycle
     --no-worktree          Skip git worktree isolation for parallel issues
-    --concurrency <n>      Max parallel dispatches (default: min(cpus, freeMB/500))
+    --concurrency <n>      Max parallel dispatches (default: min(cpus, freeMB/500), max: 64)
     --provider <name>      Agent backend: ${PROVIDER_NAMES.join(", ")} (default: opencode)
     --server-url <url>     URL of a running provider server
     --plan-timeout <min>   Planning timeout in minutes (default: 10)
-    --plan-retries <n>     Retry attempts after planning timeout (default: 1)
+    --retries <n>          Retry attempts for all agents (default: 2)
+    --plan-retries <n>     Retry attempts after planning timeout (overrides --retries for planner)
     --test-timeout <min>   Test timeout in minutes (default: 5)
     --cwd <dir>            Working directory (default: cwd)
 
@@ -183,6 +186,10 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
         log.error("--concurrency must be a positive integer");
         process.exit(1);
       }
+      if (val > MAX_CONCURRENCY) {
+        log.error(`--concurrency must not exceed ${MAX_CONCURRENCY}`);
+        process.exit(1);
+      }
       args.concurrency = val;
       explicitFlags.add("concurrency");
     } else if (arg === "--provider") {
@@ -207,6 +214,15 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
       }
       args.planTimeout = val;
       explicitFlags.add("planTimeout");
+    } else if (arg === "--retries") {
+      i++;
+      const val = parseInt(argv[i], 10);
+      if (isNaN(val) || val < 0) {
+        log.error("--retries must be a non-negative integer");
+        process.exit(1);
+      }
+      args.retries = val;
+      explicitFlags.add("retries");
     } else if (arg === "--plan-retries") {
       i++;
       const val = parseInt(argv[i], 10);
