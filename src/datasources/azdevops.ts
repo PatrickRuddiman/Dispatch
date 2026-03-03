@@ -57,7 +57,12 @@ export const datasource: Datasource = {
       cwd: opts.cwd || process.cwd(),
     });
 
-    const data = JSON.parse(stdout);
+    let data;
+    try {
+      data = JSON.parse(stdout);
+    } catch {
+      throw new Error(`Failed to parse Azure CLI output: ${stdout.slice(0, 200)}`);
+    }
     const items: IssueDetails[] = [];
 
     if (Array.isArray(data)) {
@@ -98,7 +103,12 @@ export const datasource: Datasource = {
       cwd: opts.cwd || process.cwd(),
     });
 
-    const item = JSON.parse(stdout);
+    let item;
+    try {
+      item = JSON.parse(stdout);
+    } catch {
+      throw new Error(`Failed to parse Azure CLI output: ${stdout.slice(0, 200)}`);
+    }
     const fields = item.fields ?? {};
 
     const comments = await fetchComments(issueId, opts);
@@ -193,7 +203,12 @@ export const datasource: Datasource = {
       cwd: opts.cwd || process.cwd(),
     });
 
-    const item = JSON.parse(stdout);
+    let item;
+    try {
+      item = JSON.parse(stdout);
+    } catch {
+      throw new Error(`Failed to parse Azure CLI output: ${stdout.slice(0, 200)}`);
+    }
     const fields = item.fields ?? {};
 
     return {
@@ -300,7 +315,12 @@ export const datasource: Datasource = {
         ],
         { cwd: opts.cwd },
       );
-      const pr = JSON.parse(stdout);
+      let pr;
+      try {
+        pr = JSON.parse(stdout);
+      } catch {
+        throw new Error(`Failed to parse Azure CLI output: ${stdout.slice(0, 200)}`);
+      }
       return pr.url ?? "";
     } catch (err) {
       // If a PR already exists for this branch, retrieve its URL
@@ -321,7 +341,12 @@ export const datasource: Datasource = {
           ],
           { cwd: opts.cwd },
         );
-        const prs = JSON.parse(stdout);
+        let prs;
+        try {
+          prs = JSON.parse(stdout);
+        } catch {
+          throw new Error(`Failed to parse Azure CLI output: ${stdout.slice(0, 200)}`);
+        }
         if (Array.isArray(prs) && prs.length > 0) {
           return prs[0].url ?? "";
         }
