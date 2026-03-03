@@ -123,6 +123,31 @@ describe("opencode provider", () => {
       expect(instance.name).toBe("opencode");
     });
 
+    it("logs cwd limitation when cwd is provided without url", async () => {
+      const { log } = await import("../helpers/logger.js");
+      await boot({ cwd: "/tmp/worktree" });
+      expect(log.debug).toHaveBeenCalledWith(
+        expect.stringContaining('Requested cwd "/tmp/worktree"'),
+      );
+      expect(log.debug).toHaveBeenCalledWith(
+        expect.stringContaining("does not support spawn-level cwd"),
+      );
+    });
+
+    it("does not log cwd limitation when url is provided", async () => {
+      const { log } = await import("../helpers/logger.js");
+      await boot({ url: "http://localhost:1234", cwd: "/tmp/worktree" });
+      expect(log.debug).not.toHaveBeenCalledWith(
+        expect.stringContaining("does not support spawn-level cwd"),
+      );
+    });
+
+    it("spawns local server normally when cwd is provided", async () => {
+      const instance = await boot({ cwd: "/tmp/worktree" });
+      expect(mocks.mockCreateOpencode).toHaveBeenCalledWith({ port: 0 });
+      expect(instance.name).toBe("opencode");
+    });
+
     it("throws when createOpencode fails", async () => {
       mocks.mockCreateOpencode.mockRejectedValue(new Error("spawn failed"));
       await expect(boot()).rejects.toThrow("spawn failed");

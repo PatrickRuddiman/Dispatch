@@ -39,6 +39,10 @@ export async function listModels(opts?: ProviderBootOptions): Promise<string[]> 
   if (opts?.url) {
     client = createOpencodeClient({ baseUrl: opts.url });
   } else {
+    // See boot() for details on the SDK cwd limitation.
+    if (opts?.cwd) {
+      log.debug(`listModels: requested cwd "${opts.cwd}" — OpenCode SDK does not support spawn-level cwd`);
+    }
     try {
       const oc = await createOpencode({ port: 0 });
       client = oc.client;
@@ -75,6 +79,15 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
     client = createOpencodeClient({ baseUrl: opts.url });
   } else {
     log.debug("No --server-url provided, spawning local OpenCode server...");
+    // NOTE: The @opencode-ai/sdk `createOpencodeServer` spawns the `opencode`
+    // process via `child_process.spawn()` without a `cwd` option — the server
+    // inherits `process.cwd()`. There is no `ServerOptions.cwd` or `Config`
+    // field to control the working directory. When a worktree `cwd` is needed,
+    // the prompt-level cwd (set by the executor/dispatcher) ensures the agent
+    // operates in the correct directory.
+    if (opts?.cwd) {
+      log.debug(`Requested cwd "${opts.cwd}" — OpenCode SDK does not support spawn-level cwd; relying on prompt-level cwd`);
+    }
     try {
       const oc = await createOpencode({ port: 0 });
       client = oc.client;
