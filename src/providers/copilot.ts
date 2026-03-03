@@ -27,7 +27,7 @@ export async function listModels(opts?: ProviderBootOptions): Promise<string[]> 
   try {
     await client.start();
     const models = await client.listModels();
-    return models.map((m) => m.id);
+    return models.map((m) => m.id).sort();
   } finally {
     await client.stop().catch(() => {});
   }
