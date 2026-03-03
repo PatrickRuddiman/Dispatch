@@ -177,8 +177,11 @@ describe("runTests", () => {
 
     const rejection = runTests("/project").catch((err: Error) => err);
     const err = await rejection;
-    expect(err.message).toContain("spawn ENOENT");
-    expect(err.cause).toBe(spawnError);
+    expect(err).toBeInstanceOf(Error);
+    if (err instanceof Error) {
+      expect(err.message).toContain("spawn ENOENT");
+      expect(err.cause).toBe(spawnError);
+    }
   });
 
   it("preserves spawn error properties via cause", async () => {
@@ -199,10 +202,13 @@ describe("runTests", () => {
     }) as any);
 
     const err = await runTests("/project").catch((e: Error) => e);
-    expect(err.message).toContain("spawn npm ENOENT");
-    expect(err.cause).toBe(spawnError);
-    expect((err.cause as any).code).toBe("ENOENT");
-    expect((err.cause as any).syscall).toBe("spawn npm");
+    expect(err).toBeInstanceOf(Error);
+    if (err instanceof Error) {
+      expect(err.message).toContain("spawn npm ENOENT");
+      expect(err.cause).toBe(spawnError);
+      expect((err.cause as any).code).toBe("ENOENT");
+      expect((err.cause as any).syscall).toBe("spawn npm");
+    }
   });
 
   it("concatenates multiple stdout chunks", async () => {

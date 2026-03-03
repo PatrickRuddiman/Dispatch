@@ -728,7 +728,7 @@ function setupMultiIssueScenario() {
   });
 
   const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
-  vi.mocked(ds.buildBranchName).mockImplementation((num: string, title: string, user: string) => {
+  vi.mocked(ds.buildBranchName).mockImplementation((num: string, title: string, user?: string) => {
     return `${user}/dispatch/${num}-${title.toLowerCase().replace(/\s+/g, "-")}`;
   });
 }
@@ -831,6 +831,14 @@ describe("worktree dispatch pipeline", () => {
   describe("serial fallback", () => {
     beforeEach(() => {
       vi.clearAllMocks();
+      // Restore single-issue defaults overridden by setupMultiIssueScenario()
+      vi.mocked(fetchItemsById).mockResolvedValue([ISSUE_1]);
+      vi.mocked(writeItemsToTempDir).mockResolvedValue({
+        files: ["/tmp/dispatch-test/1-test.md"],
+        issueDetailsByFile: new Map([["/tmp/dispatch-test/1-test.md", ISSUE_1]]),
+      });
+      vi.mocked(parseTaskFile).mockResolvedValue(TASK_FILE_FIXTURE);
+      vi.mocked(parseIssueFilename).mockReturnValue({ issueId: "1", slug: "test" });
       mocks.mockExecute.mockResolvedValue({
         success: true,
         dispatchResult: { task: TASK_FIXTURE, success: true },
