@@ -11,6 +11,7 @@ import type { AgentName, Agent, AgentBootOptions } from "./interface.js";
 import { boot as bootPlanner, type PlannerAgent } from "./planner.js";
 import { boot as bootExecutor, type ExecutorAgent } from "./executor.js";
 import { boot as bootSpec, type SpecAgent } from "./spec.js";
+import { boot as bootCommit, type CommitAgent } from "./commit.js";
 
 type BootFn = (opts: AgentBootOptions) => Promise<Agent>;
 
@@ -18,6 +19,7 @@ const AGENTS: Record<AgentName, BootFn> = {
   planner: bootPlanner,
   executor: bootExecutor,
   spec: bootSpec,
+  commit: bootCommit,
 };
 
 /**
@@ -47,6 +49,6 @@ export async function bootAgent(
  * Type-safe boot functions for specific agent roles.
  * Prefer these over the generic `bootAgent()` when you know the role at compile time.
  */
-export { bootPlanner, bootExecutor, bootSpec };
-export type { PlannerAgent, ExecutorAgent, SpecAgent };
+export { bootPlanner, bootExecutor, bootSpec, bootCommit };
+export type { PlannerAgent, ExecutorAgent, SpecAgent, CommitAgent };
 export type { AgentName, Agent, AgentBootOptions } from "./interface.js";
