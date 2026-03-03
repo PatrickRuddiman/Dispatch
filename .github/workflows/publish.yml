@@ -88,11 +88,17 @@ jobs:
       # package-lock.json are committed; other working-tree changes are ignored.
       # If no release-worthy commits were found, semantic-release leaves files
       # unchanged and this step is a no-op (no PR created/updated).
+      #
+      # RELEASE_TOKEN must be a Personal Access Token (PAT) with repo scope.
+      # GITHUB_TOKEN cannot create PRs unless the repository setting
+      # "Allow GitHub Actions to create and approve pull requests" is enabled
+      # (Settings > Actions > General > Workflow permissions).
+      # Using a PAT bypasses this restriction.
       - name: Create or update release PR
         id: pr
         uses: peter-evans/create-pull-request@v7
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           branch: release/next
           delete-branch: true  # delete release/next after the PR is merged
           add-paths: |
