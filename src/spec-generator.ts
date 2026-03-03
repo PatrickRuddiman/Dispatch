@@ -47,6 +47,8 @@ export interface SpecOptions {
   workItemType?: string;
   /** Max parallel fetches/generations (default: min(cpuCount, freeMB/500)) */
   concurrency?: number;
+  /** Number of retry attempts for spec generation (default: 2) */
+  retries?: number;
 }
 
 /** Returns a safe default concurrency: min(cpuCount, freeMB/500), at least 1. */
