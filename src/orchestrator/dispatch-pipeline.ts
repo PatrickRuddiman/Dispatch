@@ -188,8 +188,7 @@ export async function runDispatchPipeline(
     try {
       username = await datasource.getUsername(lifecycleOpts);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      log.warn(`Could not resolve git username for branch naming: ${message}`);
+      log.warn(`Could not resolve git username for branch naming: ${log.formatErrorChain(err)}`);
     }
 
     // Group tasks by their source file (each file = one issue)
@@ -214,8 +213,7 @@ export async function runDispatchPipeline(
           await datasource.createAndSwitchBranch(branchName, lifecycleOpts);
           log.debug(`Switched to branch ${branchName}`);
         } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          log.warn(`Could not create branch for issue #${details.number}: ${message}`);
+          log.warn(`Could not create branch for issue #${details.number}: ${log.formatErrorChain(err)}`);
           // Continue without branching
           branchName = undefined;
           defaultBranch = undefined;
@@ -267,7 +265,7 @@ export async function runDispatchPipeline(
                       planResult = {
                         prompt: "",
                         success: false,
-                        error: err instanceof Error ? err.message : String(err),
+                        error: log.extractMessage(err),
                       };
                       break;
                     }
@@ -317,8 +315,7 @@ export async function runDispatchPipeline(
                     log.success(`Synced task completion to issue #${parsed.issueId}`);
                   }
                 } catch (err) {
-                  const message = err instanceof Error ? err.message : String(err);
-                  log.warn(`Could not sync task completion to datasource: ${message}`);
+                  log.warn(`Could not sync task completion to datasource: ${log.formatErrorChain(err)}`);
                 }
 
                 tuiTask.status = "done";
@@ -355,8 +352,7 @@ export async function runDispatchPipeline(
           );
           log.debug(`Staged uncommitted changes for issue #${details.number}`);
         } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          log.warn(`Could not commit uncommitted changes for issue #${details.number}: ${message}`);
+          log.warn(`Could not commit uncommitted changes for issue #${details.number}: ${log.formatErrorChain(err)}`);
         }
       }
 
@@ -366,8 +362,7 @@ export async function runDispatchPipeline(
           await datasource.pushBranch(branchName, lifecycleOpts);
           log.debug(`Pushed branch ${branchName}`);
         } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          log.warn(`Could not push branch ${branchName}: ${message}`);
+          log.warn(`Could not push branch ${branchName}: ${log.formatErrorChain(err)}`);
         }
 
         try {
@@ -391,16 +386,14 @@ export async function runDispatchPipeline(
             log.success(`Created PR for issue #${details.number}: ${prUrl}`);
           }
         } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          log.warn(`Could not create PR for issue #${details.number}: ${message}`);
+          log.warn(`Could not create PR for issue #${details.number}: ${log.formatErrorChain(err)}`);
         }
 
         try {
           await datasource.switchBranch(defaultBranch, lifecycleOpts);
           log.debug(`Switched back to ${defaultBranch}`);
         } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          log.warn(`Could not switch back to ${defaultBranch}: ${message}`);
+          log.warn(`Could not switch back to ${defaultBranch}: ${log.formatErrorChain(err)}`);
         }
       }
     }

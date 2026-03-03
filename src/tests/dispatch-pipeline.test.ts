@@ -108,6 +108,7 @@ vi.mock("../helpers/logger.js", () => ({
     dim: vi.fn(),
     debug: vi.fn(),
     formatErrorChain: vi.fn((e: unknown) => String(e)),
+    extractMessage: vi.fn((e: unknown) => e instanceof Error ? e.message : String(e)),
   },
 }));
 

@@ -283,7 +283,7 @@ async function main() {
 }
 
 main().catch(async (err) => {
-  log.error(err instanceof Error ? err.message : String(err));
+  log.error(log.formatErrorChain(err));
   await runCleanup();
   process.exit(1);
 });

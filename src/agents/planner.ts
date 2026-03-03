@@ -10,6 +10,7 @@
 
 import type { Agent, AgentBootOptions } from "./interface.js";
 import type { Task } from "../parser.js";
+import { log } from "../helpers/logger.js";
 
 export interface PlanResult {
   /** The system prompt for the executor agent */
@@ -69,7 +70,7 @@ export async function boot(opts: AgentBootOptions): Promise<PlannerAgent> {
 
         return { prompt: plan, success: true };
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = log.extractMessage(err);
         return { prompt: "", success: false, error: message };
       }
     },

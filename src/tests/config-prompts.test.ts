@@ -75,6 +75,44 @@ describe("runInteractiveConfigWizard", () => {
     );
   });
 
+  it("model selection — saves selected model when provider returns models", async () => {
+    vi.mocked(listProviderModels).mockResolvedValueOnce(["model-a", "model-b"]);
+    vi.mocked(loadConfig).mockResolvedValueOnce({});
+    vi.mocked(select)
+      .mockResolvedValueOnce("copilot")   // provider
+      .mockResolvedValueOnce("model-a")   // model
+      .mockResolvedValueOnce("github");   // datasource
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false)  // advanced settings
+      .mockResolvedValueOnce(true);  // save
+    await runInteractiveConfigWizard();
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "copilot",
+        model: "model-a",
+        source: "github",
+      }),
+      undefined,
+    );
+  });
+
+  it("model selection — default option omits model from config", async () => {
+    vi.mocked(listProviderModels).mockResolvedValueOnce(["model-a", "model-b"]);
+    vi.mocked(loadConfig).mockResolvedValueOnce({});
+    vi.mocked(select)
+      .mockResolvedValueOnce("copilot")   // provider
+      .mockResolvedValueOnce("")          // model — "default (provider decides)"
+      .mockResolvedValueOnce("github");   // datasource
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false)  // advanced settings
+      .mockResolvedValueOnce(true);  // save
+    await runInteractiveConfigWizard();
+    const savedConfig = vi.mocked(saveConfig).mock.calls[0][0];
+    expect(savedConfig.provider).toBe("copilot");
+    expect(savedConfig.source).toBe("github");
+    expect(savedConfig.model).toBeUndefined();
+  });
+
   it("conditional Azure DevOps prompts for org and project", async () => {
     vi.mocked(loadConfig).mockResolvedValueOnce({});
     vi.mocked(select)

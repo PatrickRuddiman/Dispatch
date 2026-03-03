@@ -51,8 +51,7 @@ export async function fetchItemsById(
       const item = await datasource.fetch(id, fetchOpts);
       items.push(item);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      log.warn(`Could not fetch issue #${id}: ${message}`);
+      log.warn(`Could not fetch issue #${id}: ${log.formatErrorChain(err)}`);
     }
   }
   return items;
@@ -134,8 +133,7 @@ export async function closeCompletedSpecIssues(
       await datasource.close(issueId, fetchOpts);
       log.success(`Closed issue #${issueId} (all tasks in ${filename} completed)`);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      log.warn(`Could not close issue #${issueId}: ${message}`);
+      log.warn(`Could not close issue #${issueId}: ${log.formatErrorChain(err)}`);
     }
   }
 }
