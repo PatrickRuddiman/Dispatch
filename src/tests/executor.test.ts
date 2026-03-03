@@ -219,6 +219,7 @@ describe("execute", () => {
       plan: "plan",
     });
 
-    expect(result.elapsedMs).toBeGreaterThanOrEqual(5);
+    expect(result.elapsedMs).toBeGreaterThanOrEqual(10);
+    expect(result.elapsedMs).toBeLessThan(2000);
   });
 });

@@ -133,14 +133,14 @@ export interface Datasource {
   getUsername(opts: DispatchLifecycleOptions): Promise<string>;
 
   /**
-   * Build a branch name from an issue number, title, and username.
+   * Build a branch name from an issue number and username.
+   * Produces: `<username>/dispatch/<issueNumber>`
    *
    * @param issueNumber - The issue number/ID
-   * @param title - The issue title
    * @param username - The branch-safe username prefix
-   * @returns A sanitized branch name
+   * @returns A deterministic, sanitized branch name
    */
-  buildBranchName(issueNumber: string, title: string, username?: string): string;
+  buildBranchName(issueNumber: string, username?: string): string;
 
   /**
    * Create and switch to a feature branch for an issue.

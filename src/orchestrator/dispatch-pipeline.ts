@@ -9,7 +9,7 @@ import { readFile } from "node:fs/promises";
 import { parseTaskFile, buildTaskContext, groupTasksByMode, type TaskFile } from "../parser.js";
 import type { DispatchResult } from "../dispatcher.js";
 import { boot as bootPlanner, type PlanResult } from "../agents/planner.js";
-import { boot as bootExecutor } from "../agents/executor.js";
+import { boot as bootExecutor, type ExecuteResult } from "../agents/executor.js";
 import { boot as bootCommit } from "../agents/commit.js";
 import { log } from "../helpers/logger.js";
 import { registerCleanup } from "../helpers/cleanup.js";
@@ -30,7 +30,8 @@ import {
   getBranchDiff,
   squashBranchCommits,
 } from "./datasource-helpers.js";
-import { withTimeout, TimeoutError } from "../helpers/timeout.js";
+import { withTimeout } from "../helpers/timeout.js";
+import { withRetry } from "../helpers/retry.js";
 import chalk from "chalk";
 import { elapsed, renderHeaderLines } from "../helpers/format.js";
 
@@ -59,11 +60,14 @@ export async function runDispatchPipeline(
     workItemType,
     planTimeout,
     planRetries,
+    retries,
   } = opts;
 
   // Planning timeout/retry defaults
   const planTimeoutMs = (planTimeout ?? 10) * 60_000; // default 10 minutes → ms
-  const maxPlanAttempts = (planRetries ?? 1) + 1;     // retries + initial attempt
+  const effectivePlanRetries = planRetries ?? retries ?? 2;
+
+  log.debug(`Plan timeout: ${planTimeout ?? 10}m (${planTimeoutMs}ms), max attempts: ${maxPlanAttempts}`);
 
   // Dry-run mode uses simple log output
   if (dryRun) {
@@ -224,7 +228,7 @@ export async function runDispatchPipeline(
       if (!noBranch && details) {
         try {
           defaultBranch = await datasource.getDefaultBranch(lifecycleOpts);
-          branchName = datasource.buildBranchName(details.number, details.title, username);
+          branchName = datasource.buildBranchName(details.number, username);
 
           if (useWorktrees) {
             worktreePath = await createWorktree(cwd, file, branchName);
@@ -279,41 +283,21 @@ export async function runDispatchPipeline(
 
                 let planResult: PlanResult | undefined;
 
-                for (let attempt = 1; attempt <= maxPlanAttempts; attempt++) {
-                  try {
-                    planResult = await withTimeout(
+                try {
+                  planResult = await withRetry(
+                    () => withTimeout(
                       planner.plan(task, fileContext),
                       planTimeoutMs,
                       "planner.plan()",
-                    );
-                    break; // success — exit retry loop
-                  } catch (err) {
-                    if (err instanceof TimeoutError) {
-                      log.warn(
-                        `Planning timed out for task "${task.text}" (attempt ${attempt}/${maxPlanAttempts})`,
-                      );
-                      if (attempt < maxPlanAttempts) {
-                        log.debug(`Retrying planning (attempt ${attempt + 1}/${maxPlanAttempts})`);
-                      }
-                    } else {
-                      // Non-timeout error — do not retry, surface immediately
-                      planResult = {
-                        prompt: "",
-                        success: false,
-                        error: log.extractMessage(err),
-                      };
-                      break;
-                    }
-                  }
-                }
-
-                // All attempts exhausted with timeout — produce failure result
-                if (!planResult) {
-                  const timeoutMin = planTimeout ?? 10;
+                    ),
+                    effectivePlanRetries,
+                    { label: "planner.plan()" },
+                  );
+                } catch (err) {
                   planResult = {
                     prompt: "",
                     success: false,
-                    error: `Planning timed out after ${timeoutMin}m (${maxPlanAttempts} attempts)`,
+                    error: log.extractMessage(err),
                   };
                 }
 
@@ -332,11 +316,27 @@ export async function runDispatchPipeline(
               // ── Phase B: Execute via executor agent ──────────────
               tuiTask.status = "running";
               if (verbose) log.info(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: executing — "${task.text}"`);
-              const execResult = await executor.execute({
-                task,
-                cwd: issueCwd,
-                plan: plan ?? null,
-              });
+              const execRetries = 2;
+              const execResult = await withRetry(
+                async () => {
+                  const result = await executor.execute({
+                    task,
+                    cwd: issueCwd,
+                    plan: plan ?? null,
+                  });
+                  if (!result.success) {
+                    throw new Error(result.error ?? "Execution failed");
+                  }
+                  return result;
+                },
+                execRetries,
+                { label: `executor "${task.text}"` },
+              ).catch((err): ExecuteResult => ({
+                dispatchResult: { task, success: false, error: log.extractMessage(err) },
+                success: false,
+                error: log.extractMessage(err),
+                elapsedMs: 0,
+              }));
 
               if (execResult.success) {
                 // Sync checked-off state back to the datasource
@@ -569,7 +569,7 @@ export async function dryRunMode(
     const parsed = parseIssueFilename(task.file);
     const details = parsed ? items.find((item) => item.number === parsed.issueId) : undefined;
     const branchInfo = details
-      ? ` [branch: ${datasource.buildBranchName(details.number, details.title, username)}]`
+      ? ` [branch: ${datasource.buildBranchName(details.number, username)}]`
       : "";
     log.task(allTasks.indexOf(task), allTasks.length, `${task.file}:${task.line} — ${task.text}${branchInfo}`);
   }

@@ -3,7 +3,7 @@ import { writeFile, mkdtemp, rm, readFile, mkdir, readdir } from "node:fs/promis
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { DatasourceName } from "../datasources/interface.js";
-import { DATASOURCE_NAMES, getDatasource } from "../datasources/index.js";
+import { DATASOURCE_NAMES, getDatasource, parseAzDevOpsRemoteUrl } from "../datasources/index.js";
 import { validateConfigValue } from "../config.js";
 import { extractTitle } from "../datasources/md.js";
 
@@ -494,5 +494,187 @@ describe("DatasourceName and registry", () => {
 
   it("getDatasource throws for unknown datasource name", () => {
     expect(() => getDatasource("invalid" as DatasourceName)).toThrow("Unknown datasource");
+  });
+});
+
+// ─── parseAzDevOpsRemoteUrl ──────────────────────────────────────────
+
+describe("parseAzDevOpsRemoteUrl", () => {
+  // --- HTTPS format (dev.azure.com) ---
+
+  it("parses standard HTTPS dev.azure.com URL", () => {
+    const result = parseAzDevOpsRemoteUrl(
+      "https://dev.azure.com/myorg/myproject/_git/myrepo"
+    );
+    expect(result).toEqual({
+      orgUrl: "https://dev.azure.com/myorg",
+      project: "myproject",
+    });
+  });
+
+  it("parses HTTPS dev.azure.com URL with user@ prefix", () => {
+    const result = parseAzDevOpsRemoteUrl(
+      "https://user@dev.azure.com/myorg/myproject/_git/myrepo"
+    );
+    expect(result).toEqual({
+      orgUrl: "https://dev.azure.com/myorg",
+      project: "myproject",
+    });
+  });
+
+  it("parses HTTPS dev.azure.com URL case-insensitively", () => {
+    const result = parseAzDevOpsRemoteUrl(
+      "https://Dev.Azure.Com/MyOrg/MyProject/_git/MyRepo"
+    );
+    expect(result).toEqual({
+      orgUrl: "https://dev.azure.com/MyOrg",
+      project: "MyProject",
+    });
+  });
+
+  // --- SSH format (ssh.dev.azure.com) ---
+
+  it("parses SSH ssh.dev.azure.com URL", () => {
+    const result = parseAzDevOpsRemoteUrl(
+      "git@ssh.dev.azure.com:v3/myorg/myproject/myrepo"
+    );
+    expect(result).toEqual({
+      orgUrl: "https://dev.azure.com/myorg",
+      project: "myproject",
+    });
+  });
+
+  it("parses SSH URL case-insensitively", () => {
+    const result = parseAzDevOpsRemoteUrl(
+      "git@SSH.DEV.AZURE.COM:v3/MyOrg/MyProject/MyRepo"
+    );
+    expect(result).toEqual({
+      orgUrl: "https://dev.azure.com/MyOrg",
+      project: "MyProject",
+    });
+  });
+
+  // --- Legacy format (visualstudio.com) ---
+
+  it("parses legacy visualstudio.com URL", () => {
+    const result = parseAzDevOpsRemoteUrl(
+      "https://myorg.visualstudio.com/myproject/_git/myrepo"
+    );
+    expect(result).toEqual({
+      orgUrl: "https://dev.azure.com/myorg",
+      project: "myproject",
+    });
+  });
+
+  it("parses legacy visualstudio.com URL with DefaultCollection", () => {
+    const result = parseAzDevOpsRemoteUrl(
+      "https://myorg.visualstudio.com/DefaultCollection/myproject/_git/myrepo"
+    );
+    expect(result).toEqual({
+      orgUrl: "https://dev.azure.com/myorg",
+      project: "myproject",
+    });
+  });
+
+  it("parses legacy visualstudio.com URL case-insensitively", () => {
+    const result = parseAzDevOpsRemoteUrl(
+      "https://MyOrg.VisualStudio.Com/MyProject/_git/MyRepo"
+    );
+    expect(result).toEqual({
+      orgUrl: "https://dev.azure.com/MyOrg",
+      project: "MyProject",
+    });
+  });
+
+  // --- Normalized org URL ---
+
+  it("normalizes SSH org URL to https://dev.azure.com format", () => {
+    const result = parseAzDevOpsRemoteUrl(
+      "git@ssh.dev.azure.com:v3/contoso/WebApp/WebApp"
+    );
+    expect(result?.orgUrl).toBe("https://dev.azure.com/contoso");
+  });
+
+  it("normalizes legacy org URL to https://dev.azure.com format", () => {
+    const result = parseAzDevOpsRemoteUrl(
+      "https://contoso.visualstudio.com/WebApp/_git/WebApp"
+    );
+    expect(result?.orgUrl).toBe("https://dev.azure.com/contoso");
+  });
+
+  // --- URL-encoded characters ---
+
+  it("decodes URL-encoded characters in org name", () => {
+    const result = parseAzDevOpsRemoteUrl(
+      "https://dev.azure.com/my%20org/myproject/_git/myrepo"
+    );
+    expect(result).toEqual({
+      orgUrl: "https://dev.azure.com/my org",
+      project: "myproject",
+    });
+  });
+
+  it("decodes URL-encoded characters in project name", () => {
+    const result = parseAzDevOpsRemoteUrl(
+      "https://dev.azure.com/myorg/my%20project/_git/myrepo"
+    );
+    expect(result).toEqual({
+      orgUrl: "https://dev.azure.com/myorg",
+      project: "my project",
+    });
+  });
+
+  // --- Non-Azure DevOps URLs (should return null) ---
+
+  it("returns null for GitHub HTTPS URL", () => {
+    expect(
+      parseAzDevOpsRemoteUrl("https://github.com/user/repo.git")
+    ).toBeNull();
+  });
+
+  it("returns null for GitHub SSH URL", () => {
+    expect(
+      parseAzDevOpsRemoteUrl("git@github.com:user/repo.git")
+    ).toBeNull();
+  });
+
+  it("returns null for GitLab URL", () => {
+    expect(
+      parseAzDevOpsRemoteUrl("https://gitlab.com/user/repo.git")
+    ).toBeNull();
+  });
+
+  it("returns null for Bitbucket URL", () => {
+    expect(
+      parseAzDevOpsRemoteUrl("https://bitbucket.org/user/repo.git")
+    ).toBeNull();
+  });
+
+  // --- Malformed and edge cases ---
+
+  it("returns null for empty string", () => {
+    expect(parseAzDevOpsRemoteUrl("")).toBeNull();
+  });
+
+  it("returns null for malformed dev.azure.com URL missing _git segment", () => {
+    expect(
+      parseAzDevOpsRemoteUrl("https://dev.azure.com/myorg/myproject/myrepo")
+    ).toBeNull();
+  });
+
+  it("returns null for malformed SSH URL missing v3 prefix", () => {
+    expect(
+      parseAzDevOpsRemoteUrl("git@ssh.dev.azure.com:myorg/myproject/myrepo")
+    ).toBeNull();
+  });
+
+  it("returns null for plain text that is not a URL", () => {
+    expect(parseAzDevOpsRemoteUrl("not a url at all")).toBeNull();
+  });
+
+  it("returns null for dev.azure.com URL with only org (no project)", () => {
+    expect(
+      parseAzDevOpsRemoteUrl("https://dev.azure.com/myorg")
+    ).toBeNull();
   });
 });
