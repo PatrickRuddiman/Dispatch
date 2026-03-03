@@ -24,6 +24,8 @@ export interface OrchestrateRunOptions {
   noPlan?: boolean;
   noBranch?: boolean;
   provider?: ProviderName;
+  /** Model override to pass to the provider (provider-specific format). */
+  model?: string;
   serverUrl?: string;
   source?: DatasourceName;
   org?: string;
@@ -41,6 +43,8 @@ export interface RawCliArgs {
   noBranch: boolean;
   concurrency?: number;
   provider: ProviderName;
+  /** Model override from config or CLI (provider-specific format). */
+  model?: string;
   serverUrl?: string;
   cwd: string;
   verbose: boolean;
@@ -160,7 +164,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
       if (m.spec) {
         return this.generateSpecs({
           issues: m.spec, issueSource: m.issueSource, provider: m.provider,
-          serverUrl: m.serverUrl, cwd: m.cwd, outputDir: m.outputDir,
+          model: m.model, serverUrl: m.serverUrl, cwd: m.cwd, outputDir: m.outputDir,
           org: m.org, project: m.project, workItemType: m.workItemType, concurrency: m.concurrency,
         });
       }
@@ -197,7 +201,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
 
         return this.generateSpecs({
           issues, issueSource: m.issueSource, provider: m.provider,
-          serverUrl: m.serverUrl, cwd: m.cwd, outputDir: m.outputDir,
+          model: m.model, serverUrl: m.serverUrl, cwd: m.cwd, outputDir: m.outputDir,
           org: m.org, project: m.project, workItemType: m.workItemType, concurrency: m.concurrency,
         });
       }
@@ -205,7 +209,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
       return this.orchestrate({
         issueIds: m.issueIds, concurrency: m.concurrency ?? defaultConcurrency(),
         dryRun: m.dryRun, noPlan: m.noPlan, noBranch: m.noBranch, provider: m.provider,
-        serverUrl: m.serverUrl, source: m.issueSource, org: m.org, project: m.project,
+        model: m.model, serverUrl: m.serverUrl, source: m.issueSource, org: m.org, project: m.project,
         workItemType: m.workItemType, planTimeout: m.planTimeout, planRetries: m.planRetries,
       });
     },

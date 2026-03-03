@@ -34,6 +34,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
   const {
     issues,
     provider,
+    model,
     serverUrl,
     cwd: specCwd,
     outputDir = join(specCwd, ".dispatch", "specs"),
@@ -170,7 +171,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
   const bootStart = Date.now();
   log.info(`Booting ${provider} provider...`);
   log.debug(serverUrl ? `Using server URL: ${serverUrl}` : "No --server-url, will spawn local server");
-  const instance = await bootProvider(provider, { url: serverUrl, cwd: specCwd });
+  const instance = await bootProvider(provider, { url: serverUrl, cwd: specCwd, model });
   registerCleanup(() => instance.cleanup());
   log.debug(`Provider booted in ${elapsed(Date.now() - bootStart)}`);
 

@@ -14,7 +14,7 @@ import {
   validateConfigValue,
   type DispatchConfig,
 } from "./config.js";
-import { PROVIDER_NAMES } from "./providers/index.js";
+import { PROVIDER_NAMES, listProviderModels } from "./providers/index.js";
 import type { ProviderName } from "./providers/interface.js";
 import { DATASOURCE_NAMES, detectDatasource } from "./datasources/index.js";
 import type { DatasourceName } from "./datasources/interface.js";
@@ -63,6 +63,34 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
     choices: PROVIDER_NAMES.map((name) => ({ name, value: name })),
     default: existing.provider,
   });
+
+  // ── Model selection ────────────────────────────────────────
+  let selectedModel: string | undefined = existing.model;
+  try {
+    log.dim("Fetching available models...");
+    const serverUrl = existing.serverUrl;
+    const models = await listProviderModels(
+      provider,
+      serverUrl ? { url: serverUrl } : undefined,
+    );
+    if (models.length > 0) {
+      const modelChoice = await select<string>({
+        message: "Select a model:",
+        choices: [
+          { name: "default (provider decides)", value: "" },
+          ...models.map((m) => ({ name: m, value: m })),
+        ],
+        default: existing.model ?? "",
+      });
+      selectedModel = modelChoice || undefined;
+    } else {
+      log.dim("No models returned by provider — skipping model selection.");
+      selectedModel = existing.model;
+    }
+  } catch {
+    log.dim("Could not list models (provider may not be running) — skipping model selection.");
+    selectedModel = existing.model;
+  }
 
   // ── Auto-detect datasource from git remote ─────────────────
   const detectedSource = await detectDatasource(process.cwd());
@@ -185,6 +213,12 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
     provider,
     source,
   };
+
+  if (selectedModel !== undefined) {
+    newConfig.model = selectedModel;
+  } else {
+    delete newConfig.model;
+  }
 
   if (org !== undefined) newConfig.org = org;
   if (project !== undefined) newConfig.project = project;

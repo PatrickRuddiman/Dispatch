@@ -22,6 +22,7 @@ import { detectDatasource } from "../datasources/index.js";
  */
 const CONFIG_TO_CLI: Record<string, keyof RawCliArgs> = {
   provider: "provider",
+  model: "model",
   concurrency: "concurrency",
   source: "issueSource",
   org: "org",

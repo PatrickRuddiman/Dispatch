@@ -18,6 +18,13 @@ import { runInteractiveConfigWizard } from "./config-prompts.js";
  */
 export interface DispatchConfig {
   provider?: ProviderName;
+  /**
+   * Model to use when spawning agents, in provider-specific format.
+   *   - Copilot: bare model ID (e.g. "claude-sonnet-4-5")
+   *   - OpenCode: "provider/model" (e.g. "anthropic/claude-sonnet-4")
+   * When omitted the provider uses its auto-detected default.
+   */
+  model?: string;
   concurrency?: number;
   source?: DatasourceName;
   org?: string;
@@ -31,6 +38,7 @@ export interface DispatchConfig {
 /** Valid configuration key names. */
 export const CONFIG_KEYS = [
   "provider",
+  "model",
   "concurrency",
   "source",
   "org",
@@ -91,6 +99,12 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
     case "provider":
       if (!PROVIDER_NAMES.includes(value as ProviderName)) {
         return `Invalid provider "${value}". Available: ${PROVIDER_NAMES.join(", ")}`;
+      }
+      return null;
+
+    case "model":
+      if (!value || value.trim() === "") {
+        return `Invalid model: value must not be empty`;
       }
       return null;
 

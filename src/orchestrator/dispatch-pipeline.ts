@@ -47,6 +47,7 @@ export async function runDispatchPipeline(
     noPlan,
     noBranch,
     provider = "opencode",
+    model,
     source,
     org,
     project,
@@ -158,7 +159,7 @@ export async function runDispatchPipeline(
     // ── 3. Boot provider ────────────────────────────────────────
     tui.state.phase = "booting";
     if (verbose) log.info(`Booting ${provider} provider...`);
-    const instance = await bootProvider(provider, { url: serverUrl, cwd });
+    const instance = await bootProvider(provider, { url: serverUrl, cwd, model });
     registerCleanup(() => instance.cleanup());
     if (serverUrl) {
       tui.state.serverUrl = serverUrl;
