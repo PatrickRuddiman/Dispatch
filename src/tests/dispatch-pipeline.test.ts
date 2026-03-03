@@ -826,6 +826,10 @@ describe("commit agent integration", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    // Reset createAndSwitchBranch to clear any leftover mockRejectedValueOnce
+    // from "branch creation failure" tests (clearAllMocks does not flush the once-queue).
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    vi.mocked(ds.createAndSwitchBranch).mockReset().mockResolvedValue(undefined);
     mocks.mockExecute.mockResolvedValue({
       success: true,
       dispatchResult: { task: TASK_FIXTURE, success: true },
