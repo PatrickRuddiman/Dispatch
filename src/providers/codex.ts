@@ -8,9 +8,22 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { AgentLoop } from "@openai/codex";
 import type { ProviderInstance, ProviderBootOptions } from "./interface.js";
 import { log } from "../helpers/logger.js";
+
+/**
+ * Lazily load the @openai/codex SDK.
+ *
+ * The package ships as a CLI bundle without a proper library entry-point
+ * (no `main` / `module` / `exports` in its package.json).  A top-level
+ * static `import` would cause Vite's import analysis to fail at test time
+ * for every test file that transitively touches the provider registry.
+ * Using a dynamic import defers resolution to runtime so that only code
+ * paths that actually exercise the Codex provider pay the cost.
+ */
+async function loadAgentLoop(): Promise<typeof import("@openai/codex")> {
+  return import("@openai/codex");
+}
 
 /**
  * List available Codex models.
@@ -33,7 +46,10 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
   const model = opts?.model ?? "o4-mini";
   log.debug(`Booting Codex provider with model ${model}`);
 
-  const sessions = new Map<string, AgentLoop>();
+  const { AgentLoop } = await loadAgentLoop();
+
+  type AgentLoopInstance = InstanceType<typeof AgentLoop>;
+  const sessions = new Map<string, AgentLoopInstance>();
 
   return {
     name: "codex",
