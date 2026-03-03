@@ -4,6 +4,7 @@ import { runInteractiveConfigWizard } from "../config-prompts.js";
 import { loadConfig, saveConfig } from "../config.js";
 import { detectDatasource } from "../datasources/index.js";
 import { detectWorkItemType } from "../datasources/azdevops.js";
+import { listProviderModels } from "../providers/index.js";
 
 vi.mock("@inquirer/prompts", () => ({
   select: vi.fn(),
@@ -34,6 +35,14 @@ vi.mock("../datasources/azdevops.js", async (importOriginal) => {
   return {
     ...actual,
     detectWorkItemType: vi.fn().mockResolvedValue(null),
+  };
+});
+
+vi.mock("../providers/index.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../providers/index.js")>();
+  return {
+    ...actual,
+    listProviderModels: vi.fn().mockResolvedValue([]),
   };
 });
 
