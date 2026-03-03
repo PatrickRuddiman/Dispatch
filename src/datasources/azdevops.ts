@@ -15,6 +15,32 @@ import { slugify } from "../helpers/slugify.js";
 
 const exec = promisify(execFile);
 
+export async function detectWorkItemType(
+  opts: IssueFetchOptions = {}
+): Promise<string | null> {
+  try {
+    const args = ["boards", "work-item", "type", "list", "--output", "json"];
+    if (opts.project) args.push("--project", opts.project);
+    if (opts.org) args.push("--org", opts.org);
+
+    const { stdout } = await exec("az", args, {
+      cwd: opts.cwd || process.cwd(),
+    });
+
+    const types: { name: string }[] = JSON.parse(stdout);
+    if (!Array.isArray(types) || types.length === 0) return null;
+
+    const names = types.map((t) => t.name);
+    const preferred = ["User Story", "Product Backlog Item", "Requirement", "Issue"];
+    for (const p of preferred) {
+      if (names.includes(p)) return p;
+    }
+    return names[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export const datasource: Datasource = {
   name: "azdevops",
 
@@ -137,12 +163,21 @@ export const datasource: Datasource = {
     body: string,
     opts: IssueFetchOptions = {}
   ): Promise<IssueDetails> {
+    const workItemType =
+      opts.workItemType ?? (await detectWorkItemType(opts));
+
+    if (!workItemType) {
+      throw new Error(
+        "Could not determine work item type. Set workItemType in your config (for example via `dispatch config`)."
+      );
+    }
+
     const args = [
       "boards",
       "work-item",
       "create",
       "--type",
-      "User Story",
+      workItemType,
       "--title",
       title,
       "--description",

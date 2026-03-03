@@ -18,6 +18,7 @@ import { PROVIDER_NAMES } from "./providers/index.js";
 import type { ProviderName } from "./providers/interface.js";
 import { DATASOURCE_NAMES, detectDatasource } from "./datasources/index.js";
 import type { DatasourceName } from "./datasources/interface.js";
+import { detectWorkItemType } from "./datasources/azdevops.js";
 
 /**
  * Run the interactive configuration wizard.
@@ -91,6 +92,7 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
   // ── Azure DevOps-specific fields ───────────────────────────
   let org: string | undefined;
   let project: string | undefined;
+  let workItemType: string | undefined;
 
   if (source === "azdevops") {
     org = await input({
@@ -107,6 +109,16 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
       default: existing.project,
       validate: (value) => {
         const error = validateConfigValue("project", value);
+        return error ?? true;
+      },
+    });
+
+    const detectedType = await detectWorkItemType({ org, project });
+    workItemType = await input({
+      message: "Work item type:",
+      default: existing.workItemType ?? detectedType ?? undefined,
+      validate: (value) => {
+        const error = validateConfigValue("workItemType", value);
         return error ?? true;
       },
     });
@@ -176,6 +188,7 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
 
   if (org !== undefined) newConfig.org = org;
   if (project !== undefined) newConfig.project = project;
+  if (workItemType !== undefined) newConfig.workItemType = workItemType;
   if (concurrency !== undefined) newConfig.concurrency = concurrency;
   if (serverUrl !== undefined) newConfig.serverUrl = serverUrl;
   if (planTimeout !== undefined) newConfig.planTimeout = planTimeout;

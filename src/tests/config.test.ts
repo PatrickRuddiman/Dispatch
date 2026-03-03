@@ -181,22 +181,22 @@ describe("validateConfigValue", () => {
     expect(text).not.toBe(null);
   });
 
-  it("accepts non-empty string for org, project, serverUrl", () => {
-    for (const key of ["org", "project", "serverUrl"] as const) {
+  it("accepts non-empty string for org, project, workItemType, serverUrl", () => {
+    for (const key of ["org", "project", "workItemType", "serverUrl"] as const) {
       expect(validateConfigValue(key, "some-value")).toBe(null);
     }
   });
 
-  it("rejects empty string for org, project, serverUrl", () => {
-    for (const key of ["org", "project", "serverUrl"] as const) {
+  it("rejects empty string for org, project, workItemType, serverUrl", () => {
+    for (const key of ["org", "project", "workItemType", "serverUrl"] as const) {
       const result = validateConfigValue(key, "");
       expect(result).not.toBe(null);
       expect(result).toContain("must not be empty");
     }
   });
 
-  it("rejects whitespace-only for org, project, serverUrl", () => {
-    for (const key of ["org", "project", "serverUrl"] as const) {
+  it("rejects whitespace-only for org, project, workItemType, serverUrl", () => {
+    for (const key of ["org", "project", "workItemType", "serverUrl"] as const) {
       const result = validateConfigValue(key, "   ");
       expect(result).not.toBe(null);
       expect(result).toContain("must not be empty");

@@ -41,6 +41,8 @@ export interface SpecOptions {
   org?: string;
   /** Azure DevOps project name */
   project?: string;
+  /** Azure DevOps work item type (e.g. "User Story", "Product Backlog Item") */
+  workItemType?: string;
   /** Max parallel fetches/generations (default: min(cpuCount, freeMB/500)) */
   concurrency?: number;
 }

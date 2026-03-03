@@ -39,6 +39,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     outputDir = join(specCwd, ".dispatch", "specs"),
     org,
     project,
+    workItemType,
     concurrency = defaultConcurrency(),
   } = opts;
 
@@ -51,7 +52,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
   }
 
   const datasource = getDatasource(source);
-  const fetchOpts: IssueFetchOptions = { cwd: specCwd, org, project };
+  const fetchOpts: IssueFetchOptions = { cwd: specCwd, org, project, workItemType };
 
   // ── Determine items to process ─────────────────────────────
   const isTrackerMode = isIssueNumbers(issues);

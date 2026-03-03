@@ -98,6 +98,7 @@ export async function closeCompletedSpecIssues(
   source?: DatasourceName,
   org?: string,
   project?: string,
+  workItemType?: string,
 ): Promise<void> {
   // Resolve the datasource — use explicit source or auto-detect
   let datasourceName = source;
@@ -113,7 +114,7 @@ export async function closeCompletedSpecIssues(
     results.filter((r) => r.success).map((r) => r.task)
   );
 
-  const fetchOpts: IssueFetchOptions = { cwd, org, project };
+  const fetchOpts: IssueFetchOptions = { cwd, org, project, workItemType };
 
   for (const taskFile of taskFiles) {
     const fileTasks = taskFile.tasks;

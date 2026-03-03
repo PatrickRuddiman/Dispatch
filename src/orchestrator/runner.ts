@@ -27,6 +27,7 @@ export interface OrchestrateRunOptions {
   source?: DatasourceName;
   org?: string;
   project?: string;
+  workItemType?: string;
   planTimeout?: number;
   planRetries?: number;
 }
@@ -48,6 +49,7 @@ export interface RawCliArgs {
   issueSource?: DatasourceName;
   org?: string;
   project?: string;
+  workItemType?: string;
   planTimeout?: number;
   planRetries?: number;
   outputDir?: string;
@@ -149,7 +151,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
         return this.generateSpecs({
           issues: m.spec, issueSource: m.issueSource, provider: m.provider,
           serverUrl: m.serverUrl, cwd: m.cwd, outputDir: m.outputDir,
-          org: m.org, project: m.project, concurrency: m.concurrency,
+          org: m.org, project: m.project, workItemType: m.workItemType, concurrency: m.concurrency,
         });
       }
 
@@ -165,7 +167,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
             process.exit(1);
           }
           const datasource = getDatasource(source);
-          const existing = await datasource.list({ cwd: m.cwd, org: m.org, project: m.project });
+          const existing = await datasource.list({ cwd: m.cwd, org: m.org, project: m.project, workItemType: m.workItemType });
           if (existing.length === 0) {
             log.error("No existing specs found to regenerate");
             process.exit(1);
@@ -186,7 +188,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
         return this.generateSpecs({
           issues, issueSource: m.issueSource, provider: m.provider,
           serverUrl: m.serverUrl, cwd: m.cwd, outputDir: m.outputDir,
-          org: m.org, project: m.project, concurrency: m.concurrency,
+          org: m.org, project: m.project, workItemType: m.workItemType, concurrency: m.concurrency,
         });
       }
 
@@ -194,7 +196,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
         issueIds: m.issueIds, concurrency: m.concurrency ?? defaultConcurrency(),
         dryRun: m.dryRun, noPlan: m.noPlan, noBranch: m.noBranch, provider: m.provider,
         serverUrl: m.serverUrl, source: m.issueSource, org: m.org, project: m.project,
-        planTimeout: m.planTimeout, planRetries: m.planRetries,
+        workItemType: m.workItemType, planTimeout: m.planTimeout, planRetries: m.planRetries,
       });
     },
   };

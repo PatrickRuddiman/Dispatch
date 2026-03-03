@@ -45,6 +45,8 @@ export interface IssueFetchOptions {
   org?: string;
   /** Project name (e.g. Azure DevOps project) */
   project?: string;
+  /** Work item type (e.g. "User Story", "Product Backlog Item") */
+  workItemType?: string;
 }
 
 /**

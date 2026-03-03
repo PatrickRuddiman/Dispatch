@@ -3,6 +3,7 @@ import { select, input, confirm, number } from "@inquirer/prompts";
 import { runInteractiveConfigWizard } from "../config-prompts.js";
 import { loadConfig, saveConfig } from "../config.js";
 import { detectDatasource } from "../datasources/index.js";
+import { detectWorkItemType } from "../datasources/azdevops.js";
 
 vi.mock("@inquirer/prompts", () => ({
   select: vi.fn(),
@@ -25,6 +26,14 @@ vi.mock("../datasources/index.js", async (importOriginal) => {
   return {
     ...actual,
     detectDatasource: vi.fn().mockResolvedValue(null),
+  };
+});
+
+vi.mock("../datasources/azdevops.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../datasources/azdevops.js")>();
+  return {
+    ...actual,
+    detectWorkItemType: vi.fn().mockResolvedValue(null),
   };
 });
 
@@ -64,18 +73,20 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("azdevops");
     vi.mocked(input)
       .mockResolvedValueOnce("https://dev.azure.com/myorg")
-      .mockResolvedValueOnce("my-project");
+      .mockResolvedValueOnce("my-project")
+      .mockResolvedValueOnce("User Story");
     vi.mocked(confirm)
       .mockResolvedValueOnce(false) // advanced settings
       .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
-    expect(input).toHaveBeenCalledTimes(2);
+    expect(input).toHaveBeenCalledTimes(3);
     expect(saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
         provider: "opencode",
         source: "azdevops",
         org: "https://dev.azure.com/myorg",
         project: "my-project",
+        workItemType: "User Story",
       }),
       undefined,
     );
@@ -190,6 +201,10 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("azdevops");
+    vi.mocked(input)
+      .mockResolvedValueOnce("https://dev.azure.com/org")
+      .mockResolvedValueOnce("proj")
+      .mockResolvedValueOnce("User Story");
     await runInteractiveConfigWizard();
     expect(select).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -229,6 +244,59 @@ describe("runInteractiveConfigWizard", () => {
     const savedConfig = vi.mocked(saveConfig).mock.calls[0][0];
     expect(savedConfig.source).toBeUndefined();
     expect(savedConfig.provider).toBe("copilot");
+  });
+
+  it("azdevops flow uses detected work item type as default", async () => {
+    vi.mocked(loadConfig).mockResolvedValueOnce({});
+    vi.mocked(detectWorkItemType).mockResolvedValueOnce("Product Backlog Item");
+    vi.mocked(select)
+      .mockResolvedValueOnce("copilot")
+      .mockResolvedValueOnce("azdevops");
+    vi.mocked(input)
+      .mockResolvedValueOnce("https://dev.azure.com/myorg")
+      .mockResolvedValueOnce("my-project")
+      .mockResolvedValueOnce("Product Backlog Item");
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // advanced settings
+      .mockResolvedValueOnce(true); // save
+    await runInteractiveConfigWizard();
+    expect(detectWorkItemType).toHaveBeenCalledWith({
+      org: "https://dev.azure.com/myorg",
+      project: "my-project",
+    });
+    expect(input).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Work item type:",
+        default: "Product Backlog Item",
+      }),
+    );
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ workItemType: "Product Backlog Item" }),
+      undefined,
+    );
+  });
+
+  it("azdevops flow falls back to existing config workItemType when detection fails", async () => {
+    vi.mocked(loadConfig).mockResolvedValueOnce({ workItemType: "Requirement" });
+    vi.mocked(detectWorkItemType).mockResolvedValueOnce(null);
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(true) // reconfigure
+      .mockResolvedValueOnce(false) // advanced settings
+      .mockResolvedValueOnce(true); // save
+    vi.mocked(select)
+      .mockResolvedValueOnce("copilot")
+      .mockResolvedValueOnce("azdevops");
+    vi.mocked(input)
+      .mockResolvedValueOnce("https://dev.azure.com/myorg")
+      .mockResolvedValueOnce("my-project")
+      .mockResolvedValueOnce("Requirement");
+    await runInteractiveConfigWizard();
+    expect(input).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Work item type:",
+        default: "Requirement",
+      }),
+    );
   });
 
   it("datasource choices include auto as first option", async () => {

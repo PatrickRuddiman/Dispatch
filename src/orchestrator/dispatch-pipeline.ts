@@ -50,6 +50,7 @@ export async function runDispatchPipeline(
     source,
     org,
     project,
+    workItemType,
     planTimeout,
     planRetries,
   } = opts;
@@ -60,7 +61,7 @@ export async function runDispatchPipeline(
 
   // Dry-run mode uses simple log output
   if (dryRun) {
-    return dryRunMode(issueIds, cwd, source, org, project);
+    return dryRunMode(issueIds, cwd, source, org, project, workItemType);
   }
 
   // ── Start TUI (or inline logging for verbose mode) ──────────
@@ -104,7 +105,7 @@ export async function runDispatchPipeline(
     }
 
     const datasource = getDatasource(source);
-    const fetchOpts: IssueFetchOptions = { cwd, org, project };
+    const fetchOpts: IssueFetchOptions = { cwd, org, project, workItemType };
     const items = issueIds.length > 0
       ? await fetchItemsById(issueIds, datasource, fetchOpts)
       : await datasource.list(fetchOpts);
@@ -395,7 +396,7 @@ export async function runDispatchPipeline(
     }
 
     // ── 6. Close originating issues for completed spec files ────
-    await closeCompletedSpecIssues(taskFiles, results, cwd, source, org, project);
+    await closeCompletedSpecIssues(taskFiles, results, cwd, source, org, project, workItemType);
 
     // ── 7. Cleanup ──────────────────────────────────────────────
     await executor.cleanup();
@@ -423,6 +424,7 @@ export async function dryRunMode(
   source?: DatasourceName,
   org?: string,
   project?: string,
+  workItemType?: string,
 ): Promise<DispatchSummary> {
   if (!source) {
     log.error("No datasource configured. Use --source or run 'dispatch config' to set up defaults.");
@@ -430,7 +432,7 @@ export async function dryRunMode(
   }
 
   const datasource = getDatasource(source);
-  const fetchOpts: IssueFetchOptions = { cwd, org, project };
+  const fetchOpts: IssueFetchOptions = { cwd, org, project, workItemType };
   const items = issueIds.length > 0
     ? await fetchItemsById(issueIds, datasource, fetchOpts)
     : await datasource.list(fetchOpts);
