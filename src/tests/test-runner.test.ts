@@ -166,15 +166,43 @@ describe("runTests", () => {
       JSON.stringify({ scripts: { test: "vitest run" } }),
     );
 
+    const spawnError = new Error("spawn ENOENT");
     const child = createMockChildProcess();
     vi.mocked(spawn).mockImplementation((() => {
       process.nextTick(() => {
-        child.emit("error", new Error("spawn ENOENT"));
+        child.emit("error", spawnError);
       });
       return child;
     }) as any);
 
-    await expect(runTests("/project")).rejects.toThrow("spawn ENOENT");
+    const rejection = runTests("/project").catch((err: Error) => err);
+    const err = await rejection;
+    expect(err.message).toContain("spawn ENOENT");
+    expect(err.cause).toBe(spawnError);
+  });
+
+  it("preserves spawn error properties via cause", async () => {
+    vi.mocked(readFile).mockResolvedValue(
+      JSON.stringify({ scripts: { test: "vitest run" } }),
+    );
+
+    const spawnError = Object.assign(new Error("spawn npm ENOENT"), {
+      code: "ENOENT",
+      syscall: "spawn npm",
+    });
+    const child = createMockChildProcess();
+    vi.mocked(spawn).mockImplementation((() => {
+      process.nextTick(() => {
+        child.emit("error", spawnError);
+      });
+      return child;
+    }) as any);
+
+    const err = await runTests("/project").catch((e: Error) => e);
+    expect(err.message).toContain("spawn npm ENOENT");
+    expect(err.cause).toBe(spawnError);
+    expect((err.cause as any).code).toBe("ENOENT");
+    expect((err.cause as any).syscall).toBe("spawn npm");
   });
 
   it("concatenates multiple stdout chunks", async () => {
