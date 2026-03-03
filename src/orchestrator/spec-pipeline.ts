@@ -496,14 +496,14 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
   if (isTrackerMode) {
     items = await fetchTrackerItems(issues, datasource, fetchOpts, concurrency, source);
     if (items.length === 0) {
-      return { total: 0, generated: 0, failed: 0, files: [], issueNumbers: [], durationMs: 0, fileDurationsMs: {} };
+      return { total: 0, generated: 0, failed: 0, files: [], issueNumbers: [], durationMs: Date.now() - pipelineStart, fileDurationsMs: {} };
     }
   } else if (isInlineText) {
     items = buildInlineTextItem(issues, outputDir);
   } else {
     const fileItems = await resolveFileItems(issues, specCwd, concurrency);
     if (!fileItems) {
-      return { total: 0, generated: 0, failed: 0, files: [], issueNumbers: [], durationMs: 0, fileDurationsMs: {} };
+      return { total: 0, generated: 0, failed: 0, files: [], issueNumbers: [], durationMs: Date.now() - pipelineStart, fileDurationsMs: {} };
     }
     items = fileItems;
   }
