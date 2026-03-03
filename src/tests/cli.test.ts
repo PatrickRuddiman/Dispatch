@@ -190,6 +190,20 @@ describe("parseArgs --fix-tests mutual exclusion (at parser level)", () => {
   });
 });
 
+describe("parseArgs --force", () => {
+  it("sets force to true when --force is passed", () => {
+    const [args, flags] = parseArgs(["--force"]);
+    expect(args.force).toBe(true);
+    expect(flags.has("force")).toBe(true);
+  });
+
+  it("defaults force to false when --force is not provided", () => {
+    const [args, flags] = parseArgs([]);
+    expect(args.force).toBe(false);
+    expect(flags.has("force")).toBe(false);
+  });
+});
+
 // ─── parseArgs basic flags ──────────────────────────────────────────
 
 describe("parseArgs basic flags", () => {
