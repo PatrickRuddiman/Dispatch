@@ -44,7 +44,7 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
     async createSession(): Promise<string> {
       log.debug("Creating Claude session...");
       try {
-        const session = unstable_v2_createSession({ model });
+        const session = unstable_v2_createSession({ model, permissionMode: 'acceptEdits' });
         const sessionId = randomUUID();
         sessions.set(sessionId, session);
         log.debug(`Session created: ${sessionId}`);

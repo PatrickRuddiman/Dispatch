@@ -82,7 +82,7 @@ describe("createSession", () => {
     const instance = await boot();
     const sessionId = await instance.createSession();
     expect(sessionId).toBe("test-uuid-1234");
-    expect(mockCreateSession).toHaveBeenCalledWith({ model: "claude-sonnet-4" });
+    expect(mockCreateSession).toHaveBeenCalledWith({ model: "claude-sonnet-4", permissionMode: "acceptEdits" });
   });
 
   it("throws when unstable_v2_createSession fails", async () => {
