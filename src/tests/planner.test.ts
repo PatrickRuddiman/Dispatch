@@ -189,6 +189,31 @@ describe("plan", () => {
     expect(result.success).toBe(false);
     expect(result.error).toBe("raw string error");
   });
+
+  it("uses cwd override in prompt when provided", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("plan output"),
+    });
+
+    const agent = await boot({ cwd: "/original", provider });
+    await agent.plan(TASK_FIXTURE, undefined, "/worktree/path");
+
+    const promptArg = vi.mocked(provider.prompt).mock.calls[0][1];
+    expect(promptArg).toContain("/worktree/path");
+    expect(promptArg).not.toContain("/original");
+  });
+
+  it("falls back to boot-time cwd when cwd override is not provided", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("plan output"),
+    });
+
+    const agent = await boot({ cwd: "/boot-cwd", provider });
+    await agent.plan(TASK_FIXTURE);
+
+    const promptArg = vi.mocked(provider.prompt).mock.calls[0][1];
+    expect(promptArg).toContain("/boot-cwd");
+  });
 });
 
 describe("cleanup", () => {
