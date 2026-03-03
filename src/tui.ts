@@ -104,6 +104,14 @@ function phaseLabel(phase: TuiState["phase"], provider?: string): string {
   }
 }
 
+function countVisualRows(text: string, cols: number): number {
+  const stripped = text.replace(/\x1B\[[0-9;]*m/g, "");
+  const safeCols = Math.max(1, cols);
+  return stripped.split("\n").reduce((sum, line) => {
+    return sum + Math.max(1, Math.ceil(line.length / safeCols));
+  }, 0);
+}
+
 function render(state: TuiState): string {
   const lines: string[] = [];
   const now = Date.now();
@@ -226,7 +234,7 @@ function draw(state: TuiState): void {
   }
   const output = render(state);
   process.stdout.write(output);
-  lastLineCount = output.split("\n").length;
+  lastLineCount = countVisualRows(output, process.stdout.columns || 80);
 }
 
 /**
