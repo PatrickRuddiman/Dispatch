@@ -12,6 +12,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Datasource, IssueDetails, IssueFetchOptions, DispatchLifecycleOptions } from "./interface.js";
 import { slugify } from "../helpers/slugify.js";
+import { log } from "../helpers/logger.js";
 
 const exec = promisify(execFile);
 
@@ -56,7 +57,12 @@ export const datasource: Datasource = {
       cwd: opts.cwd || process.cwd(),
     });
 
-    const data = JSON.parse(stdout);
+    let data;
+    try {
+      data = JSON.parse(stdout);
+    } catch {
+      throw new Error(`Failed to parse Azure CLI output: ${stdout.slice(0, 200)}`);
+    }
     const items: IssueDetails[] = [];
 
     if (Array.isArray(data)) {
@@ -97,7 +103,12 @@ export const datasource: Datasource = {
       cwd: opts.cwd || process.cwd(),
     });
 
-    const item = JSON.parse(stdout);
+    let item;
+    try {
+      item = JSON.parse(stdout);
+    } catch {
+      throw new Error(`Failed to parse Azure CLI output: ${stdout.slice(0, 200)}`);
+    }
     const fields = item.fields ?? {};
 
     const comments = await fetchComments(issueId, opts);
@@ -192,7 +203,12 @@ export const datasource: Datasource = {
       cwd: opts.cwd || process.cwd(),
     });
 
-    const item = JSON.parse(stdout);
+    let item;
+    try {
+      item = JSON.parse(stdout);
+    } catch {
+      throw new Error(`Failed to parse Azure CLI output: ${stdout.slice(0, 200)}`);
+    }
     const fields = item.fields ?? {};
 
     return {
@@ -246,7 +262,7 @@ export const datasource: Datasource = {
     try {
       await exec("git", ["checkout", "-b", branchName], { cwd: opts.cwd });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = log.extractMessage(err);
       if (message.includes("already exists")) {
         await exec("git", ["checkout", branchName], { cwd: opts.cwd });
       } else {
@@ -299,11 +315,16 @@ export const datasource: Datasource = {
         ],
         { cwd: opts.cwd },
       );
-      const pr = JSON.parse(stdout);
+      let pr;
+      try {
+        pr = JSON.parse(stdout);
+      } catch {
+        throw new Error(`Failed to parse Azure CLI output: ${stdout.slice(0, 200)}`);
+      }
       return pr.url ?? "";
     } catch (err) {
       // If a PR already exists for this branch, retrieve its URL
-      const message = err instanceof Error ? err.message : String(err);
+      const message = log.extractMessage(err);
       if (message.includes("already exists")) {
         const { stdout } = await exec(
           "az",
@@ -320,7 +341,12 @@ export const datasource: Datasource = {
           ],
           { cwd: opts.cwd },
         );
-        const prs = JSON.parse(stdout);
+        let prs;
+        try {
+          prs = JSON.parse(stdout);
+        } catch {
+          throw new Error(`Failed to parse Azure CLI output: ${stdout.slice(0, 200)}`);
+        }
         if (Array.isArray(prs) && prs.length > 0) {
           return prs[0].url ?? "";
         }

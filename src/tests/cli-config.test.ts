@@ -11,6 +11,7 @@ vi.mock("../helpers/logger.js", () => ({
     task: vi.fn(),
     verbose: false,
     formatErrorChain: vi.fn().mockReturnValue(""),
+    extractMessage: vi.fn((e: unknown) => e instanceof Error ? e.message : String(e)),
   },
 }));
 
@@ -20,12 +21,13 @@ vi.mock("../config.js", () => ({
 
 vi.mock("../datasources/index.js", () => ({
   detectDatasource: vi.fn().mockResolvedValue(null),
+  DATASOURCE_NAMES: ["github", "azdevops", "md"],
 }));
 
 import { resolveCliConfig } from "../orchestrator/cli-config.js";
 import { log } from "../helpers/logger.js";
 import { loadConfig } from "../config.js";
-import { detectDatasource } from "../datasources/index.js";
+import { detectDatasource, DATASOURCE_NAMES } from "../datasources/index.js";
 import type { RawCliArgs } from "../orchestrator/runner.js";
 
 function createRawCliArgs(overrides?: Partial<RawCliArgs>): RawCliArgs {
@@ -34,6 +36,7 @@ function createRawCliArgs(overrides?: Partial<RawCliArgs>): RawCliArgs {
     dryRun: false,
     noPlan: false,
     noBranch: false,
+    noWorktree: false,
     provider: "copilot",
     cwd: "/tmp/test-cwd",
     verbose: false,
@@ -255,7 +258,7 @@ describe("resolveCliConfig()", () => {
       );
     });
 
-    it("falls back to md when detection returns null", async () => {
+    it("exits with error when detection returns null", async () => {
       vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
       vi.mocked(detectDatasource).mockResolvedValue(null);
 
@@ -265,10 +268,11 @@ describe("resolveCliConfig()", () => {
         issueSource: undefined,
       });
 
-      const result = await resolveCliConfig(args);
-      expect(result.issueSource).toBe("md");
-      expect(log.info).toHaveBeenCalledWith(
-        expect.stringContaining("falling back to: md"),
+      await expect(resolveCliConfig(args)).rejects.toThrow(
+        "process.exit called",
+      );
+      expect(log.error).toHaveBeenCalledWith(
+        expect.stringContaining("auto-detection failed"),
       );
     });
 
@@ -422,7 +426,7 @@ describe("resolveCliConfig()", () => {
       expect(result.issueSource).toBe("github");
     });
 
-    it("falls back to 'md' when no explicit source is set and detection fails", async () => {
+    it("exits with error when no explicit source is set and detection fails", async () => {
       vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
       vi.mocked(detectDatasource).mockResolvedValue(null);
 
@@ -430,10 +434,37 @@ describe("resolveCliConfig()", () => {
         explicitFlags: new Set(["provider"]),
         issueSource: undefined,
       });
-      const result = await resolveCliConfig(args);
 
+      await expect(resolveCliConfig(args)).rejects.toThrow(
+        "process.exit called",
+      );
       expect(detectDatasource).toHaveBeenCalledWith("/tmp/test-cwd");
-      expect(result.issueSource).toBe("md");
+      expect(log.error).toHaveBeenCalledWith(
+        expect.stringContaining("auto-detection failed"),
+      );
+    });
+
+    it("includes remediation guidance when detection fails", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+      vi.mocked(detectDatasource).mockResolvedValue(null);
+
+      const args = createRawCliArgs({
+        explicitFlags: new Set(["provider"]),
+        issueSource: undefined,
+      });
+
+      await expect(resolveCliConfig(args)).rejects.toThrow(
+        "process.exit called",
+      );
+      expect(log.dim).toHaveBeenCalledWith(
+        expect.stringContaining("github, azdevops, md"),
+      );
+      expect(log.dim).toHaveBeenCalledWith(
+        expect.stringContaining("dispatch config"),
+      );
+      expect(log.dim).toHaveBeenCalledWith(
+        expect.stringContaining("--issue-source"),
+      );
     });
 
     it("explicit --source flag overrides auto-detection", async () => {

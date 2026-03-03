@@ -10,6 +10,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Datasource, IssueDetails, IssueFetchOptions, DispatchLifecycleOptions } from "./interface.js";
 import { slugify } from "../helpers/slugify.js";
+import { log } from "../helpers/logger.js";
 
 const exec = promisify(execFile);
 
@@ -221,7 +222,7 @@ export const datasource: Datasource = {
       await git(["checkout", "-b", branchName], cwd);
     } catch (err) {
       // Branch may already exist — switch to it instead
-      const message = err instanceof Error ? err.message : String(err);
+      const message = log.extractMessage(err);
       if (message.includes("already exists")) {
         await git(["checkout", branchName], cwd);
       } else {
@@ -268,7 +269,7 @@ export const datasource: Datasource = {
       return url.trim();
     } catch (err) {
       // If a PR already exists for this branch, retrieve its URL
-      const message = err instanceof Error ? err.message : String(err);
+      const message = log.extractMessage(err);
       if (message.includes("already exists")) {
         const existing = await gh(
           ["pr", "view", branchName, "--json", "url", "--jq", ".url"],

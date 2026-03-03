@@ -15,7 +15,8 @@ vi.mock("../helpers/logger.js", () => ({
     dim: vi.fn(),
     task: vi.fn(),
     verbose: false,
-    formatErrorChain: vi.fn().mockReturnValue(""),
+    formatErrorChain: vi.fn((e: unknown) => e instanceof Error ? e.message : String(e)),
+    extractMessage: vi.fn((e: unknown) => e instanceof Error ? e.message : String(e)),
   },
 }));
 
@@ -56,6 +57,9 @@ import {
   closeCompletedSpecIssues,
   buildPrBody,
   buildPrTitle,
+  getBranchDiff,
+  amendCommitMessage,
+  squashBranchCommits,
 } from "../orchestrator/datasource-helpers.js";
 
 /** Create a mock Datasource with all methods stubbed via vi.fn(). */
@@ -771,5 +775,96 @@ describe("closeCompletedSpecIssues", () => {
     await closeCompletedSpecIssues([taskFile], results, "/tmp", "github");
 
     expect(log.warn).toHaveBeenCalledWith(expect.stringContaining("close failed"));
+  });
+});
+
+// ─── getBranchDiff ──────────────────────────────────────────────────
+
+describe("getBranchDiff", () => {
+  it("returns the full diff output", async () => {
+    const diffOutput = "diff --git a/file.ts b/file.ts\n--- a/file.ts\n+++ b/file.ts\n@@ -1 +1 @@\n-old\n+new\n";
+    mockExecFile.mockResolvedValue({ stdout: diffOutput });
+
+    const result = await getBranchDiff("main", "/tmp/repo");
+
+    expect(result).toBe(diffOutput);
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "git",
+      ["diff", "main..HEAD"],
+      { cwd: "/tmp/repo", maxBuffer: 10 * 1024 * 1024 },
+    );
+  });
+
+  it("returns an empty string when git diff fails", async () => {
+    mockExecFile.mockRejectedValue(new Error("fatal: bad revision"));
+
+    const result = await getBranchDiff("main", "/tmp/repo");
+
+    expect(result).toBe("");
+  });
+
+  it("returns an empty string when there are no differences", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "" });
+
+    const result = await getBranchDiff("main", "/tmp/repo");
+
+    expect(result).toBe("");
+  });
+});
+
+// ─── amendCommitMessage ─────────────────────────────────────────────
+
+describe("amendCommitMessage", () => {
+  it("calls git commit --amend with the new message", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "" });
+
+    await amendCommitMessage("feat: new message", "/tmp/repo");
+
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "git",
+      ["commit", "--amend", "-m", "feat: new message"],
+      { cwd: "/tmp/repo" },
+    );
+  });
+
+  it("propagates errors from git", async () => {
+    mockExecFile.mockRejectedValue(new Error("nothing to amend"));
+
+    await expect(amendCommitMessage("feat: msg", "/tmp/repo")).rejects.toThrow("nothing to amend");
+  });
+});
+
+// ─── squashBranchCommits ────────────────────────────────────────────
+
+describe("squashBranchCommits", () => {
+  it("squashes commits using merge-base, soft reset, and commit", async () => {
+    mockExecFile
+      .mockResolvedValueOnce({ stdout: "abc123\n" })  // merge-base
+      .mockResolvedValueOnce({ stdout: "" })            // reset --soft
+      .mockResolvedValueOnce({ stdout: "" });           // commit
+
+    await squashBranchCommits("main", "feat: squashed", "/tmp/repo");
+
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "git",
+      ["merge-base", "main", "HEAD"],
+      { cwd: "/tmp/repo" },
+    );
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "git",
+      ["reset", "--soft", "abc123"],
+      { cwd: "/tmp/repo" },
+    );
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "git",
+      ["commit", "-m", "feat: squashed"],
+      { cwd: "/tmp/repo" },
+    );
+  });
+
+  it("propagates errors from merge-base", async () => {
+    mockExecFile.mockRejectedValue(new Error("fatal: not a git repository"));
+
+    await expect(squashBranchCommits("main", "msg", "/tmp/repo")).rejects.toThrow("fatal: not a git repository");
   });
 });

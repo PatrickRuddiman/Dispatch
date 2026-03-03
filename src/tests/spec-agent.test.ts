@@ -24,6 +24,7 @@ vi.mock("../helpers/logger.js", () => ({
     task: vi.fn(),
     verbose: false,
     formatErrorChain: vi.fn().mockReturnValue(""),
+    extractMessage: vi.fn((e: unknown) => e instanceof Error ? e.message : String(e)),
   },
 }));
 

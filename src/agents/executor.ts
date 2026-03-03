@@ -11,6 +11,7 @@ import type { Agent, AgentBootOptions } from "./interface.js";
 import type { Task } from "../parser.js";
 import { markTaskComplete } from "../parser.js";
 import { dispatchTask, type DispatchResult } from "../dispatcher.js";
+import { log } from "../helpers/logger.js";
 
 /**
  * Input to the executor for a single task.
@@ -92,7 +93,7 @@ export async function boot(opts: AgentBootOptions): Promise<ExecutorAgent> {
           elapsedMs: Date.now() - startTime,
         };
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = log.extractMessage(err);
         return {
           dispatchResult: { task, success: false, error: message },
           success: false,

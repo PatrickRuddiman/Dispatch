@@ -89,8 +89,8 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
             log.debug(`Body: ${details.body?.length ?? 0} chars, Labels: ${details.labels.length}, Comments: ${details.comments.length}`);
             return { id, details };
           } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            log.error(`Failed to fetch #${id}: ${message}`);
+            const message = log.extractMessage(err);
+            log.error(`Failed to fetch #${id}: ${log.formatErrorChain(err)}`);
             log.debug(log.formatErrorChain(err));
             return { id, details: null, error: message };
           }
@@ -148,8 +148,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
         };
         items.push({ id: filePath, details });
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        items.push({ id: filePath, details: null, error: message });
+        items.push({ id: filePath, details: null, error: log.extractMessage(err) });
       }
     }
   }
@@ -279,15 +278,13 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
             }
             // md datasource + file/glob mode: file already written in-place, nothing to do
           } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
             const label = isTrackerMode ? `issue #${id}` : filepath;
-            log.warn(`Could not sync ${label} to datasource: ${message}`);
+            log.warn(`Could not sync ${label} to datasource: ${log.formatErrorChain(err)}`);
           }
 
           return { filepath, identifier };
         } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          log.error(`Failed to generate spec for ${isTrackerMode ? `#${id}` : filepath}: ${message}`);
+          log.error(`Failed to generate spec for ${isTrackerMode ? `#${id}` : filepath}: ${log.formatErrorChain(err)}`);
           log.debug(log.formatErrorChain(err));
           return null;
         }

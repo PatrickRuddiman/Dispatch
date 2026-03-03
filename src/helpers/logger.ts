@@ -71,4 +71,15 @@ export const log = {
 
     return parts.join("\n  ⤷ ");
   },
+
+  /**
+   * Extract the raw error message string from an unknown thrown value.
+   * Returns `err.message` for Error instances, `String(err)` for other
+   * truthy values, and `""` for null/undefined.
+   */
+  extractMessage(err: unknown): string {
+    if (err instanceof Error) return err.message;
+    if (err != null) return String(err);
+    return "";
+  },
 };

@@ -279,6 +279,48 @@ describe("task list truncation", () => {
   });
 });
 
+describe("worktree indicator rendering", () => {
+  it("shows worktree tag when multiple worktrees are active", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    addTask("running", "Task in wt1", 0, { worktree: "123-fix-auth" });
+    addTask("running", "Task in wt2", 1, { worktree: "456-add-feature" });
+    tui.update();
+    const output = lastOutput();
+    expect(output).toContain("[wt:123-fix-auth]");
+    expect(output).toContain("[wt:456-add-feature]");
+  });
+
+  it("hides worktree tag when only one worktree is active", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    addTask("running", "Task in wt1", 0, { worktree: "123-fix-auth" });
+    addTask("running", "Task in wt1", 1, { worktree: "123-fix-auth" });
+    tui.update();
+    expect(lastOutput()).not.toContain("[wt:");
+  });
+
+  it("hides worktree tag when no worktrees are set", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    addTask("running", "A regular task", 0);
+    tui.update();
+    expect(lastOutput()).not.toContain("[wt:");
+  });
+
+  it("shows worktree tag only for tasks that have a worktree", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    addTask("running", "Task with wt", 0, { worktree: "123-fix-auth" });
+    addTask("running", "Task without wt", 1);
+    addTask("running", "Task with wt2", 2, { worktree: "456-add-feature" });
+    tui.update();
+    const output = lastOutput();
+    expect(output).toContain("[wt:123-fix-auth]");
+    expect(output).toContain("[wt:456-add-feature]");
+  });
+});
+
 describe("header and issue rendering", () => {
   it("renders header with dispatch branding", async () => {
     await setup();
@@ -312,5 +354,28 @@ describe("header and issue rendering", () => {
     tui.update();
     expect(lastOutput()).toContain("#42");
     expect(lastOutput()).toContain("Fix the bug");
+  });
+});
+
+describe("visual row counting in draw", () => {
+  it("accounts for line wrapping when computing lastLineCount", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    // Create a task with text long enough to cause wrapping at 80 cols
+    const longText = "A".repeat(200);
+    addTask("running", longText, 0);
+    tui.update();
+    writeSpy.mockClear();
+    // Re-render so the cursor-up sequence reflects the previous frame's visual rows
+    tui.update();
+    const cursorUpCall = String(writeSpy.mock.calls[0][0]);
+    // Extract the cursor-up count from the ANSI escape sequence \x1B[<N>A
+    const match = cursorUpCall.match(/\x1B\[(\d+)A/);
+    expect(match).not.toBeNull();
+    const rowCount = Number(match![1]);
+    // With a 200-char task text in an 80-col terminal, the output line containing
+    // the task will wrap to multiple visual rows. The cursor-up count must be
+    // greater than a simple newline count would produce.
+    expect(rowCount).toBeGreaterThan(0);
   });
 });

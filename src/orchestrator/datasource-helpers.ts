@@ -51,8 +51,7 @@ export async function fetchItemsById(
       const item = await datasource.fetch(id, fetchOpts);
       items.push(item);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      log.warn(`Could not fetch issue #${id}: ${message}`);
+      log.warn(`Could not fetch issue #${id}: ${log.formatErrorChain(err)}`);
     }
   }
   return items;
@@ -134,8 +133,7 @@ export async function closeCompletedSpecIssues(
       await datasource.close(issueId, fetchOpts);
       log.success(`Closed issue #${issueId} (all tasks in ${filename} completed)`);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      log.warn(`Could not close issue #${issueId}: ${message}`);
+      log.warn(`Could not close issue #${issueId}: ${log.formatErrorChain(err)}`);
     }
   }
 }
@@ -162,6 +160,66 @@ async function getCommitSummaries(defaultBranch: string, cwd: string): Promise<s
   } catch {
     return [];
   }
+}
+
+/**
+ * Retrieve the full diff of the current branch relative to the default branch.
+ *
+ * @param defaultBranch - The base branch to compare against (e.g. "main")
+ * @param cwd - Working directory (git repo root)
+ * @returns The diff output as a string, or an empty string on failure
+ */
+export async function getBranchDiff(defaultBranch: string, cwd: string): Promise<string> {
+  try {
+    const { stdout } = await exec(
+      "git",
+      ["diff", `${defaultBranch}..HEAD`],
+      { cwd, maxBuffer: 10 * 1024 * 1024 },
+    );
+    return stdout;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Amend the most recent commit's message without changing its content.
+ *
+ * @param message - The new commit message
+ * @param cwd - Working directory (git repo root)
+ */
+export async function amendCommitMessage(message: string, cwd: string): Promise<void> {
+  await exec(
+    "git",
+    ["commit", "--amend", "-m", message],
+    { cwd },
+  );
+}
+
+/**
+ * Squash all commits on the current branch (relative to the default branch)
+ * into a single commit with the given message.
+ *
+ * Uses a soft reset to the merge-base followed by a fresh commit, which
+ * avoids interactive rebase complexity.
+ *
+ * @param defaultBranch - The base branch to compare against (e.g. "main")
+ * @param message - The commit message for the squashed commit
+ * @param cwd - Working directory (git repo root)
+ */
+export async function squashBranchCommits(
+  defaultBranch: string,
+  message: string,
+  cwd: string,
+): Promise<void> {
+  const { stdout } = await exec(
+    "git",
+    ["merge-base", defaultBranch, "HEAD"],
+    { cwd },
+  );
+  const mergeBase = stdout.trim();
+  await exec("git", ["reset", "--soft", mergeBase], { cwd });
+  await exec("git", ["commit", "-m", message], { cwd });
 }
 
 /**

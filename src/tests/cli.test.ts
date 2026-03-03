@@ -11,6 +11,7 @@ vi.mock("../helpers/logger.js", () => ({
     task: vi.fn(),
     verbose: false,
     formatErrorChain: vi.fn().mockReturnValue(""),
+    extractMessage: vi.fn((e: unknown) => e instanceof Error ? e.message : String(e)),
   },
 }));
 
@@ -230,6 +231,12 @@ describe("parseArgs basic flags", () => {
     const [args, flags] = parseArgs(["--no-branch"]);
     expect(args.noBranch).toBe(true);
     expect(flags.has("noBranch")).toBe(true);
+  });
+
+  it("parses --no-worktree", () => {
+    const [args, flags] = parseArgs(["--no-worktree"]);
+    expect(args.noWorktree).toBe(true);
+    expect(flags.has("noWorktree")).toBe(true);
   });
 
   it("parses --verbose", () => {
