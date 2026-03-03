@@ -664,6 +664,82 @@ describe("commitAllChanges safety-net", () => {
   });
 });
 
+describe("branch creation failure", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    mocks.mockExecute.mockResolvedValue({
+      success: true,
+      dispatchResult: { task: TASK_FIXTURE, success: true },
+      elapsedMs: 100,
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("marks all tasks as failed when createAndSwitchBranch rejects", async () => {
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    vi.mocked(ds.createAndSwitchBranch).mockRejectedValueOnce(
+      new Error("branch already exists"),
+    );
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ noBranch: false, noPlan: true }),
+      "/tmp/test",
+    );
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result.failed).toBe(1);
+    expect(result.completed).toBe(0);
+    expect(vi.mocked(log.error)).toHaveBeenCalledWith(
+      expect.stringContaining("branch"),
+    );
+  });
+
+  it("does not invoke executor when branch creation fails", async () => {
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    vi.mocked(ds.createAndSwitchBranch).mockRejectedValueOnce(
+      new Error("branch already exists"),
+    );
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ noBranch: false, noPlan: true }),
+      "/tmp/test",
+    );
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.runAllTimersAsync();
+
+    await resultPromise;
+
+    expect(mocks.mockExecute).not.toHaveBeenCalled();
+  });
+
+  it("succeeds when noBranch is true even if createAndSwitchBranch would throw", async () => {
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    vi.mocked(ds.createAndSwitchBranch).mockRejectedValueOnce(
+      new Error("should not be called"),
+    );
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ noBranch: true, noPlan: true }),
+      "/tmp/test",
+    );
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result.completed).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(ds.createAndSwitchBranch).not.toHaveBeenCalled();
+  });
+});
+
 // ─── Worktree dispatch pipeline ─────────────────────────────────
 
 const ISSUE_1: IssueDetails = {
@@ -816,14 +892,15 @@ describe("worktree dispatch pipeline", () => {
       expect(commitCwds).toContain("/tmp/test/.dispatch/worktrees/2-bugfix");
     });
 
-    it("continues without branching when worktree creation fails", async () => {
+    it("fails tasks when worktree creation fails", async () => {
       vi.mocked(createWorktree).mockRejectedValue(new Error("worktree creation failed"));
 
       const result = await runDispatchPipeline(multiIssueOpts(), "/tmp/test");
 
-      expect(result.completed).toBe(2);
-      expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
-        expect.stringContaining("Could not create branch"),
+      expect(result.failed).toBe(2);
+      expect(result.completed).toBe(0);
+      expect(vi.mocked(log.error)).toHaveBeenCalledWith(
+        expect.stringContaining("Branch creation failed"),
       );
     });
   });
