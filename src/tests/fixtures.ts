@@ -1,4 +1,5 @@
-import { vi } from "vitest";
+import { vi, type Mock } from "vitest";
+import { EventEmitter } from "node:events";
 import type { ProviderInstance } from "../providers/interface.js";
 import type { Datasource, IssueDetails } from "../datasources/interface.js";
 import type { Task } from "../parser.js";
@@ -57,4 +58,36 @@ export function createMockIssueDetails(overrides?: Partial<IssueDetails>): Issue
     acceptanceCriteria: "",
     ...overrides,
   };
+}
+
+export interface MockChildProcess extends EventEmitter {
+  stdout: EventEmitter;
+  stderr: EventEmitter;
+  kill: Mock;
+}
+
+export function createMockChildProcess(): MockChildProcess {
+  const child = new EventEmitter() as MockChildProcess;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = vi.fn();
+  return child;
+}
+
+/**
+ * Callback-style implementation for an execFile mock used with util.promisify.
+ * When the real execFile is replaced by vi.fn() and wrapped with promisify,
+ * the default promisify convention passes (error, value) to the callback,
+ * where value is the single resolved result object.
+ */
+export type ExecFileMockImpl = (
+  cmd: string,
+  args: readonly string[] | null,
+  opts: Record<string, unknown>,
+  cb: (error: Error | null, result?: { stdout: string; stderr: string }) => void,
+) => void;
+
+/** Apply a typed mock implementation to a mocked execFile function. */
+export function mockExecFile(mock: Mock, impl: ExecFileMockImpl): void {
+  mock.mockImplementation(impl);
 }

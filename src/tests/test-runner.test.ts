@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { EventEmitter } from "node:events";
 
 vi.mock("../helpers/logger.js", () => ({
   log: {
@@ -26,15 +25,9 @@ vi.mock("node:child_process", () => ({
 
 import { detectTestCommand, runTests } from "../test-runner.js";
 import { readFile } from "node:fs/promises";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { TimeoutError } from "../helpers/timeout.js";
-
-function createMockChildProcess() {
-  const child = new EventEmitter();
-  (child as any).stdout = new EventEmitter();
-  (child as any).stderr = new EventEmitter();
-  return child;
-}
+import { createMockChildProcess, type MockChildProcess } from "./fixtures.js";
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -104,11 +97,11 @@ describe("runTests", () => {
     const child = createMockChildProcess();
     vi.mocked(spawn).mockImplementation((() => {
       process.nextTick(() => {
-        (child as any).stdout.emit("data", "all tests passed\n");
+        child.stdout.emit("data", "all tests passed\n");
         child.emit("close", 0);
       });
       return child;
-    }) as any);
+    }) as unknown as typeof spawn);
 
     const result = await runTests("/project");
 
@@ -128,11 +121,11 @@ describe("runTests", () => {
     const child = createMockChildProcess();
     vi.mocked(spawn).mockImplementation((() => {
       process.nextTick(() => {
-        (child as any).stderr.emit("data", "FAIL src/test.ts\n");
+        child.stderr.emit("data", "FAIL src/test.ts\n");
         child.emit("close", 1);
       });
       return child;
-    }) as any);
+    }) as unknown as typeof spawn);
 
     const result = await runTests("/project");
 
@@ -155,7 +148,7 @@ describe("runTests", () => {
         child.emit("close", null);
       });
       return child;
-    }) as any);
+    }) as unknown as typeof spawn);
 
     const result = await runTests("/project");
 
@@ -174,7 +167,7 @@ describe("runTests", () => {
         child.emit("error", spawnError);
       });
       return child;
-    }) as any);
+    }) as unknown as typeof spawn);
 
     const err = await runTests("/project").catch((err: Error) => err) as Error;
 
@@ -197,14 +190,14 @@ describe("runTests", () => {
         child.emit("error", spawnError);
       });
       return child;
-    }) as any);
+    }) as unknown as typeof spawn);
 
     const err = await runTests("/project").catch((err: Error) => err) as Error;
 
     expect(err.message).toContain("spawn npm ENOENT");
     expect(err.cause).toBe(spawnError);
-    expect((err.cause as any).code).toBe("ENOENT");
-    expect((err.cause as any).syscall).toBe("spawn npm");
+    expect((err.cause as NodeJS.ErrnoException).code).toBe("ENOENT");
+    expect((err.cause as NodeJS.ErrnoException).syscall).toBe("spawn npm");
   });
 
   it("concatenates multiple stdout chunks", async () => {
@@ -215,13 +208,13 @@ describe("runTests", () => {
     const child = createMockChildProcess();
     vi.mocked(spawn).mockImplementation((() => {
       process.nextTick(() => {
-        (child as any).stdout.emit("data", "chunk1");
-        (child as any).stdout.emit("data", "chunk2");
-        (child as any).stdout.emit("data", "chunk3");
+        child.stdout.emit("data", "chunk1");
+        child.stdout.emit("data", "chunk2");
+        child.stdout.emit("data", "chunk3");
         child.emit("close", 0);
       });
       return child;
-    }) as any);
+    }) as unknown as typeof spawn);
 
     const result = await runTests("/project");
 
@@ -239,7 +232,7 @@ describe("runTests", () => {
         child.emit("close", 0);
       });
       return child;
-    }) as any);
+    }) as unknown as typeof spawn);
 
     await runTests("/project");
 
@@ -267,8 +260,7 @@ describe("runTests timeout", () => {
     );
 
     const child = createMockChildProcess();
-    (child as any).kill = vi.fn();
-    vi.mocked(spawn).mockReturnValue(child as any);
+    vi.mocked(spawn).mockReturnValue(child as unknown as ChildProcess);
 
     const promise = runTests("/project", 5000);
     // Prevent unhandled rejection during fake-timer advancement
@@ -286,9 +278,7 @@ describe("runTests timeout", () => {
     );
 
     const child = createMockChildProcess();
-    const killFn = vi.fn();
-    (child as any).kill = killFn;
-    vi.mocked(spawn).mockReturnValue(child as any);
+    vi.mocked(spawn).mockReturnValue(child as unknown as ChildProcess);
 
     const promise = runTests("/project", 5000);
     // Prevent unhandled rejection during fake-timer advancement
@@ -297,7 +287,7 @@ describe("runTests timeout", () => {
     await vi.advanceTimersByTimeAsync(5000);
 
     await promise.catch(() => {}); // consume rejection
-    expect(killFn).toHaveBeenCalled();
+    expect(child.kill).toHaveBeenCalled();
   });
 
   it("resolves normally when child closes before timeout", async () => {
@@ -306,19 +296,18 @@ describe("runTests timeout", () => {
     );
 
     const child = createMockChildProcess();
-    (child as any).kill = vi.fn();
-    vi.mocked(spawn).mockReturnValue(child as any);
+    vi.mocked(spawn).mockReturnValue(child as unknown as ChildProcess);
 
     const promise = runTests("/project", 10_000);
 
     // Child closes before timeout
     await vi.advanceTimersByTimeAsync(100);
-    (child as any).stdout.emit("data", "ok\n");
+    child.stdout.emit("data", "ok\n");
     child.emit("close", 0);
 
     const result = await promise;
     expect(result.exitCode).toBe(0);
-    expect((child as any).kill).not.toHaveBeenCalled();
+    expect(child.kill).not.toHaveBeenCalled();
   });
 
   it("uses default timeout of 300000ms when not specified", async () => {
@@ -327,8 +316,7 @@ describe("runTests timeout", () => {
     );
 
     const child = createMockChildProcess();
-    (child as any).kill = vi.fn();
-    vi.mocked(spawn).mockReturnValue(child as any);
+    vi.mocked(spawn).mockReturnValue(child as unknown as ChildProcess);
 
     const promise = runTests("/project");
     // Prevent unhandled rejection during fake-timer advancement
