@@ -236,6 +236,10 @@ If this becomes an issue, the `git()` helper can be modified to pass a larger
   sequences `markTaskComplete` and `commitTask`
 - [CLI Options](../cli-orchestration/cli.md#options-reference) -- `--concurrency`
   flag that affects git safety
+- [Configuration System](../cli-orchestration/configuration.md) -- Persistent
+  `--concurrency` defaults and three-tier merge logic
+- [Run State Persistence](../git-and-worktree/run-state.md) -- Task status
+  tracking that complements the per-task commit model
 - [Markdown Syntax Reference](../task-parsing/markdown-syntax.md) -- Checkbox
   format that the parser uses to identify tasks before commit
 - [Datasource Overview](../datasource-system/overview.md) -- Branch naming

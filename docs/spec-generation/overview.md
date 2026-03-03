@@ -1,30 +1,44 @@
 # Spec Generation
 
-The spec generation pipeline converts issue tracker work items into high-level
-markdown specification files that drive the automated implementation pipeline.
-It is the `--spec` mode of the dispatch CLI -- a front-end that transforms
-issue descriptions into structured task lists suitable for consumption by the
-main `dispatch` command.
+The spec generation pipeline converts issue tracker work items, inline text
+descriptions, or existing files into high-level markdown specification files
+that drive the automated implementation pipeline. It is the `--spec` mode of
+the dispatch CLI — a front-end that transforms inputs into structured task
+lists suitable for consumption by the main `dispatch` command.
 
 ## What it does
 
-When a user runs `dispatch --spec 42,43,44`, the pipeline:
+The pipeline accepts three distinct input modes and produces structured
+markdown specs:
 
-1. **Detects the issue source** from the git remote URL, or accepts an explicit
-   `--source` flag. See [Datasource Auto-Detection](../datasource-system/overview.md#auto-detection).
-2. **Fetches each issue's details** via a pluggable
-   [issue fetcher](../issue-fetching/overview.md) (`gh` CLI for GitHub,
-   `az` CLI for Azure DevOps).
+```bash
+# Tracker mode — fetch issues from GitHub / Azure DevOps
+dispatch --spec 42,43,44
+
+# File/glob mode — transform existing files into specs
+dispatch --spec "docs/requirements/*.md"
+
+# Inline text mode — generate a spec from a text description
+dispatch --spec "Add user authentication with OAuth2 support"
+```
+
+Regardless of input mode, the pipeline:
+
+1. **Discriminates input type** using pattern matching (see
+   [Input mode discrimination](#input-mode-discrimination)).
+2. **Resolves the datasource** via explicit `--source` flag, git remote
+   auto-detection, or fallback heuristics. See
+   [Datasource Auto-Detection](../datasource-system/overview.md#auto-detection).
 3. **Boots an AI provider** (OpenCode or Copilot) through the
    [provider abstraction](../provider-system/provider-overview.md).
-4. **Prompts the AI** in a fresh session per issue, instructing it to explore
-   the codebase and produce a strategic spec file.
-5. **Writes the spec files** to `.dispatch/specs/` (or a custom `--output-dir`).
-
-The generated specs follow a structured markdown format (Context, Why,
-Approach, Integration Points, Tasks, References) and are designed to be
-consumed directly by `dispatch "path/to/specs/*.md"` to drive the full
-implementation pipeline.
+4. **Boots a spec agent** that wraps the provider with spec-specific prompt
+   construction, temp-file orchestration, and post-processing.
+5. **Generates specs concurrently** in batches, with retry on failure.
+6. **Post-processes output** — extracts spec content from AI response,
+   validates structure, renames files based on generated H1 title.
+7. **Syncs with datasource** — updates tracker issues or manages local files
+   depending on mode and datasource type.
+8. **Writes spec files** to `.dispatch/specs/` (or a custom `--output-dir`).
 
 ## Why it exists
 
@@ -33,12 +47,15 @@ automated implementation. Without it, a user would manually translate an
 issue's requirements into a structured task file. The spec generator automates
 this translation by:
 
-- **Reading the issue context** -- description, acceptance criteria, comments,
-  labels, and state -- so nothing is missed.
-- **Exploring the codebase** -- the AI agent reads files, searches for symbols,
+- **Reading the issue context** — description, acceptance criteria, comments,
+  labels, and state — so nothing is missed.
+- **Accepting multiple input formats** — tracker issues, existing requirement
+  files, or free-form text descriptions — giving flexibility in how work is
+  defined.
+- **Exploring the codebase** — the AI agent reads files, searches for symbols,
   and understands the project's architecture, conventions, and tech stack
   before writing the spec.
-- **Staying high-level intentionally** -- the spec describes WHAT needs to
+- **Staying high-level intentionally** — the spec describes WHAT needs to
   change, WHY it needs to change, and HOW it fits into the existing project,
   but deliberately avoids low-level implementation specifics (exact code, line
   numbers, diffs). This is because a separate
@@ -50,69 +67,193 @@ this translation by:
 
 | File | Role |
 |------|------|
-| `src/cli.ts` | CLI entry point -- parses `--spec` and related flags, delegates to `generateSpecs()` |
-| `src/spec-generator.ts` | Core pipeline -- orchestrates detection, fetching, AI prompting, and file output |
-| `src/issue-fetcher.ts` | `IssueDetails`, `IssueFetcher`, and `IssueSourceName` type definitions |
-| `src/issue-fetchers/index.ts` | Fetcher registry, auto-detection, `ISSUE_SOURCE_NAMES` |
+| [`src/agents/spec.ts`](../../src/agents/spec.ts) | Spec agent — boot, prompt builders, temp-file orchestration, post-processing |
+| [`src/orchestrator/spec-pipeline.ts`](../../src/orchestrator/spec-pipeline.ts) | Pipeline orchestrator — input discrimination, batching, retry, datasource sync |
+| [`src/spec-generator.ts`](../../src/spec-generator.ts) | Shared utilities — types, input classifiers, content extraction, validation, concurrency |
+| [`src/helpers/retry.ts`](../../src/helpers/retry.ts) | Retry utility — immediate retry with configurable attempts |
+| [`src/helpers/confirm-large-batch.ts`](../../src/helpers/confirm-large-batch.ts) | Large batch safety — confirmation prompt for batches over 100 items |
+| [`src/helpers/cleanup.ts`](../../src/helpers/cleanup.ts) | Process-level cleanup registry |
+| [`src/helpers/slugify.ts`](../../src/helpers/slugify.ts) | Slug generation for spec filenames |
+
+## Architecture overview
+
+The spec generation pipeline is split across three source files with clear
+responsibility boundaries:
+
+```mermaid
+flowchart TD
+    subgraph "Entry Point"
+        CLI["CLI (src/cli.ts)"]
+    end
+
+    subgraph "Pipeline Orchestrator"
+        SP["spec-pipeline.ts<br/>runSpecPipeline()"]
+        SP -->|"classifies input"| ID["Input Discrimination<br/>isIssueNumbers() / isGlobOrFilePath()"]
+        SP -->|"dry-run preview"| DR["Dry-Run Mode"]
+        SP -->|"batch safety"| LB["confirmLargeBatch()"]
+        SP -->|"boots provider"| PB["Provider Boot"]
+        SP -->|"boots agent"| AB["Spec Agent Boot"]
+        SP -->|"retry wrapper"| RW["withRetry()"]
+        SP -->|"renames files"| RF["File Rename Flow"]
+        SP -->|"syncs datasource"| DS["Datasource Sync"]
+    end
+
+    subgraph "Spec Agent"
+        SA["agents/spec.ts<br/>boot() → SpecAgent"]
+        SA -->|"generate()"| GEN["Prompt Build → Session → AI Write → Read Temp → Extract → Validate → Write Final"]
+        SA -->|"cleanup()"| CL["Delete temp files"]
+    end
+
+    subgraph "Shared Utilities"
+        SG["spec-generator.ts"]
+        SG --- IC["isIssueNumbers()"]
+        SG --- IGF["isGlobOrFilePath()"]
+        SG --- ESC["extractSpecContent()"]
+        SG --- VSS["validateSpecStructure()"]
+        SG --- RS["resolveSource()"]
+        SG --- DC["defaultConcurrency()"]
+    end
+
+    CLI -->|"--spec flag"| SP
+    SP -->|"per-item generation"| SA
+    SP -->|"uses classifiers"| SG
+    SA -->|"uses post-processing"| SG
+```
+
+## Input mode discrimination
+
+The pipeline determines which input mode to use through a three-way
+discrimination chain in `src/orchestrator/spec-pipeline.ts`:
+
+```mermaid
+flowchart TD
+    INPUT["User input string(s)"] --> ISN{"isIssueNumbers()?<br/>Regex: /^\\d+(,\\s*\\d+)*$/"}
+    ISN -->|"Yes"| TM["Tracker Mode<br/>Fetch issues via datasource"]
+    ISN -->|"No"| IGF{"isGlobOrFilePath()?<br/>Glob metacharacters,<br/>path separators,<br/>dot prefix,<br/>file extensions"}
+    IGF -->|"Yes"| FM["File/Glob Mode<br/>Read files from filesystem"]
+    IGF -->|"No"| IM["Inline Text Mode<br/>Treat as free-form description"]
+
+    TM --> GEN["Generate Specs"]
+    FM --> GEN
+    IM --> GEN
+
+    style ISN fill:#f9f,stroke:#333
+    style IGF fill:#bbf,stroke:#333
+    style IM fill:#bfb,stroke:#333
+```
+
+### Tracker mode
+
+Triggered when input matches `/^\d+(,\s*\d+)*$/` (comma-separated numbers).
+
+- Fetches issue details via the [datasource system](../datasource-system/overview.md).
+- Concurrent batched fetching for multiple issues.
+- Filenames: `{id}-{slug}.md` (e.g., `42-add-user-authentication.md`).
+- Datasource sync: updates existing issues and deletes local spec files after
+  sync (for non-md datasources).
+
+### File/glob mode
+
+Triggered when input contains glob metacharacters (`*`, `?`, `{`, `[`), path
+separators (`/`, `\`), dot-prefix (`.`), or common file extensions (`.md`,
+`.txt`, etc.). Array inputs always classify as file/glob mode.
+
+- Resolves globs using the [`glob`](https://github.com/isaacs/node-glob)
+  package with `{ cwd, absolute: true }`.
+- Reads file content from the filesystem.
+- With non-md datasource: creates new tracker issues and deletes local files.
+- With md datasource: keeps files in-place.
+
+### Inline text mode
+
+Fallback when input matches neither issue numbers nor file/glob patterns.
+
+- Constructs an `IssueDetails` object from the raw text string.
+- Generates a slug-based filename: `{slug}.md`.
+- No tracker interaction — the text is the entire input.
+
+### Edge cases in input classification
+
+- `isIssueNumbers()` returns `false` for array inputs — arrays always go
+  through the glob/file path.
+- `isGlobOrFilePath()` returns `true` for arrays — even if array elements
+  look like issue numbers.
+- A string like `"42"` matches as an issue number. A string like `"42.md"`
+  matches as a file path.
+- Empty string passes through to inline text mode (the spec agent will return
+  an error for missing input).
 
 ## End-to-end pipeline flow
 
 The spec generation pipeline involves multiple interacting services. The
 following sequence diagram shows the complete data flow from CLI invocation
-through issue fetching, AI prompting, and file output:
+through all processing stages:
 
 ```mermaid
 sequenceDiagram
     participant User
     participant CLI as cli.ts
-    participant Spec as spec-generator.ts
-    participant Reg as issue-fetchers/index.ts
-    participant Git as git CLI
-    participant Fetcher as GitHub / AzDevOps Fetcher
-    participant Tool as gh / az CLI
-    participant ProvReg as providers/index.ts
-    participant AI as AI Provider (OpenCode / Copilot)
+    participant Pipeline as spec-pipeline.ts
+    participant SG as spec-generator.ts
+    participant DS as Datasource
+    participant Provider as AI Provider
+    participant Agent as Spec Agent
+    participant AI as AI Session
     participant FS as File System
 
-    User->>CLI: dispatch --spec 42,43
+    User->>CLI: dispatch --spec "42,43"
+    CLI->>Pipeline: runSpecPipeline(options)
 
-    CLI->>Spec: generateSpecs({ issues: "42,43", ... })
+    Pipeline->>SG: isIssueNumbers("42,43")
+    SG-->>Pipeline: true (tracker mode)
 
-    alt --source not provided
-        Spec->>Reg: detectIssueSource(cwd)
-        Reg->>Git: git remote get-url origin
-        Git-->>Reg: remote URL
-        Reg-->>Spec: "github" | "azdevops" | null
-        Note over Spec: Exit with error if null
+    Pipeline->>SG: resolveSource(options)
+    SG-->>Pipeline: "github"
+
+    Pipeline->>DS: fetchIssues([42, 43])
+    DS-->>Pipeline: IssueDetails[]
+
+    alt Dry-run mode
+        Pipeline-->>CLI: Preview items, return early
     end
 
-    Spec->>Reg: getIssueFetcher(source)
-    Reg-->>Spec: IssueFetcher
-
-    loop For each issue ID (sequential)
-        Spec->>Fetcher: fetch(id, { cwd, org, project })
-        Fetcher->>Tool: gh issue view / az boards work-item show
-        Tool-->>Fetcher: JSON response
-        Fetcher-->>Spec: IssueDetails (or error)
+    alt Batch > 100 items
+        Pipeline->>User: confirmLargeBatch()
+        User-->>Pipeline: "yes" / abort
     end
 
-    Spec->>ProvReg: bootProvider(provider, { url, cwd })
-    ProvReg-->>Spec: ProviderInstance
+    Pipeline->>Provider: bootProvider(name, opts)
+    Provider-->>Pipeline: ProviderInstance
 
-    Spec->>FS: mkdir(outputDir, { recursive: true })
+    Pipeline->>Agent: boot(instance)
+    Agent-->>Pipeline: SpecAgent { generate, cleanup }
 
-    loop For each successfully fetched issue (sequential)
-        Spec->>AI: createSession()
-        AI-->>Spec: sessionId
-        Spec->>AI: prompt(sessionId, specPrompt)
-        AI-->>Spec: markdown spec content
-        Note over Spec: Throw if empty response
-        Spec->>FS: writeFile(outputDir/id-slug.md, spec)
+    loop For each item (concurrent, capped by defaultConcurrency)
+        Pipeline->>Pipeline: withRetry(retries=2)
+        Pipeline->>Agent: generate(item, outputPath, cwd)
+
+        Note over Agent: Path traversal guard
+        Agent->>FS: create .dispatch/tmp/ dir
+        Agent->>AI: createSession()
+        Agent->>AI: prompt(specPrompt)
+        Note over AI: AI uses Write tool to save temp file
+        Agent->>FS: readFile(tempPath)
+        Agent->>SG: extractSpecContent(raw)
+        Agent->>SG: validateSpecStructure(content)
+        Agent->>FS: writeFile(finalPath, content)
+        Agent->>FS: rm(tempPath)
+        Agent-->>Pipeline: SpecResult { success, valid, ... }
+
+        alt File rename needed
+            Pipeline->>Pipeline: Extract H1, re-slugify
+            Pipeline->>FS: rename(oldPath, newPath)
+        end
     end
 
-    Spec->>AI: cleanup()
-    Spec-->>CLI: SpecSummary { total, generated, failed, files }
-    CLI->>CLI: process.exit(failed > 0 ? 1 : 0)
+    Pipeline->>DS: syncResults (mode-dependent)
+    Pipeline->>Agent: cleanup()
+    Pipeline->>Provider: cleanup()
+    Pipeline-->>CLI: SpecSummary
 ```
 
 ## Two-stage pipeline: spec agent, planner agent, coder agent
@@ -122,7 +263,7 @@ issue tracker items into committed code changes:
 
 ```mermaid
 flowchart LR
-    A["Issue Tracker<br/>(GitHub / Azure DevOps)"] -->|"dispatch --spec"| B["Spec Agent (AI)<br/>Explores codebase,<br/>produces spec file"]
+    A["Issue Tracker<br/>(GitHub / Azure DevOps)<br/>or Files / Text"] -->|"dispatch --spec"| B["Spec Agent (AI)<br/>Explores codebase,<br/>produces spec file"]
     B -->|"writes .md files"| C[".dispatch/specs/*.md"]
     C -->|"dispatch 'specs/*.md'"| D["Planner Agent (AI)<br/>Read-only exploration,<br/>detailed execution plan"]
     D -->|"plan text"| E["Coder Agent (AI)<br/>Follows plan,<br/>makes code changes"]
@@ -152,20 +293,184 @@ dispatch --spec 42,43,44
 dispatch ".dispatch/specs/*.md"
 ```
 
-## Issue source detection
+## The spec agent
 
-When `--source` is not provided, the spec generator calls
-`detectIssueSource(cwd)` to auto-detect the issue tracker from the git
-`origin` remote URL. The function matches against known hostname patterns
-(github.com, dev.azure.com, visualstudio.com) and supports both SSH and HTTPS
-URL formats.
+The spec agent (`src/agents/spec.ts`) is the core AI interaction layer. It
+wraps the provider instance with spec-specific behavior.
 
-If detection fails (no pattern match, not a git repository, or no `origin`
-remote), all issues are marked as failed and the process exits with code `1`.
-Use `--source` to bypass auto-detection entirely.
+### Boot and lifecycle
 
-See [Datasource Auto-Detection](../datasource-system/overview.md#auto-detection)
-for the full pattern table, URL format support, and limitation details.
+The `boot()` function accepts a `ProviderInstance` and returns a `SpecAgent`
+object with two methods:
+
+- **`generate(item, outputPath, cwd)`** — generates a single spec.
+- **`cleanup()`** — removes the `.dispatch/tmp/` directory.
+
+### Generation flow
+
+Each call to `generate()` follows this sequence:
+
+1. **Path traversal guard** — validates that `outputPath` is contained within
+   `cwd` using `resolve()` + `startsWith(resolvedCwd + sep)`. This guard does
+   **not** follow symlinks, so a symlink pointing outside `cwd` would pass
+   validation.
+2. **Create temp directory** — ensures `.dispatch/tmp/` exists.
+3. **Build prompt** — selects one of three prompt builders based on input type:
+    - `buildSpecPrompt()` for tracker issues
+    - `buildInlineTextSpecPrompt()` for inline text
+    - `buildFileSpecPrompt()` for file content
+4. **Create AI session** — fresh session per spec.
+5. **Send prompt** — all prompts instruct the AI to use its Write tool to save
+   the spec to a temp file path within `.dispatch/tmp/`.
+6. **Read temp file** — reads the AI-written temp file from disk.
+7. **Extract spec content** — `extractSpecContent()` performs 3-stage cleanup:
+   strip code fences → remove preamble before H1 → remove postamble after
+   last recognized H2 section.
+8. **Validate spec structure** — `validateSpecStructure()` checks 3 things:
+   starts with H1, has `## Tasks` (exact match), has `- [ ]` after Tasks.
+9. **Write final output** — writes post-processed content to the final path.
+10. **Delete temp file** — removes the temp file.
+
+### Why a temp file?
+
+The AI writes to a temp file via its Write tool rather than returning content
+in its response. This allows the spec agent to apply post-processing
+(extraction, validation) before writing the final output file. If the AI were
+to write directly to the final path, the post-processing step would require
+reading, modifying, and rewriting the file.
+
+### Input validation
+
+If none of the three input modes provides content (no issue details, no inline
+text, no file content), the agent returns an error result immediately without
+creating an AI session.
+
+### Error diagnostics
+
+If the AI fails to write the expected temp file, the error message includes
+the first 300 characters of the AI's response text. This helps diagnose
+whether the AI misunderstood the instructions or encountered an error.
+
+For detailed spec agent documentation, see
+[Spec Agent](./spec-agent.md).
+
+## Concurrency model
+
+The pipeline processes specs **concurrently** using a capped concurrency model:
+
+### Default concurrency calculation
+
+The `defaultConcurrency()` function (`src/spec-generator.ts`) calculates:
+
+```
+Math.max(1, Math.min(cpus().length, Math.floor(freemem() / 1024 / 1024 / 500)))
+```
+
+- Minimum: 1 concurrent task.
+- Maximum: CPU count OR available memory / 500 MB, whichever is lower.
+- The `MB_PER_CONCURRENT_TASK = 500` constant estimates memory usage per AI
+  session.
+
+On a machine with 8 CPUs and 4 GB free memory:
+`Math.min(8, Math.floor(4096 / 500))` = `Math.min(8, 8)` = 8.
+
+On a machine with 8 CPUs and 2 GB free memory:
+`Math.min(8, Math.floor(2048 / 500))` = `Math.min(8, 4)` = 4.
+
+### Retry strategy
+
+Each spec generation is wrapped in `withRetry()` (`src/helpers/retry.ts`) with
+`retries = 2` (default). Key characteristics:
+
+- **Immediate retry** — no exponential backoff or delay between attempts.
+- Retries `maxRetries` additional times (so up to 3 total attempts with
+  `retries = 2`).
+- The last error is re-thrown if all attempts fail.
+- Applies to each individual spec, not the entire batch.
+
+## Dry-run mode
+
+When `--dry-run` is passed, the pipeline previews what would be generated
+without booting the provider, creating AI sessions, or writing files:
+
+- Lists all items that would be processed.
+- Shows filenames that would be generated.
+- Returns early before provider boot — no AI costs or side effects.
+
+This is useful for verifying input classification and issue fetching before
+committing to a full generation run.
+
+## Large batch safety
+
+The `confirmLargeBatch()` function (`src/helpers/confirm-large-batch.ts`)
+provides a safety gate for large batches:
+
+- **Threshold:** `LARGE_BATCH_THRESHOLD = 100` items.
+- If the batch size exceeds 100, the user must type `"yes"` at an interactive
+  prompt (via `@inquirer/prompts` `input()` function).
+- Returns `true` immediately if count ≤ threshold.
+- This prevents accidental processing of massive batches that could consume
+  significant AI resources.
+
+## File rename flow
+
+After a spec is generated, the pipeline extracts the H1 title from the output
+and re-slugifies it. If the resulting filename differs from the original
+(which was based on the issue title or input slug), the file is renamed:
+
+1. Read the generated spec file.
+2. Extract the first H1 heading (`# Title`).
+3. Generate a new slug from the H1 title.
+4. If the new path differs from the original path, rename the file.
+
+This ensures filenames reflect the AI-generated title (which may be more
+descriptive than the original issue title).
+
+## Content extraction and validation
+
+### `extractSpecContent()` — 3-stage cleanup
+
+The extraction function (`src/spec-generator.ts`) processes raw AI output
+through three stages:
+
+1. **Strip code fences** — removes markdown code block wrappers (`` ```markdown
+   ... ``` ``) that some models add around the entire output.
+2. **Remove preamble** — strips any text before the first H1 heading (`# ...`).
+   The AI sometimes generates conversational text before the actual spec.
+3. **Remove postamble** — strips any text after the last recognized H2 section.
+   The recognized H2 headings are: Context, Why, Approach, Integration Points,
+   Tasks, References, Key Guidelines (the `RECOGNIZED_H2` set in
+   `src/spec-generator.ts`).
+
+### `validateSpecStructure()` — 3-check validation
+
+Validation checks (`src/spec-generator.ts`):
+
+1. **Starts with H1** — the spec must begin with a `# ` heading.
+2. **Has `## Tasks`** — exact heading match required.
+3. **Has `- [ ]` after Tasks** — at least one checkbox task item must follow
+   the Tasks heading.
+
+**Important:** Validation failures are **warnings, not errors**. A failed
+validation produces `valid: false` in the result but `success: true`. The
+spec file is still written. This design choice avoids discarding otherwise
+useful AI output due to minor formatting issues.
+
+## Datasource sync
+
+After all specs are generated, the pipeline syncs results with the datasource:
+
+### Tracker mode sync
+
+- **Non-md datasource** (GitHub, Azure DevOps): Updates existing tracker
+  issues with spec content, then deletes the local spec file.
+- **Md datasource**: Keeps the local file in place.
+
+### File mode sync
+
+- **Non-md datasource**: Creates new tracker issues from the generated specs,
+  then deletes the local spec files.
+- **Md datasource**: Keeps files in-place (no sync needed).
 
 ## Spec file output
 
@@ -181,114 +486,64 @@ To change the output location, use `--output-dir`:
 dispatch --spec 42,43 --output-dir ./my-specs
 ```
 
-The `--output-dir` value is resolved to an absolute path by the CLI argument
-parser (`src/cli.ts:127`).
-
 ### File naming convention
 
-Each spec file is named `<issue-id>-<slug>.md` where:
+Naming varies by input mode:
 
-1. `<issue-id>` is the issue number (e.g., `42`).
-2. `<slug>` is derived from the issue title by the [`slugify()`](../shared-utilities/slugify.md) utility:
-    - Converting to lowercase
-    - Replacing non-alphanumeric characters with hyphens
-    - Removing leading/trailing hyphens
-    - Truncating to 60 characters
+| Mode | Pattern | Example |
+|------|---------|---------|
+| Tracker | `{id}-{slug}.md` | `42-add-user-authentication.md` |
+| Inline text | `{slug}.md` | `add-user-authentication-with-oauth2.md` |
+| File/glob | Varies | Based on source filename |
 
-**Example:** Issue #42 titled "Add user authentication flow" produces
-`42-add-user-authentication-flow.md`.
-
-**Collision risk:** The issue ID prefix mitigates collisions. Two issues with
-similar titles (e.g., "Fix login bug" and "Fix login bug (part 2)") produce
-different filenames because their IDs differ (`42-fix-login-bug.md` vs
-`43-fix-login-bug-part-2.md`). The only collision scenario is processing the
-same issue ID twice in a single invocation, which would overwrite the first
-file.
-
-### Filesystem permissions
-
-The output directory requires write permission for the current user. The
-`mkdir` call needs permission to create directories in the parent path (or the
-directory must already exist). Individual spec files are written with
-`writeFile(filepath, spec, "utf-8")`.
-
-## Sequential processing
-
-The spec generator processes issues **sequentially** in two places:
-
-1. **Issue fetching** (`src/spec-generator.ts:109`): A `for` loop fetches
-   issues one at a time.
-2. **Spec generation** (`src/spec-generator.ts:137`): Another `for` loop
-   generates specs one at a time.
-
-**Why not parallel?** Sequential processing is a deliberate choice:
-
-- **Issue fetching:** The `gh` and `az` CLI tools may not handle concurrent
-  invocations gracefully. Both tools read from the same credential store, and
-  concurrent `execFile` calls could produce interleaved JSON output in error
-  scenarios. Sequential fetching also provides clear, ordered log output.
-- **Spec generation:** Each spec generation creates a fresh AI session and
-  sends a large prompt. Sequential processing avoids overwhelming the provider
-  with concurrent sessions, prevents context window exhaustion across
-  simultaneous sessions, and produces clear per-issue log output. The AI agent
-  also explores the filesystem during spec generation, and concurrent sessions
-  could interfere with each other's exploration.
-- **Error accumulation:** Both loops use a try/catch pattern that records
-  failures and continues with the remaining issues. Sequential processing makes
-  error accumulation straightforward -- each issue is either fetched/generated
-  or it is not, and the final summary counts are accurate.
+The [`slugify()`](../shared-utilities/slugify.md) utility generates slugs by:
+- Converting to lowercase
+- Replacing non-alphanumeric characters with hyphens
+- Removing leading/trailing hyphens
+- Truncating to `MAX_SLUG_LENGTH = 60` characters
 
 ## AI prompt structure
 
-The `buildSpecPrompt()` function (`src/spec-generator.ts:219-333`) constructs
-a detailed prompt that instructs the AI to explore the codebase and produce a
-structured spec file.
+The spec agent builds prompts via three specialized functions in
+`src/agents/spec.ts`:
 
-### Prompt sections
+### `buildSpecPrompt()` — tracker issues
 
-1. **Role definition:** "You are a **spec agent**" -- establishes the agent's
-   identity and purpose.
-2. **Pipeline context:** Explains the two-stage downstream pipeline (planner
-   agent + coder agent) so the AI understands why its output should stay
-   high-level.
-3. **Issue details:** Includes issue number, title, state, URL, labels,
-   description, acceptance criteria, and discussion comments. Sections are
-   conditionally included only when data is present (e.g., acceptance criteria
-   is omitted for GitHub issues).
-4. **Working directory:** The `cwd` path so the AI knows where to explore.
-5. **Instructions:** A five-step process:
-    1. Explore the codebase (read files, search symbols, understand structure)
-    2. Understand the issue (description, criteria, comments)
-    3. Research the approach (docs, libraries, patterns)
-    4. Identify integration points (modules, interfaces, conventions)
-    5. DO NOT make any changes
-6. **Output format:** A template showing the exact markdown structure the AI
-   should produce (Context, Why, Approach, Integration Points, Tasks,
-   References).
-7. **Key guidelines:** Constraints on staying high-level, respecting the
-   project's stack, explaining WHAT/WHY/HOW strategically, keeping tasks
-   atomic, and outputting only markdown content.
+Includes issue number, title, state, URL, labels, description, acceptance
+criteria, and discussion comments. Sections are conditionally included only
+when data is present.
 
-### Why the prompt stays high-level
+### `buildInlineTextSpecPrompt()` — inline text
 
-The prompt explicitly instructs the AI to avoid code snippets, exact line
-numbers, and step-by-step coding instructions. This is because:
+Constructs a prompt from the raw text string, treating it as the issue
+description.
 
-- The planner agent will re-explore the codebase with the context of each
-  individual `- [ ]` task and produce detailed plans.
-- The spec agent sees the entire issue, while the planner sees only one task
-  at a time (with filtered context). Detailed line-level instructions in the
-  spec would duplicate work and potentially conflict with the planner's
-  findings.
-- High-level specs are more resilient to codebase changes between spec
-  generation and execution.
+### `buildFileSpecPrompt()` — file content
+
+Includes both the file path and its content in the prompt.
+
+### Common prompt elements
+
+All three prompt builders share:
+
+1. **Role definition:** "You are a spec agent."
+2. **Pipeline context:** Explains the downstream planner + coder agents.
+3. **Working directory:** The `cwd` path for codebase exploration.
+4. **Write instruction:** Instructs the AI to use its Write tool to save
+   the spec to a specific temp file path.
+5. **Output format template:** The expected markdown structure (Context, Why,
+   Approach, Integration Points, Tasks, References).
+6. **Task execution tags:** `(P)` for parallel, `(S)` for sequential, `(I)`
+   for independent — defined at lines 318-348 of `src/agents/spec.ts`.
+7. **Key guidelines:** Stay high-level, respect the project stack, explain
+   WHAT/WHY/HOW strategically, keep tasks atomic.
 
 ### Output format
 
 The generated spec follows this structure:
 
 ```markdown
-# <Issue title> (#<number>)
+# <Title>
 
 > <One-line summary>
 
@@ -305,176 +560,148 @@ The generated spec follows this structure:
 <Modules, interfaces, conventions to align with>
 
 ## Tasks
-- [ ] First task
-- [ ] Second task
-- [ ] ...
+- [ ] (P) First task (parallelizable)
+- [ ] (S) Second task (sequential, depends on first)
+- [ ] (I) Third task (independent)
 
 ## References
 - <Links to docs, related issues, resources>
 ```
 
-The `## Tasks` section contains GitHub-style checkbox items (`- [ ] ...`) that
-the main `dispatch` command treats as individual units of work.
+The `## Tasks` section contains GitHub-style checkbox items (`- [ ] ...`) with
+optional execution tags that the main `dispatch` command treats as individual
+units of work.
 
-## Provider interaction
+## Cleanup
 
-The spec generator interacts with the AI provider through the same
-`ProviderInstance` interface used by the
-[dispatch pipeline](../planning-and-dispatch/overview.md):
+The pipeline performs cleanup in two stages at the end of processing:
 
-1. **Boot:** `bootProvider(provider, { url: serverUrl, cwd })` at
-   `src/spec-generator.ts:129`.
-2. **Create session:** `instance.createSession()` per issue at
-   `src/spec-generator.ts:197`.
-3. **Prompt:** `instance.prompt(sessionId, prompt)` at
-   `src/spec-generator.ts:199`.
-4. **Cleanup:** `instance.cleanup()` at `src/spec-generator.ts:163`.
+1. **Spec agent cleanup** — `specAgent.cleanup()` removes the `.dispatch/tmp/`
+   directory. Wrapped in try/catch — failures are logged but do not throw.
+2. **Provider cleanup** — `instance.cleanup()` shuts down the AI provider
+   server. Also wrapped in try/catch.
 
-The `--server-url` option works the same way as in dispatch mode -- it
-connects to an already-running provider server instead of spawning one. See
-the [Provider overview](../provider-system/provider-overview.md) for backend
-setup and connection details.
+The [cleanup registry](../shared-types/cleanup.md) provides a safety net:
+even if an unhandled error occurs after the provider is booted, the top-level
+error handler will drain the registry before exiting.
 
-### Supported AI providers
+### Lazy model detection
 
-Two backends are currently supported:
-
-| Provider | Flag | Default |
-|----------|------|---------|
-| OpenCode | `--provider opencode` | Yes (default) |
-| Copilot | `--provider copilot` | No |
-
-The `--provider` flag is validated against `PROVIDER_NAMES` at
-`src/cli.ts:144-148`. For adding a new provider, see the
-[Adding a Provider guide](../provider-system/adding-a-provider.md).
-
-### Empty response handling
-
-If the AI provider returns an empty response (null, undefined, or
-whitespace-only), `generateSingleSpec()` throws an error:
-`"AI returned an empty spec"` (`src/spec-generator.ts:202-204`).
-
-This error is caught by the per-issue try/catch at
-`src/spec-generator.ts:140-158`, which logs the failure, increments the
-`failed` counter, and continues processing remaining issues. The failed
-issue does not produce an output file.
-
-### Token limits and large prompts
-
-The spec prompt can be large -- it includes the full issue description,
-acceptance criteria, discussion comments, and detailed instructions. There is
-**no size validation or truncation** of the prompt before it is sent to the
-provider.
-
-If the prompt exceeds the provider's context window:
-- **OpenCode:** Behavior depends on the underlying model configuration.
-- **Copilot:** Behavior depends on the GitHub Copilot backend model.
-
-The provider may truncate, return an error, or produce degraded output.
-Dispatch does not detect or handle this condition. If issues have extremely
-long descriptions or many comments, consider splitting them or summarizing
-before using `--spec`.
+The pipeline logs the AI model name once it becomes available. At header time,
+the model may not yet be known (before the first AI interaction). The pipeline
+checks at lines 352-355 of `src/orchestrator/spec-pipeline.ts` and logs the
+model once detected.
 
 ## Error handling and exit codes
 
-### Per-issue error accumulation
+### Per-item error accumulation
 
-The spec generator uses a "catch and continue" pattern. Each issue is
-processed independently, and failures do not block subsequent issues:
+The spec generator uses a "catch and continue" pattern. Each item is processed
+independently, and failures do not block subsequent items:
 
-- **Fetch failures:** If an issue cannot be fetched (auth error, issue not
-  found, CLI tool missing), it is recorded with `details: null` and an error
-  message. Processing continues with remaining issues.
-- **Generation failures:** If the AI returns an empty response or the session
-  fails, the error is caught and the `failed` counter is incremented.
-  Processing continues.
-- **All fetches fail:** If no issues could be fetched at all, the pipeline
-  aborts before booting the AI provider to avoid unnecessary resource usage.
+- **Fetch failures:** If an issue cannot be fetched, it is recorded with an
+  error message. Processing continues.
+- **Generation failures:** If the AI returns empty content, the session fails,
+  or the temp file is not written, the error is caught, retried up to 2 times,
+  then recorded as failed. Processing continues.
+- **Path traversal failures:** If the output path resolves outside `cwd`, the
+  generation returns an error immediately without creating an AI session.
+- **All fetches fail:** If no items could be prepared at all, the pipeline
+  aborts before booting the AI provider.
 
 ### Exit code behavior
-
-The CLI at `src/cli.ts:194` exits with code `1` if `summary.failed > 0`:
 
 | Outcome | Exit code |
 |---------|-----------|
 | All specs generated successfully | `0` |
 | Some specs generated, some failed | `1` |
 | All specs failed | `1` |
-| No issue numbers provided | `0` (empty summary, no failures) |
+| Dry-run mode | `0` |
 
-There is no distinction between partial failure and total failure in the exit
-code. Use the log output to determine which specific issues failed and why.
+### Validation failures do not affect exit codes
 
-### Provider cleanup
+Since validation failures produce `success: true` with `valid: false`, they
+do **not** contribute to the failed count and do not affect the exit code.
+Validation warnings are logged but treated as informational.
 
-Unlike the [dispatch orchestrator's cleanup gap](../cli-orchestration/orchestrator.md#the-cleanup-gap-mitigated),
-the spec generator calls `instance.cleanup()` on the success path at
-`src/spec-generator.ts:163`. The [cleanup registry](../shared-types/cleanup.md)
-provides a safety net: even if an unhandled error occurs after the
-provider is booted (e.g., `mkdir` fails), the top-level `.catch()` handler
-in `src/cli.ts:218-220` will drain the registry before exiting.
+## Source detection
 
-## CLI spec mode vs dispatch mode
+The `resolveSource()` function (`src/spec-generator.ts`) determines the
+datasource through a priority chain:
 
-The CLI determines which mode to run based on the presence of the `--spec`
-flag (`src/cli.ts:182-216`):
+1. **Explicit `--source` flag** — used directly if provided.
+2. **Auto-detect from git** — reads `git remote get-url origin` and matches
+   against known hostname patterns (github.com, dev.azure.com,
+   visualstudio.com).
+3. **Fallback for non-issue inputs** — returns `"md"` for file/glob and
+   inline text inputs (no tracker needed).
+4. **Null for issue inputs** — returns `null` if auto-detection fails for
+   issue inputs, causing the pipeline to abort.
 
-```mermaid
-flowchart TD
-    A["process.argv"] --> B["parseArgs()"]
-    B --> C{"--spec provided?"}
-    C -->|Yes| D["Spec mode:<br/>generateSpecs()"]
-    C -->|No| E{"glob pattern provided?"}
-    E -->|Yes| F["Dispatch mode:<br/>orchestrate()"]
-    E -->|No| G["Error: missing pattern"]
-    D --> H{"summary.failed > 0?"}
-    F --> I{"summary.failed > 0?"}
-    H -->|Yes| J["exit 1"]
-    H -->|No| K["exit 0"]
-    I -->|Yes| J
-    I -->|No| K
+See [Datasource Auto-Detection](../datasource-system/overview.md#auto-detection)
+for the full pattern table, URL format support, and limitation details.
+
+## Security considerations
+
+### Path traversal guard
+
+The spec agent validates output paths at `src/agents/spec.ts:90-102`:
+
+```
+resolve(outputPath).startsWith(resolvedCwd + sep)
 ```
 
-When `--spec` is present, the glob pattern is not required. All dispatch-specific
-options (`--dry-run`, `--no-plan`, `--concurrency`) are accepted by the parser
-but ignored in spec mode. The shared options (`--provider`, `--server-url`,
-`--cwd`) apply to both modes.
+**Limitation:** This check uses `resolve()` which does **not** follow
+symlinks. A symlink within `cwd` that points outside it would pass the
+validation. For most use cases this is acceptable since spec output paths
+are programmatically generated, not user-supplied directory traversal strings.
+
+### Temp file security
+
+Temp files are written to `.dispatch/tmp/` within the project directory, not
+to the system temp directory (`/tmp`). This avoids cross-user temp file
+attacks but means the project directory must be writable.
 
 ## Related documentation
 
-- [Issue Fetching](../issue-fetching/overview.md) -- How issues are retrieved
-  and normalized from GitHub and Azure DevOps
-- [GitHub Fetcher](../issue-fetching/github-fetcher.md) -- GitHub CLI
-  integration, setup, and troubleshooting
-- [Azure DevOps Fetcher](../issue-fetching/azdevops-fetcher.md) -- Azure CLI
-  integration, setup, and troubleshooting
-- [Datasource System](../datasource-system/overview.md) -- Datasource
-  interface, registry, and auto-detection underlying the fetchers
-- [GitHub Datasource](../datasource-system/github-datasource.md) -- The GitHub
-  datasource implementation used by the fetcher shim
-- [Datasource Integrations](../datasource-system/integrations.md) -- How
-  datasource integrations consume generated specs
-- [Integrations & Troubleshooting](./integrations.md) -- External dependencies,
+- [Spec Agent](./spec-agent.md) — Detailed spec agent implementation
+  (boot, prompt builders, temp-file orchestration, post-processing)
+- [Integrations & Troubleshooting](./integrations.md) — External dependencies,
   auth, and troubleshooting for the spec pipeline
-- [Provider Abstraction & Backends](../provider-system/provider-overview.md) --
+- [Issue Fetching](../issue-fetching/overview.md) — How issues are retrieved
+  and normalized from GitHub and Azure DevOps
+- [Datasource System](../datasource-system/overview.md) — Datasource
+  interface, registry, and auto-detection
+- [Datasource Integrations](../datasource-system/integrations.md) — How
+  datasource integrations consume generated specs
+- [Provider Abstraction & Backends](../provider-system/provider-overview.md) —
   AI provider setup and session model
-- [Cleanup Registry](../shared-types/cleanup.md) -- How provider cleanup is
+- [Cleanup Registry](../shared-types/cleanup.md) — How provider cleanup is
   registered and drained on exit
-- [CLI Argument Parser](../cli-orchestration/cli.md) -- Full CLI option reference
+- [CLI Argument Parser](../cli-orchestration/cli.md) — Full CLI option reference
   including `--spec` mode
-- [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) -- How
+- [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) — How
   generated spec files are consumed downstream
-- [Testing Overview](../testing/overview.md) -- Test coverage including
-  spec generator tests
-- [Spec Generator Tests](../testing/spec-generator-tests.md) -- Unit and
-  integration tests for the spec generation pipeline
-- [Slugify Utility](../shared-utilities/slugify.md) -- The `slugify()` function
+- [Slugify Utility](../shared-utilities/slugify.md) — The `slugify()` function
   used for spec filename generation
-- [Shared Interfaces & Utilities](../shared-types/overview.md) -- Shared types
+- [Timeout Utility](../shared-utilities/timeout.md) — `withTimeout` deadline
+  wrapper used across the pipeline
+- [Shared Interfaces & Utilities](../shared-types/overview.md) — Shared types
   used by the spec pipeline (provider, cleanup, logger, format)
-- [Task Parsing & Markdown](../task-parsing/overview.md) -- How the generated
+- [Task Parsing & Markdown](../task-parsing/overview.md) — How the generated
   `- [ ]` task items are parsed by the dispatch pipeline
-- [Configuration](../cli-orchestration/configuration.md) -- Persistent config
+- [Configuration](../cli-orchestration/configuration.md) — Persistent config
   defaults that affect `--spec` mode (provider, source)
-- [Architecture Overview](../architecture.md) -- System-wide design and
+- [Architecture Overview](../architecture.md) — System-wide design and
   pipeline topology
+- [Spec Generator Tests](../testing/spec-generator-tests.md) — Unit and
+  integration tests for the spec generation pipeline
+- [Prerequisites & Safety Checks](../prereqs-and-safety/overview.md) —
+  Environment validation (Node.js version, git, CLI tools) that runs before
+  the spec pipeline boots
+- [Batch Confirmation](../prereqs-and-safety/confirm-large-batch.md) —
+  The safety prompt for large batches referenced by `confirmLargeBatch()`
+  in the pipeline
+- [Planner Agent](../planning-and-dispatch/planner.md) — The downstream
+  planner that consumes generated specs in the two-phase
+  planner-then-executor architecture
