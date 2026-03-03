@@ -216,6 +216,9 @@ the [issue fetchers](../issue-fetching/overview.md) and [AI provider](../shared-
 - [Architecture overview](../architecture.md) — spec generation pipeline diagram
 - [Parser tests](parser-tests.md) — `(P)`/`(S)`/`(I)` mode prefix testing (consumer of spec output)
 - [Task parsing overview](../task-parsing/overview.md) — how `(P)`/`(S)`/`(I)` mode prefixes are parsed
+- [Markdown syntax reference](../task-parsing/markdown-syntax.md) — Exact syntax
+  rules for the `- [ ]` checkbox format and `(P)`/`(S)`/`(I)` mode prefixes
+  that the spec generator must produce
 - [Issue fetching overview](../issue-fetching/overview.md) — issue fetchers consumed by `generateSpecs()`
 - [Provider interface](../shared-types/provider.md) — AI provider used by spec generation
 - [Datasource system](../datasource-system/overview.md) — datasources that feed issue data into spec generation
