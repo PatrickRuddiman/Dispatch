@@ -372,9 +372,9 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     const providerCall = vi.mocked(select).mock.calls[0][0];
-    for (const choice of providerCall.choices) {
+    for (const choice of providerCall.choices as Array<{ name: string; value: string }>) {
       expect(choice.name).toBe(
-        `${chalk.green("●")} ${(choice as { value: string }).value}`,
+        `${chalk.green("●")} ${choice.value}`,
       );
     }
   });
@@ -392,16 +392,17 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     const providerCall = vi.mocked(select).mock.calls[0][0];
-    const copilotChoice = providerCall.choices.find(
-      (c: { value: string }) => c.value === "copilot",
+    const choices = providerCall.choices as Array<{ name: string; value: string }>;
+    const copilotChoice = choices.find(
+      (c) => c.value === "copilot",
     );
     expect(copilotChoice!.name).toBe(`${chalk.red("●")} copilot`);
-    const otherChoices = providerCall.choices.filter(
-      (c: { value: string }) => c.value !== "copilot",
+    const otherChoices = choices.filter(
+      (c) => c.value !== "copilot",
     );
     for (const choice of otherChoices) {
       expect(choice.name).toBe(
-        `${chalk.green("●")} ${(choice as { value: string }).value}`,
+        `${chalk.green("●")} ${choice.value}`,
       );
     }
   });
