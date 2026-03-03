@@ -221,4 +221,33 @@ describe("log", () => {
       expect(result).toBe("Error: outer\n  ⤷ Cause: inner string");
     });
   });
+
+  // ─── extractMessage ─────────────────────────────────────────────────
+
+  describe("extractMessage", () => {
+    it("returns the message of an Error", () => {
+      const result = log.extractMessage(new Error("boom"));
+      expect(result).toBe("boom");
+    });
+
+    it("returns the string representation of a non-Error string", () => {
+      const result = log.extractMessage("string error");
+      expect(result).toBe("string error");
+    });
+
+    it("returns the string representation of a non-Error number", () => {
+      const result = log.extractMessage(404);
+      expect(result).toBe("404");
+    });
+
+    it('returns "" for null', () => {
+      const result = log.extractMessage(null);
+      expect(result).toBe("");
+    });
+
+    it('returns "" for undefined', () => {
+      const result = log.extractMessage(undefined);
+      expect(result).toBe("");
+    });
+  });
 });
