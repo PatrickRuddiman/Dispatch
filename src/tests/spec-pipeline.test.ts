@@ -45,6 +45,7 @@ vi.mock("../helpers/format.js", () => ({
 }));
 
 vi.mock("../helpers/slugify.js", () => ({
+  MAX_SLUG_LENGTH: 60,
   slugify: vi.fn((input: string, maxLen?: number) => {
     const slug = input
       .toLowerCase()
