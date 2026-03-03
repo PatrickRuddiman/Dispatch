@@ -1,10 +1,9 @@
 # Integrations & Troubleshooting
 
 This document covers the external integrations used by the planning and dispatch
-pipeline: the Git CLI (including worktrees and squash operations), Node.js
-`child_process`, Node.js `fs`, Node.js `os.tmpdir()`, the provider system,
-and chalk for terminal styling. For each integration, it explains how to access,
-query, monitor, and troubleshoot it.
+pipeline: the Git CLI, Node.js `child_process`, Node.js `fs`, and the provider
+system. For each integration, it explains how to access, query, monitor, and
+troubleshoot it.
 
 ## Git CLI
 
@@ -247,152 +246,10 @@ teardown runs even if the process exits via signal or unhandled error.
 2. Re-run dispatch (completed tasks are already marked `[x]` and will be
    skipped)
 
-## Git worktree operations
-
-**Used in**: `src/orchestrator/dispatch-pipeline.ts:16, 250-253` and
-`src/helpers/worktree.ts`
-**Official documentation**: [git-scm.com/docs/git-worktree](https://git-scm.com/docs/git-worktree)
-
-Git worktrees allow multiple working directories to share a single `.git`
-repository. The dispatch pipeline uses worktrees to process multiple issues
-in parallel — each issue gets its own worktree with its own branch, avoiding
-the branch-switching conflicts that would occur with a single working directory.
-
-### Commands used
-
-| Command | Purpose | Called from |
-|---------|---------|------------|
-| `git worktree add <path> -b <branch>` | Create a new worktree with a branch | `src/helpers/worktree.ts` (createWorktree) |
-| `git worktree remove <path>` | Remove a worktree after processing | `src/helpers/worktree.ts` (removeWorktree) |
-
-### When worktrees are used
-
-The pipeline activates worktree mode when all three conditions are true:
-`!noWorktree && !noBranch && tasksByFile.size > 1`
-(`src/orchestrator/dispatch-pipeline.ts:186`). See
-[Orchestrator — Worktree-based parallel execution](../cli-orchestration/orchestrator.md#worktree-based-parallel-execution)
-for the full decision flowchart.
-
-### Per-worktree resource isolation
-
-Each worktree gets its own:
-
-- `ProviderInstance` (booted with `cwd` set to the worktree path)
-- `PlannerAgent`, `ExecutorAgent`, and `CommitAgent`
-- Independent cleanup registration via `registerCleanup()`
-
-This isolation means a provider crash in one worktree does not affect other
-worktrees. However, it also means N issues require N provider instances,
-which may increase memory usage and API rate limit pressure.
-
-### Troubleshooting worktree issues
-
-- **Stale worktrees**: If the process is killed before cleanup runs,
-  orphaned worktree directories may remain. List them with `git worktree list`
-  and remove with `git worktree remove <path>` or `git worktree prune`.
-- **Lock conflicts**: Git uses lock files per-worktree. If a worktree
-  operation fails with a lock error, check for stale `.git/worktrees/<name>/locked`
-  files.
-- **Disk space**: Each worktree is a full checkout. Large repositories may
-  consume significant disk space when processing many issues in parallel.
-
-## Squash via soft reset
-
-**Used in**: `src/orchestrator/datasource-helpers.ts:210-223`
-
-After all tasks for an issue complete, the commit agent rewrites the branch's
-commit history into a single squashed commit. This uses a `git merge-base` +
-`git reset --soft` + `git commit` strategy rather than interactive rebase:
-
-| Step | Command | Purpose |
-|------|---------|---------|
-| 1 | `git merge-base <default> HEAD` | Find the common ancestor | 
-| 2 | `git reset --soft <merge-base>` | Move HEAD back, keeping all changes staged |
-| 3 | `git commit -m <message>` | Create a single commit with all changes |
-
-### Why soft reset instead of interactive rebase
-
-- **Simpler**: No editor interaction or todo-list processing required
-- **Deterministic**: No conflict resolution needed (all changes are already
-  on the branch)
-- **Fast**: Three commands instead of a multi-step rebase sequence
-
-### Troubleshooting squash failures
-
-If the squash fails (e.g., empty diff, detached HEAD), the error is caught
-and logged as a warning (`src/orchestrator/dispatch-pipeline.ts:479`). The
-pipeline continues with the original commit history — the PR is still created
-with the unsquashed commits.
-
-## chalk (terminal styling)
-
-**Used in**: `src/orchestrator/dispatch-pipeline.ts:35-36`
-**Official documentation**: [github.com/chalk/chalk](https://github.com/chalk/chalk)
-
-The dispatch pipeline imports chalk for colored terminal output. Chalk
-automatically detects terminal color support and degrades gracefully:
-
-- **True color terminals**: Full RGB colors
-- **256-color terminals**: Closest ANSI 256-color approximation
-- **Basic terminals**: 16-color ANSI
-- **No color support** (e.g., piped output, `NO_COLOR` env var): Plain text
-
-### Disabling colors
-
-Set `NO_COLOR=1` or `FORCE_COLOR=0` in the environment to disable chalk
-output. This is useful for CI pipelines or when piping dispatch output to a
-file. Chalk respects the [NO_COLOR](https://no-color.org/) convention.
-
-### Where chalk is used in the pipeline
-
-Chalk is used by the `renderHeaderLines()` function
-(`src/helpers/format.ts`) to style the pipeline header displayed at
-startup. The TUI module (`src/tui.ts`) also uses chalk for status
-coloring. The pipeline itself imports chalk at
-`src/orchestrator/dispatch-pipeline.ts:35` for header rendering.
-
-## Node.js os.tmpdir()
-
-**Used in**: `src/orchestrator/datasource-helpers.ts` (via `mkdtemp`)
-**Official documentation**: [Node.js os.tmpdir](https://nodejs.org/api/os.html#ostmpdir)
-
-The pipeline creates temporary directories for spec files using
-`mkdtemp(join(tmpdir(), "dispatch-"))`. This creates directories like
-`/tmp/dispatch-abc123/` on Linux/macOS or
-`C:\Users\<user>\AppData\Local\Temp\dispatch-abc123\` on Windows.
-
-### Temp directory lifecycle
-
-1. **Created**: At the start of the pipeline via `writeItemsToTempDir()`
-   (`src/orchestrator/datasource-helpers.ts`)
-2. **Populated**: Each discovered work item is written as a markdown file
-   using the pattern `<issueId>-<slug>.md`
-3. **Read**: The pipeline parses tasks from these files
-4. **NOT cleaned up**: There is no explicit cleanup of temp directories
-   anywhere in the pipeline. The OS's temp directory purging mechanism
-   (e.g., `systemd-tmpfiles` on Linux, reboot on Windows) is relied upon.
-
-### Implications of no cleanup
-
-- Repeated dispatch runs accumulate `dispatch-*` directories in the OS
-  temp directory
-- On long-running servers, this may consume disk space over time
-- To manually clean up: `rm -rf /tmp/dispatch-*` (Linux/macOS)
-
-### Platform differences
-
-| Platform | Default `tmpdir()` | Cleanup mechanism |
-|----------|-------------------|-------------------|
-| Linux | `/tmp` | `systemd-tmpfiles` or reboot |
-| macOS | `/var/folders/.../T` | OS periodic cleanup |
-| Windows | `%TEMP%` | Disk Cleanup tool or reboot |
-
 ## Related documentation
 
 - [Pipeline Overview](./overview.md) -- How integrations fit into the pipeline
 - [Dispatcher](./dispatcher.md) -- Provider interaction during execution
-- [Executor Agent](./executor.md) -- Executor agent wrapping dispatch with
-  task completion and timing
 - [Planner Agent](./planner.md) -- Provider interaction during planning
 - [Git Operations](./git.md) -- Detailed git behavior and concurrency concerns
 - [Task Context & Lifecycle](./task-context-and-lifecycle.md) -- File system
@@ -406,13 +263,7 @@ The pipeline creates temporary directories for spec files using
   that drains provider teardown on exit
 - [Shared Types Integrations](../shared-types/integrations.md) -- chalk, Node.js
   fs/promises, and process signal details
-- [Testing Overview](../testing/overview.md) -- Test coverage (the dispatch
-  pipeline and datasource helpers are tested via `dispatch-pipeline.test.ts`
-  and `datasource-helpers.test.ts`; the dispatcher and executor agent are
-  tested via [Executor & Dispatcher Tests](../testing/executor-and-dispatcher-tests.md))
+- [Testing Overview](../testing/overview.md) -- Test coverage (note: the
+  orchestrator, planner, dispatcher, and git modules are not unit tested)
 - [Datasource Integrations](../datasource-system/integrations.md) -- Similar
   subprocess patterns used by the datasource layer
-- [Orchestrator — Worktree Execution](../cli-orchestration/orchestrator.md#worktree-based-parallel-execution)
-  -- Decision logic and per-issue processing in worktree mode
-- [Datasource Helpers](../datasource-system/datasource-helpers.md) --
-  `squashBranchCommits`, `getBranchDiff`, and temp file writing

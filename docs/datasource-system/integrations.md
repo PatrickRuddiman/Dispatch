@@ -96,11 +96,8 @@ when a datasource operation is first called. This applies to:
 | `az` | Azure DevOps datasource (CRUD + PR creation) | First call to any Azure DevOps operation |
 | `git` | Auto-detection (`detectDatasource()`), all lifecycle operations | Call to `detectDatasource()` or any git lifecycle method |
 
-The markdown datasource has a single subprocess dependency: `getUsername()`
-shells out to `git config user.name` via `execFile`. If `git` is not
-installed, the `catch` block returns `"local"` as the fallback username. All
-other markdown datasource operations use only Node.js `fs/promises` and do not
-depend on external tools.
+The markdown datasource does not depend on any external tools, so ENOENT errors
+do not apply to it.
 
 ## Git-based auto-detection
 
@@ -151,55 +148,10 @@ GitHub Enterprise Server hostnames (e.g., `github.mycompany.com`). Use
 registered. Other git hosting services will return `null`.
 
 **No markdown auto-detection.** The auto-detection system never returns `"md"`.
-The markdown datasource must always be selected explicitly with `--source md`,
-`dispatch config` (interactive wizard), or a `.dispatch/config.json` file with
-`"source": "md"`.
+The markdown datasource must always be selected explicitly with `--source md`.
 
 **Return type.** `detectDatasource()` returns `Promise<DatasourceName | null>`,
 not `Promise<DatasourceName>`. Callers must handle the `null` case.
-
-### `getGitRemoteUrl` behavior
-
-The `getGitRemoteUrl(cwd)` function (`src/datasources/index.ts:54`) wraps the
-`git remote get-url origin` call in a `try/catch` that catches **all** errors
-and returns `null`. This means the function returns `null` in all of the
-following cases:
-
-| Scenario | Underlying error | Return value |
-|----------|-----------------|--------------|
-| No `origin` remote configured | Non-zero exit from `git` | `null` |
-| Not inside a git repository | Non-zero exit from `git` | `null` |
-| `git` is not installed / not on PATH | `ENOENT` | `null` |
-| Empty stdout from `git` | No error, but `stdout.trim()` is `""` | `null` |
-
-Because `getGitRemoteUrl` swallows all errors, `detectDatasource()` also
-returns `null` in all of these cases. Callers handle `null` differently:
-
-- **`cli-config.ts`:** Exits with error code 1 and prints a message advising
-    the user to run `dispatch config` or specify `--source` explicitly.
-- **`datasource-helpers.ts` (`closeCompletedSpecIssues`):** Silently returns
-    without closing any issues.
-
-### Detection data flow
-
-The following diagram shows the complete detection path from the CLI
-invocation through to datasource resolution:
-
-```mermaid
-flowchart TD
-    START["CLI invoked without --source"] --> GIT["getGitRemoteUrl(cwd)"]
-    GIT -->|"git remote get-url origin"| URL{"URL obtained?"}
-    URL -->|"null (error or empty)"| NULL_1["Return null"]
-    URL -->|"valid URL string"| MATCH{"Test against SOURCE_PATTERNS"}
-    MATCH -->|"github.com"| GH["Return 'github'"]
-    MATCH -->|"dev.azure.com"| AZ["Return 'azdevops'"]
-    MATCH -->|"visualstudio.com"| AZ
-    MATCH -->|"no pattern matches"| NULL_2["Return null"]
-    NULL_1 --> CALLER{"Caller context?"}
-    NULL_2 --> CALLER
-    CALLER -->|"cli-config.ts"| EXIT["Exit code 1 + remediation message"]
-    CALLER -->|"datasource-helpers.ts"| SKIP["Silent return (skip close)"]
-```
 
 ## Git CLI integration for lifecycle operations
 
@@ -213,7 +165,6 @@ the [git lifecycle methods](./overview.md#git-lifecycle-operations) on the
 | Operation | Git command(s) | Notes |
 |-----------|---------------|-------|
 | Default branch detection | `git symbolic-ref refs/remotes/origin/HEAD` | Falls back to `git rev-parse --verify main`, then `"master"` |
-| Username resolution | `git config user.name` | Used by the markdown datasource's `getUsername()`; falls back to `"local"` on error or empty. GitHub and Azure DevOps datasources use their respective CLI tools instead (`gh api user`, `az account show`). |
 | Branch creation | `git checkout -b <branch>` | Falls back to `git checkout <branch>` if exists |
 | Branch switching | `git checkout <branch>` | |
 | Staging | `git add -A` | Stages all changes including untracked files |
@@ -264,90 +215,13 @@ changes that conflict with the target branch, `git checkout -b` or
 should ensure the working directory is clean before calling branching
 operations.
 
-## Azure DevOps remote URL parsing
-
-The `parseAzDevOpsRemoteUrl()` function in `src/datasources/index.ts:112`
-extracts the organization URL and project name from Azure DevOps git remote
-URLs. It is used by the Azure DevOps datasource to derive `--org` and
-`--project` values when they are not explicitly provided.
-
-### Supported URL formats
-
-The parser handles three formats with dedicated regex patterns, tested in
-order:
-
-| Format | Pattern | Example |
-|--------|---------|---------|
-| Modern HTTPS | `https://[user@]dev.azure.com/{org}/{project}/_git/{repo}` | `https://dev.azure.com/myorg/my-project/_git/my-repo` |
-| SSH | `git@ssh.dev.azure.com:v3/{org}/{project}/{repo}` | `git@ssh.dev.azure.com:v3/myorg/my-project/my-repo` |
-| Legacy HTTPS | `https://{org}.visualstudio.com/[DefaultCollection/]{project}/_git/{repo}` | `https://myorg.visualstudio.com/my-project/_git/my-repo` |
-
-All three formats normalize the output to a consistent structure:
-`{ orgUrl: "https://dev.azure.com/{org}", project: "{project}" }`.
-
-### Username prefix handling
-
-The modern HTTPS format supports an optional `user@` prefix before
-`dev.azure.com` (e.g., `https://user@dev.azure.com/org/project/_git/repo`).
-The regex uses `(?:[^@]+@)?` to optionally match and discard this prefix.
-This prefix is common in Azure DevOps clone URLs and is also inserted by
-some git credential managers.
-
-### Legacy `DefaultCollection` segment
-
-Some legacy Azure DevOps (formerly VSTS) URLs include a `DefaultCollection`
-path segment between the host and the project name. The regex uses
-`(?:DefaultCollection\/)?` to optionally match and discard this segment.
-Example: `https://myorg.visualstudio.com/DefaultCollection/my-project/_git/my-repo`
-parses identically to the URL without `DefaultCollection`.
-
-### `decodeURIComponent` usage
-
-All three parsing paths apply `decodeURIComponent()` to the captured
-organization and project names. This is necessary because Azure DevOps
-percent-encodes spaces and special characters in organization and project
-names in remote URLs (e.g., `My%20Project` → `My Project`). Without
-decoding, the extracted names would not match the actual Azure DevOps
-identifiers needed for API calls.
-
-### Return value
-
-If the URL does not match any of the three patterns, the function returns
-`null`. This includes GitHub URLs, GitLab URLs, malformed Azure DevOps URLs
-(e.g., missing the `/_git/` segment), and empty strings.
-
-## Authentication failure handling
-
-The datasource system does not define a standardized error type for
-authentication failures. Each datasource relies on the underlying CLI tool's
-error reporting:
-
-| Datasource | Auth mechanism | Failure behavior |
-|------------|---------------|-----------------|
-| **GitHub** | `gh auth login` / `GH_TOKEN` env var | `gh` exits with non-zero status; stderr contains auth error message. The error propagates as an `execFile` rejection. |
-| **Azure DevOps** | `az login` / `AZURE_DEVOPS_EXT_PAT` env var | `az` exits with non-zero status; stderr contains auth error message. The error propagates as an `execFile` rejection. |
-| **Markdown** | None (local filesystem) | Not applicable |
-
-Authentication errors are not distinguishable from other CLI errors at the
-datasource level. The spec generator catches fetch errors at
-`src/spec-generator.ts:114-118` and marks the individual issue as failed
-while continuing to process remaining issues. This means an expired token
-will cause per-issue failures rather than a blanket pipeline abort.
-
-There is no pre-flight authentication check. The first API call to the CLI
-tool surfaces the error, which may be several steps into the pipeline.
-
 ## Branch naming convention
 
 All three datasource implementations use a consistent branch naming convention:
 
 ```
-<username>/dispatch/<issueNumber>-<slugified-title>
+dispatch/<issueNumber>-<slugified-title>
 ```
-
-The `<username>` segment comes from `getUsername()`, which resolves a
-branch-safe slug of the current user's identity (see
-[overview](./overview.md#the-getusername-method) for per-datasource behavior).
 
 ### Slug construction
 
@@ -360,20 +234,15 @@ datasources):
 3. Trim leading and trailing hyphens.
 4. Truncate to 50 characters.
 
-The username is also slugified (same algorithm, default 60-character limit)
-before being placed in the branch name.
-
 ### CI/CD implications
 
-The `<username>/dispatch/` structure creates a predictable namespace for CI/CD
-configuration. Because the username prefix varies, glob patterns must account
-for it:
+The `dispatch/` prefix creates a predictable namespace for CI/CD configuration:
 
 **GitHub Actions:**
 ```yaml
 on:
   push:
-    branches: ['*/dispatch/**']
+    branches: ['dispatch/**']
 ```
 
 **Azure DevOps Pipelines:**
@@ -381,7 +250,7 @@ on:
 trigger:
   branches:
     include:
-      - '*/dispatch/*'
+      - dispatch/*
 ```
 
 This allows teams to create pipeline triggers that run only on

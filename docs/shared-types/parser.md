@@ -42,11 +42,10 @@ Represents a single unchecked markdown checkbox item:
 | Field | Type | Description |
 |-------|------|-------------|
 | `index` | `number` | Zero-based index within the file's unchecked tasks |
-| `text` | `string` | The raw text content after `- [ ] ` (trimmed, mode prefix stripped) |
+| `text` | `string` | The raw text content after `- [ ] ` (trimmed) |
 | `line` | `number` | 1-based line number in the source file |
 | `raw` | `string` | Full original line content including indentation |
 | `file` | `string` | Absolute path to the source file |
-| `mode` | `"parallel" \| "serial" \| "isolated" \| undefined` | Execution mode extracted from `(P)`, `(S)`, or `(I)` prefix; defaults to `"serial"` during parsing |
 
 ### TaskFile
 
@@ -66,12 +65,11 @@ Represents a parsed markdown file:
 | `parseTaskFile` | `(filePath: string) → Promise<TaskFile>` | Reads file from disk, delegates to `parseTaskContent` |
 | `buildTaskContext` | `(content: string, task: Task) → string` | Filters sibling unchecked tasks for planner context |
 | `markTaskComplete` | `(task: Task) → Promise<void>` | Read-modify-write cycle to replace `[ ]` with `[x]` |
-| `groupTasksByMode` | `(tasks: Task[]) → Task[][]` | Partitions tasks into sequential execution groups by mode |
 
 ## Source references
 
-- `src/parser.ts` — Full parser implementation (187 lines)
-- `src/tests/parser.test.ts` — Comprehensive test suite (1116 lines, 72 tests);
+- `src/parser.ts` — Full parser implementation (171 lines)
+- `src/tests/parser.test.ts` — Comprehensive test suite (995 lines, 62 tests);
   see [Parser Tests](../testing/parser-tests.md) for the detailed breakdown
 
 ## Detailed documentation
@@ -101,6 +99,6 @@ concurrency analysis, and testing:
 - [Testing Guide](../task-parsing/testing-guide.md) -- How to run and extend
   the parser test suite
 - [Parser Tests (detailed)](../testing/parser-tests.md) -- Comprehensive
-  breakdown of all 72 parser tests including mode extraction and grouping
+  breakdown of all 62 parser tests including mode extraction and grouping
 - [CLI & Orchestration](../cli-orchestration/overview.md) -- How the orchestrator
   uses `parseTaskFile`, `buildTaskContext`, and `markTaskComplete`

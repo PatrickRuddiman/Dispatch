@@ -11,9 +11,8 @@ point (`src/cli.ts`).
 
 The configuration system allows users to set persistent defaults for frequently
 used CLI options, avoiding the need to pass `--provider copilot --source github`
-on every invocation. It supports four configurable keys and provides a
-`dispatch config` subcommand for managing stored values via an interactive
-wizard.
+on every invocation. It supports eight configurable keys and provides a
+`dispatch config` subcommand for managing stored values.
 
 ## Why it exists
 
@@ -41,18 +40,13 @@ system solves this by:
 The persistent configuration file is stored at:
 
 ```
-{CWD}/.dispatch/config.json
+~/.dispatch/config.json
 ```
 
-The path is **project-local**, computed by `getConfigPath()` (`src/config.ts:42-44`)
-using `process.cwd()` joined with `.dispatch/config.json`. The `.dispatch/`
+The path is computed by `getConfigPath()` (`src/config.ts:46-48`) using
+`os.homedir()` joined with `.dispatch/config.json`. The `~/.dispatch/`
 directory is created automatically by `saveConfig()` via
 `mkdir(dirname(configPath), { recursive: true })` when it does not exist.
-
-The `configDir` parameter can be overridden for testing or when the `dispatch
-config` subcommand receives a `--cwd` flag. The CLI entry point
-(`src/cli.ts:271-278`) parses `--cwd` from the raw arguments before delegating
-to `handleConfigCommand()`, constructing `configDir = join(cwd, ".dispatch")`.
 
 ### File format
 
@@ -61,9 +55,13 @@ The config file is a plain JSON object with optional fields:
 ```json
 {
   "provider": "copilot",
-  "model": "claude-sonnet-4-5",
+  "concurrency": 3,
   "source": "github",
-  "testTimeout": 5
+  "org": "https://dev.azure.com/myorg",
+  "project": "MyProject",
+  "serverUrl": "http://localhost:4096",
+  "planTimeout": 10,
+  "planRetries": 1
 }
 ```
 
@@ -72,7 +70,7 @@ All fields are optional. The file is written as pretty-printed JSON with
 
 ### What happens when the config file is corrupted or contains invalid JSON
 
-`loadConfig()` (`src/config.ts:52-59`) wraps the file read and JSON parse in a
+`loadConfig()` (`src/config.ts:56-63`) wraps the file read and JSON parse in a
 `try/catch` block. If the file does not exist, contains invalid JSON, or cannot
 be read for any reason, the function silently returns an empty object (`{}`).
 **No error is displayed to the user.** This means:
@@ -87,14 +85,14 @@ values are absent.
 
 ### File permissions
 
-The config file inherits the default permissions of the project directory.
+The config file inherits the default permissions of the user's home directory.
 On Unix systems, files created by `writeFile` typically receive mode `0644`
-(owner read-write, group and others read-only). The `.dispatch/` directory
+(owner read-write, group and others read-only). The `~/.dispatch/` directory
 is created with the default `mkdir` permissions (typically `0755`).
 
 ### Is the config file format versioned?
 
-No. The `DispatchConfig` interface (`src/config.ts:19-30`) defines the schema,
+No. The `DispatchConfig` interface (`src/config.ts:20-29`) defines the schema,
 but there is no version field, no migration logic, and no schema validation
 beyond per-key type checks. When new keys are added to `DispatchConfig` in
 future releases:
@@ -113,29 +111,36 @@ handles the common cases without explicit versioning.
 
 | Key | Type | Valid values | Description |
 |-----|------|-------------|-------------|
-| `provider` | string | `"opencode"`, `"copilot"`, `"claude"`, `"codex"` | AI agent backend (see [Provider System](../provider-system/provider-overview.md)) |
-| `model` | string | Any non-empty string (provider-specific format) | Model to use when spawning agents. Copilot: bare model ID (e.g., `"claude-sonnet-4-5"`). OpenCode: `"provider/model"` (e.g., `"anthropic/claude-sonnet-4"`). When omitted, the provider uses its auto-detected default. |
+| `provider` | string | `"opencode"`, `"copilot"` | AI agent backend (see [Provider System](../provider-system/provider-overview.md)) |
+| `concurrency` | number | Positive integer (1, 2, 3, ...) | Max parallel dispatches per batch |
 | `source` | string | `"github"`, `"azdevops"`, `"md"` | Default datasource for issue fetching (see [Datasource System](../datasource-system/overview.md)) |
-| `testTimeout` | number | Positive number (e.g., 1, 5, 10) | Test timeout in minutes for `--fix-tests` mode. Parsed via `Number()`. |
-
-These four keys are defined by `CONFIG_KEYS` (`src/config.ts:33`).
+| `org` | string | Any non-empty string | Azure DevOps organization URL |
+| `project` | string | Any non-empty string | Azure DevOps project name |
+| `serverUrl` | string | Any non-empty string | URL of a running provider server |
+| `planTimeout` | number | Positive number (e.g., 0.5, 1, 10) | Planning timeout in minutes. Parsed via `parseFloat`. |
+| `planRetries` | number | Non-negative integer (0, 1, 2, ...) | Number of retry attempts after planning timeout. Parsed via `parseInt`. |
 
 ### Validation rules
 
-`validateConfigValue()` (`src/config.ts:80-111`) enforces type-specific rules:
+`validateConfigValue()` (`src/config.ts:95-143`) enforces type-specific rules:
 
-- **`provider`** must be in `PROVIDER_NAMES` (currently `"opencode"`,
-  `"copilot"`, `"claude"`, `"codex"`). Invalid values produce:
-  `Invalid provider "<value>". Available: opencode, copilot, claude, codex`
-- **`model`** must be a non-empty string. Empty or whitespace-only values
-  are rejected with: `Invalid model: value must not be empty`
+- **`provider`** must be in `PROVIDER_NAMES` (currently `"opencode"` or
+  `"copilot"`). Invalid values produce:
+  `Invalid provider "<value>". Available: opencode, copilot`
 - **`source`** must be in `DATASOURCE_NAMES` (currently `"github"`,
   `"azdevops"`, `"md"`). Invalid values produce:
   `Invalid source "<value>". Available: github, azdevops, md`
-- **`testTimeout`** must parse to a positive finite number via
+- **`concurrency`** must parse to a positive integer. Values like `"0"`,
+  `"-1"`, `"1.5"`, and `"abc"` are rejected.
+- **`org`**, **`project`**, **`serverUrl`** must be non-empty strings.
+- **`planTimeout`** must parse to a positive finite number via
   `Number(value)`. Values like `"0"`, `"-5"`, `"abc"`, and `""` are rejected.
   The error message is:
-  `Invalid testTimeout "<value>". Must be a positive number (minutes)`
+  `Invalid planTimeout "<value>". Must be a positive number (minutes)`
+- **`planRetries`** must parse to a non-negative integer via
+  `Number(value)`. Values like `"-1"`, `"1.5"`, and `"abc"` are rejected.
+  The error message is:
+  `Invalid planRetries "<value>". Must be a non-negative integer`
 
 ### Config key to CLI field mapping
 
@@ -144,11 +149,15 @@ The config system uses different key names than the CLI in one case:
 | Config key | CLI flag | CLI args field |
 |------------|----------|----------------|
 | `provider` | `--provider` | `provider` |
-| `model` | *(no direct CLI flag)* | `model` |
+| `concurrency` | `--concurrency` | `concurrency` |
 | `source` | `--source` | `issueSource` |
-| `testTimeout` | `--test-timeout` | `testTimeout` |
+| `org` | `--org` | `org` |
+| `project` | `--project` | `project` |
+| `serverUrl` | `--server-url` | `serverUrl` |
+| `planTimeout` | `--plan-timeout` | `planTimeout` |
+| `planRetries` | `--plan-retries` | `planRetries` |
 
-The `source` to `issueSource` mapping (`src/orchestrator/cli-config.ts:28`)
+The `source` to `issueSource` mapping (`src/orchestrator/cli-config.ts:24`)
 is the only field where the config key differs from the CLI field name. This
 is because the CLI uses `--source` (matching the config key), but the internal
 `RawCliArgs` interface uses `issueSource` to avoid confusion with other uses
@@ -157,91 +166,17 @@ of "source" in the codebase.
 ## The `dispatch config` command
 
 Running `dispatch config` launches an interactive wizard that guides the user
-through provider, model, and datasource selection. It is the sole interface
-for managing persistent configuration.
+through viewing current configuration, setting new values, and resetting
+configuration. It is the sole interface for managing persistent configuration.
 
 ```bash
 dispatch config
-dispatch config --cwd /path/to/project
 ```
 
-The wizard (`src/config-prompts.ts:30-159`) uses
-[`@inquirer/prompts`](https://github.com/SBoudrias/Inquirer.js) to present an
-interactive terminal flow. The wizard follows a linear, non-branching sequence:
-
-```mermaid
-stateDiagram-v2
-    [*] --> LoadExisting: loadConfig()
-    LoadExisting --> ShowCurrent: hasExisting?
-    ShowCurrent --> AskReconfigure: confirm("Reconfigure?")
-    AskReconfigure --> ProviderSelect: yes
-    AskReconfigure --> Done: no ("unchanged")
-    LoadExisting --> ProviderSelect: no existing config
-
-    ProviderSelect --> CheckBinaries: checkProviderInstalled() x4
-    CheckBinaries --> SelectProvider: select() with install indicators
-    SelectProvider --> FetchModels: listProviderModels(provider)
-    FetchModels --> SelectModel: models available
-    FetchModels --> SkipModel: fetch failed or empty
-
-    SelectModel --> DetectDatasource: detectDatasource(cwd)
-    SkipModel --> DetectDatasource
-
-    DetectDatasource --> SelectDatasource: select() with "auto" option
-    SelectDatasource --> ShowSummary: display new config
-    ShowSummary --> ConfirmSave: confirm("Save?")
-    ConfirmSave --> SaveConfig: yes → saveConfig()
-    ConfirmSave --> Done: no ("not saved")
-    SaveConfig --> Done
-    Done --> [*]
-```
-
-### Provider install indicators
-
-The wizard checks whether each provider's CLI binary is available on PATH
-by running `checkProviderInstalled()` (`src/providers/detect.ts:29-37`),
-which attempts to execute the binary with `--version`. The results are shown
-as colored dots next to each provider name:
-
-- Green dot (`chalk.green("●")`) -- provider CLI binary found on PATH
-- Red dot (`chalk.red("●")`) -- provider CLI binary not found
-
-The binary names are defined in `PROVIDER_BINARIES`
-(`src/providers/detect.ts:16-21`): `opencode`, `copilot`, `claude`, `codex`.
-
-### Model selection
-
-After selecting a provider, the wizard fetches available models via
-`listProviderModels(provider)` (`src/providers/index.ts:65-76`). This starts
-a temporary provider instance, fetches the model list, and tears down. If the
-provider is not running or the fetch fails, model selection is silently
-skipped and the existing model value (if any) is preserved.
-
-When models are available, the user selects from a list that includes a
-"default (provider decides)" option. The model format is provider-specific:
-
-- **Copilot**: Bare model ID (e.g., `claude-sonnet-4-5`)
-- **OpenCode**: `provider/model` format (e.g., `anthropic/claude-sonnet-4`)
-
-### Datasource selection with auto-detection
-
-The wizard runs `detectDatasource(process.cwd())` to inspect the `origin` git
-remote URL. If a match is found, it's displayed as an informational message.
-The user can then select from the available datasources or choose `"auto"` to
-defer detection to runtime. Selecting `"auto"` stores `source: undefined` in
-the config file, which means the datasource will be auto-detected on each
-`dispatch` invocation.
-
-### What the wizard does NOT support
-
-The wizard does **not** support:
-
-- Editing individual keys (it always runs the full reconfiguration flow)
-- Resetting configuration to defaults (the user can decline to save)
-- Non-interactive mode (it requires a TTY for `@inquirer/prompts`)
-
-In CI or non-interactive environments, use CLI flags (`--provider`, `--source`,
-etc.) instead of `dispatch config`.
+The wizard uses `@inquirer/prompts` to present an interactive menu where the
+user can view current settings, modify individual keys, or reset the config
+file. All validation (provider names, datasource names, numeric bounds) is
+handled within the wizard flow.
 
 ## Three-tier configuration precedence
 
@@ -257,23 +192,19 @@ flowchart TD
     C --> D["orchestrator.runFromCli(args)"]
     D --> E["resolveCliConfig(args)"]
 
-    E --> F["loadConfig(configDir)<br/>Read {cwd}/.dispatch/config.json"]
-    F --> G{"For each CONFIG_KEYS entry<br/>(provider, model, source, testTimeout)"}
+    E --> F["loadConfig()<br/>Read ~/.dispatch/config.json"]
+    F --> G{"For each CONFIG_TO_CLI entry"}
 
     G --> H{"Config value exists<br/>AND flag NOT in explicitFlags?"}
     H -->|Yes| I["Apply config value<br/>to merged args"]
     H -->|No| J["Keep CLI value<br/>(or hardcoded default)"]
 
-    I --> K["Validate mandatory fields<br/>(provider)"]
+    I --> K["Validate mandatory fields<br/>(provider + source)"]
     J --> K
 
-    K -->|Missing provider| L["log.error + process.exit(1)"]
-    K -->|Present| K2{"needsSource?<br/>(not spec/respec/fix-tests)"}
-    K2 -->|Yes, not configured| K3["detectDatasource(cwd)<br/>from git remote"]
-    K3 -->|detected| M["Enable verbose logging<br/>Return merged args"]
-    K3 -->|not detected| L2["log.error + process.exit(1)"]
-    K2 -->|No or configured| M
-    M --> N["Delegate to appropriate pipeline<br/>(dispatch, spec, or fix-tests)"]
+    K -->|Missing| L["log.error + process.exit(1)"]
+    K -->|Present| M["Enable verbose logging<br/>Return merged args"]
+    M --> N["Delegate to appropriate pipeline<br/>(dispatch or spec)"]
 ```
 
 ### How the `explicitFlags` set prevents config overrides
@@ -288,21 +219,20 @@ args.provider = val as ProviderName;
 explicitFlags.add("provider");  // marks "provider" as explicit
 ```
 
-During the merge step in `resolveCliConfig()` (`src/orchestrator/cli-config.ts:65-71`),
+During the merge step in `resolveCliConfig()` (`src/orchestrator/cli-config.ts:52-57`),
 each config key is checked against `explicitFlags`:
 
 ```
-for (const configKey of CONFIG_KEYS) {
-    const cliField = CONFIG_TO_CLI[configKey];
-    const configValue = config[configKey];
+for (const [configKey, cliField] of Object.entries(CONFIG_TO_CLI)) {
+    const configValue = config[configKey as keyof DispatchConfig];
     if (configValue !== undefined && !explicitFlags.has(cliField)) {
-        setCliField(merged, cliField, configValue);
+        (merged as Record<string, unknown>)[cliField] = configValue;
     }
 }
 ```
 
 This means a config value is applied **only when** both conditions are true:
-1. The config key has a value in `{cwd}/.dispatch/config.json`
+1. The config key has a value in `~/.dispatch/config.json`
 2. The corresponding CLI flag was **not** explicitly passed
 
 This design ensures that `dispatch --provider opencode` always uses OpenCode
@@ -337,78 +267,62 @@ command operates independently of the dispatch argument grammar.
 
 ## Mandatory configuration validation
 
-After merging config-file defaults, `resolveCliConfig()` validates that the
-provider is configured (`src/orchestrator/cli-config.ts:73-82`):
+After merging config-file defaults, `resolveCliConfig()` validates that two
+mandatory fields are configured (`src/orchestrator/cli-config.ts:59-82`):
 
-- **`provider`** -- must be set via CLI flag (`--provider`) or config file
-  (`dispatch config`). The validation checks `explicitFlags.has("provider") ||
-  config.provider !== undefined` -- it verifies the user explicitly chose a
-  provider rather than relying on the hardcoded default.
+1. **`provider`** -- must be set via CLI flag (`--provider`) or config file
+   (`dispatch config`).
+2. **`source`** (mapped to `issueSource`) -- must be set via CLI flag
+   (`--source`) or config file (`dispatch config`).
 
-If the provider is missing, the user receives a targeted error message:
+If either is missing, the user receives a targeted error message with
+remediation guidance:
 
 ```
-✖ Missing required configuration: provider
-    Run 'dispatch config' to configure defaults interactively.
-    Or pass it as a CLI flag: --provider <name>
+✖ Missing required configuration: provider, source
+    Run `dispatch config` to configure defaults.
+    Or pass them as CLI flags: --provider <name> --source <name>
 ```
 
 The process exits with code `1`.
 
 Note that `provider` has a hardcoded default of `"opencode"` in `parseArgs()`
-(`src/cli.ts:103`), so the merged args always contain a provider value. The
-validation deliberately ignores this default and checks whether the user
-actively chose a provider through either the CLI flag or config file. In
-practice, this means provider validation only fails when neither the CLI flag
-nor the config file provides a value, even though the merged args contain
-`"opencode"`.
+(`src/cli.ts:103`), so in practice the provider validation only fails if the
+user has not set a provider in the config file AND the hardcoded default is
+somehow cleared. The validation checks `explicitFlags.has("provider") ||
+config.provider !== undefined` (`src/orchestrator/cli-config.ts:60-61`), which
+means it checks whether the flag was explicitly provided OR the config file has
+a value -- it does NOT check the merged value. Because `parseArgs` always sets
+`provider: "opencode"` as a default, the merged args always have a provider
+value, but the validation ignores that default. In practice this means provider
+validation only fails when neither the CLI flag nor the config file provides a
+value, even though the merged args contain `"opencode"`. The `source` field
+has no hardcoded default, making it the field most likely to trigger the
+validation error on first use.
 
-### Datasource (source) validation
+## The `serverUrl` config option
 
-The `source` field is **not** validated as mandatory in the same way. Instead,
-`resolveCliConfig()` uses a two-step approach
-(`src/orchestrator/cli-config.ts:97-113`):
-
-1. **Check if source is needed**: Source is only required for dispatch mode --
-   it is skipped entirely when `--spec`, `--respec`, or `--fix-tests` is active
-   (these modes defer source resolution to their own pipeline logic).
-2. **Auto-detect if not configured**: When source is needed but not set via
-   CLI flag or config file, `detectDatasource(cwd)` inspects the `origin` git
-   remote URL and attempts to match it against known patterns (see
-   [auto-detection](#auto-detection-from-git-remote)).
-3. **Fail if undetectable**: If auto-detection also fails, the process exits
-   with code `1` and guidance to set `--source` or run `dispatch config`.
-
-## The `--server-url` CLI option
-
-The `--server-url` flag is a **CLI-only** option -- it is not part of the four
-config keys and cannot be persisted via `dispatch config`. It stores the URL of
-an already-running AI provider server. When set, the provider connects to this
-URL instead of spawning a new server process.
-
-Provider-specific behavior:
+The `serverUrl` config key stores the URL of an already-running AI provider
+server. When set, the provider connects to this URL instead of spawning a new
+server process. This applies to both supported providers:
 
 - **OpenCode** (`--provider opencode`): The URL points to an OpenCode server's
   HTTP API (e.g., `http://localhost:4096`). The SDK creates a client using
-  `createOpencodeClient({ baseUrl: url })`.
+  `createOpencodeClient({ baseUrl: url })`. See the
+  [OpenCode Backend](../provider-system/opencode-backend.md) for details.
 - **Copilot** (`--provider copilot`): The URL is passed as `cliUrl` to the
-  Copilot SDK client.
-- **Claude** (`--provider claude`): The URL is passed to the Claude Code CLI
-  process.
-- **Codex** (`--provider codex`): The URL is passed to the Codex CLI process.
+  Copilot SDK client. See the
+  [Copilot Backend](../provider-system/copilot-backend.md) for details.
 
-See the [Provider Abstraction](../provider-system/provider-overview.md) for
-details on each provider's connection handling.
+Setting `serverUrl` in the config file is useful for development environments
+where a provider server is long-running, avoiding the startup overhead on
+each dispatch invocation.
 
-## Concurrency limits
-
-The `--concurrency` flag controls the maximum number of parallel task
-dispatches. The CLI enforces a hard ceiling: `MAX_CONCURRENCY = 64`, exported
-from `src/cli.ts:22`. Any value passed via `--concurrency` is clamped to this
-maximum during argument parsing.
+## Default concurrency computation
 
 When `--concurrency` is not explicitly provided and no config-file value
-exists, the orchestrator computes a default using `defaultConcurrency()`:
+exists, the orchestrator computes a default using `defaultConcurrency()` from
+`src/spec-generator.ts:48-51`:
 
 ```
 Math.max(1, Math.min(cpus().length, Math.floor(freemem() / 1024 / 1024 / 500)))
@@ -420,6 +334,11 @@ This formula ensures the default is:
 - At most `floor(freeMemoryMB / 500)` -- each concurrent task is assumed to
   need roughly 500 MB of memory
 
+The computation runs at pipeline invocation time (`src/agents/orchestrator.ts:207`),
+not at argument parsing time, so it reflects the system's resource availability
+when the pipeline actually starts. The [TUI](tui.md) displays active task counts
+driven by this concurrency value.
+
 | System | CPUs | Free memory | Default concurrency |
 |--------|------|-------------|-------------------|
 | Laptop | 8 | 4 GB | `min(8, 8)` = 8 |
@@ -429,24 +348,18 @@ This formula ensures the default is:
 
 ## Supported providers
 
-Four AI agent backends are currently registered in `src/providers/index.ts:19-24`:
+Two AI agent backends are currently registered in `src/providers/index.ts`:
 
-| Provider name | Module | Description |
-|--------------|--------|-------------|
-| `opencode` | `src/providers/opencode.ts` | Default. Spawns or connects to an OpenCode server. |
-| `copilot` | `src/providers/copilot.ts` | GitHub Copilot agent backend. |
-| `claude` | `src/providers/claude.ts` | Anthropic Claude Code CLI backend. |
-| `codex` | `src/providers/codex.ts` | OpenAI Codex CLI backend. |
+| Provider name | SDK | Description |
+|--------------|-----|-------------|
+| `opencode` | `@opencode-ai/sdk` v1.2.10 | Default. Spawns or connects to an OpenCode server. |
+| `copilot` | `@github/copilot-sdk` v0.1.0 | GitHub Copilot agent backend. |
 
 Provider names are validated at two points:
 1. **CLI level** (`src/cli.ts:161`): `--provider` is checked against
    `PROVIDER_NAMES` at parse time.
-2. **Config level** (`src/config.ts:82-86`): `validateConfigValue("provider", ...)`
-   checks against `PROVIDER_NAMES`.
-
-Each provider also exposes a `listModels()` function used by the interactive
-wizard to populate the model selection menu. See
-`src/providers/index.ts:65-76` for the `listProviderModels()` implementation.
+2. **Config level** (`src/config.ts:94`): The interactive wizard validates
+   provider names against the same list.
 
 To add a new provider, see the
 [Adding a Provider guide](../provider-system/adding-a-provider.md).
@@ -464,14 +377,14 @@ Three datasource backends are currently registered in `src/datasources/index.ts`
 Datasource names are validated at two points:
 1. **CLI level** (`src/cli.ts:129`): `--source` is checked against
    `DATASOURCE_NAMES` at parse time.
-2. **Config level** (`src/config.ts:94-98`): `validateConfigValue("source", ...)`
-   checks against `DATASOURCE_NAMES`.
+2. **Config level** (`src/config.ts:100`): The interactive wizard validates
+   datasource names against the same list.
 
 ### Auto-detection from git remote
 
-When `--source` is not provided and no config value exists, the datasource is
-auto-detected by inspecting the `origin` git remote URL via
-`detectDatasource()` in `src/datasources/index.ts:84-97`:
+When `--source` is not provided and no config value exists, the spec pipeline
+auto-detects the datasource by inspecting the `origin` git remote URL via
+`detectDatasource()` in `src/datasources/index.ts:66-87`:
 
 | Remote URL pattern | Detected source |
 |-------------------|----------------|
@@ -543,11 +456,10 @@ The CLI installs signal handlers for `SIGINT` and `SIGTERM` at
 
 ### What `runCleanup()` releases
 
-The cleanup registry (`src/helpers/cleanup.ts`) maintains a list of async
-functions registered by subsystems during their lifecycle. Currently, the
-primary resource registered for cleanup is the AI provider's `cleanup()` method,
-which is registered at provider boot time via
-`registerCleanup(() => instance.cleanup())`.
+The cleanup registry (`src/cleanup.ts`) maintains a list of async functions
+registered by subsystems during their lifecycle. Currently, the primary
+resource registered for cleanup is the AI provider's `cleanup()` method, which
+is registered at provider boot time via `registerCleanup(() => instance.cleanup())`.
 
 Depending on the provider, `cleanup()` releases:
 
@@ -556,7 +468,7 @@ Depending on the provider, `cleanup()` releases:
 - **Copilot**: Destroys all tracked sessions via `session.destroy()`, then
   stops the Copilot CLI child process via `client.stop()`.
 
-The cleanup registry (`src/helpers/cleanup.ts:26-34`) has these safety properties:
+The cleanup registry (`src/cleanup.ts:26-34`) has these safety properties:
 
 - **Drain-once**: `splice(0)` atomically takes all functions and clears the
   array, so repeated calls to `runCleanup()` are harmless (the second call
@@ -585,18 +497,17 @@ The CLI delegates to the orchestrator via a two-step process
    bound to the working directory. This is a lightweight operation that does
    not boot any AI providers or perform I/O.
 
-2. **`orchestrator.runFromCli(args)`**: The orchestrator's CLI entry point
-   (`src/orchestrator/runner.ts:138-230`), which:
+2. **`orchestrator.runFromCli(args)`**: The orchestrator's CLI entry point,
+   which:
    - Calls `resolveCliConfig(args)` to load and merge config defaults
-   - Runs prerequisite checks (e.g., required CLI tools on PATH)
-   - Ensures `.dispatch/worktrees/` is in `.gitignore`
-   - Enforces mutual exclusion between `--spec`, `--respec`, and `--fix-tests`
-     (see [mutual exclusion](cli.md#spec-mode-validation))
-   - Routes to the appropriate pipeline: fix-tests, spec, respec, or dispatch
+   - Validates mandatory configuration
+   - Routes to the spec pipeline (if `--spec` is present) or the dispatch
+     pipeline (otherwise)
 
-The `bootOrchestrator` function is exported from `src/orchestrator/runner.ts`.
-The orchestrator is a thin coordinator that delegates to extracted pipeline
-modules (`spec-pipeline.ts`, `dispatch-pipeline.ts`, `fix-tests-pipeline.ts`).
+The `bootOrchestrator` function is exported from `src/agents/index.ts` and
+delegates to `src/agents/orchestrator.ts:158`. The orchestrator itself is not
+an agent -- it is a pipeline coordinator that boots and manages agents
+(planner, executor, spec) internally.
 
 ### Dependencies initialized during boot
 
@@ -610,10 +521,9 @@ lazily when `run()`, `orchestrate()`, or `generateSpecs()` is called.
 
 If `saveConfig()` fails with `EACCES` (permission denied):
 
-1. Check permissions on the project's `.dispatch/` directory:
-   `ls -la .dispatch/`
-2. Ensure the user has write access: `chmod u+w .dispatch/`
-3. Check disk space: `df -h .`
+1. Check permissions on `~/.dispatch/`: `ls -la ~/.dispatch/`
+2. Ensure the user has write access: `chmod u+w ~/.dispatch/`
+3. Check disk space: `df -h ~`
 
 ### Config file deleted while CLI is running
 
@@ -625,17 +535,16 @@ If the config file is deleted between `loadConfig()` and a subsequent
   `mkdir(dirname(configPath), { recursive: true })`.
 - No data loss occurs beyond the deleted configuration values.
 
-### Config keys quick reference
+### Config keys reference
 
-The `dispatch config` interactive wizard manages these four persistent keys:
-`provider`, `model`, `source`, `testTimeout` (defined by `CONFIG_KEYS` at
-`src/config.ts:33`).
-
-CLI-only flags that **cannot** be persisted include: `--dry-run`, `--no-plan`,
-`--no-branch`, `--no-worktree`, `--force`, `--verbose`, `--concurrency`,
-`--server-url`, `--retries`, `--plan-retries`, `--plan-timeout`, `--cwd`,
-`--output-dir`, `--org`, `--project`. These are per-invocation options
-not suited to persistent defaults.
+The interactive wizard supports the following config keys: `provider`,
+`concurrency`, `source`, `org`, `project`, `serverUrl`, `planTimeout`,
+`planRetries`.
+Keys like `dryRun`, `noPlan`, `noBranch`, and `verbose` are CLI-only flags and
+cannot be persisted. See [the --no-branch flag](cli.md#the---no-branch-flag)
+for details on that flag's behavior, and the
+[Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) for how
+`--no-plan` affects execution.
 
 ## Related documentation
 
@@ -647,6 +556,10 @@ not suited to persistent defaults.
   concurrency and phase state
 - [Provider Abstraction](../provider-system/provider-overview.md) -- provider
   selection and `--server-url` semantics
+- [Copilot Backend](../provider-system/copilot-backend.md) -- Copilot-specific
+  `serverUrl` and authentication details
+- [OpenCode Backend](../provider-system/opencode-backend.md) -- OpenCode-specific
+  `serverUrl` and server lifecycle
 - [Datasource System](../datasource-system/overview.md) -- datasource
   detection and `--source` options
 - [Spec Generation](../spec-generation/overview.md) -- how `--spec` mode
@@ -655,5 +568,7 @@ not suited to persistent defaults.
   config I/O, validation, and merge logic
 - [Cleanup registry](../shared-types/cleanup.md) -- process-level cleanup
   mechanism used by signal handlers
-- [Integrations](integrations.md) -- Node.js fs/promises, chalk, @inquirer/prompts,
-  and process signal details
+- [Integrations](integrations.md) -- Node.js fs/promises, chalk, and process
+  signal details
+- [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) --
+  pipeline stages that consume resolved `--no-plan` and `--concurrency` options

@@ -8,7 +8,7 @@ tasks complete.
 
 ## What it does
 
-The module exports nine functions and one interface:
+The module exports four functions and one interface:
 
 | Export | Type | Purpose |
 |--------|------|---------|
@@ -16,11 +16,6 @@ The module exports nine functions and one interface:
 | `fetchItemsById(issueIds, datasource, fetchOpts)` | Function | Fetch multiple issues by ID, skipping failures |
 | `writeItemsToTempDir(items)` | Function | Write `IssueDetails` items to a temp directory as `<id>-<slug>.md` files |
 | `closeCompletedSpecIssues(taskFiles, results, cwd, source?, org?, project?)` | Function | Auto-close issues on the tracker when all tasks for a spec complete |
-| `getBranchDiff(defaultBranch, cwd)` | Function | Run `git diff` against the default branch and return the output |
-| `amendCommitMessage(message, cwd)` | Function | Rewrite the most recent commit message via `git commit --amend` |
-| `squashBranchCommits(defaultBranch, message, cwd)` | Function | Squash all branch commits into one via soft-reset strategy |
-| `buildPrBody(details, tasks, results, defaultBranch, datasourceName, cwd)` | Function | Assemble a markdown PR body with summary, tasks, labels, and issue-close reference |
-| `buildPrTitle(issueTitle, defaultBranch, cwd)` | Function | Generate a PR title from branch commit messages |
 | `WriteItemsResult` | Interface | Return type of `writeItemsToTempDir()` |
 
 ## Why it exists
@@ -46,9 +41,6 @@ provides clean bridge functions.
 | `TaskFile` | `src/parser.ts` | Represents a parsed spec file with its tasks (see [Task Parsing](../task-parsing/overview.md)) |
 | `DispatchResult` | `src/dispatcher.ts` | Represents the outcome of a dispatched task (see [Dispatcher](../planning-and-dispatch/dispatcher.md)) |
 | `log` | `src/logger.ts` | Logging (warnings and success messages) (see [Logger](../shared-types/logger.md)) |
-| `execFile` | `node:child_process` | Execute git commands as subprocesses |
-| `promisify` | `node:util` | Promisify `execFile` for async/await usage |
-| `Task` | `src/parser.ts` | Task type used by `buildPrBody` (see [Task Parsing](../task-parsing/overview.md)) |
 
 ## `parseIssueFilename`
 
@@ -241,142 +233,6 @@ If `datasource.close()` fails for a specific issue (e.g., the issue was already
 closed, the user lacks permissions, or the tracker is unreachable), the error
 is logged as a warning and processing continues with the next spec file. A
 single close failure does not prevent other issues from being closed.
-
-## `getBranchDiff`
-
-Returns the full `git diff` between the default branch and `HEAD`.
-
-**Signature:**
-```
-getBranchDiff(defaultBranch: string, cwd: string): Promise<string>
-```
-
-**Behavior:**
-
-1. Runs `git diff <defaultBranch>..HEAD` via `execFile` with
-   `maxBuffer: 10 * 1024 * 1024` (10 MB).
-2. Returns the diff output as a string.
-3. On failure (e.g., the branch does not exist or git is not available),
-   returns an empty string.
-
-**Why 10 MB?** The default Node.js `execFile` `maxBuffer` is 1 MB. Diffs
-can be significantly larger in active branches with many file changes. The
-10 MB limit accommodates most real-world branch diffs.
-
-**Used by:** The [commit agent](../planning-and-dispatch/commit-agent.md),
-which needs the full diff to generate commit messages and PR descriptions.
-
-See `src/orchestrator/datasource-helpers.ts:172-183`.
-
-## `amendCommitMessage`
-
-Rewrites the most recent commit message without changing the committed
-content.
-
-**Signature:**
-```
-amendCommitMessage(message: string, cwd: string): Promise<void>
-```
-
-**Behavior:**
-
-1. Runs `git commit --amend -m <message>` in the given working directory.
-2. The command replaces the message of the most recent commit while leaving
-   the tree and parent pointers unchanged.
-
-See `src/orchestrator/datasource-helpers.ts:191-197`.
-
-## `squashBranchCommits`
-
-Squashes all commits on the current branch (relative to the default branch)
-into a single commit.
-
-**Signature:**
-```
-squashBranchCommits(defaultBranch: string, message: string, cwd: string): Promise<void>
-```
-
-**Behavior:**
-
-1. Finds the merge base: `git merge-base <defaultBranch> HEAD`.
-2. Soft-resets to the merge base: `git reset --soft <mergeBase>`. This
-   removes the individual commits but preserves all file changes in the
-   index.
-3. Creates a single new commit: `git commit -m <message>`.
-
-**Why soft reset instead of interactive rebase?** Interactive rebase requires
-user interaction or complex automation to handle editor prompts and conflict
-resolution. The soft-reset strategy achieves the same result (a single commit
-with all changes) in three deterministic, non-interactive steps that work
-without a TTY.
-
-See `src/orchestrator/datasource-helpers.ts:210-223` and
-[Integrations -- Squash via soft reset](../planning-and-dispatch/integrations.md#squash-via-soft-reset).
-
-## `buildPrBody`
-
-Assembles a markdown pull request body from pipeline data.
-
-**Signature:**
-```
-buildPrBody(
-  details: IssueDetails,
-  tasks: Task[],
-  results: DispatchResult[],
-  defaultBranch: string,
-  datasourceName: DatasourceName,
-  cwd: string,
-): Promise<string>
-```
-
-**Behavior:**
-
-1. **Summary section:** Calls the private helper `getCommitSummaries()`
-   which runs `git log <defaultBranch>..HEAD --pretty=format:%s` to collect
-   commit messages. Each message becomes a bullet point under a
-   `## Summary` heading.
-2. **Tasks section:** Cross-references `tasks` with `results` to build a
-   `## Tasks` section with `[x]` for completed tasks and `[ ]` for failed
-   tasks.
-3. **Labels section:** If the issue has labels, adds a `**Labels:**` line
-   with comma-separated label names.
-4. **Issue-close reference:** Appends datasource-specific syntax:
-    - `"github"` -- `Closes #<number>`
-    - `"azdevops"` -- `Resolves AB#<number>`
-    - `"md"` -- nothing (no tracker to close)
-
-**Return value:** The assembled PR body as a single markdown string.
-
-See `src/orchestrator/datasource-helpers.ts:242-299`.
-
-## `buildPrTitle`
-
-Generates a descriptive PR title from the commit messages on the branch.
-
-**Signature:**
-```
-buildPrTitle(issueTitle: string, defaultBranch: string, cwd: string): Promise<string>
-```
-
-**Behavior:**
-
-1. Calls `getCommitSummaries()` to retrieve commit messages from the branch.
-2. If there are **0 commits**, returns `issueTitle` as a fallback.
-3. If there is **1 commit**, returns that commit's message as the title.
-4. If there are **multiple commits**, returns the last commit's message with
-   a count suffix: `<last commit message> (+N more)` where N is the number
-   of remaining commits.
-
-See `src/orchestrator/datasource-helpers.ts:314-331`.
-
-### Private helper: `getCommitSummaries`
-
-`getCommitSummaries()` is a private function
-(`src/orchestrator/datasource-helpers.ts:149-163`) used by both `buildPrBody`
-and `buildPrTitle`. It runs
-`git log <defaultBranch>..HEAD --pretty=format:%s` to retrieve one-line
-commit summaries for all commits on the current branch that are not on the
-default branch. On failure, it returns an empty array.
 
 ## Data flow diagram
 

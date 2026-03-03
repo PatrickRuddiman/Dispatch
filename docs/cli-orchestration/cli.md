@@ -92,9 +92,8 @@ The likely reasons are:
   The only runtime dependencies are `chalk`, `glob`, and the two provider SDKs.
   Adding a CLI framework would add another dependency (and its transitive
   dependencies) for a relatively simple argument surface.
-- **Small option set**: Dispatch has ~22 options across three modes (dispatch,
-  spec, fix-tests). A hand-rolled parser for this surface area is
-  straightforward and fits in ~170 lines.
+- **Small option set**: Dispatch has 17 options across two modes. A hand-rolled
+  parser for this surface area is straightforward and fits in ~135 lines.
 - **Full control**: The parser can exit immediately with targeted error messages
   (e.g., provider validation against [`PROVIDER_NAMES`](../provider-system/provider-overview.md#the-provider-registry)) without mapping through
   a framework's validation API.
@@ -131,15 +130,11 @@ checks for `--server-url` and `--cwd`.
 | `--dry-run` | boolean | `false` | List discovered tasks without executing (see [dry-run mode](orchestrator.md#dry-run-mode)) |
 | `--no-plan` | boolean | `false` | Skip the [planner agent](../planning-and-dispatch/planner.md), dispatch tasks directly (see [Planning & Dispatch overview](../planning-and-dispatch/overview.md)) |
 | `--no-branch` | boolean | `false` | Skip branch creation, push, and PR lifecycle (see [the --no-branch flag](#the---no-branch-flag)) |
-| `--no-worktree` | boolean | `false` | Skip git worktree isolation for parallel issues. When set, all issues are dispatched in the main working tree instead of isolated worktrees. |
-| `--force` | boolean | `false` | Ignore prior run state and re-run all tasks, even those already marked complete. |
-| `--concurrency <n>` | integer | `min(cpus, freeMB/500)` | Maximum parallel dispatches per batch. Capped at `MAX_CONCURRENCY` (64). See [concurrency model](orchestrator.md#concurrency-model) and [default computation](configuration.md#default-concurrency-computation). |
-| `--provider <name>` | string | `"opencode"` | AI agent backend (`opencode`, `copilot`, `claude`, or `codex`); see [Provider Abstraction](../provider-system/provider-overview.md) |
+| `--concurrency <n>` | integer | `min(cpus, freeMB/500)` | Maximum parallel dispatches per batch (see [concurrency model](orchestrator.md#concurrency-model) and [default computation](configuration.md#default-concurrency-computation)) |
+| `--provider <name>` | string | `"opencode"` | AI agent backend (`opencode` or `copilot`); see [Provider Abstraction](../provider-system/provider-overview.md) |
 | `--server-url <url>` | string | *none* | Connect to a running provider server instead of starting one |
 | `--plan-timeout <min>` | float | `10` | Planning timeout in minutes. Must be a positive number. Parsed via `parseFloat`. Configurable via `dispatch config`. |
-| `--retries <n>` | integer | `2` | Retry attempts for all agents. Must be a non-negative integer. Parsed via `parseInt`. |
-| `--plan-retries <n>` | integer | *(uses `--retries`)* | Retry attempts after planning timeout. Overrides `--retries` for the planner agent only. Must be a non-negative integer. Parsed via `parseInt`. |
-| `--test-timeout <min>` | float | `5` | Test timeout in minutes for `--fix-tests` mode. Must be a positive number. Parsed via `parseFloat`. Configurable via `dispatch config`. |
+| `--plan-retries <n>` | integer | `1` | Number of retry attempts after planning timeout. Must be a non-negative integer. Parsed via `parseInt`. Configurable via `dispatch config`. |
 | `--cwd <dir>` | string | `process.cwd()` | Working directory for file discovery and agent execution |
 | `--verbose` | boolean | `false` | Show detailed debug output for troubleshooting |
 | `-h`, `--help` | boolean | `false` | Show usage information |
@@ -154,7 +149,7 @@ issue IDs are not required and the dispatch-specific flags (`--dry-run`,
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `--spec <values...>` | string (one or more) | *none* | Comma-separated issue numbers, multiple space-separated args, glob pattern for local `.md` files, or inline text description. Activates spec mode. See [issue IDs vs glob patterns](configuration.md#the---spec-flag-issue-ids-vs-glob-patterns). |
-| `--respec [values...]` | string (zero or more) | *none* | Regenerate existing specs. Accepts the same value types as `--spec` (issue numbers, glob, multiple args), or can be passed with no arguments to regenerate all existing specs. Uses variadic collection -- consumes all subsequent non-flag arguments. An empty invocation (`--respec` with no args or immediately followed by another flag) produces an empty array. |
+| `--respec [values...]` | string (zero or more) | *none* | Regenerate existing specs. Accepts the same value types as `--spec` (issue numbers, glob, multiple args), or can be passed with no arguments to regenerate all existing specs. Uses variadic collection — consumes all subsequent non-flag arguments. An empty invocation (`--respec` with no args or immediately followed by another flag) produces an empty array. |
 | `--source <name>` | string | *auto-detected* | Datasource: `github`, `azdevops`, or `md`. Auto-detected from `git remote get-url origin` if omitted. See [datasource detection](configuration.md#auto-detection-from-git-remote), [Datasource Overview](../datasource-system/overview.md), and individual datasource docs: [GitHub](../datasource-system/github-datasource.md), [Azure DevOps](../datasource-system/azdevops-datasource.md), [Markdown](../datasource-system/markdown-datasource.md). |
 | `--org <url>` | string | *none* | Azure DevOps organization URL (e.g., `https://dev.azure.com/myorg`). Required when `--source azdevops`. |
 | `--project <name>` | string | *none* | Azure DevOps project name. Required when `--source azdevops`. |
@@ -162,20 +157,7 @@ issue IDs are not required and the dispatch-specific flags (`--dry-run`,
 | `--provider <name>` | string | `"opencode"` | AI agent backend (shared with dispatch mode) |
 | `--server-url <url>` | string | *none* | Connect to a running provider server (shared with dispatch mode) |
 | `--plan-timeout <min>` | float | `10` | Planning timeout in minutes (shared with dispatch mode) |
-| `--plan-retries <n>` | integer | *(uses `--retries`)* | Retry attempts after planning timeout (shared with dispatch mode) |
-
-### Fix-tests mode options
-
-Fix-tests mode is activated by passing `--fix-tests`. It runs the project's
-test suite and uses an AI agent to fix any failures. This mode is mutually
-exclusive with `--spec`, `--respec`, and positional issue IDs.
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `--fix-tests` | boolean | `false` | Run tests and fix failures via AI agent. Cannot be combined with `--spec`, `--respec`, or issue IDs. |
-| `--test-timeout <min>` | float | `5` | Test timeout in minutes. Must be a positive number. Configurable via `dispatch config`. |
-| `--provider <name>` | string | `"opencode"` | AI agent backend (shared with dispatch mode) |
-| `--server-url <url>` | string | *none* | Connect to a running provider server (shared with dispatch mode) |
+| `--plan-retries <n>` | integer | `1` | Retry attempts after planning timeout (shared with dispatch mode) |
 
 #### Spec mode validation
 
@@ -207,11 +189,8 @@ exhausted.
 
 The `--spec` and `--respec` flags are not mutually exclusive at the parser
 level. Both can be set simultaneously in `ParsedArgs`. Mutual exclusion is
-enforced downstream by the runner's `runFromCli()` method
-(`src/orchestrator/runner.ts:153-163`), which checks for conflicting mode
-flags (`--spec`, `--respec`, `--fix-tests`) and exits with a clear error if
-more than one is present. Additionally, `--fix-tests` cannot be combined with
-positional issue IDs (`src/orchestrator/runner.ts:166-169`).
+enforced downstream by the orchestrator (`src/agents/orchestrator.ts`), which
+checks for both and produces an error.
 
 Examples:
 
@@ -327,24 +306,14 @@ sequenceDiagram
 ## Exit code contract
 
 The CLI uses a binary exit code scheme with additional signal codes.
-The primary exit logic is at `src/cli.ts:317`:
+The primary exit logic is at `src/cli.ts:277-278`:
 
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | All tasks completed successfully (or `--help`/`--version`/`config` was used) |
-| `1` | One or more tasks failed, fix-tests was unsuccessful, **or** a fatal error occurred |
+| `1` | One or more tasks failed, **or** a fatal error occurred |
 | `130` | Process received SIGINT (Ctrl+C) |
 | `143` | Process received SIGTERM |
-
-The exit code logic handles three distinct summary types returned by the
-runner:
-
-- **`DispatchSummary`** (dispatch mode): Has a `.failed` count. Exit `1` if
-  any tasks failed.
-- **`FixTestsSummary`** (fix-tests mode): Has a `.success` boolean. Exit `1`
-  if `success` is `false`.
-- **`SpecSummary`** (spec mode): Has neither `.failed` nor `.success`. Falls
-  through to exit `0`.
 
 There is **no distinction** between partial failure and total failure. If 9 out
 of 10 tasks succeed but 1 fails, the exit code is `1`. This follows POSIX
@@ -358,32 +327,62 @@ information. A future enhancement could add `--json` output or distinct exit
 codes (e.g., `2` for partial failure).
 
 Unhandled exceptions from `main()` are caught by the top-level `.catch()`
-handler (`src/cli.ts:321-324`), which logs the error message using
-`log.formatErrorChain()` for nested cause display, calls
+handler (`src/cli.ts:281-284`), which logs the error message, calls
 [`runCleanup()`](../shared-types/cleanup.md) to release provider resources, and exits with code `1`.
 
 ## Version string and tsup define
 
-The version string is injected at build time using tsup's `define` feature.
-At `src/cli.ts:307`, the CLI prints `dispatch v${__VERSION__}` where
-`__VERSION__` is a build-time constant declared in `src/globals.d.ts:1`.
+The version string is currently hardcoded as `"dispatch v0.1.0"` at
+`src/cli.ts:267`. The adjacent comment says `// Read version from package.json
+at build time via tsup define`, indicating the intent to inject the version at
+build time.
 
-The tsup configuration (`tsup.config.ts:18-20`) reads the version from
-`package.json` and injects it via the `define` block:
+However, the tsup configuration (`tsup.config.ts`) does **not** currently
+include a `define` block:
 
+```typescript
+// tsup.config.ts — current state
+export default defineConfig({
+  entry: ["src/cli.ts"],
+  format: ["esm"],
+  target: "node18",
+  outDir: "dist",
+  clean: true,
+  splitting: false,
+  sourcemap: true,
+  dts: false,
+  banner: {
+    js: "#!/usr/bin/env node",
+  },
+});
 ```
-define: {
-    __VERSION__: JSON.stringify(version),
-}
+
+The `define` feature is **not wired up**. The version string in
+`package.json` (`"0.1.0"`) and the hardcoded string in `cli.ts` happen to
+match, but they are not synchronized automatically.
+
+To wire this up, the tsup config would need:
+
+```typescript
+import { readFileSync } from "fs";
+const pkg = JSON.parse(readFileSync("./package.json", "utf-8"));
+
+export default defineConfig({
+  // ...existing config...
+  define: {
+    __VERSION__: JSON.stringify(pkg.version),
+  },
+});
 ```
 
-This means the version string in the built `dist/cli.js` is automatically
-synchronized with the `version` field in `package.json`. No manual version
-string maintenance is required.
+Then `src/cli.ts` would become:
 
-tsup's `define` feature works like esbuild's `define` -- it performs global
-string replacement at build time, replacing every occurrence of the
-`__VERSION__` identifier with the JSON-stringified version value.
+```typescript
+console.log(`dispatch v${__VERSION__}`);
+```
+
+See the [tsup documentation on `define`](https://tsup.egoist.dev/) for details
+on build-time constant injection.
 
 ## How it works
 
@@ -399,18 +398,12 @@ flowchart TD
     G -->|No| I["bootOrchestrator({ cwd })"]
     I --> J["orchestrator.runFromCli(args)"]
     J --> K["resolveCliConfig(args)<br/>merge config + validate"]
-    K --> K2{"mutual exclusion check<br/>--spec, --respec, --fix-tests"}
-    K2 -->|conflict| S2["log.error(), exit 1"]
-    K2 -->|ok| L{"mode?"}
-    L -->|"--fix-tests"| L2["Fix-tests pipeline"]
-    L -->|"--spec"| M["Spec pipeline"]
-    L -->|"--respec"| M2["Respec pipeline"]
-    L -->|dispatch| N["Dispatch pipeline"]
-    L2 --> O["Summary"]
-    M --> O
-    M2 --> O
+    K --> L{"--spec or --respec?"}
+    L -->|Yes| M["Spec pipeline"]
+    L -->|No| N["Dispatch pipeline"]
+    M --> O["Summary"]
     N --> O
-    O --> P{"summary.failed > 0<br/>or !summary.success?"}
+    O --> P{"summary.failed > 0?"}
     P -->|Yes| Q["exit 1"]
     P -->|No| R["exit 0"]
     D -.->|validation error| S["log.error(), exit 1"]

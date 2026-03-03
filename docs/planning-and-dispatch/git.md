@@ -154,27 +154,6 @@ of git operations between tasks in the same batch.
 
 There is no override or special handling -- standard Git ignore rules apply.
 
-## Post-execution squash via commit agent
-
-After all tasks complete, the [commit agent](./commit-agent.md) analyzes the
-full branch diff and generates an AI-powered conventional commit message, PR
-title, and PR description. If the commit agent succeeds, the pipeline calls
-`squashBranchCommits()` from `src/orchestrator/datasource-helpers.ts`, which
-replaces all per-task commits with a single squash commit:
-
-1. `git merge-base <defaultBranch> HEAD` -- find the common ancestor
-2. `git reset --soft <merge-base>` -- undo all commits but keep changes staged
-3. `git commit -m <AI-generated message>` -- create a single commit
-
-This soft-reset approach avoids interactive rebase, making it reliable in
-non-interactive (CI) environments. The `getBranchDiff()` helper uses
-`git diff <defaultBranch>..HEAD` with a 10 MB `maxBuffer` to obtain the diff
-fed to the commit agent.
-
-If the commit agent fails, the per-task commits created by `commitTask()`
-remain intact on the branch. See [Commit Agent](./commit-agent.md) for the
-full generation flow, error handling, and fallback behavior.
-
 ## Troubleshooting
 
 ### Git commit failures
@@ -246,8 +225,6 @@ If this becomes an issue, the `git()` helper can be modified to pass a larger
 ## Related documentation
 
 - [Pipeline Overview](./overview.md) -- Where git fits in the pipeline
-- [Commit Agent](./commit-agent.md) -- AI-generated commit messages and
-  post-execution squash
 - [Dispatcher](./dispatcher.md) -- The execution phase that precedes commit
 - [Task Context & Lifecycle](./task-context-and-lifecycle.md) -- The
   `markTaskComplete()` call that precedes commit

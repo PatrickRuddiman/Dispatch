@@ -173,22 +173,6 @@ The method is called in error handlers throughout the pipeline:
 - `src/spec-generator.ts:288, 362, 462` -- issue fetch and spec generation
   failures
 
-### `log.extractMessage()` -- safe error message extraction
-
-The `extractMessage()` method (`src/helpers/logger.ts:80-84`) safely
-extracts a message string from an unknown thrown value. This is useful in
-`catch` blocks where the caught value may not be an `Error` instance:
-
-| Input | Return value |
-|-------|-------------|
-| `Error` instance | `err.message` |
-| Non-null/undefined value | `String(err)` |
-| `null` or `undefined` | `""` (empty string) |
-
-This method complements `formatErrorChain` -- use `extractMessage` when you
-need just the top-level message string, and `formatErrorChain` when you need
-the full cause chain for diagnostics.
-
 ## Why chalk for terminal styling
 
 Chalk was chosen over raw ANSI escape codes or alternatives for several reasons:
@@ -322,14 +306,7 @@ a full log-level hierarchy.
 
 ## Source reference
 
-- `src/helpers/logger.ts` -- Full logger implementation (85 lines)
-
-## Test coverage
-
-The logger now has a dedicated test suite covering all seven methods,
-the `verbose` flag, `formatErrorChain`, and `extractMessage`. See
-[Shared Helpers Tests](../testing/shared-helpers-tests.md) for the full
-breakdown of 24 tests across 8 `describe` blocks.
+- `src/logger.ts` -- Full logger implementation (71 lines)
 
 ## Related documentation
 
@@ -340,8 +317,6 @@ breakdown of 24 tests across 8 `describe` blocks.
   logger output for timing
 - [Format Tests](../testing/format-tests.md) -- Test suite covering the
   `elapsed()` function that the logger displays
-- [Shared Helpers Tests](../testing/shared-helpers-tests.md) -- Test suite
-  covering the logger module (24 tests)
 - [Integrations reference](./integrations.md) -- Chalk color detection, CI
   behavior, and Node.js process signal details
 - [TUI](../cli-orchestration/tui.md) -- The alternative rich output mode that

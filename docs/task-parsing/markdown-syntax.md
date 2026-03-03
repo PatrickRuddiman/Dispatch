@@ -17,7 +17,7 @@ for recommended task file structure):
 
 ### Regex definitions
 
-The parser uses two regular expressions defined in `src/parser.ts:33-35`:
+The parser uses two regular expressions defined in `src/parser.ts:31-33`:
 
 ```
 UNCHECKED_RE = /^(\s*[-*]\s)\[ \]\s+(.+)$/
@@ -159,7 +159,7 @@ style was used in the original line. This means:
 - Asterisk markers stay as asterisks
 - Indentation is preserved exactly
 
-This is confirmed by the test at `src/parser.test.ts:649-667` which verifies
+This is confirmed by the test at `src/parser.test.ts:371-389` which verifies
 that `"    - [ ] Indented task"` becomes `"    - [x] Indented task"`.
 
 ## Line ending handling

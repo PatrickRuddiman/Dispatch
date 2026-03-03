@@ -3,10 +3,10 @@
 ## What it does
 
 The `withTimeout<T>` function in
-[`src/helpers/timeout.ts`](../../src/helpers/timeout.ts) wraps any `Promise<T>`
-with a deadline. If the wrapped promise does not settle within the specified
-number of milliseconds, `withTimeout` rejects with a `TimeoutError` that
-includes a human-readable label identifying which operation timed out.
+[`src/timeout.ts`](../../src/timeout.ts) wraps any `Promise<T>` with a
+deadline. If the wrapped promise does not settle within the specified number
+of milliseconds, `withTimeout` rejects with a `TimeoutError` that includes a
+human-readable label identifying which operation timed out.
 
 The module exports two symbols:
 
@@ -110,23 +110,12 @@ In practice the risk is low:
   outside the scope of `withTimeout` -- it is the caller's responsibility to
   ensure the underlying operation can be cancelled or will eventually settle.
 
-## Operations that use timeout wrapping
+## Operations that could benefit from timeout wrapping
 
-Two call sites currently use `withTimeout`:
-
-| Consumer | Location | Wrapped operation |
-|----------|----------|-------------------|
-| Dispatch pipeline | `src/orchestrator/dispatch-pipeline.ts:333` | `localPlanner.plan()` -- AI planner call with configurable deadline |
-| Test runner | `src/test-runner.ts:98` | Test runner spawn -- bounds wall-clock time for test execution |
-
-The planning phase also has a manual retry loop around `withTimeout` that
-retries on `TimeoutError` but breaks on other errors. See
-[Resilience overview](./resilience.md) for how timeout and retry compose.
-
-### Operations that could benefit from timeout wrapping
-
-Other potentially long-running async operations that are **not** currently
-timeout-bounded include:
+Currently only the plan generation step in
+[`dispatch-pipeline.ts`](../planning-and-dispatch/planner.md) uses
+`withTimeout`. Other potentially long-running async operations that are
+**not** timeout-bounded include:
 
 | Operation | Location | Risk |
 |-----------|----------|------|
@@ -158,15 +147,11 @@ these tests.
 
 ## Related documentation
 
-- [Shared Utilities overview](./overview.md) -- Context for all shared
+- [Shared Utilities overview](./overview.md) -- Context for both shared
   utility modules
-- [Retry](./retry.md) -- Automatic retry wrapper, used alongside timeout
-  in the dispatch pipeline
-- [Resilience overview](./resilience.md) -- How cleanup, retry, and timeout
-  compose in the dispatch pipeline
-- [Slugify](./slugify.md) -- Another shared utility module
-- [Testing](./testing.md) -- How to run slugify, timeout, and retry tests;
-  fake timer details
+- [Slugify](./slugify.md) -- The other shared utility module
+- [Testing](./testing.md) -- How to run slugify and timeout tests, fake
+  timer details
 - [Configuration](../cli-orchestration/configuration.md) -- `planTimeout` and
   `planRetries` configuration reference
 - [Orchestrator](../cli-orchestration/orchestrator.md) -- The dispatch

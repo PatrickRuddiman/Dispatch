@@ -4,45 +4,6 @@ This page documents the external dependencies and integrations used by the
 CLI & Orchestration group, answering operational questions about configuration,
 behavior, and troubleshooting.
 
-## `@inquirer/prompts`
-
-**Package**: `@inquirer/prompts` (MIT license)
-**Used in**: `src/config-prompts.ts`
-**Official docs**: [github.com/SBoudrias/Inquirer.js](https://github.com/SBoudrias/Inquirer.js)
-
-The `@inquirer/prompts` package provides the interactive terminal prompts used
-by the `dispatch config` wizard. Dispatch uses two prompt types from the
-package:
-
-| Prompt | Import | Usage |
-|--------|--------|-------|
-| `select` | `import { select } from "@inquirer/prompts"` | Provider selection, model selection, datasource selection |
-| `confirm` | `import { confirm } from "@inquirer/prompts"` | "Reconfigure?" and "Save?" confirmation steps |
-
-### How it works
-
-Each prompt is `await`-ed individually in the wizard's linear flow
-(`src/config-prompts.ts:30-159`). The prompts render interactive menus to
-`process.stderr` and read keystrokes from `process.stdin`. They require a
-TTY -- if stdin is not a terminal (e.g., piped input, CI environment),
-the prompts throw and the wizard exits.
-
-### Non-interactive / CI environments
-
-`@inquirer/prompts` does **not** support non-interactive mode. In CI or
-scripted environments where `dispatch config` cannot be used:
-
-- Pass all required options as CLI flags: `--provider`, `--source`, etc.
-- Or manually create `{CWD}/.dispatch/config.json` with the desired values.
-
-### Color and theming
-
-The prompts use their own internal ANSI styling (not chalk). Color output
-follows the terminal's capabilities and respects `NO_COLOR` / `FORCE_COLOR`
-environment variables. The wizard adds chalk-styled install indicators
-(green/red dots) to the provider choice labels, but the prompt framework
-handles its own cursor movement and highlighting.
-
 ## Chalk
 
 See [Chalk reference](../shared-types/integrations.md#chalk) for full
@@ -127,8 +88,9 @@ dispatch tasks/**/*.md
 
 ## OpenCode AI Agent SDK
 
-**Package**: `@opencode-ai/sdk`
-**Used in**: `src/providers/opencode.ts`, `src/providers/index.ts:11`
+**Package**: `@opencode-ai/sdk` v1.2.10
+**Used in**: `src/providers/opencode.ts`, `src/providers/index.ts:11`,
+`src/orchestrator.ts:100`
 **Official docs**: [opencode.ai/docs](https://opencode.ai/docs)
 
 The OpenCode SDK provides the default AI agent backend for dispatch. For full
@@ -182,8 +144,9 @@ OpenCode documentation for specific rate limit and pricing details.
 
 ## GitHub Copilot SDK
 
-**Package**: `@github/copilot-sdk`
-**Used in**: `src/providers/copilot.ts`, `src/providers/index.ts:12`
+**Package**: `@github/copilot-sdk` v0.1.0
+**Used in**: `src/providers/copilot.ts`, `src/providers/index.ts:12`,
+`src/orchestrator.ts:100`
 **Official docs**: [github.com/github/copilot-sdk](https://github.com/github/copilot-sdk)
 
 The Copilot SDK provides an alternative AI agent backend. For full setup,
@@ -288,29 +251,35 @@ Key settings:
 
 ### The `define` feature and version injection
 
-The tsup configuration (`tsup.config.ts:18-20`) uses the `define` feature to
-inject the version string at build time:
+The comment at `src/cli.ts:127` references tsup's `define` feature for
+injecting the version string at build time. However, **this is not currently
+wired up**. The tsup config has no `define` block, and the version string is
+hardcoded.
+
+To implement build-time version injection:
 
 ```typescript
+// tsup.config.ts
 import { readFileSync } from "fs";
-const { version } = JSON.parse(readFileSync("./package.json", "utf-8"));
+const pkg = JSON.parse(readFileSync("./package.json", "utf-8"));
 
 export default defineConfig({
-  // ... other config ...
+  // ... existing config ...
   define: {
-    __VERSION__: JSON.stringify(version),
+    __VERSION__: JSON.stringify(pkg.version),
   },
 });
 ```
 
-The CLI reads this at `src/cli.ts:307` via `dispatch v${__VERSION__}`, where
-`__VERSION__` is declared as a global constant in `src/globals.d.ts:1`.
+```typescript
+// src/cli.ts
+declare const __VERSION__: string;
+console.log(`dispatch v${__VERSION__}`);
+```
 
-tsup's `define` feature works like esbuild's `define` -- it performs global
-string replacement at build time, replacing every occurrence of the
-`__VERSION__` identifier with the JSON-stringified version value. This means
-the version in the built `dist/cli.js` is automatically synchronized with
-`package.json` -- no manual version string maintenance is required.
+tsup's `define` feature works like esbuild's `define` — it performs global
+string replacement at build time, replacing every occurrence of the identifier
+with the specified value.
 
 ### Build commands
 
@@ -324,26 +293,27 @@ npm run dev        # Watch mode for development
 ## Node.js fs/promises (config file I/O)
 
 **Module**: `node:fs/promises`
-**Used in**: `src/config.ts:7` (`readFile`, `writeFile`, `mkdir`)
+**Used in**: `src/config.ts:7` (`readFile`, `writeFile`, `mkdir`, `rm`)
 **Official docs**: [nodejs.org/api/fs.html#promises-api](https://nodejs.org/api/fs.html#promises-api)
 
 The `fs/promises` module provides asynchronous filesystem operations for the
-[configuration system](configuration.md). It is used to read, write, and
-create the persistent config file at `{CWD}/.dispatch/config.json`.
+[configuration system](configuration.md). It is used to read, write, create,
+and delete the persistent config file at `~/.dispatch/config.json`.
 
 ### Functions used
 
 | Function | Usage | Location |
 |----------|-------|----------|
-| `readFile` | Load config file contents as UTF-8 string | `src/config.ts:55` |
-| `writeFile` | Write pretty-printed JSON config to disk | `src/config.ts:73` |
-| `mkdir` | Create `.dispatch/` directory if it doesn't exist | `src/config.ts:72` |
+| `readFile` | Load config file contents as UTF-8 string | `src/config.ts:63` |
+| `writeFile` | Write pretty-printed JSON config to disk | `src/config.ts:81` |
+| `mkdir` | Create `~/.dispatch/` directory if it doesn't exist | `src/config.ts:80` |
+| `rm` | Delete config file during config reset (via interactive wizard) | `src/config.ts:228` |
 
 ### Config file location and permissions
 
-The config file path is `{CWD}/.dispatch/config.json`, computed via
-`join(process.cwd(), ".dispatch")` in `getConfigPath()` (`src/config.ts:42-44`).
-The `.dispatch/` directory is created with `{ recursive: true }`, which:
+The config file path is `~/.dispatch/config.json`, computed via
+`join(homedir(), ".dispatch", "config.json")`. The `~/.dispatch/` directory is
+created with `{ recursive: true }`, which:
 
 - Creates all missing parent directories in the path.
 - Is a no-op if the directory already exists.
@@ -364,15 +334,16 @@ The config system uses a **silent-fallback** strategy for read errors and an
 | `readFile` (load config) | `catch` returns `{}` — no error shown | Missing or corrupted config is common and non-fatal |
 | `writeFile` (save config) | Error propagates to caller | Write failures need user attention (permissions, disk space) |
 | `mkdir` (create dir) | Error propagates to caller | Directory creation failures block config persistence |
+| `rm` (reset config) | `{ force: true }` + `catch` returns success | File may already be deleted; either way, reset succeeds |
 
 ### Troubleshooting fs/promises issues
 
 | Symptom | Likely cause | Resolution |
 |---------|-------------|------------|
-| `EACCES` on `saveConfig` | No write permission on `.dispatch/` | `chmod u+w .dispatch/` or run as a user with write access to the project directory |
-| `ENOSPC` on `writeFile` | Disk full | Free disk space in the project directory partition |
-| Config silently ignored | Corrupted JSON in config file | Run `dispatch config` to reconfigure, or manually edit `.dispatch/config.json` |
-| `EROFS` on `mkdir` | Read-only filesystem (e.g., some container images) | Mount a writable volume or use CLI flags exclusively |
+| `EACCES` on `saveConfig` | No write permission on `~/.dispatch/` | `chmod u+w ~/.dispatch/` or run as a user with home directory access |
+| `ENOSPC` on `writeFile` | Disk full | Free disk space in the home directory partition |
+| Config silently ignored | Corrupted JSON in config file | Run `dispatch config` to reconfigure, or manually edit `~/.dispatch/config.json` |
+| `EROFS` on `mkdir` | Read-only filesystem (e.g., some container images) | Mount a writable volume at `$HOME` or use CLI flags exclusively |
 
 ### Concurrent access
 
@@ -459,8 +430,8 @@ troubleshooting, and unhandleable signals, see
 
 ## Process cleanup registry
 
-**Module**: `src/helpers/cleanup.ts` (35 lines)
-**Used in**: `src/orchestrator/runner.ts`, `src/cli.ts` (signal and
+**Module**: `src/cleanup.ts` (35 lines)
+**Used in**: `src/agents/orchestrator.ts:17,151`, `src/cli.ts` (signal and
 error handlers)
 
 The cleanup registry is a simple module that allows sub-modules (orchestrator,
@@ -496,7 +467,7 @@ const instance = await bootProvider(provider, { url: serverUrl, cwd });
 registerCleanup(() => instance.cleanup());
 ```
 
-This registration happens at provider boot time, immediately after
+This registration happens at `src/agents/orchestrator.ts:151`, immediately after
 the provider is booted. It ensures that even if an unhandled error propagates
 past the orchestrator's `try/catch`, the CLI's top-level error handler can still
 clean up the provider by calling `runCleanup()`.
@@ -508,10 +479,15 @@ for how this interacts with the orchestrator's own error recovery.
 
 - [CLI](cli.md) -- argument parsing and exit codes
 - [Configuration](configuration.md) -- config file, three-tier precedence,
-  `dispatch config` subcommand, interactive wizard
+  `dispatch config` subcommand
 - [Orchestrator](orchestrator.md) -- glob usage and provider boot
 - [TUI](tui.md) -- ANSI rendering and TTY detection
 - [Logger](../shared-types/logger.md) -- chalk usage in logging
 - [Provider Abstraction & Backends](../provider-system/provider-overview.md) -- provider SDK details
+- [OpenCode Backend](../provider-system/opencode-backend.md) -- OpenCode-specific setup and troubleshooting
+- [Copilot Backend](../provider-system/copilot-backend.md) -- Copilot-specific setup and authentication
 - [Cleanup Registry](../shared-types/cleanup.md) -- Process-level cleanup mechanism
 - [Shared Integrations](../shared-types/integrations.md) -- Chalk, fs/promises, and signal handling reference
+- [Planner Agent](../planning-and-dispatch/planner.md) -- Planning phase referenced by rate limits discussion
+- [Dispatcher](../planning-and-dispatch/dispatcher.md) -- Execution phase that consumes provider sessions
+- [Timeout Utility](../shared-utilities/timeout.md) -- Plan timeout mechanism used by the orchestrator

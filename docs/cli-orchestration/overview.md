@@ -23,10 +23,9 @@ Dispatch needs a single coherent entry point that:
 | File | Purpose |
 |------|---------|
 | [`src/cli.ts`](cli.md) | Hand-rolled argument parser, `main()` entry point, config subcommand routing, exit code logic |
-| [`src/config.ts`](configuration.md) | Persistent config data layer: file I/O (`{CWD}/.dispatch/config.json`), validation, `handleConfigCommand()` |
-| [`src/config-prompts.ts`](configuration.md#the-dispatch-config-command) | Interactive config wizard: provider/model/datasource selection using `@inquirer/prompts` |
+| [`src/config.ts`](configuration.md) | Persistent config data layer: file I/O (`~/.dispatch/config.json`), validation, `handleConfigCommand()` |
 | [`src/orchestrator/cli-config.ts`](configuration.md#three-tier-configuration-precedence) | Config resolution: three-tier merge of CLI flags, config file, and hardcoded defaults |
-| [`src/orchestrator/runner.ts`](orchestrator.md) | Thin coordinator: mutual exclusion, pipeline delegation (dispatch, spec, respec, fix-tests) |
+| [`src/agents/orchestrator.ts`](orchestrator.md) | Core multi-phase pipeline: discover, parse, boot, plan, dispatch, commit |
 | [`src/tui.ts`](tui.md) | Real-time terminal dashboard with spinner, progress bar, and task list |
 | [`src/logger.ts`](../shared-types/logger.md) | Minimal structured logger with chalk formatting for non-TUI contexts |
 
@@ -35,26 +34,28 @@ Dispatch needs a single coherent entry point that:
 ```mermaid
 flowchart TD
     A["cli.ts<br/>config subcommand or parseArgs()"] -->|"config"| A2["config.ts<br/>handleConfigCommand()"]
-    A2 --> A3["config-prompts.ts<br/>runInteractiveConfigWizard()"]
     A -->|"RawCliArgs + explicitFlags"| B["bootOrchestrator({ cwd })"]
-    B --> B2["runner.runFromCli(args)"]
+    B --> B2["orchestrator.runFromCli(args)"]
     B2 --> B3["cli-config.ts<br/>resolveCliConfig(args)"]
-    B3 -->|"merged args"| B4{"mutual exclusion check<br/>--spec / --respec / --fix-tests"}
-    B4 -->|conflict| X["log.error + exit 1"]
-    B4 -->|ok| C{"mode?"}
-    C -->|"--fix-tests"| C3["Fix-tests pipeline"]
-    C -->|"--spec"| C2["Spec pipeline"]
-    C -->|"--respec"| C4["Respec pipeline"]
-    C -->|dispatch| D{"dryRun?"}
+    B3 -->|"merged args"| C{"--spec?"}
+    C -->|Yes| C2["Spec pipeline"]
+    C -->|No| D{"dryRun?"}
     D -->|Yes| E["dryRunMode()<br/>logger output"]
-    D -->|No| F["Dispatch pipeline"]
-    F --> G["bootProvider() → plan → dispatch → commit"]
-    C2 --> H["Summary"]
-    C3 --> H
-    C4 --> H
-    E --> H
-    G --> H
-    H --> R["cli.ts<br/>process.exit(failed > 0 ? 1 : 0)"]
+    D -->|No| F["createTui()"]
+    F --> G["1. glob() — discover files"]
+    G --> H["2. parseTaskFile() — extract tasks"]
+    H --> I["3. bootProvider() — start AI agent"]
+    I --> J["4. Batch dispatch loop"]
+    J --> K{"--no-plan?"}
+    K -->|No| L["planTask() — planner agent"]
+    K -->|Yes| M["dispatchTask() — executor agent"]
+    L --> M
+    M --> N["markTaskComplete() — update markdown"]
+    N --> O["commitTask() — git commit"]
+    O -->|next batch| J
+    J -->|all done| P["5. instance.cleanup()"]
+    P --> Q["TUI stop, return summary"]
+    Q --> R["cli.ts<br/>process.exit(summary.failed > 0 ? 1 : 0)"]
 ```
 
 ## Cross-group dependencies
@@ -67,88 +68,14 @@ This group depends on every other group in the project:
   `dispatchTask()`, `commitTask()`
 - **[Provider Abstraction & Backends](../provider-system/provider-overview.md)**: `bootProvider()`,
   `ProviderInstance`, [`ProviderName`](../shared-types/provider.md#why-providername-is-a-string-literal-union), `PROVIDER_NAMES`
-  (four providers: opencode, copilot, claude, codex)
 - **[Datasource System](../datasource-system/overview.md)**: `DATASOURCE_NAMES`,
-  `DatasourceName`, `detectDatasource()` for git-remote-based auto-detection
+  `DatasourceName`, datasource detection from git remote
 - **[Spec Generation](../spec-generation/overview.md)**: `generateSpecs()` pipeline
   invoked in `--spec` mode
 - **[Shared Interfaces & Utilities](../shared-types/overview.md)**: `Task`, `TaskFile`,
   `ProviderName` type definitions
-- **Node.js built-ins**: `fs/promises` (config file I/O), `os` (cpus, freemem),
-  `path`, `child_process` (git remote detection)
-- **Third-party**: `@inquirer/prompts` (interactive wizard), `chalk` (terminal colors)
-
-## CLI multi-service delegation
-
-The CLI entry point delegates to multiple subsystems depending on the user's
-input. The following diagram shows how `cli.ts` routes to each service and
-the key data types flowing between them:
-
-```mermaid
-flowchart LR
-    subgraph CLI ["cli.ts — entry point"]
-        argv["process.argv"]
-        configCheck{"config<br/>subcommand?"}
-        parse["parseArgs()"]
-        signals["SIGINT / SIGTERM<br/>handlers"]
-    end
-
-    subgraph Config ["Configuration"]
-        configWizard["config-prompts.ts<br/>interactive wizard"]
-        configIO["config.ts<br/>load / save / validate"]
-        configFile[("{CWD}/.dispatch/<br/>config.json")]
-    end
-
-    subgraph Resolution ["Config Resolution"]
-        resolve["cli-config.ts<br/>resolveCliConfig()"]
-        detect["datasources/index.ts<br/>detectDatasource()"]
-    end
-
-    subgraph Pipelines ["Pipeline Delegation (runner.ts)"]
-        dispatch["dispatch-pipeline.ts"]
-        spec["spec-pipeline.ts"]
-        fixTests["fix-tests-pipeline.ts"]
-    end
-
-    subgraph Providers ["Provider Registry"]
-        boot["providers/index.ts<br/>bootProvider()"]
-        opencode["opencode"]
-        copilot["copilot"]
-        claude["claude"]
-        codex["codex"]
-    end
-
-    subgraph Cleanup ["Shutdown"]
-        cleanupReg["helpers/cleanup.ts<br/>runCleanup()"]
-    end
-
-    argv --> configCheck
-    configCheck -->|yes| configWizard
-    configWizard --> configIO
-    configIO <--> configFile
-    configCheck -->|no| parse
-    parse -->|"RawCliArgs"| resolve
-    resolve --> configIO
-    resolve --> detect
-    resolve -->|"merged args"| Pipelines
-    dispatch --> boot
-    spec --> boot
-    fixTests --> boot
-    boot --> opencode & copilot & claude & codex
-    signals --> cleanupReg
-    cleanupReg --> boot
-```
-
-This diagram illustrates three key architectural properties:
-
-1. **Early config interception**: The config subcommand is handled before
-   `parseArgs()` runs, keeping the wizard independent of the dispatch argument
-   grammar.
-2. **Single resolution point**: All pipelines receive their options through
-   `resolveCliConfig()`, ensuring consistent three-tier precedence (CLI flags >
-   config file > hardcoded defaults).
-3. **Uniform provider interface**: All four pipelines boot providers through
-   the same `bootProvider()` function, enabling provider-agnostic pipeline code.
+- **Node.js built-ins**: `fs/promises` (config file I/O), `os` (homedir,
+  cpus, freemem), `path`, `child_process` (git remote detection)
 
 ## Quick reference
 
@@ -165,8 +92,6 @@ dispatch 14 15 16
 dispatch 14 --provider copilot --concurrency 3
 dispatch --dry-run
 dispatch 14 --no-plan
-dispatch --no-worktree
-dispatch --force
 dispatch --server-url http://localhost:4096
 dispatch --cwd /path/to/project
 
@@ -174,17 +99,8 @@ dispatch --cwd /path/to/project
 dispatch --spec 42,43,44
 dispatch --spec "drafts/*.md" --source github
 
-# Respec (regenerate existing specs)
-dispatch --respec              # regenerate all
-dispatch --respec 42,43        # regenerate specific issues
-
-# Fix tests mode
-dispatch --fix-tests
-dispatch --fix-tests --test-timeout 10
-
 # Config management (interactive wizard)
 dispatch config
-dispatch config --cwd /path/to/project
 ```
 
 ## Related documentation
@@ -196,8 +112,8 @@ dispatch config --cwd /path/to/project
   pipeline phases
 - [Terminal UI](tui.md) -- rendering, state machines, and TTY compatibility
 - [Logger](../shared-types/logger.md) -- structured logging for non-interactive contexts
-- [Integrations](integrations.md) -- @inquirer/prompts, chalk, glob, tsup,
-  Node.js process, and fs/promises config I/O details
+- [Integrations](integrations.md) -- chalk, glob, tsup, Node.js process,
+  and fs/promises config I/O details
 - [Spec Generation](../spec-generation/overview.md) -- the spec pipeline invoked
   by `--spec` mode
 - [Datasource System](../datasource-system/overview.md) -- datasource detection

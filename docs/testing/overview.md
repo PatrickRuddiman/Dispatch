@@ -2,21 +2,18 @@
 
 This document describes the testing infrastructure, strategy, and organization
 for the dispatch project. It covers how tests are run, what framework is
-used, and how the nineteen test files map to the production modules they verify.
+used, and how the six test files map to the production modules they verify.
 
 ## Test framework
 
 The project uses [Vitest](https://vitest.dev/) **v4.0.18** as its test
-framework. A `vitest.config.ts` file in the project root configures:
+framework. There is no `vitest.config.ts` or `vite.config.ts` file in the
+project root -- Vitest uses its default configuration, which:
 
-- A **resolve alias** that redirects `@openai/codex` imports to
-  `src/__mocks__/@openai/codex.ts` during test runs (see
-  [Type Declarations and Mocks](type-declarations-and-mocks.md))
-- **Coverage** via the `v8` provider with an 80% line threshold, excluding
-  `src/tests/**`, `**/interface.ts`, and `**/index.ts`
-- Automatic discovery of all `*.test.ts` files under the project root
-- Node.js (not browser) test environment
-- File-level parallelism by default
+- Automatically discovers all `*.test.ts` files under the project root
+- Uses the project's `tsconfig.json` for TypeScript compilation
+- Runs tests in Node.js (not browser) mode
+- Enables file-level parallelism by default
 
 ### Running tests
 
@@ -24,7 +21,6 @@ framework. A `vitest.config.ts` file in the project root configures:
 |---------|--------|----------|
 | `npm test` | `vitest run` | Single run, exits with status code |
 | `npm run test:watch` | `vitest` | Watch mode, re-runs on file change |
-| `npm run test:coverage` | `vitest run --coverage` | Single run with v8 coverage report |
 | `npx vitest run src/tests/config.test.ts` | -- | Run a single test file |
 
 ### Debugging tests
@@ -53,33 +49,13 @@ All test files live in `src/tests/` and follow the naming convention
 | Test file | Production module | Lines (test) | Lines (source) | Category |
 |-----------|-------------------|-------------|----------------|----------|
 | [`config.test.ts`](config-tests.md) | [`src/config.ts`](../../src/config.ts) | 405 | 231 | File I/O, validation, CLI |
-| [`commit-agent.test.ts`](../planning-and-dispatch/commit-agent.md#testing) | [`src/agents/commit.ts`](../../src/agents/commit.ts) | 42 | 296 | Mock-based, boot lifecycle |
-| [`dispatcher.test.ts`](executor-and-dispatcher-tests.md) | [`src/dispatcher.ts`](../../src/dispatcher.ts) | 140 | 123 | Mock-based, prompt construction |
-| [`executor.test.ts`](executor-and-dispatcher-tests.md) | [`src/agents/executor.ts`](../../src/agents/executor.ts) | 225 | 110 | Mock-based, lifecycle |
-| [`format.test.ts`](format-tests.md) | [`src/helpers/format.ts`](../../src/helpers/format.ts) | 82 | 50 | Pure logic |
+| [`format.test.ts`](format-tests.md) | [`src/format.ts`](../../src/format.ts) | 34 | 19 | Pure logic |
 | [`parser.test.ts`](parser-tests.md) | [`src/parser.ts`](../../src/parser.ts) | 995 | 171 | Pure logic + file I/O |
 | [`spec-generator.test.ts`](spec-generator-tests.md) | [`src/spec-generator.ts`](../../src/spec-generator.ts) | 641 | 837 | Pure logic, validation |
 | [`slugify.test.ts`](../shared-utilities/testing.md) | [`src/slugify.ts`](../../src/slugify.ts) | 113 | 31 | Pure logic |
 | [`timeout.test.ts`](../shared-utilities/testing.md) | [`src/timeout.ts`](../../src/timeout.ts) | 190 | 79 | Async + fake timers |
-| [`tui.test.ts`](tui-tests.md) | [`src/tui.ts`](../../src/tui.ts) | 418 | 347 | Stdout spy + fake timers |
-| [`orchestrator.test.ts`](orchestrator-tests.md) | [`src/orchestrator/runner.ts`](../../src/orchestrator/runner.ts) | ~80 | ~200 | Mock-based, integration |
-| `datasource-helpers.test.ts` | [`src/orchestrator/datasource-helpers.ts`](../../src/orchestrator/datasource-helpers.ts) | 870 | 331 | Mock-based, pure logic |
-| `dispatch-pipeline.test.ts` | [`src/orchestrator/dispatch-pipeline.ts`](../../src/orchestrator/dispatch-pipeline.ts) | 1483 | 662 | Mock-based, pipeline orchestration |
-| `integration/dispatch-flow.test.ts` | Multiple pipeline modules | 289 | -- | Integration, end-to-end flow |
-| [`confirm-large-batch.test.ts`](shared-helpers-tests.md) | [`src/helpers/confirm-large-batch.ts`](../../src/helpers/confirm-large-batch.ts) | 124 | 42 | Mock-based, async |
-| [`logger.test.ts`](shared-helpers-tests.md) | [`src/helpers/logger.ts`](../../src/helpers/logger.ts) | 253 | 85 | Spy-based |
-| [`prereqs.test.ts`](shared-helpers-tests.md) | [`src/helpers/prereqs.ts`](../../src/helpers/prereqs.ts) | 170 | 98 | Mock-based, async |
-| [`run-state.test.ts`](shared-helpers-tests.md) | [`src/helpers/run-state.ts`](../../src/helpers/run-state.ts) | 185 | 46 | Mock-based |
 
-**Total: ~6,625 lines of test code** covering ~3,888 lines of production code.
-
-### Shared test fixtures
-
-The `src/tests/fixtures.ts` module provides four factory functions
-(`createMockProvider`, `createMockDatasource`, `createMockTask`,
-`createMockIssueDetails`) that create pre-configured test doubles for core
-domain interfaces. All factories accept an `overrides` parameter for
-per-test customization. See [Test Fixtures](test-fixtures.md) for details.
+**Total: 2,378 lines of test code** covering 1,368 lines of production code.
 
 ## Testing patterns
 
@@ -130,79 +106,40 @@ and have no filesystem side effects.
 graph TD
     subgraph "Test Suite"
         CT["config.test.ts<br/>8 describe blocks, 48 tests"]
-        CAT["commit-agent.test.ts<br/>2 describe blocks, 4 tests"]
-        DT["dispatcher.test.ts<br/>1 describe block, 7 tests"]
-        ET["executor.test.ts<br/>2 describe blocks, 9 tests"]
-        FT["format.test.ts<br/>2 describe blocks, 12 tests"]
+        FT["format.test.ts<br/>1 describe block, 6 tests"]
         PT["parser.test.ts<br/>5 describe blocks, 62 tests"]
         ST["spec-generator.test.ts<br/>4 describe blocks, 48 tests"]
         SLT["slugify.test.ts<br/>24 tests"]
         TOT["timeout.test.ts<br/>~12 tests, fake timers"]
-        TT["tui.test.ts<br/>7 describe blocks, 27 tests"]
-        OT["orchestrator.test.ts<br/>2 describe blocks, 8 tests"]
-        DHT["datasource-helpers.test.ts<br/>9 describe blocks, 64 tests"]
-        DPT["dispatch-pipeline.test.ts<br/>12 describe blocks, 55 tests"]
-        DFT["integration/dispatch-flow.test.ts<br/>1 describe block, 3 tests"]
-        CLBT["confirm-large-batch.test.ts<br/>3 describe blocks, 10 tests"]
-        LGT["logger.test.ts<br/>8 describe blocks, 24 tests"]
-        PRT["prereqs.test.ts<br/>1 describe block, 11 tests"]
-        RST["run-state.test.ts<br/>4 describe blocks, 12 tests"]
     end
 
     subgraph "Production Modules"
         C["config.ts<br/>Config I/O &amp; validation"]
-        CA["agents/commit.ts<br/>Commit agent"]
-        D["dispatcher.ts<br/>Task dispatch &amp; prompts"]
-        EX["agents/executor.ts<br/>Executor agent lifecycle"]
-        F["helpers/format.ts<br/>Duration &amp; header formatting"]
+        F["format.ts<br/>Duration formatting"]
         P["parser.ts<br/>Task parsing &amp; mutation"]
         S["spec-generator.ts<br/>Spec pipeline &amp; validation"]
-        SL["helpers/slugify.ts<br/>String-to-identifier"]
-        TO["helpers/timeout.ts<br/>Promise deadline"]
-        TU["tui.ts<br/>Terminal dashboard"]
-        OR["orchestrator/runner.ts<br/>Orchestrator pipeline"]
-        DSH["orchestrator/datasource-helpers.ts<br/>Datasource helper functions"]
-        DP["orchestrator/dispatch-pipeline.ts<br/>Dispatch pipeline"]
-        MULTI["Multiple pipeline modules<br/>(integration)"]
-        CLB["helpers/confirm-large-batch.ts<br/>Batch confirmation"]
-        LG["helpers/logger.ts<br/>Structured logging"]
-        PRQ["helpers/prereqs.ts<br/>Prerequisite checker"]
-        RS["helpers/run-state.ts<br/>Run state persistence"]
+        SL["slugify.ts<br/>String-to-identifier"]
+        TO["timeout.ts<br/>Promise deadline"]
     end
 
     CT --> C
-    CAT --> CA
-    DT --> D
-    ET --> EX
     FT --> F
     PT --> P
     ST --> S
     SLT --> SL
     TOT --> TO
-    TT --> TU
-    OT --> OR
-    DHT --> DSH
-    DPT --> DP
-    DFT --> MULTI
-    CLBT --> CLB
-    LGT --> LG
-    PRT --> PRQ
-    RST --> RS
 ```
 
 ## What is NOT tested
 
 The following production modules do not have corresponding test files:
 
-- `src/agents/orchestrator.ts` — pipeline controller; note that
-  `orchestrator.test.ts` covers `parseIssueFilename` and datasource sync,
-  `dispatch-pipeline.test.ts` covers the full dispatch pipeline with mocked
-  providers and datasources, and `datasource-helpers.test.ts` covers all
-  helper functions. However, the orchestrator's `runFromCli` entry point
-  is not directly tested (see [Orchestrator](../cli-orchestration/orchestrator.md) and [Orchestrator Tests](orchestrator-tests.md)).
-- `src/agents/commit.ts` — commit agent `generate()`, `buildCommitPrompt()`, and `parseCommitResponse()` are untested at unit level; only `boot()` and `cleanup()` are covered (see [Commit Agent](../planning-and-dispatch/commit-agent.md#testing))
+- `src/agents/orchestrator.ts` — pipeline controller (see [Orchestrator](../cli-orchestration/orchestrator.md))
 - `src/planner.ts` — planner agent prompt construction (see [Planner](../planning-and-dispatch/planner.md))
+- `src/dispatcher.ts` — executor agent dispatch (see [Dispatcher](../planning-and-dispatch/dispatcher.md))
 - `src/git.ts` — conventional commit operations (see [Git Operations](../planning-and-dispatch/git.md))
+- `src/tui.ts` — terminal dashboard (see [TUI](../cli-orchestration/tui.md))
+- `src/logger.ts` — structured logging (see [Logger](../shared-types/logger.md))
 - `src/providers/opencode.ts` — OpenCode backend (see [OpenCode Backend](../provider-system/opencode-backend.md))
 - `src/providers/copilot.ts` — Copilot backend (see [Copilot Backend](../provider-system/copilot-backend.md))
 - `src/issue-fetchers/github.ts` — GitHub issue fetcher (delegates to [GitHub datasource](../datasource-system/github-datasource.md)); see also [GitHub Fetcher](../issue-fetching/github-fetcher.md)
@@ -215,101 +152,21 @@ infrastructure.
 
 ### Fake timer testing
 
-The `timeout.test.ts` and `tui.test.ts` files use Vitest fake timers to
-control time deterministically. The `timeout.test.ts` uses fake timers to
-test async deadline behavior, while `tui.test.ts` uses them to control the
-80ms animation interval and make `Date.now()` deterministic. See the
+The `timeout.test.ts` file uses Vitest fake timers to control time
+deterministically. This pattern is unique among the project's test files --
+no other test file currently uses `vi.useFakeTimers()`. See the
 [Shared Utilities testing guide](../shared-utilities/testing.md) for details
-on the fake timer setup in `timeout.test.ts`, and
-[TUI Tests](tui-tests.md) for the TUI-specific fake timer and stdout spy
-patterns.
-
-### Module-level mocking
-
-The executor and dispatcher test files use `vi.mock()` with factory functions
-to replace production dependencies with controllable fakes. This pattern is
-used when the module under test depends on external services (AI providers,
-filesystem I/O) that cannot be invoked in tests:
-
-```
-vi.mock("../dispatcher.js", () => ({ dispatchTask: vi.fn() }));
-vi.mock("../parser.js", () => ({ markTaskComplete: vi.fn() }));
-```
-
-Vitest hoists `vi.mock()` calls to the top of the file, so they execute
-before any imports. Tests configure mock return values per-test using
-`vi.mocked(fn).mockResolvedValue()` and reset state with
-`vi.resetAllMocks()` in `beforeEach`. See
-[Executor & Dispatcher Tests](executor-and-dispatcher-tests.md) for details.
-
-### The vi.hoisted() pattern
-
-When a `vi.mock()` factory function needs to reference a mock variable, a
-naive `const mockFn = vi.fn()` at the top of the file fails because
-`vi.mock()` is hoisted above all declarations at compile time. The
-`vi.hoisted()` API solves this by returning values that are available in
-the hoisted scope:
-
-```
-const { mockFn } = vi.hoisted(() => ({ mockFn: vi.fn() }));
-vi.mock("some-module", () => ({ exportedFn: mockFn }));
-```
-
-This pattern is used in three shared-helper test files
-(`confirm-large-batch.test.ts`, `prereqs.test.ts`, `run-state.test.ts`)
-to create mock references for `@inquirer/prompts`, `node:child_process`,
-and `node:fs/promises`. See
-[Shared Helpers Tests](shared-helpers-tests.md#the-vihoisted--vimock-pattern)
-for a detailed explanation and usage table.
-
-### Dispatch pipeline testing patterns
-
-The `dispatch-pipeline.test.ts` and `datasource-helpers.test.ts` files
-introduce additional patterns specific to testing the pipeline orchestration:
-
-- **Full pipeline mocking**: `dispatch-pipeline.test.ts` mocks all provider
-  agents (planner, executor, commit), the datasource layer, worktree helpers,
-  TUI, and git operations. This creates a fully isolated test environment
-  where each test controls exactly what succeeds or fails.
-- **Shared test fixtures**: Both files use the factory functions from
-  `src/tests/fixtures.ts` (`createMockProvider`, `createMockDatasource`,
-  `createMockTask`, `createMockIssueDetails`) to build consistent test
-  doubles. See [Test Fixtures](test-fixtures.md).
-- **Multi-issue options helpers**: `dispatch-pipeline.test.ts` defines
-  `multiIssueOpts()` and similar helpers that produce `OrchestrateRunOptions`
-  objects pre-configured for worktree tests, serial tests, dry-run tests, etc.
-- **Worktree behavior assertions**: Tests verify the worktree decision logic
-  (`noWorktree`, `noBranch`, `tasksByFile.size`) by checking whether
-  `createWorktree` was called, and validate per-worktree provider boot and
-  cleanup sequences.
-- **Integration flow tests**: `integration/dispatch-flow.test.ts` (3 tests)
-  exercises the full pipeline with lightweight mocks, verifying end-to-end
-  behavior including datasource discovery, task parsing, execution, and
-  issue closing.
+on the fake timer setup, the async advancement requirement, and the no-op
+`.catch()` pattern.
 
 ## Related documentation
 
 - [Configuration tests](config-tests.md) -- `config.test.ts` detailed breakdown
-- [Commit agent](../planning-and-dispatch/commit-agent.md#testing) --
-  `commit-agent.test.ts` coverage details and test gaps
-- [Executor & dispatcher tests](executor-and-dispatcher-tests.md) --
-  `executor.test.ts` and `dispatcher.test.ts` detailed breakdown
 - [Format utility tests](format-tests.md) -- `format.test.ts` detailed breakdown
-- [TUI tests](tui-tests.md) -- `tui.test.ts` detailed breakdown
 - [Parser tests](parser-tests.md) -- `parser.test.ts` detailed breakdown
 - [Spec generator tests](spec-generator-tests.md) -- `spec-generator.test.ts` detailed breakdown
-- [Orchestrator tests](orchestrator-tests.md) -- `orchestrator.test.ts`
-  detailed breakdown (parseIssueFilename and datasource sync)
-- [Test fixtures](test-fixtures.md) -- shared factory functions for test
-  doubles (`createMockProvider`, `createMockDatasource`, etc.)
-- [Type declarations and mocks](type-declarations-and-mocks.md) -- ambient
-  type declarations (`globals.d.ts`, `codex.d.ts`) and the `@openai/codex`
-  module mock
 - [Shared Utilities testing](../shared-utilities/testing.md) -- `slugify.test.ts` and `timeout.test.ts`
   detailed breakdown, fake timer patterns
-- [Shared Helpers Tests](shared-helpers-tests.md) -- `confirm-large-batch.test.ts`,
-  `logger.test.ts`, `prereqs.test.ts`, `run-state.test.ts`, and `slugify.test.ts`
-  testing patterns including `vi.hoisted()` usage
 - [Parser testing guide](../task-parsing/testing-guide.md) -- parser-specific testing patterns
 - [Datasource testing](../datasource-system/testing.md) -- datasource-specific
   test suite (markdown datasource, registry, and config validation)

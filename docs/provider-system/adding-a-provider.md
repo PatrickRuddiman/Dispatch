@@ -119,10 +119,10 @@ Edit `src/provider.ts:11` to add your provider name to the union type:
 
 ```ts
 // Before
-export type ProviderName = "opencode" | "copilot" | "claude" | "codex";
+export type ProviderName = "opencode" | "copilot";
 
 // After
-export type ProviderName = "opencode" | "copilot" | "claude" | "codex" | "example";
+export type ProviderName = "opencode" | "copilot" | "example";
 ```
 
 This ensures TypeScript validates the provider name throughout the codebase --

@@ -1,15 +1,14 @@
 # Shared Utilities -- Testing
 
 This document covers the test infrastructure and patterns specific to the
-slugify, timeout, and retry utility modules.
+slugify and timeout utility modules.
 
 ## Test files
 
 | Test file | Production module | Tests | Lines (test) | Lines (source) | Category |
 |-----------|-------------------|-------|-------------|----------------|----------|
 | [`src/tests/slugify.test.ts`](../../src/tests/slugify.test.ts) | [`src/slugify.ts`](../../src/slugify.ts) | 24 | 113 | 31 | Pure logic |
-| [`src/tests/timeout.test.ts`](../../src/tests/timeout.test.ts) | [`src/helpers/timeout.ts`](../../src/helpers/timeout.ts) | ~12 | 190 | 79 | Async + fake timers |
-| [`src/tests/retry.test.ts`](../../src/tests/retry.test.ts) | [`src/helpers/retry.ts`](../../src/helpers/retry.ts) | ~14 | 164 | 55 | Async + mocked logger |
+| [`src/tests/timeout.test.ts`](../../src/tests/timeout.test.ts) | [`src/timeout.ts`](../../src/timeout.ts) | ~12 | 190 | 79 | Async + fake timers |
 
 ## Running the tests
 
@@ -22,7 +21,7 @@ npm test
 ### Shared utility tests only
 
 ```
-npx vitest run src/tests/slugify.test.ts src/tests/timeout.test.ts src/tests/retry.test.ts
+npx vitest run src/tests/slugify.test.ts src/tests/timeout.test.ts
 ```
 
 ### Single file
@@ -30,7 +29,6 @@ npx vitest run src/tests/slugify.test.ts src/tests/timeout.test.ts src/tests/ret
 ```
 npx vitest run src/tests/slugify.test.ts
 npx vitest run src/tests/timeout.test.ts
-npx vitest run src/tests/retry.test.ts
 ```
 
 ### Watch mode
@@ -41,10 +39,12 @@ npx vitest src/tests/slugify.test.ts
 
 ## Framework details
 
-The project uses [Vitest](https://vitest.dev/) **v4.0.18** with a
-`vitest.config.ts` that configures v8 coverage (80% line threshold), a
-module alias for `@openai/codex`, and test exclusions. See the
-[Testing Overview](../testing/overview.md) for framework-wide details
+The project uses [Vitest](https://vitest.dev/) **v4.0.18**. There is no
+`vitest.config.ts` -- Vitest runs with its defaults, discovering `*.test.ts`
+files automatically and executing them in Node.js mode with file-level
+parallelism.
+
+See the [Testing Overview](../testing/overview.md) for framework-wide details
 including debugging and CI integration.
 
 ## Test patterns
@@ -117,43 +117,6 @@ unhandled rejection warning. This pattern is documented in the
 [Vitest fake timers guide](https://vitest.dev/guide/mocking#timers) as a
 known consideration when testing promise-based timeout logic.
 
-### Logger mock testing (retry)
-
-The retry tests verify logging behavior without producing console noise by
-mocking the logger module. Tests use `vi.mock()` to replace `log.warn` and
-`log.debug` with Vitest spy functions:
-
-**Setup:**
-
-```
-vi.mock("../helpers/logger.js", () => ({
-    log: { warn: vi.fn(), debug: vi.fn() }
-}));
-```
-
-This replaces the logger with controlled spies for the entire test file.
-Tests then assert on call counts and argument patterns:
-
-- `log.warn` is called once per non-final failed attempt
-- `log.debug` is called once per non-final failed attempt (for error details)
-- The label string appears in warn messages when provided
-- Attempt numbers and remaining retry counts are accurate
-
-**No fake timers needed:**
-
-Unlike the timeout tests, retry tests do not use `vi.useFakeTimers()` because
-`withRetry` has no delay between attempts. The async functions used in tests
-resolve or reject immediately, making the tests straightforward `await`-based
-assertions.
-
-**Error type coverage:**
-
-The retry tests verify error type preservation through three scenarios:
-
-- Standard `Error` instances: rethrown with `instanceof Error` intact
-- Custom error subclasses: rethrown with `instanceof CustomError` intact
-- Non-Error thrown values (strings): rethrown as-is and catchable
-
 ### What is NOT tested
 
 The following edge case is not covered by the current test suite:
@@ -169,9 +132,6 @@ The following edge case is not covered by the current test suite:
   usage
 - [Timeout](./timeout.md) -- Timeout function behavior, retry strategy, and
   memory considerations
-- [Retry](./retry.md) -- Retry function behavior, logging, pipeline consumers
-- [Resilience overview](./resilience.md) -- How cleanup, retry, and timeout
-  compose in the dispatch pipeline
 - [Shared Utilities overview](./overview.md) -- Context for the shared
   utility group
 - [Testing Overview](../testing/overview.md) -- Project-wide test framework,
@@ -184,6 +144,3 @@ The following edge case is not covered by the current test suite:
   demonstrating similar pure-logic and I/O testing patterns
 - [Datasource Integrations](../datasource-system/integrations.md) -- Slug
   construction in branch naming that depends on the slugify function
-- [Shared Helpers Tests](../testing/shared-helpers-tests.md) -- Additional
-  test suites for helpers (confirm-large-batch, logger, prereqs, run-state)
-  using `vi.hoisted()` and `vi.mock()` patterns
