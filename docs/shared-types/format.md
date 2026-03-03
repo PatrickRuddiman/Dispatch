@@ -2,9 +2,9 @@
 
 ## What it does
 
-The format module (`src/format.ts`, 19 lines) provides a single
-human-readable duration formatter used across Dispatch for progress
-reporting and timing output.
+The format module (`src/helpers/format.ts`, 50 lines) provides human-readable
+duration formatting and a shared header renderer used across Dispatch for
+progress reporting, timing output, and display banners.
 
 ## Why it exists
 
@@ -14,6 +14,10 @@ Several modules need to display elapsed time to the user: the
 debug output includes timing information. Rather than scattering `Math.floor`
 arithmetic and string formatting across every call site, `elapsed()` centralizes
 the conversion from raw milliseconds into a compact `"Ns"` or `"Nm Ns"` string.
+
+Similarly, the header banner showing provider, model, and source information is
+needed by both the TUI and the spec pipeline. `renderHeaderLines()` centralizes
+this chalk-formatted output so that all consumers produce a consistent header.
 
 ## API
 
@@ -54,6 +58,44 @@ The test suite explicitly verifies this behavior: `elapsed(3600000)` returns
 `"60m 0s"` and `elapsed(5400000)` returns `"90m 0s"`
 (see `src/tests/format.test.ts:25-28`).
 
+### `renderHeaderLines(info: HeaderInfo): string[]`
+
+Builds the standard dispatch header lines used by both the TUI and the
+spec-generation banner. Returns an array of chalk-formatted strings, one per
+line.
+
+**Parameters:**
+
+- `info` — A `HeaderInfo` object with optional metadata fields.
+
+**`HeaderInfo` interface:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `provider` | `string?` | Provider name (e.g. `"opencode"`, `"copilot"`) |
+| `model` | `string?` | Model identifier (e.g. `"gpt-4o"`, `"claude-sonnet-4"`) |
+| `source` | `string?` | Datasource name (e.g. `"github"`, `"azdevops"`, `"md"`) |
+
+**Returns:** An array of strings. The first element is always the dispatch
+branding line. Subsequent elements are present only when the corresponding
+`HeaderInfo` field is provided:
+
+| Line | Content | Condition |
+|------|---------|-----------|
+| 1 | `  ⚡ dispatch — AI task orchestration` (bold white + dim) | Always |
+| 2 | `  provider: <name>` (dim) | When `info.provider` is set |
+| 3 | `  model: <name>` (dim) | When `info.model` is set |
+| 4 | `  source: <name>` (dim) | When `info.source` is set |
+
+**Consumers:**
+
+- **`src/tui.ts:127`** — TUI header, called on every render frame with
+  provider, model, and source from `TuiState`.
+- **`src/orchestrator/dispatch-pipeline.ts:89`** — Verbose mode inline header
+  (printed once via the logger when `--verbose` is active instead of the TUI).
+- **`src/orchestrator/spec-pipeline.ts:213`** — Spec pipeline banner, printed
+  before spec generation begins.
+
 ### Edge cases and untested inputs
 
 The following inputs are technically valid JavaScript but are not tested and
@@ -87,9 +129,16 @@ The `elapsed()` function is imported by:
 - **`src/tui.ts`** — Formats per-task elapsed time in the terminal display.
 - **`src/spec-generator.ts`** — Logs generation duration for spec output.
 
+The `renderHeaderLines()` function is imported by:
+
+- **`src/tui.ts`** — Renders the TUI header on every render frame.
+- **`src/orchestrator/dispatch-pipeline.ts`** — Prints a one-time header in
+  verbose mode.
+- **`src/orchestrator/spec-pipeline.ts`** — Prints the spec pipeline banner.
+
 ## Source reference
 
-- **Implementation:** `src/format.ts` (19 lines)
+- **Implementation:** `src/helpers/format.ts` (50 lines)
 - **Tests:** `src/tests/format.test.ts` (34 lines)
 
 ## Related documentation
@@ -105,3 +154,6 @@ The `elapsed()` function is imported by:
   logging generation duration
 - [Integrations](./integrations.md) -- Node.js operational details for the
   shared layer
+- [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) --
+  The dispatch pipeline that uses `renderHeaderLines()` for verbose-mode
+  headers

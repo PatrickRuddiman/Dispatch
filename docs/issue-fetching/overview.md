@@ -312,6 +312,10 @@ documentation and the `--spec` invocation details.
 
 - [Deprecated Compatibility Layer](../deprecated-compat/overview.md) -- Migration
   guidance, removal safety assessment, and adapter pattern details
+- [Azure DevOps Datasource](../datasource-system/azdevops-datasource.md) --
+  Current Azure DevOps implementation that supersedes the deprecated fetcher
+- [Markdown Datasource](../datasource-system/markdown-datasource.md) -- Local
+  offline datasource alternative
 - [Datasource Overview](../datasource-system/overview.md) -- The current
   `Datasource` interface that supersedes `IssueFetcher`
 - [Datasource Integrations & Troubleshooting](../datasource-system/integrations.md) --
@@ -326,3 +330,5 @@ documentation and the `--spec` invocation details.
   boot and session model used by the spec pipeline
 - [Shared Types Overview](../shared-types/overview.md) -- Foundational type
   definitions shared across the pipeline
+- [Prereqs & Safety Integrations](../prereqs-and-safety/integrations.md) --
+  CLI tool detection patterns for `gh`/`az` binary availability checks
