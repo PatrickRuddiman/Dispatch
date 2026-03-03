@@ -1,10 +1,15 @@
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { select, input, confirm, number } from "@inquirer/prompts";
 import { runInteractiveConfigWizard } from "../config-prompts.js";
 import { loadConfig, saveConfig } from "../config.js";
-import { detectDatasource } from "../datasources/index.js";
+import {
+  detectDatasource,
+  getGitRemoteUrl,
+  parseAzDevOpsRemoteUrl,
+} from "../datasources/index.js";
 import { detectWorkItemType } from "../datasources/azdevops.js";
-import { listProviderModels } from "../providers/index.js";
+import { listProviderModels, checkProviderInstalled } from "../providers/index.js";
+import chalk from "chalk";
 
 vi.mock("@inquirer/prompts", () => ({
   select: vi.fn(),
@@ -27,6 +32,8 @@ vi.mock("../datasources/index.js", async (importOriginal) => {
   return {
     ...actual,
     detectDatasource: vi.fn().mockResolvedValue(null),
+    getGitRemoteUrl: vi.fn().mockResolvedValue(null),
+    parseAzDevOpsRemoteUrl: vi.fn().mockReturnValue(null),
   };
 });
 
@@ -43,6 +50,7 @@ vi.mock("../providers/index.js", async (importOriginal) => {
   return {
     ...actual,
     listProviderModels: vi.fn().mockResolvedValue([]),
+    checkProviderInstalled: vi.fn().mockResolvedValue(true),
   };
 });
 
@@ -50,7 +58,20 @@ vi.spyOn(console, "log").mockImplementation(() => {});
 vi.spyOn(console, "error").mockImplementation(() => {});
 
 afterEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
+});
+
+// Re-establish default mock implementations after each reset
+beforeEach(() => {
+  vi.mocked(loadConfig).mockResolvedValue({});
+  vi.mocked(saveConfig).mockResolvedValue(undefined);
+  vi.mocked(detectDatasource).mockResolvedValue(null);
+  vi.mocked(getGitRemoteUrl).mockResolvedValue(null);
+  vi.mocked(parseAzDevOpsRemoteUrl).mockReturnValue(null);
+  vi.mocked(detectWorkItemType).mockResolvedValue(null);
+  vi.mocked(listProviderModels).mockResolvedValue([]);
+  vi.spyOn(console, "log").mockImplementation(() => {});
+  vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
 // ─── runInteractiveConfigWizard ──────────────────────────────────────
@@ -113,20 +134,24 @@ describe("runInteractiveConfigWizard", () => {
     expect(savedConfig.model).toBeUndefined();
   });
 
-  it("conditional Azure DevOps prompts for org and project", async () => {
+  it("azdevops auto-detects org and project from git remote", async () => {
     vi.mocked(loadConfig).mockResolvedValueOnce({});
+    vi.mocked(getGitRemoteUrl).mockResolvedValueOnce(
+      "https://dev.azure.com/myorg/my-project/_git/my-repo",
+    );
+    vi.mocked(parseAzDevOpsRemoteUrl).mockReturnValueOnce({
+      orgUrl: "https://dev.azure.com/myorg",
+      project: "my-project",
+    });
+    vi.mocked(detectWorkItemType).mockResolvedValueOnce("User Story");
     vi.mocked(select)
       .mockResolvedValueOnce("opencode")
       .mockResolvedValueOnce("azdevops");
-    vi.mocked(input)
-      .mockResolvedValueOnce("https://dev.azure.com/myorg")
-      .mockResolvedValueOnce("my-project")
-      .mockResolvedValueOnce("User Story");
     vi.mocked(confirm)
       .mockResolvedValueOnce(false) // advanced settings
       .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
-    expect(input).toHaveBeenCalledTimes(3);
+    expect(input).not.toHaveBeenCalled();
     expect(saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
         provider: "opencode",
@@ -137,6 +162,89 @@ describe("runInteractiveConfigWizard", () => {
       }),
       undefined,
     );
+  });
+
+  it("azdevops falls back to manual prompts when git remote parsing fails", async () => {
+    vi.mocked(loadConfig).mockResolvedValueOnce({});
+    vi.mocked(getGitRemoteUrl).mockResolvedValueOnce(null);
+    vi.mocked(parseAzDevOpsRemoteUrl).mockReturnValueOnce(null);
+    vi.mocked(detectWorkItemType).mockResolvedValueOnce(null);
+    vi.mocked(select)
+      .mockResolvedValueOnce("opencode")
+      .mockResolvedValueOnce("azdevops");
+    vi.mocked(input)
+      .mockResolvedValueOnce("https://dev.azure.com/myorg")
+      .mockResolvedValueOnce("my-project");
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // advanced settings
+      .mockResolvedValueOnce(true); // save
+    await runInteractiveConfigWizard();
+    expect(input).toHaveBeenCalledTimes(2);
+    expect(input).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "Azure DevOps organization URL:" }),
+    );
+    expect(input).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "Azure DevOps project name:" }),
+    );
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "opencode",
+        source: "azdevops",
+        org: "https://dev.azure.com/myorg",
+        project: "my-project",
+      }),
+      undefined,
+    );
+  });
+
+  it("azdevops silently detects work item type without prompting", async () => {
+    vi.mocked(loadConfig).mockResolvedValueOnce({});
+    vi.mocked(getGitRemoteUrl).mockResolvedValueOnce(
+      "https://dev.azure.com/myorg/my-project/_git/repo",
+    );
+    vi.mocked(parseAzDevOpsRemoteUrl).mockReturnValueOnce({
+      orgUrl: "https://dev.azure.com/myorg",
+      project: "my-project",
+    });
+    vi.mocked(detectWorkItemType).mockResolvedValueOnce("Product Backlog Item");
+    vi.mocked(select)
+      .mockResolvedValueOnce("copilot")
+      .mockResolvedValueOnce("azdevops");
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    await runInteractiveConfigWizard();
+    expect(detectWorkItemType).toHaveBeenCalledWith({
+      org: "https://dev.azure.com/myorg",
+      project: "my-project",
+    });
+    expect(input).not.toHaveBeenCalled();
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ workItemType: "Product Backlog Item" }),
+      undefined,
+    );
+  });
+
+  it("azdevops leaves workItemType undefined when detection fails", async () => {
+    vi.mocked(loadConfig).mockResolvedValueOnce({});
+    vi.mocked(getGitRemoteUrl).mockResolvedValueOnce(
+      "https://dev.azure.com/myorg/my-project/_git/repo",
+    );
+    vi.mocked(parseAzDevOpsRemoteUrl).mockReturnValueOnce({
+      orgUrl: "https://dev.azure.com/myorg",
+      project: "my-project",
+    });
+    vi.mocked(detectWorkItemType).mockResolvedValueOnce(null);
+    vi.mocked(select)
+      .mockResolvedValueOnce("copilot")
+      .mockResolvedValueOnce("azdevops");
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    await runInteractiveConfigWizard();
+    expect(input).not.toHaveBeenCalled();
+    const savedConfig = vi.mocked(saveConfig).mock.calls[0][0];
+    expect(savedConfig.workItemType).toBeUndefined();
   });
 
   it("non-azdevops datasource does NOT prompt for org/project", async () => {
@@ -185,6 +293,7 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(number)
       .mockResolvedValueOnce(4) // concurrency
       .mockResolvedValueOnce(10) // planTimeout
+      .mockResolvedValueOnce(2) // retries
       .mockResolvedValueOnce(2); // planRetries
     vi.mocked(input).mockResolvedValueOnce("http://localhost:3000"); // serverUrl
     await runInteractiveConfigWizard();
@@ -195,6 +304,7 @@ describe("runInteractiveConfigWizard", () => {
         concurrency: 4,
         serverUrl: "http://localhost:3000",
         planTimeout: 10,
+        retries: 2,
         planRetries: 2,
       }),
       undefined,
@@ -241,6 +351,14 @@ describe("runInteractiveConfigWizard", () => {
   it("existing config source takes precedence over auto-detected", async () => {
     vi.mocked(detectDatasource).mockResolvedValueOnce("github");
     vi.mocked(loadConfig).mockResolvedValueOnce({ source: "azdevops" });
+    vi.mocked(getGitRemoteUrl).mockResolvedValueOnce(
+      "https://dev.azure.com/org/proj/_git/repo",
+    );
+    vi.mocked(parseAzDevOpsRemoteUrl).mockReturnValueOnce({
+      orgUrl: "https://dev.azure.com/org",
+      project: "proj",
+    });
+    vi.mocked(detectWorkItemType).mockResolvedValueOnce("User Story");
     vi.mocked(confirm)
       .mockResolvedValueOnce(true) // reconfigure
       .mockResolvedValueOnce(false) // advanced settings
@@ -248,10 +366,6 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("azdevops");
-    vi.mocked(input)
-      .mockResolvedValueOnce("https://dev.azure.com/org")
-      .mockResolvedValueOnce("proj")
-      .mockResolvedValueOnce("User Story");
     await runInteractiveConfigWizard();
     expect(select).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -293,16 +407,19 @@ describe("runInteractiveConfigWizard", () => {
     expect(savedConfig.provider).toBe("copilot");
   });
 
-  it("azdevops flow uses detected work item type as default", async () => {
+  it("azdevops calls detectWorkItemType with auto-detected org and project", async () => {
     vi.mocked(loadConfig).mockResolvedValueOnce({});
+    vi.mocked(getGitRemoteUrl).mockResolvedValueOnce(
+      "https://dev.azure.com/myorg/my-project/_git/repo",
+    );
+    vi.mocked(parseAzDevOpsRemoteUrl).mockReturnValueOnce({
+      orgUrl: "https://dev.azure.com/myorg",
+      project: "my-project",
+    });
     vi.mocked(detectWorkItemType).mockResolvedValueOnce("Product Backlog Item");
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("azdevops");
-    vi.mocked(input)
-      .mockResolvedValueOnce("https://dev.azure.com/myorg")
-      .mockResolvedValueOnce("my-project")
-      .mockResolvedValueOnce("Product Backlog Item");
     vi.mocked(confirm)
       .mockResolvedValueOnce(false) // advanced settings
       .mockResolvedValueOnce(true); // save
@@ -311,21 +428,16 @@ describe("runInteractiveConfigWizard", () => {
       org: "https://dev.azure.com/myorg",
       project: "my-project",
     });
-    expect(input).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: "Work item type:",
-        default: "Product Backlog Item",
-      }),
-    );
     expect(saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({ workItemType: "Product Backlog Item" }),
       undefined,
     );
   });
 
-  it("azdevops flow falls back to existing config workItemType when detection fails", async () => {
+  it("azdevops fallback path still calls detectWorkItemType silently", async () => {
     vi.mocked(loadConfig).mockResolvedValueOnce({ workItemType: "Requirement" });
-    vi.mocked(detectWorkItemType).mockResolvedValueOnce(null);
+    vi.mocked(getGitRemoteUrl).mockResolvedValueOnce(null);
+    vi.mocked(detectWorkItemType).mockResolvedValueOnce("Requirement");
     vi.mocked(confirm)
       .mockResolvedValueOnce(true) // reconfigure
       .mockResolvedValueOnce(false) // advanced settings
@@ -335,14 +447,16 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("azdevops");
     vi.mocked(input)
       .mockResolvedValueOnce("https://dev.azure.com/myorg")
-      .mockResolvedValueOnce("my-project")
-      .mockResolvedValueOnce("Requirement");
+      .mockResolvedValueOnce("my-project");
     await runInteractiveConfigWizard();
-    expect(input).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: "Work item type:",
-        default: "Requirement",
-      }),
+    expect(detectWorkItemType).toHaveBeenCalledWith({
+      org: "https://dev.azure.com/myorg",
+      project: "my-project",
+    });
+    expect(input).toHaveBeenCalledTimes(2);
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ workItemType: "Requirement" }),
+      undefined,
     );
   });
 
@@ -357,5 +471,51 @@ describe("runInteractiveConfigWizard", () => {
     await runInteractiveConfigWizard();
     const datasourceCall = vi.mocked(select).mock.calls[1][0];
     expect(datasourceCall.choices[0]).toMatchObject({ name: "auto", value: "auto" });
+  });
+
+  it("provider select choices include install indicator annotations", async () => {
+    vi.mocked(checkProviderInstalled).mockResolvedValue(true);
+    vi.mocked(loadConfig).mockResolvedValueOnce({});
+    vi.mocked(select)
+      .mockResolvedValueOnce("copilot")
+      .mockResolvedValueOnce("github");
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // advanced settings
+      .mockResolvedValueOnce(true); // save
+    await runInteractiveConfigWizard();
+    const providerCall = vi.mocked(select).mock.calls[0][0];
+    for (const choice of providerCall.choices as Array<{ name: string; value: string }>) {
+      expect(choice.name).toBe(
+        `${chalk.green("●")} ${choice.value}`,
+      );
+    }
+  });
+
+  it("provider select choices show red indicator for uninstalled providers", async () => {
+    vi.mocked(checkProviderInstalled).mockImplementation(
+      async (name) => name !== "copilot",
+    );
+    vi.mocked(loadConfig).mockResolvedValueOnce({});
+    vi.mocked(select)
+      .mockResolvedValueOnce("copilot")
+      .mockResolvedValueOnce("github");
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // advanced settings
+      .mockResolvedValueOnce(true); // save
+    await runInteractiveConfigWizard();
+    const providerCall = vi.mocked(select).mock.calls[0][0];
+    const choices = providerCall.choices as Array<{ name: string; value: string }>;
+    const copilotChoice = choices.find(
+      (c) => c.value === "copilot",
+    );
+    expect(copilotChoice!.name).toBe(`${chalk.red("●")} copilot`);
+    const otherChoices = choices.filter(
+      (c) => c.value !== "copilot",
+    );
+    for (const choice of otherChoices) {
+      expect(choice.name).toBe(
+        `${chalk.green("●")} ${choice.value}`,
+      );
+    }
   });
 });

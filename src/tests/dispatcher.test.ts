@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Task } from "../parser.js";
 import type { ProviderInstance } from "../providers/interface.js";
+import { createMockProvider, createMockTask } from "./fixtures.js";
 
 vi.mock("../helpers/logger.js", () => ({
   log: {
@@ -12,24 +13,7 @@ vi.mock("../helpers/logger.js", () => ({
 
 import { dispatchTask } from "../dispatcher.js";
 
-function createMockProvider(overrides?: Partial<ProviderInstance>): ProviderInstance {
-  return {
-    name: "mock",
-    model: "mock-model",
-    createSession: vi.fn<ProviderInstance["createSession"]>().mockResolvedValue("session-1"),
-    prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("done"),
-    cleanup: vi.fn<ProviderInstance["cleanup"]>().mockResolvedValue(undefined),
-    ...overrides,
-  };
-}
-
-const TASK_FIXTURE: Task = {
-  index: 0,
-  text: "Implement the widget",
-  line: 3,
-  raw: "- [ ] Implement the widget",
-  file: "/tmp/test/42-feature.md",
-};
+const TASK_FIXTURE = createMockTask();
 
 describe("dispatchTask", () => {
   beforeEach(() => {

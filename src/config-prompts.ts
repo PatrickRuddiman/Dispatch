@@ -14,9 +14,14 @@ import {
   validateConfigValue,
   type DispatchConfig,
 } from "./config.js";
-import { PROVIDER_NAMES, listProviderModels } from "./providers/index.js";
+import { PROVIDER_NAMES, listProviderModels, checkProviderInstalled } from "./providers/index.js";
 import type { ProviderName } from "./providers/interface.js";
-import { DATASOURCE_NAMES, detectDatasource } from "./datasources/index.js";
+import {
+  DATASOURCE_NAMES,
+  detectDatasource,
+  getGitRemoteUrl,
+  parseAzDevOpsRemoteUrl,
+} from "./datasources/index.js";
 import type { DatasourceName } from "./datasources/interface.js";
 import { detectWorkItemType } from "./datasources/azdevops.js";
 
@@ -58,9 +63,16 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
   }
 
   // ── Provider selection ─────────────────────────────────────
+  const installStatuses = await Promise.all(
+    PROVIDER_NAMES.map((name) => checkProviderInstalled(name)),
+  );
+
   const provider = await select<ProviderName>({
     message: "Select a provider:",
-    choices: PROVIDER_NAMES.map((name) => ({ name, value: name })),
+    choices: PROVIDER_NAMES.map((name, i) => ({
+      name: `${installStatuses[i] ? chalk.green("●") : chalk.red("●")} ${name}`,
+      value: name,
+    })),
     default: existing.provider,
   });
 
@@ -123,33 +135,42 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
   let workItemType: string | undefined;
 
   if (source === "azdevops") {
-    org = await input({
-      message: "Azure DevOps organization URL:",
-      default: existing.org,
-      validate: (value) => {
-        const error = validateConfigValue("org", value);
-        return error ?? true;
-      },
-    });
+    const remoteUrl = await getGitRemoteUrl(process.cwd());
+    const parsed = remoteUrl ? parseAzDevOpsRemoteUrl(remoteUrl) : null;
 
-    project = await input({
-      message: "Azure DevOps project name:",
-      default: existing.project,
-      validate: (value) => {
-        const error = validateConfigValue("project", value);
-        return error ?? true;
-      },
-    });
+    if (parsed) {
+      org = parsed.orgUrl;
+      project = parsed.project;
+      log.info(
+        `Detected org ${chalk.cyan(org)} and project ${chalk.cyan(project)} from git remote`,
+      );
+    } else {
+      org = await input({
+        message: "Azure DevOps organization URL:",
+        default: existing.org,
+        validate: (value) => {
+          const error = validateConfigValue("org", value);
+          return error ?? true;
+        },
+      });
+
+      project = await input({
+        message: "Azure DevOps project name:",
+        default: existing.project,
+        validate: (value) => {
+          const error = validateConfigValue("project", value);
+          return error ?? true;
+        },
+      });
+    }
 
     const detectedType = await detectWorkItemType({ org, project });
-    workItemType = await input({
-      message: "Work item type:",
-      default: existing.workItemType ?? detectedType ?? undefined,
-      validate: (value) => {
-        const error = validateConfigValue("workItemType", value);
-        return error ?? true;
-      },
-    });
+    if (detectedType) {
+      workItemType = detectedType;
+      log.info(`Detected work item type ${chalk.cyan(detectedType)}`);
+    } else {
+      log.dim("Work item type will be detected at runtime");
+    }
   }
 
   // ── Advanced settings ──────────────────────────────────────
@@ -157,6 +178,7 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
   let serverUrl: string | undefined = existing.serverUrl;
   let planTimeout: number | undefined = existing.planTimeout;
   let planRetries: number | undefined = existing.planRetries;
+  let retries: number | undefined = existing.retries;
 
   console.log();
   const configureAdvanced = await confirm({
@@ -195,6 +217,17 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
     });
     planTimeout = planTimeoutResult;
 
+    const retriesResult = await number({
+      message: "Retries (retry attempts for all agents):",
+      default: existing.retries,
+      validate: (value) => {
+        if (value === undefined) return true;
+        const error = validateConfigValue("retries", String(value));
+        return error ?? true;
+      },
+    });
+    retries = retriesResult;
+
     const planRetriesResult = await number({
       message: "Plan retries:",
       default: existing.planRetries,
@@ -226,6 +259,7 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
   if (concurrency !== undefined) newConfig.concurrency = concurrency;
   if (serverUrl !== undefined) newConfig.serverUrl = serverUrl;
   if (planTimeout !== undefined) newConfig.planTimeout = planTimeout;
+  if (retries !== undefined) newConfig.retries = retries;
   if (planRetries !== undefined) newConfig.planRetries = planRetries;
 
   // ── Summary ────────────────────────────────────────────────
