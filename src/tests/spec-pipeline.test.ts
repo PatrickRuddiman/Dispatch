@@ -397,6 +397,15 @@ describe("runSpecPipeline", () => {
         expect.any(Object),
       );
       expect(result.issueNumbers).toContain("1");
+      expect(unlink).toHaveBeenCalledWith("/tmp/test-cwd/.dispatch/specs/1-mock-title.md");
+    });
+
+    it("logs success message after deleting local spec in tracker mode", async () => {
+      await runSpecPipeline(baseOpts({ issues: "1", concurrency: 1 }));
+
+      expect(vi.mocked(log.success)).toHaveBeenCalledWith(
+        expect.stringContaining("Deleted local spec"),
+      );
     });
 
     it("warns when datasource sync fails in tracker mode", async () => {
@@ -408,6 +417,7 @@ describe("runSpecPipeline", () => {
         expect.stringContaining("Could not sync"),
       );
       expect(result.generated).toBe(1);
+      expect(unlink).not.toHaveBeenCalled();
     });
 
     it("creates new issue in file mode with tracker datasource", async () => {
@@ -579,6 +589,64 @@ describe("runSpecPipeline", () => {
       expect(result.total).toBe(1);
       expect(vi.mocked(bootProvider)).not.toHaveBeenCalled();
       expect(mocks.mockGenerate).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Retry logic ──────────────────────────────────────────────
+
+  describe("retry logic", () => {
+    beforeEach(() => {
+      vi.mocked(confirmLargeBatch).mockResolvedValue(true);
+    });
+
+    it("retries spec generation on failure and succeeds on second attempt", async () => {
+      mocks.mockGenerate
+        .mockRejectedValueOnce(new Error("Transient API error"))
+        .mockResolvedValueOnce({
+          content: "# Generated Spec\n\n## Tasks\n\n- [ ] Do something",
+          success: true,
+          valid: true,
+        });
+
+      const result = await runSpecPipeline(baseOpts({ issues: "1", concurrency: 1, retries: 1 }));
+
+      expect(mocks.mockGenerate).toHaveBeenCalledTimes(2);
+      expect(result.generated).toBe(1);
+      expect(result.failed).toBe(0);
+      expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
+        expect.stringContaining("Attempt 1/2 failed"),
+      );
+    });
+
+    it("fails after exhausting all retry attempts", async () => {
+      mocks.mockGenerate.mockRejectedValue(new Error("Persistent failure"));
+
+      const result = await runSpecPipeline(baseOpts({ issues: "1", concurrency: 1, retries: 2 }));
+
+      expect(mocks.mockGenerate).toHaveBeenCalledTimes(3); // 1 initial + 2 retries
+      expect(result.generated).toBe(0);
+      expect(result.failed).toBe(1);
+    });
+
+    it("does not retry when retries is 0", async () => {
+      mocks.mockGenerate.mockRejectedValue(new Error("Immediate failure"));
+
+      const result = await runSpecPipeline(baseOpts({ issues: "1", concurrency: 1, retries: 0 }));
+
+      expect(mocks.mockGenerate).toHaveBeenCalledTimes(1);
+      expect(result.generated).toBe(0);
+      expect(result.failed).toBe(1);
+    });
+
+    it("uses default retries of 2 when not specified", async () => {
+      mocks.mockGenerate.mockRejectedValue(new Error("Always fails"));
+
+      const result = await runSpecPipeline(baseOpts({ issues: "1", concurrency: 1 }));
+
+      // Default retries = 2, so 3 total attempts
+      expect(mocks.mockGenerate).toHaveBeenCalledTimes(3);
+      expect(result.generated).toBe(0);
+      expect(result.failed).toBe(1);
     });
   });
 });
