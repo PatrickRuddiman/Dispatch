@@ -291,7 +291,7 @@ describe("planning timeout and retry", () => {
     expect(result.failed).toBe(0);
     expect(mocks.mockPlan).toHaveBeenCalledTimes(2);
     expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
-      expect.stringContaining("Attempt 1/2 failed"),
+      expect.stringContaining("Planning timed out"),
     );
     expect(mocks.mockExecute).toHaveBeenCalledOnce();
   });
@@ -319,11 +319,11 @@ describe("planning timeout and retry", () => {
     // Executor should NOT have been called since planning failed
     expect(mocks.mockExecute).not.toHaveBeenCalled();
     expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
-      expect.stringContaining("Attempt 1/2 failed"),
+      expect.stringContaining("Planning timed out"),
     );
   });
 
-  it("retries on non-timeout errors and fails when all attempts exhausted", async () => {
+  it("does not retry on non-timeout errors and fails immediately", async () => {
     mocks.mockPlan.mockRejectedValue(new Error("Provider connection refused"));
 
     const resultPromise = runDispatchPipeline(baseOpts({ planRetries: 2 }), "/tmp/test");
@@ -333,8 +333,8 @@ describe("planning timeout and retry", () => {
 
     expect(result.completed).toBe(0);
     expect(result.failed).toBe(1);
-    // Should be called 3 times (2 retries + 1 initial = 3 attempts)
-    expect(mocks.mockPlan).toHaveBeenCalledTimes(3);
+    // Non-timeout errors are not retried — only one attempt
+    expect(mocks.mockPlan).toHaveBeenCalledTimes(1);
     expect(mocks.mockExecute).not.toHaveBeenCalled();
   });
 
@@ -368,7 +368,7 @@ describe("planning timeout and retry", () => {
     expect(mocks.mockExecute).not.toHaveBeenCalled();
   });
 
-  it("uses default timeout (10 min) and retries (2) when not configured", async () => {
+  it("uses default timeout (10 min) and retries (1) when not configured", async () => {
     mocks.mockPlan.mockImplementation(
       () => new Promise<PlanResult>(() => {}), // never resolves
     );
@@ -378,16 +378,15 @@ describe("planning timeout and retry", () => {
       "/tmp/test",
     );
 
-    // Default is 10 minutes = 600_000ms; advance past three attempts (default retries=2)
+    // Default is 10 minutes = 600_000ms; advance past two attempts (default retries=1)
     await vi.advanceTimersByTimeAsync(600_000); // first attempt timeout
     await vi.advanceTimersByTimeAsync(600_000); // second attempt timeout
-    await vi.advanceTimersByTimeAsync(600_000); // third attempt timeout
     await vi.runAllTimersAsync();
 
     const result = await resultPromise;
 
     expect(result.failed).toBe(1);
-    expect(mocks.mockPlan).toHaveBeenCalledTimes(3); // 2 retries = 3 attempts
+    expect(mocks.mockPlan).toHaveBeenCalledTimes(2); // 1 retry = 2 attempts
   });
 
   it("falls back to general retries when planRetries is not set", async () => {
@@ -411,14 +410,9 @@ describe("planning timeout and retry", () => {
     expect(mocks.mockPlan).toHaveBeenCalledTimes(2); // 1 retry = 2 attempts
   });
 
-  it("retries on non-timeout error and succeeds on second attempt", async () => {
-    let callCount = 0;
+  it("fails immediately on non-timeout error without retrying", async () => {
     mocks.mockPlan.mockImplementation(() => {
-      callCount++;
-      if (callCount === 1) {
-        return Promise.reject(new Error("Transient API failure"));
-      }
-      return Promise.resolve({ prompt: "Execute step 1", success: true });
+      return Promise.reject(new Error("Transient API failure"));
     });
 
     const resultPromise = runDispatchPipeline(baseOpts({ planRetries: 1 }), "/tmp/test");
@@ -426,10 +420,11 @@ describe("planning timeout and retry", () => {
 
     const result = await resultPromise;
 
-    expect(result.completed).toBe(1);
-    expect(result.failed).toBe(0);
-    expect(mocks.mockPlan).toHaveBeenCalledTimes(2);
-    expect(mocks.mockExecute).toHaveBeenCalledOnce();
+    expect(result.completed).toBe(0);
+    expect(result.failed).toBe(1);
+    // Non-timeout errors break immediately — only one attempt
+    expect(mocks.mockPlan).toHaveBeenCalledTimes(1);
+    expect(mocks.mockExecute).not.toHaveBeenCalled();
   });
 });
 
