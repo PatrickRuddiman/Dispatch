@@ -18,6 +18,14 @@ export interface ProviderBootOptions {
   url?: string;
   /** Working directory for the agent */
   cwd?: string;
+  /**
+   * Model to use, overriding the provider's default.
+   * Format is provider-specific:
+   *   - Copilot: bare model ID (e.g. "claude-sonnet-4-5")
+   *   - OpenCode: "provider/model" (e.g. "anthropic/claude-sonnet-4")
+   * When omitted the provider uses its auto-detected default.
+   */
+  model?: string;
 }
 
 /**

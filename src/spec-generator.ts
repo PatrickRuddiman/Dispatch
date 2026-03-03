@@ -31,6 +31,8 @@ export interface SpecOptions {
   issueSource?: DatasourceName;
   /** AI agent backend */
   provider: ProviderName;
+  /** Model override to pass to the provider (provider-specific format). */
+  model?: string;
   /** URL of a running provider server */
   serverUrl?: string;
   /** Working directory */

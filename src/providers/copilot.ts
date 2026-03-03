@@ -15,6 +15,25 @@ import type { ProviderInstance, ProviderBootOptions } from "./interface.js";
 import { log } from "../helpers/logger.js";
 
 /**
+ * List available Copilot models.
+ *
+ * Starts a temporary client, fetches the model list, then stops it.
+ * Returns bare model IDs (e.g. "claude-sonnet-4-5").
+ */
+export async function listModels(opts?: ProviderBootOptions): Promise<string[]> {
+  const client = new CopilotClient({
+    ...(opts?.url ? { cliUrl: opts.url } : {}),
+  });
+  try {
+    await client.start();
+    const models = await client.listModels();
+    return models.map((m) => m.id);
+  } finally {
+    await client.stop().catch(() => {});
+  }
+}
+
+/**
  * Boot a Copilot provider instance — starts or connects to a Copilot CLI server.
  */
 export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance> {
@@ -48,7 +67,10 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
     async createSession(): Promise<string> {
       log.debug("Creating Copilot session...");
       try {
-        const session = await client.createSession({ onPermissionRequest: approveAll });
+        const session = await client.createSession({
+          ...(opts?.model ? { model: opts.model } : {}),
+          onPermissionRequest: approveAll,
+        });
         sessions.set(session.sessionId, session);
         log.debug(`Session created: ${session.sessionId}`);
 

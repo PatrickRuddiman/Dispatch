@@ -26,6 +26,42 @@ import type { ProviderInstance, ProviderBootOptions } from "./interface.js";
 import { log } from "../helpers/logger.js";
 
 /**
+ * List available OpenCode models for configured providers.
+ *
+ * Starts a temporary server (or connects to an existing one), fetches
+ * providers that have an API key configured, and returns their models
+ * in "providerId/modelId" format (e.g. "anthropic/claude-sonnet-4").
+ */
+export async function listModels(opts?: ProviderBootOptions): Promise<string[]> {
+  let client: OpencodeClient;
+  let stopServer: (() => void) | undefined;
+
+  if (opts?.url) {
+    client = createOpencodeClient({ baseUrl: opts.url });
+  } else {
+    try {
+      const oc = await createOpencode({ port: 0 });
+      client = oc.client;
+      stopServer = () => oc.server.close();
+    } catch (err) {
+      log.debug(`listModels: failed to start OpenCode server: ${log.formatErrorChain(err)}`);
+      throw err;
+    }
+  }
+
+  try {
+    const { data } = await client.config.providers();
+    if (!data) return [];
+    return data.providers
+      .filter((p) => p.source === "env" || p.source === "config" || p.source === "custom")
+      .flatMap((p) => Object.keys(p.models).map((modelId) => `${p.id}/${modelId}`))
+      .sort();
+  } finally {
+    stopServer?.();
+  }
+}
+
+/**
  * Boot an OpenCode instance — either connect to a running server
  * or start a new one.
  */
@@ -50,17 +86,35 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
     }
   }
 
-  // ── Retrieve the active model (best-effort) ──────────────────
-  let model: string | undefined;
-  try {
-    const { data: config } = await client.config.get();
-    if (config?.model) {
-      // model is in "provider/model" format (e.g. "anthropic/claude-sonnet-4")
-      model = config.model;
-      log.debug(`Detected model: ${model}`);
+  // ── Parse model override from boot options ────────────────────
+  // Format: "providerID/modelID" (e.g. "anthropic/claude-sonnet-4")
+  let modelOverride: { providerID: string; modelID: string } | undefined;
+  if (opts?.model) {
+    const slash = opts.model.indexOf("/");
+    if (slash > 0) {
+      modelOverride = {
+        providerID: opts.model.slice(0, slash),
+        modelID: opts.model.slice(slash + 1),
+      };
+      log.debug(`Model override: ${opts.model}`);
+    } else {
+      log.debug(`Ignoring model override "${opts.model}": must be in "provider/model" format`);
     }
-  } catch (err) {
-    log.debug(`Failed to retrieve model from config: ${log.formatErrorChain(err)}`);
+  }
+
+  // ── Retrieve the active model (best-effort) ──────────────────
+  let model: string | undefined = opts?.model;
+  if (!model) {
+    try {
+      const { data: config } = await client.config.get();
+      if (config?.model) {
+        // model is in "provider/model" format (e.g. "anthropic/claude-sonnet-4")
+        model = config.model;
+        log.debug(`Detected model: ${model}`);
+      }
+    } catch (err) {
+      log.debug(`Failed to retrieve model from config: ${log.formatErrorChain(err)}`);
+    }
   }
 
   return {
@@ -91,6 +145,7 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
           path: { id: sessionId },
           body: {
             parts: [{ type: "text", text }],
+            ...(modelOverride ? { model: modelOverride } : {}),
           },
         });
 

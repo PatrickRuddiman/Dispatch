@@ -8,14 +8,20 @@
  */
 
 import type { ProviderName, ProviderInstance, ProviderBootOptions } from "./interface.js";
-import { boot as bootOpencode } from "./opencode.js";
-import { boot as bootCopilot } from "./copilot.js";
+import { boot as bootOpencode, listModels as listOpencodeModels } from "./opencode.js";
+import { boot as bootCopilot, listModels as listCopilotModels } from "./copilot.js";
 
 type BootFn = (opts?: ProviderBootOptions) => Promise<ProviderInstance>;
+type ListModelsFn = (opts?: ProviderBootOptions) => Promise<string[]>;
 
 const PROVIDERS: Record<ProviderName, BootFn> = {
   opencode: bootOpencode,
   copilot: bootCopilot,
+};
+
+const LIST_MODELS: Record<ProviderName, ListModelsFn> = {
+  opencode: listOpencodeModels,
+  copilot: listCopilotModels,
 };
 
 /**
@@ -39,6 +45,28 @@ export async function bootProvider(
     );
   }
   return bootFn(opts);
+}
+
+/**
+ * List available models for a provider by name.
+ *
+ * Starts a temporary provider instance (or connects to an existing server),
+ * fetches the model list, and tears down. Returns model IDs as strings.
+ * Throws if the provider is unavailable (caller should handle gracefully).
+ *
+ * @throws if the provider name is not registered or the provider is unavailable.
+ */
+export async function listProviderModels(
+  name: ProviderName,
+  opts?: ProviderBootOptions
+): Promise<string[]> {
+  const fn = LIST_MODELS[name];
+  if (!fn) {
+    throw new Error(
+      `Unknown provider "${name}". Available: ${PROVIDER_NAMES.join(", ")}`
+    );
+  }
+  return fn(opts);
 }
 
 export type { ProviderName, ProviderInstance, ProviderBootOptions } from "./interface.js";
