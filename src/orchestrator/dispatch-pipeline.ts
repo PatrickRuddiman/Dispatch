@@ -10,7 +10,7 @@ import { parseTaskFile, buildTaskContext, groupTasksByMode, type TaskFile } from
 import type { DispatchResult } from "../dispatcher.js";
 import { boot as bootPlanner, type PlanResult } from "../agents/planner.js";
 import { boot as bootExecutor } from "../agents/executor.js";
-import { boot as bootCommit, type CommitAgent } from "../agents/commit.js";
+import { boot as bootCommit } from "../agents/commit.js";
 import { log } from "../helpers/logger.js";
 import { registerCleanup } from "../helpers/cleanup.js";
 import { createWorktree, removeWorktree, worktreeName } from "../helpers/worktree.js";
@@ -28,7 +28,6 @@ import {
   buildPrBody,
   buildPrTitle,
   getBranchDiff,
-  amendCommitMessage,
   squashBranchCommits,
 } from "./datasource-helpers.js";
 import { withTimeout, TimeoutError } from "../helpers/timeout.js";
@@ -394,38 +393,33 @@ export async function runDispatchPipeline(
         }
       }
 
-      // ── Commit agent: rewrite commit messages + generate PR content ──
-      let commitPrTitle: string | undefined;
-      let commitPrBody: string | undefined;
+      // ── Commit agent (rewrite commits + generate PR metadata) ───
+      let commitAgentResult: import("../agents/commit.js").CommitResult | undefined;
       if (!noBranch && branchName && defaultBranch && details) {
         try {
           const branchDiff = await getBranchDiff(defaultBranch, issueCwd);
           if (branchDiff) {
-            const commitResult = await commitAgent.generate({
+            const result = await commitAgent.generate({
               branchDiff,
               issue: details,
               taskResults: issueResults,
               cwd: issueCwd,
             });
-
-            if (commitResult.success && commitResult.commitMessage) {
+            if (result.success) {
+              commitAgentResult = result;
+              // Rewrite commit history with the generated message
               try {
-                await squashBranchCommits(defaultBranch, commitResult.commitMessage, issueCwd);
+                await squashBranchCommits(defaultBranch, result.commitMessage, issueCwd);
                 log.debug(`Rewrote commit message for issue #${details.number}`);
               } catch (err) {
-                log.warn(`Could not amend commit message for issue #${details.number}: ${log.formatErrorChain(err)}`);
+                log.warn(`Could not rewrite commit message for issue #${details.number}: ${log.formatErrorChain(err)}`);
               }
-            }
-
-            if (commitResult.success && commitResult.prTitle) {
-              commitPrTitle = commitResult.prTitle;
-            }
-            if (commitResult.success && commitResult.prDescription) {
-              commitPrBody = commitResult.prDescription;
+            } else {
+              log.warn(`Commit agent failed for issue #${details.number}: ${result.error}`);
             }
           }
         } catch (err) {
-          log.warn(`Commit agent failed for issue #${details.number}: ${log.formatErrorChain(err)}`);
+          log.warn(`Commit agent error for issue #${details.number}: ${log.formatErrorChain(err)}`);
         }
       }
 
@@ -439,15 +433,17 @@ export async function runDispatchPipeline(
         }
 
         try {
-          const prTitle = commitPrTitle ?? await buildPrTitle(details.title, defaultBranch, issueLifecycleOpts.cwd);
-          const prBody = commitPrBody ?? await buildPrBody(
-            details,
-            fileTasks,
-            issueResults,
-            defaultBranch,
-            datasource.name,
-            issueLifecycleOpts.cwd,
-          );
+          const prTitle = commitAgentResult?.prTitle
+            || await buildPrTitle(details.title, defaultBranch, issueLifecycleOpts.cwd);
+          const prBody = commitAgentResult?.prDescription
+            || await buildPrBody(
+              details,
+              fileTasks,
+              issueResults,
+              defaultBranch,
+              datasource.name,
+              issueLifecycleOpts.cwd,
+            );
           const prUrl = await datasource.createPullRequest(
             branchName,
             details.number,
@@ -497,8 +493,8 @@ export async function runDispatchPipeline(
     await closeCompletedSpecIssues(taskFiles, results, cwd, source, org, project, workItemType);
 
     // ── 7. Cleanup ──────────────────────────────────────────────
-    await executor.cleanup();
     await commitAgent.cleanup();
+    await executor.cleanup();
     await planner?.cleanup();
     await instance.cleanup();
 
