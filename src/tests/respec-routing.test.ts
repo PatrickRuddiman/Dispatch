@@ -79,6 +79,7 @@ function createRawCliArgs(overrides?: Partial<RawCliArgs>): RawCliArgs {
     noPlan: false,
     noBranch: false,
     noWorktree: false,
+    force: false,
     provider: "copilot",
     cwd: "/tmp/test-cwd",
     verbose: false,
@@ -186,6 +187,9 @@ describe("--respec routing in runFromCli()", () => {
       org: undefined,
       project: undefined,
       concurrency: undefined,
+      dryRun: false,
+      model: undefined,
+      workItemType: undefined,
     });
   });
 
@@ -208,6 +212,9 @@ describe("--respec routing in runFromCli()", () => {
       org: undefined,
       project: undefined,
       concurrency: undefined,
+      dryRun: false,
+      model: undefined,
+      workItemType: undefined,
     });
   });
 
@@ -226,6 +233,9 @@ describe("--respec routing in runFromCli()", () => {
       org: undefined,
       project: undefined,
       concurrency: undefined,
+      dryRun: false,
+      model: undefined,
+      workItemType: undefined,
     });
   });
 

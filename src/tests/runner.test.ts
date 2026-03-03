@@ -75,6 +75,7 @@ function createRawCliArgs(overrides?: Partial<RawCliArgs>): RawCliArgs {
     noPlan: false,
     noBranch: false,
     noWorktree: false,
+    force: false,
     provider: "copilot",
     cwd: "/tmp/test-cwd",
     verbose: false,
