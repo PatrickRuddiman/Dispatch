@@ -42,7 +42,7 @@ export async function dispatchTask(
     log.debug(`Task dispatch completed (${response.length} chars response)`);
     return { task, success: true };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = log.extractMessage(err);
     log.debug(`Task dispatch failed: ${log.formatErrorChain(err)}`);
     return { task, success: false, error: message };
   }

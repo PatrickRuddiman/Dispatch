@@ -31,6 +31,7 @@ vi.mock("../helpers/logger.js", () => ({
     dim: vi.fn(),
     debug: vi.fn(),
     formatErrorChain: vi.fn((e: unknown) => String(e)),
+    extractMessage: vi.fn((e: unknown) => e instanceof Error ? e.message : String(e)),
   },
 }));
 
@@ -44,6 +45,7 @@ vi.mock("../helpers/format.js", () => ({
 }));
 
 vi.mock("../helpers/slugify.js", () => ({
+  MAX_SLUG_LENGTH: 60,
   slugify: vi.fn((input: string, maxLen?: number) => {
     const slug = input
       .toLowerCase()

@@ -3,6 +3,7 @@ dist/
 *.tgz
 .DS_Store
 .dispatch/*
+.dispatch/worktrees/
 
 # Secrets / environment
 .env

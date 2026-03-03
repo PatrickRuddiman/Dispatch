@@ -14,6 +14,8 @@ export interface TaskState {
   status: TaskStatus;
   elapsed?: number;
   error?: string;
+  /** Worktree directory name when running in a worktree (e.g. "123-fix-auth-bug") */
+  worktree?: string;
 }
 
 export interface TuiState {
@@ -102,6 +104,14 @@ function phaseLabel(phase: TuiState["phase"], provider?: string): string {
   }
 }
 
+function countVisualRows(text: string, cols: number): number {
+  const stripped = text.replace(/\x1B\[[0-9;]*m/g, "");
+  const safeCols = Math.max(1, cols);
+  return stripped.split("\n").reduce((sum, line) => {
+    return sum + Math.max(1, Math.ceil(line.length / safeCols));
+  }, 0);
+}
+
 function render(state: TuiState): string {
   const lines: string[] = [];
   const now = Date.now();
@@ -139,6 +149,12 @@ function render(state: TuiState): string {
     lines.push("");
 
     // ── Task list ───────────────────────────────────────────
+    // Determine if multiple worktrees are active (show indicator only when >1)
+    const activeWorktrees = new Set(
+      state.tasks.map((t) => t.worktree).filter(Boolean)
+    );
+    const showWorktree = activeWorktrees.size > 1;
+
     const cols = process.stdout.columns || 80;
     const maxTextLen = cols - 30;
 
@@ -177,7 +193,11 @@ function render(state: TuiState): string {
 
       const label = statusLabel(ts.status);
 
-      lines.push(`  ${icon} ${idx} ${text} ${label}${elapsedStr}`);
+      const wtTag = showWorktree && ts.worktree
+        ? chalk.dim(` [wt:${ts.worktree}]`)
+        : "";
+
+      lines.push(`  ${icon} ${idx} ${text} ${label}${elapsedStr}${wtTag}`);
 
       if (ts.error) {
         lines.push(chalk.red(`       └─ ${ts.error}`));
@@ -214,7 +234,7 @@ function draw(state: TuiState): void {
   }
   const output = render(state);
   process.stdout.write(output);
-  lastLineCount = output.split("\n").length;
+  lastLineCount = countVisualRows(output, process.stdout.columns || 80);
 }
 
 /**

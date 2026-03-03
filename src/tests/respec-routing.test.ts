@@ -13,6 +13,7 @@ vi.mock("../helpers/logger.js", () => ({
     task: vi.fn(),
     verbose: false,
     formatErrorChain: vi.fn().mockReturnValue(""),
+    extractMessage: vi.fn((e: unknown) => e instanceof Error ? e.message : String(e)),
   },
 }));
 
@@ -77,6 +78,7 @@ function createRawCliArgs(overrides?: Partial<RawCliArgs>): RawCliArgs {
     dryRun: false,
     noPlan: false,
     noBranch: false,
+    noWorktree: false,
     provider: "copilot",
     cwd: "/tmp/test-cwd",
     verbose: false,
