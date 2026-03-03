@@ -138,14 +138,14 @@ describe("github datasource — getDefaultBranch", () => {
 });
 
 describe("github datasource — buildBranchName", () => {
-  it("builds <username>/dispatch/<number>-<slug>", () => {
-    const result = datasource.buildBranchName("42", "Add User Auth", "jdoe");
-    expect(result).toBe("jdoe/dispatch/42-add-user-auth");
+  it("builds <username>/dispatch/<number>", () => {
+    const result = datasource.buildBranchName("42", "jdoe");
+    expect(result).toBe("jdoe/dispatch/42");
   });
 
   it("falls back to 'unknown' when username is omitted", () => {
-    const result = datasource.buildBranchName("42", "Add User Auth");
-    expect(result).toBe("unknown/dispatch/42-add-user-auth");
+    const result = datasource.buildBranchName("42");
+    expect(result).toBe("unknown/dispatch/42");
   });
 });
 

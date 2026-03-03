@@ -88,7 +88,7 @@ vi.mock("../datasources/index.js", () => ({
     create: vi.fn().mockResolvedValue({} as IssueDetails),
     getDefaultBranch: vi.fn().mockResolvedValue("main"),
     getUsername: vi.fn().mockResolvedValue("testuser"),
-    buildBranchName: vi.fn().mockReturnValue("testuser/dispatch/1-test"),
+    buildBranchName: vi.fn().mockReturnValue("testuser/dispatch/1"),
     createAndSwitchBranch: vi.fn().mockResolvedValue(undefined),
     switchBranch: vi.fn().mockResolvedValue(undefined),
     pushBranch: vi.fn().mockResolvedValue(undefined),
@@ -728,8 +728,8 @@ function setupMultiIssueScenario() {
   });
 
   const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
-  vi.mocked(ds.buildBranchName).mockImplementation((num: string, title: string, user?: string) => {
-    return `${user}/dispatch/${num}-${title.toLowerCase().replace(/\s+/g, "-")}`;
+  vi.mocked(ds.buildBranchName).mockImplementation((num: string, user?: string) => {
+    return `${user}/dispatch/${num}`;
   });
 }
 

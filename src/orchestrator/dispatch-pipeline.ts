@@ -220,7 +220,7 @@ export async function runDispatchPipeline(
       if (!noBranch && details) {
         try {
           defaultBranch = await datasource.getDefaultBranch(lifecycleOpts);
-          branchName = datasource.buildBranchName(details.number, details.title, username);
+          branchName = datasource.buildBranchName(details.number, username);
 
           if (useWorktrees) {
             worktreePath = await createWorktree(cwd, file, branchName);
@@ -532,7 +532,7 @@ export async function dryRunMode(
     const parsed = parseIssueFilename(task.file);
     const details = parsed ? items.find((item) => item.number === parsed.issueId) : undefined;
     const branchInfo = details
-      ? ` [branch: ${datasource.buildBranchName(details.number, details.title, username)}]`
+      ? ` [branch: ${datasource.buildBranchName(details.number, username)}]`
       : "";
     log.task(allTasks.indexOf(task), allTasks.length, `${task.file}:${task.line} — ${task.text}${branchInfo}`);
   }
