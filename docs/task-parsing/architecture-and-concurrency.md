@@ -305,7 +305,13 @@ modules that only need the types.
   consumes `buildTaskContext` output
 - [CLI Reference](../cli-orchestration/cli.md) -- `--concurrency` flag that
   controls parallel execution
+- [Worktree Management](../git-and-worktree/worktree-management.md) -- Git
+  worktree concurrency considerations that parallel the file I/O concerns here
+- [Gitignore Helper](../git-and-worktree/gitignore-helper.md) -- Another
+  read-modify-write pattern with similar race condition analysis
 - [Timeout Utility](../shared-utilities/timeout.md) -- deadline enforcement
   used alongside the concurrency model
 - [Provider Interface](../shared-types/provider.md) -- the `ProviderInstance`
   lifecycle driven by the orchestrator batching loop
+- [Run State](../git-and-worktree/run-state.md) -- Atomic write comparison
+  with the read-modify-write pattern discussed here

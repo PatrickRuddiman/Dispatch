@@ -55,3 +55,5 @@ mocking, temporary files, or setup/teardown is needed.
   generation utility functions
 - [Shared Utilities Testing](../shared-utilities/testing.md) -- Slugify and
   timeout test suites that follow similar pure-function testing patterns
+- [Cleanup Registry](../shared-types/cleanup.md) -- Process-level cleanup
+  context where elapsed time measurements are relevant during shutdown

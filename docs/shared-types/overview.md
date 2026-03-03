@@ -101,3 +101,9 @@ graph TD
 - [Testing Overview](../testing/overview.md) -- Project-wide test suite
   covering config, format, parser, spec-generator, slugify, and timeout
   modules
+- [Format Tests](../testing/format-tests.md) -- Tests for the `elapsed()`
+  duration formatting utility
+- [Spec Generator Tests](../testing/spec-generator-tests.md) -- Tests for
+  spec generation pipeline utilities that consume shared types
+- [Git & Worktree Management](../git-and-worktree/overview.md) -- Worktree
+  context in which shared types (Task, TaskFile, ProviderInstance) are used
