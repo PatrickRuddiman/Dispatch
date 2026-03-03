@@ -168,7 +168,7 @@ export const datasource: Datasource = {
 
     if (!workItemType) {
       throw new Error(
-        "Could not determine work item type. Set workItemType in your config or pass it via --work-item-type."
+        "Could not determine work item type. Set workItemType in your config (for example via `dispatch config`)."
       );
     }
 
