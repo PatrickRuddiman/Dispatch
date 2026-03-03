@@ -482,6 +482,7 @@ describe("DatasourceName and registry", () => {
       expect(typeof ds.close).toBe("function");
       expect(typeof ds.create).toBe("function");
       expect(typeof ds.getDefaultBranch).toBe("function");
+      expect(typeof ds.getUsername).toBe("function");
       expect(typeof ds.buildBranchName).toBe("function");
       expect(typeof ds.createAndSwitchBranch).toBe("function");
       expect(typeof ds.switchBranch).toBe("function");

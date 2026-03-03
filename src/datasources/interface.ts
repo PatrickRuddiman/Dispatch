@@ -125,13 +125,22 @@ export interface Datasource {
   getDefaultBranch(opts: DispatchLifecycleOptions): Promise<string>;
 
   /**
-   * Build a branch name from an issue number and title.
+   * Resolve the current git username for branch namespacing.
+   *
+   * @param opts - Lifecycle options (cwd)
+   * @returns A slugified, branch-safe username
+   */
+  getUsername(opts: DispatchLifecycleOptions): Promise<string>;
+
+  /**
+   * Build a branch name from an issue number, title, and username.
    *
    * @param issueNumber - The issue number/ID
    * @param title - The issue title
+   * @param username - The branch-safe username prefix
    * @returns A sanitized branch name
    */
-  buildBranchName(issueNumber: string, title: string): string;
+  buildBranchName(issueNumber: string, title: string, username: string): string;
 
   /**
    * Create and switch to a feature branch for an issue.

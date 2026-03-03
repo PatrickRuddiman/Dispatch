@@ -8,10 +8,14 @@
  * where markdown files serve as the source of truth.
  */
 
+import { execFile } from "node:child_process";
 import { readFile, writeFile, readdir, mkdir, rename } from "node:fs/promises";
 import { join, parse as parsePath } from "node:path";
+import { promisify } from "node:util";
 import type { Datasource, IssueDetails, IssueFetchOptions, DispatchLifecycleOptions } from "./interface.js";
 import { slugify } from "../helpers/slugify.js";
+
+const exec = promisify(execFile);
 
 /** Default directory for markdown specs, relative to cwd. */
 const DEFAULT_DIR = ".dispatch/specs";
@@ -136,9 +140,20 @@ export const datasource: Datasource = {
     return "main";
   },
 
-  buildBranchName(issueNumber: string, title: string): string {
+  async getUsername(opts: DispatchLifecycleOptions): Promise<string> {
+    try {
+      const { stdout } = await exec("git", ["config", "user.name"], { cwd: opts.cwd });
+      const name = stdout.trim();
+      if (!name) return "local";
+      return slugify(name);
+    } catch {
+      return "local";
+    }
+  },
+
+  buildBranchName(issueNumber: string, title: string, username: string): string {
     const slug = slugify(title, 50);
-    return `dispatch/${issueNumber}-${slug}`;
+    return `${username}/dispatch/${issueNumber}-${slug}`;
   },
 
   async createAndSwitchBranch(_branchName: string, _opts: DispatchLifecycleOptions): Promise<void> {
