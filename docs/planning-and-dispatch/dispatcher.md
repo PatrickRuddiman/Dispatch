@@ -7,9 +7,10 @@ a structured result.
 
 ## What it does
 
-The dispatcher receives a [`Task`](../task-parsing/api-reference.md#task) object and an optional execution plan (produced
-by the [planner](./planner.md)), constructs an appropriate prompt, creates a
-fresh [provider session](../provider-system/provider-overview.md#session-isolation-model), sends the prompt, and returns a `DispatchResult`
+The dispatcher receives a [`Task`](../task-parsing/api-reference.md#task) object, an optional execution plan (produced
+by the [planner](./planner.md)), and an optional `worktreeRoot` path for
+[worktree isolation](#worktree-isolation). It constructs an appropriate prompt,
+creates a fresh [provider session](../provider-system/provider-overview.md#session-isolation-model), sends the prompt, and returns a `DispatchResult`
 indicating success or failure.
 
 ## Why it exists
@@ -133,6 +134,31 @@ capability restrictions (e.g., read-only file access, tool whitelisting). The
 constraints rely entirely on the AI agent following the prompt instructions.
 An agent that ignores prompt instructions could explore, re-plan, or modify
 files outside the plan's scope.
+
+### Worktree isolation
+
+When operating inside a git worktree, the optional `worktreeRoot` parameter
+(`src/dispatcher.ts:28`) triggers additional prompt instructions via
+`buildWorktreeIsolation()` (`src/dispatcher.ts:132-139`). Both `buildPrompt()`
+and `buildPlannedPrompt()` append these instructions when a worktree root is
+provided.
+
+The instructions tell the agent:
+
+- It is operating inside a git worktree at the specified root directory
+- It **must not** read, write, or execute commands that access files outside
+  that directory
+- All file paths must resolve within the worktree root
+
+**Enforcement is prompt-only**, like the [executor constraints](#executor-constraints)
+and [planner read-only enforcement](./planner.md#read-only-enforcement). The
+provider backends do not support filesystem sandboxing. If the agent ignores the
+instruction, it could access files outside the worktree.
+
+**When is `worktreeRoot` provided?** The [orchestrator](../cli-orchestration/orchestrator.md)
+passes `worktreeRoot` when tasks are dispatched into isolated git worktrees
+(created for `(I)` mode tasks). In non-worktree mode, the parameter is
+`undefined` and no isolation instructions are appended.
 
 ### Planned vs unplanned dispatch outcomes
 
@@ -287,5 +313,12 @@ Returned by `dispatchTask()`:
   used for plan generation timeout
 - [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) --
   File I/O safety relevant to `markTaskComplete` after dispatch
+- [Executor Agent](./executor.md) -- How the executor wraps `dispatchTask()`
+  with task completion marking, forming the dispatch-then-complete coupling
 - [Datasource Helpers](../datasource-system/datasource-helpers.md) -- Helper
-  utilities for datasource operations referenced by the dispatcher
+  utilities for datasource operations; `DispatchResult` from the dispatcher
+  drives the auto-close logic in `closeCompletedSpecIssues()`
+- [Git & Worktree Management](../git-and-worktree/overview.md) -- Worktree
+  creation and isolation model that provides the `worktreeRoot` parameter
+- [Run State & Lifecycle](../git-and-worktree/run-state.md) -- State
+  transitions for worktree-isolated task dispatch

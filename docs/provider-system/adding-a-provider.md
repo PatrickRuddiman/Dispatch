@@ -159,8 +159,13 @@ npm install @example/agent-sdk
 
 ## Step 5: Test
 
-1. **Unit test**: Verify your provider implements the interface correctly. Test
-   the boot, session creation, prompt, and cleanup lifecycle.
+1. **Unit test**: Create a test file at `src/tests/<name>.test.ts` following the
+   pattern established by the existing provider tests. Use `vi.hoisted()` to
+   declare mock references, `vi.mock()` to replace your SDK dependency, and
+   test the full `ProviderInstance` lifecycle (boot, createSession, prompt,
+   cleanup). See the [Provider Tests](../testing/provider-tests.md) guide for
+   detailed patterns including the `vi.hoisted()` pattern, SDK mocking strategy,
+   and idempotent cleanup testing.
 
 2. **Integration test**: Run a dispatch with your provider (see the
    [CLI Options Reference](../cli-orchestration/cli.md#options-reference) for
@@ -221,5 +226,11 @@ runtime flexibility.
   argument validation
 - [Configuration](../cli-orchestration/configuration.md) -- How the `--provider`
   flag interacts with persistent config defaults
-- [Testing Overview](../testing/overview.md) -- Test coverage (note: provider
-  backends are not unit tested)
+- [Testing Overview](../testing/overview.md) -- Test coverage and provider
+  test patterns
+- [Provider Tests](../testing/provider-tests.md) -- Detailed guide for
+  provider unit tests including SDK mocking and `vi.hoisted()` patterns
+- [Provider Binary Detection](../prereqs-and-safety/provider-detection.md) --
+  How provider binaries are detected during the configuration wizard; new
+  providers should add their binary to the `PROVIDER_BINARIES` map in
+  `src/providers/detect.ts`

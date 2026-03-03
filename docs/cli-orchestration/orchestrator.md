@@ -1,6 +1,6 @@
 # Orchestrator Pipeline
 
-The orchestrator (`src/agents/orchestrator.ts`) implements the core multi-phase
+The orchestrator (`src/orchestrator/runner.ts`) implements the core multi-phase
 pipeline that drives the entire dispatch tool. It coordinates datasource-driven
 work item discovery, task parsing, AI provider lifecycle, optional planning,
 execution, per-issue branch management, datasource sync, and automatic issue
@@ -22,7 +22,7 @@ The orchestrator exposes two entry points from the CLI:
     1. **Discover** work items from the configured [datasource](../datasource-system/overview.md) (GitHub, Azure DevOps, or local markdown), optionally filtered by issue IDs
     2. **Write** discovered items to temporary spec files via `writeItemsToTempDir()`
     3. **Parse** unchecked tasks from the spec files using [`parseTaskFile()`](../task-parsing/api-reference.md#parsetaskfile) (see [Markdown Syntax Reference](../task-parsing/markdown-syntax.md) for supported checkbox formats)
-    4. **Boot** the selected [AI provider](../provider-system/provider-overview.md) (OpenCode or Copilot)
+    4. **Boot** the selected [AI provider](../provider-system/provider-overview.md) (OpenCode, Copilot, Claude, or Codex)
     5. **Group** tasks by source file (one file = one issue), then by execution mode using [`groupTasksByMode()`](../task-parsing/api-reference.md#grouptasksbymode)
     6. **Branch** (unless `--no-branch`): create a per-issue feature branch, dispatch tasks, push, create PR, switch back (see [branch lifecycle](cli.md#the---no-branch-flag))
     7. **Dispatch** tasks in [group-aware concurrent batches](#concurrency-model) (plan + execute per task)
@@ -38,10 +38,10 @@ tasks plus per-task results.
 Before `runFromCli()` delegates to the dispatch or spec pipeline, it calls
 `resolveCliConfig(args)` from `src/orchestrator/cli-config.ts`. This function:
 
-1. Loads `~/.dispatch/config.json` via `loadConfig()`.
+1. Loads `{CWD}/.dispatch/config.json` via `loadConfig()`.
 2. Merges config defaults beneath CLI flags using the `explicitFlags` set
    (CLI flags always win).
-3. Validates that mandatory fields (`provider` and `source`) are configured.
+3. Validates that the mandatory field (`provider`) is configured.
 4. Enables verbose logging if `--verbose` was passed.
 
 See [Configuration — Three-tier precedence](configuration.md#three-tier-configuration-precedence)
@@ -436,8 +436,8 @@ AI providers or modifying any files.
 ### OrchestrateRunOptions
 
 Passed from `runFromCli()` (after config resolution) to `orchestrate()`
-(`src/agents/orchestrator.ts:18-29`). The `cwd` field is captured at boot
-time via `bootOrchestrator({ cwd })` rather than passed per-invocation:
+(`src/orchestrator/runner.ts:21-40`). The `cwd` field is captured at boot
+time via `boot({ cwd })` rather than passed per-invocation:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -446,13 +446,18 @@ time via `bootOrchestrator({ cwd })` rather than passed per-invocation:
 | `dryRun` | `boolean` | Preview mode -- no execution |
 | `noPlan` | `boolean?` | Skip the planner agent phase (optional, defaults to `false`) |
 | `noBranch` | `boolean?` | Skip branch creation, push, and PR lifecycle (optional, defaults to `false`). See [the --no-branch flag](cli.md#the---no-branch-flag). |
-| `provider` | `ProviderName?` | AI backend name (`"opencode"` or `"copilot"`, defaults to `"opencode"`) |
+| `noWorktree` | `boolean?` | Disable git worktree isolation (optional, defaults to `false`) |
+| `force` | `boolean?` | Force operation even if pre-checks would block (optional, defaults to `false`) |
+| `provider` | `ProviderName?` | AI backend name (`"opencode"`, `"copilot"`, `"claude"`, or `"codex"`, defaults to `"opencode"`) |
+| `model` | `string?` | Model override to pass to the provider (provider-specific format) |
 | `serverUrl` | `string?` | URL of a running provider server |
 | `source` | `DatasourceName?` | Datasource backend (`"github"`, `"azdevops"`, or `"md"`) |
 | `org` | `string?` | Azure DevOps organization URL |
 | `project` | `string?` | Azure DevOps project name |
-| `planTimeout` | `number?` | Planning timeout in minutes. Passed through from CLI `--plan-timeout` or config `planTimeout`. Used with [`withTimeout()`](../shared-utilities/timeout.md). |
-| `planRetries` | `number?` | Number of retry attempts after planning timeout. Passed through from CLI `--plan-retries` or config `planRetries`. |
+| `workItemType` | `string?` | Azure DevOps work item type filter |
+| `planTimeout` | `number?` | Planning timeout in minutes. Passed through from CLI `--plan-timeout` or config. Used with [`withTimeout()`](../shared-utilities/timeout.md). |
+| `planRetries` | `number?` | Number of retry attempts after planning timeout. Passed through from CLI `--plan-retries` or config. |
+| `retries` | `number?` | Number of retries for task execution failures. Passed through from CLI `--retries`. |
 
 ### DispatchSummary
 
@@ -505,3 +510,8 @@ Returned from `orchestrate()` to the CLI:
   controlling planning execution timeouts (`planTimeout` option)
 - [Testing Overview](../testing/overview.md) -- project-wide test suite
   documentation (note: orchestrator is not directly tested)
+- [Prerequisites & Safety Checks](../prereqs-and-safety/overview.md) -- How
+  environment validation (Node.js, git, CLI tools) runs before the orchestrator
+  pipeline starts
+- [Run State & Lifecycle](../git-and-worktree/run-state.md) -- Worktree run
+  state tracking and future resume feature for interrupted orchestrator runs

@@ -164,3 +164,7 @@ handling, see
   File I/O safety and concurrent write analysis
 - [Provider Overview](../provider-system/provider-overview.md) -- The AI
   provider sessions used by planner and dispatcher
+- [Run State Persistence](../git-and-worktree/run-state.md) -- Task status
+  persistence that uses `Task.file` and `Task.line` for ID construction
+- [Configuration System](../cli-orchestration/configuration.md) -- `--concurrency`
+  setting that controls concurrent write risk for `markTaskComplete`
