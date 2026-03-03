@@ -1,308 +1,266 @@
-# dispatch
+# Dispatch
 
-AI agent orchestration CLI — parse markdown task files, dispatch each unit of work to code agents (OpenCode, GitHub Copilot, etc.), and commit results with conventional commits.
+AI agent orchestration CLI — parse work items from GitHub Issues, Azure DevOps, or local markdown files, dispatch each unit of work to a coding agent (OpenCode, GitHub Copilot, Claude Code, or OpenAI Codex), and commit results with conventional commits.
 
-## Why dispatch?
+## What it does
 
-Manual orchestration of AI coding agents is tedious when a project has many small, well-defined units of work. dispatch solves three problems:
+Dispatch closes the gap between issue trackers and AI coding agents. It:
 
-- **Context isolation** — each task runs in a fresh agent session so context from one task does not leak into another.
-- **Precision through planning** — an optional two-phase pipeline lets a read-only planner agent explore the codebase first, producing a focused execution plan that the executor agent follows.
-- **Automated record-keeping** — after each task, the markdown file is updated and a conventional commit is created, giving a clean, reviewable git history tied directly to the original task list.
-
-The tool is backend-agnostic: it supports multiple issue trackers via a datasource abstraction and multiple AI runtimes via a provider abstraction, letting teams use their existing tools without lock-in.
-
-## Key Features
-
-- **Backend-agnostic** provider and datasource abstractions — no vendor lock-in
-- **Two-phase planner-executor pipeline** — optional read-only planner explores the codebase before the executor makes changes (`--no-plan` skips planning)
-- **Markdown as source of truth** — task files use `- [ ]` checkbox syntax with `(P)`arallel, `(S)`erial, and `(I)`solated execution mode prefixes
-- **Automatic conventional commits** — commit type (feat, fix, docs, refactor, etc.) is inferred from task text
-- **Real-time TUI dashboard** — terminal UI with spinner, progress bar, and per-task status tracking
-- **Three-tier configuration** — CLI flags > project-local config file (`.dispatch/config.json`) > defaults
-- **Configurable concurrency** — control parallel task execution per batch
-
-## Supported Backends
-
-### Providers (AI Agent Runtimes)
-
-| Provider | SDK | Prompt Model |
-|----------|-----|-------------|
-| OpenCode | `@opencode-ai/sdk` | Async — fire-and-forget + SSE event stream |
-| GitHub Copilot | `@github/copilot-sdk` | Synchronous — blocking request/response |
-
-### Datasources (Issue Trackers)
-
-| Datasource | Tool | Auth |
-|------------|------|------|
-| GitHub Issues | `gh` CLI | `gh auth login` |
-| Azure DevOps Work Items | `az` CLI | `az login` |
-| Local Markdown | Filesystem | None |
+1. **Fetches work items** from GitHub Issues, Azure DevOps Work Items, or local markdown specs.
+2. **Generates structured specs** via an AI agent that explores the codebase and produces task lists.
+3. **Plans and executes** each task in isolated AI sessions, with an optional two-phase planner-then-executor pipeline.
+4. **Manages the git lifecycle** — branching, committing with conventional commit messages, pushing, and opening pull requests that auto-close the originating issue.
 
 ## Prerequisites
 
-### Node.js and npm
+### Node.js
 
-Install [Node.js](https://nodejs.org/) **>= 20.12.0** (npm is included). Verify your installation:
+Node.js **>= 20.12.0** is required.
 
-```sh
-node --version   # must be >= 20.12.0
-```
+### AI provider (choose one)
 
-### AI Agent Runtime
-
-At least one AI agent runtime must be installed and authenticated with a default model configured. dispatch cannot function without a provider backend.
-
-**OpenCode**
+**OpenCode** (default):
 
 ```sh
-# Install
+# Install OpenCode
 curl -fsSL https://opencode.ai/install | bash
 # or: npm install -g opencode-ai
+
+# Configure an LLM provider (Anthropic, OpenAI, etc.)
+opencode
+# then run: /connect
 ```
 
-Launch `opencode` and run the `/connect` command to configure your LLM provider. Then verify:
+**GitHub Copilot**:
 
 ```sh
-opencode --version
+# Requires an active GitHub Copilot subscription
+
+# Install the Copilot CLI
+npm install -g @github/copilot     # requires Node.js 22+
+# or: brew install copilot-cli
+# or: winget install GitHub.Copilot
+
+# Authenticate
+copilot
+# then run: /login
 ```
 
-See [OpenCode backend docs](./docs/provider-system/opencode-backend.md) for full setup options.
+For CI environments, set one of these environment variables instead of logging in interactively:
+- `COPILOT_GITHUB_TOKEN` — GitHub PAT with **Copilot Requests** permission (highest priority)
+- `GH_TOKEN` — standard GitHub CLI token
+- `GITHUB_TOKEN` — commonly used in CI
 
-**GitHub Copilot**
-
-Requires an active [GitHub Copilot subscription](https://github.com/features/copilot/plans).
+**Claude Code** (`--provider claude`):
 
 ```sh
-# Install
-npm install -g @github/copilot
+# Install Claude Code CLI
+npm install -g @anthropic-ai/claude-code
+
+# Authenticate
+claude login
+# or set ANTHROPIC_API_KEY in your environment
 ```
 
-Launch `copilot` and follow the `/login` prompt to authenticate. Then verify:
+Default model: `claude-sonnet-4`. Available models: `claude-sonnet-4`, `claude-sonnet-4-5`, `claude-opus-4-6`, `claude-haiku-3-5`.
+
+**OpenAI Codex** (`--provider codex`):
 
 ```sh
-copilot --version
+# Install the Codex CLI
+npm install -g @openai/codex
+
+# Authenticate via environment variable
+export OPENAI_API_KEY=sk-...
 ```
 
-See [Copilot backend docs](./docs/provider-system/copilot-backend.md) for full setup options.
+Default model: `o4-mini`. Available models: `o4-mini`, `o3-mini`, `codex-mini-latest`.
+
+### Issue tracker (choose based on your repo)
+
+**GitHub** (`--source github`):
+
+```sh
+# Install the GitHub CLI
+# https://cli.github.com/
+
+gh auth login
+```
+
+**Azure DevOps** (`--source azdevops`):
+
+```sh
+# Install the Azure CLI
+# https://learn.microsoft.com/en-us/cli/azure/install-azure-cli
+
+az login
+az extension add --name azure-devops
+```
+
+**Local markdown** (`--source md`): No external tools or authentication required.
 
 ## Installation
 
-```bash
+```sh
+# Global install — adds `dispatch` to PATH
 npm install -g @pruddiman/dispatch
-```
 
-Or run directly without installing:
-
-```bash
+# Run without installing
 npx @pruddiman/dispatch
+
+# Local project install
+npm install --save-dev @pruddiman/dispatch
+npx dispatch
 ```
 
-## Quick Start
+## Quick start
 
-dispatch operates as a three-stage pipeline:
+```sh
+# Run interactive configuration wizard (first-time setup)
+dispatch config
 
-### 1. Generate specs from issues
+# Dispatch all open issues to AI agents
+dispatch
 
-Fetch issues from your tracker and generate structured markdown specs with task checkboxes:
+# Dispatch specific issues
+dispatch 42 43 44
 
-```bash
-# From issue numbers
-dispatch --spec 42,43,44
+# Dry run — list tasks without executing
+dispatch --dry-run
 
-# From local markdown files using a glob pattern
-dispatch --spec "drafts/*.md"
+# Use GitHub Copilot instead of OpenCode
+dispatch --provider copilot
 
-# From an inline text description
-dispatch --spec "add dark mode toggle to settings page"
+# Generate specs from issues (before dispatching)
+dispatch --spec 42,43
 ```
 
-This creates spec files in `.dispatch/specs/` (e.g., `42-add-auth.md`) with `- [ ]` task items.
+## Pipeline modes
 
-To regenerate existing specs, use `--respec`:
+| Mode | Flag | Description |
+|------|------|-------------|
+| **Dispatch** | *(default)* | Plan and execute tasks; manage full git lifecycle |
+| **Spec generation** | `--spec` / `--respec` | Convert issues into structured markdown spec files |
+| **Fix tests** | `--fix-tests` | Detect and auto-fix failing tests via AI |
 
-```bash
-# Regenerate all existing specs
-dispatch --respec
+## Task files
 
-# Regenerate specs for specific issues
-dispatch --respec 42,43,44
+Dispatch reads work items from markdown files with `- [ ] ...` checkbox syntax:
 
-# Regenerate specs matching a glob pattern
-dispatch --respec "specs/*.md"
+```markdown
+# My Feature
+
+- [ ] (P) Add the login endpoint
+- [ ] (P) Write unit tests for the login endpoint
+- [ ] (S) Update the API documentation
 ```
 
-### 2. Execute tasks
+Each unchecked item is dispatched to an AI agent. An optional mode prefix controls execution batching:
 
-Run the generated specs through the plan-and-execute pipeline:
+| Prefix | Mode | Behavior |
+|--------|------|----------|
+| `(P)` | Parallel | Tasks run concurrently (up to `--concurrency`) |
+| `(S)` | Serial | Tasks run one at a time |
+| `(I)` | Isolated | Each task runs in a dedicated worktree |
 
-```bash
-dispatch ".dispatch/specs/*.md"
-```
-
-For each task, dispatch will:
-1. **Plan** — a read-only planner agent explores the codebase and produces a detailed execution plan
-2. **Execute** — an executor agent follows the plan to make code changes
-3. **Commit** — changes are staged and committed with an inferred conventional commit message
-4. **Mark complete** — the `- [ ]` checkbox is updated to `- [x]` in the source file
-
-### 3. Fix failing tests
-
-Run tests and automatically fix failures via an AI agent:
-
-```bash
-dispatch --fix-tests
-```
-
-### Common options
-
-```bash
-dispatch --no-plan "tasks.md"          # Skip the planning phase
-dispatch --no-branch "tasks.md"        # Skip branch creation, push, and PR lifecycle
-dispatch --provider copilot "tasks.md" # Use GitHub Copilot instead of OpenCode
-dispatch --source github "tasks.md"    # Explicitly set the datasource
-dispatch --concurrency 3 "tasks.md"    # Run up to 3 tasks in parallel
-dispatch --server-url http://localhost:3000 "tasks.md"  # Use a running provider server
-dispatch --plan-timeout 15 "tasks.md"  # Set planning timeout to 15 minutes
-dispatch --plan-retries 2 "tasks.md"   # Retry planning up to 2 times
-dispatch --output-dir ./my-specs --spec 42  # Custom output directory for specs
-dispatch --verbose "tasks.md"          # Show detailed debug output
-```
-
-> **Concurrency auto-scaling:** When `--concurrency` is not specified, dispatch
-> automatically computes a safe default using `min(cpuCount, freeMemMB / 500)`,
-> with a minimum of 1. Each concurrent agent process is assumed to consume ~500 MB
-> of memory.
+Tasks are marked `[x]` when complete. Rerunning dispatch skips already-completed tasks.
 
 ## Configuration
 
-dispatch uses a three-tier configuration system: CLI flags > project-local config file (`.dispatch/config.json`) > defaults.
+Dispatch uses three-tier configuration: CLI flags override config file values, which override hardcoded defaults.
 
-### Interactive configuration
-
-```bash
+```sh
+# Interactive wizard — guided setup for all options
 dispatch config
 ```
 
-Running `dispatch config` launches an interactive wizard that guides you through viewing, setting, and resetting your configuration.
+Config is stored at `~/.dispatch/config.json`:
 
-Valid config keys: `provider`, `model`, `concurrency`, `source`, `org`, `project`, `workItemType`, `serverUrl`, `planTimeout`, `planRetries`.
-
-- **`model`** — AI model override in provider-specific format (e.g. `"claude-sonnet-4-5"` for Copilot, `"anthropic/claude-sonnet-4"` for OpenCode). When omitted the provider uses its default.
-- **`workItemType`** — Azure DevOps work item type (e.g. `"User Story"`, `"Bug"`). Only relevant when using the `azdevops` datasource.
-
-## Requirements
-
-| Requirement | Version | Notes |
-|-------------|---------|-------|
-| Node.js | >= 20.12.0 | Required — ESM-only runtime |
-| git | Any | Required — auto-detection, conventional commits |
-| `gh` CLI | Any | Optional — required for GitHub datasource |
-| `az` CLI + azure-devops extension | Any | Optional — required for Azure DevOps datasource |
-| OpenCode or GitHub Copilot | Varies | At least one AI agent runtime required |
-
-## Development
-
-```bash
-git clone https://github.com/PatrickRuddiman/Dispatch.git
-cd Dispatch
-npm install
-npm run build        # Build with tsup
-npm test             # Run tests with Vitest
-npm run typecheck    # Type-check with tsc --noEmit
+```json
+{
+  "provider": "copilot",
+  "source": "github",
+  "concurrency": 3,
+  "planTimeout": 10,
+  "planRetries": 1
+}
 ```
 
-Additional commands:
+| Key | Description |
+|-----|-------------|
+| `provider` | AI backend: `opencode` (default), `copilot`, `claude`, or `codex` |
+| `source` | Issue tracker: `github`, `azdevops`, or `md` |
+| `concurrency` | Max parallel task dispatches |
+| `planTimeout` | Planning timeout in minutes (default: 10) |
+| `planRetries` | Retry attempts after planning timeout (default: 1) |
+| `org` | Azure DevOps organization URL |
+| `project` | Azure DevOps project name |
+| `serverUrl` | URL of a running provider server |
 
-```bash
-npm run dev          # Watch mode build
-npm run test:watch   # Watch mode tests
-```
+## Options reference
 
-## Troubleshooting
+### Dispatch mode
 
-### "Could not detect datasource from git remote"
+| Option | Default | Description |
+|--------|---------|-------------|
+| `<issue-id...>` | *(all open)* | Issue IDs to dispatch |
+| `--provider <name>` | `opencode` | AI backend (`opencode`, `copilot`, `claude`, `codex`) |
+| `--source <name>` | *(auto-detected)* | Datasource (`github`, `azdevops`, `md`) |
+| `--dry-run` | `false` | List tasks without executing |
+| `--no-plan` | `false` | Skip planner phase, execute directly |
+| `--no-branch` | `false` | Skip branch/push/PR lifecycle |
+| `--concurrency <n>` | *(cpu/memory)* | Max parallel dispatches |
+| `--plan-timeout <min>` | `10` | Planning timeout in minutes |
+| `--plan-retries <n>` | `1` | Retries after planning timeout |
+| `--server-url <url>` | *(none)* | Connect to a running provider server |
+| `--cwd <dir>` | `process.cwd()` | Working directory |
+| `--verbose` | `false` | Show detailed debug output |
 
-dispatch auto-detects whether to use GitHub or Azure DevOps by inspecting your git remote URL. If the remote does not match a known pattern (e.g., no remote configured, or a self-hosted URL), detection falls back to local markdown mode.
+### Spec mode
 
-**Fix:** pass `--source` explicitly:
+| Option | Description |
+|--------|-------------|
+| `--spec <values...>` | Issue numbers, glob pattern, or description. Activates spec mode. |
+| `--respec [values...]` | Regenerate existing specs. Pass no args to regenerate all. |
+| `--source <name>` | Datasource override (auto-detected if omitted) |
+| `--output-dir <dir>` | Output directory for spec files (default: `.dispatch/specs`) |
+| `--org <url>` | Azure DevOps organization URL (required for `azdevops`) |
+| `--project <name>` | Azure DevOps project name (required for `azdevops`) |
 
-```sh
-dispatch --source github "tasks.md"
-dispatch --source azdevops "tasks.md"
-```
+## Datasource auto-detection
 
-### Provider binary not found
+When `--source` is not provided, Dispatch inspects the git `origin` remote URL:
 
-dispatch requires a provider runtime (`opencode` or `copilot`) to be installed and on your `PATH`. If the binary is missing, the provider will fail to start.
+| Remote URL contains | Detected source |
+|---------------------|----------------|
+| `github.com` | `github` |
+| `dev.azure.com` | `azdevops` |
+| `visualstudio.com` | `azdevops` |
 
-**Verify installation:**
+For local-only workflows, pass `--source md` explicitly.
 
-```sh
-opencode --version
-copilot --version
-```
+## Exit codes
 
-If not installed, see [OpenCode setup](./docs/provider-system/opencode-backend.md) or [Copilot setup](./docs/provider-system/copilot-backend.md).
+| Code | Meaning |
+|------|---------|
+| `0` | All tasks completed successfully |
+| `1` | One or more tasks failed, or a fatal error occurred |
+| `130` | SIGINT (Ctrl+C) |
+| `143` | SIGTERM |
 
-### Planning timeout exceeded
+## Documentation
 
-The planner phase has a default timeout of **10 minutes** per attempt. If the planner does not finish in time, dispatch retries up to `maxPlanAttempts` times (default: 1 retry) before failing the task.
+Full documentation is in the [`docs/`](docs/) directory:
 
-**Fix:** increase the timeout or retries:
-
-```sh
-dispatch --plan-timeout 20 "tasks.md"   # 20-minute timeout
-dispatch --plan-retries 3 "tasks.md"    # Retry planning up to 3 times
-```
-
-Both values can also be set in `.dispatch/config.json` via the `planTimeout` and `planRetries` keys.
-
-### Branch creation failed
-
-dispatch creates a git branch per issue. This can fail if:
-
-- You lack write permissions to the repository.
-- A branch with the computed name already exists locally or on the remote.
-
-**Fix:** delete the conflicting branch or use `--no-branch` to skip branch creation entirely:
-
-```sh
-dispatch --no-branch "tasks.md"
-```
-
-### "No unchecked tasks found"
-
-dispatch looks for unchecked markdown checkboxes in the `## Tasks` section. Tasks must use the exact format `- [ ]` (hyphen, space, open bracket, space, close bracket) with a space inside the brackets.
-
-**Common mistakes:**
-
-```md
-- [] task     # wrong — missing space inside brackets
-- [x] task    # already checked — dispatch skips these
-* [ ] task    # wrong — use - not *
-```
-
-**Correct format:**
-
-```md
-- [ ] task description
-- [ ] (P) parallel task description
-```
-
-## Error Handling & Recovery
-
-- **Batch failure isolation** — when a task fails, other tasks in the same batch continue executing. Failed tasks are tracked and reported in the final summary (e.g., `Done — 5 completed, 1 failed`).
-- **No run resumption** — runs cannot currently be resumed after interruption. Re-running will re-process all unchecked (`- [ ]`) tasks; tasks already marked complete (`- [x]`) in the source file are skipped.
-- **`--dry-run` scope** — `--dry-run` covers task discovery and parsing only. It does not trigger spec generation, planning, or execution.
+- [Architecture Overview](docs/architecture.md)
+- [CLI & Orchestration](docs/cli-orchestration/overview.md)
+- [Datasource System](docs/datasource-system/overview.md)
+- [Provider System](docs/provider-system/provider-overview.md)
+- [Task Parsing](docs/task-parsing/overview.md)
+- [Planning & Dispatch](docs/planning-and-dispatch/overview.md)
+- [Spec Generation](docs/spec-generation/overview.md)
+- [Testing](docs/testing/overview.md)
 
 ## License
 
 MIT
-
-## Documentation
-
-For comprehensive documentation, see the [`docs/`](./docs/) directory:
-
-- **[Documentation Index](./docs/index.md)** — entry point with key concepts and navigation guide
-- **[Architecture Overview](./docs/architecture.md)** — system topology, pipeline flows, design decisions, and component index
