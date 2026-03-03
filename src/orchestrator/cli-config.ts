@@ -8,6 +8,8 @@
  */
 
 import { join } from "node:path";
+import { access } from "node:fs/promises";
+import { constants } from "node:fs";
 import { log } from "../helpers/logger.js";
 import { loadConfig, type DispatchConfig } from "../config.js";
 import type { RawCliArgs } from "./runner.js";
@@ -73,6 +75,18 @@ export async function resolveCliConfig(args: RawCliArgs): Promise<RawCliArgs> {
     log.dim("  Run 'dispatch config' to configure defaults interactively.");
     log.dim("  Or pass it as a CLI flag: --provider <name>");
     process.exit(1);
+  }
+
+  // ── Output-dir validation ─────────────────────────────────
+  if (merged.outputDir) {
+    try {
+      await access(merged.outputDir, constants.W_OK);
+    } catch {
+      log.error(
+        `--output-dir path does not exist or is not writable: ${merged.outputDir}`,
+      );
+      process.exit(1);
+    }
   }
 
   // ── Auto-detect datasource when not explicitly set ─────────
