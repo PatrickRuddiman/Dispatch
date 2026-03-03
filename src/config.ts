@@ -26,10 +26,11 @@ export interface DispatchConfig {
    */
   model?: string;
   source?: DatasourceName;
+  testTimeout?: number;
 }
 
 /** Valid configuration key names. */
-export const CONFIG_KEYS = ["provider", "model", "source"] as const;
+export const CONFIG_KEYS = ["provider", "model", "source", "testTimeout"] as const;
 
 /** A valid configuration key name. */
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -95,6 +96,14 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
         return `Invalid source "${value}". Available: ${DATASOURCE_NAMES.join(", ")}`;
       }
       return null;
+
+    case "testTimeout": {
+      const num = Number(value);
+      if (!Number.isFinite(num) || num <= 0) {
+        return `Invalid testTimeout "${value}". Must be a positive number (minutes)`;
+      }
+      return null;
+    }
 
     default:
       return `Unknown config key "${key}"`;

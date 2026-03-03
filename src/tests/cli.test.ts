@@ -332,6 +332,17 @@ describe("parseArgs value flags", () => {
     expect(args.planTimeout).toBe(1.5);
   });
 
+  it("parses --test-timeout <n>", () => {
+    const [args, flags] = parseArgs(["--test-timeout", "5"]);
+    expect(args.testTimeout).toBe(5);
+    expect(flags.has("testTimeout")).toBe(true);
+  });
+
+  it("parses --test-timeout with decimal", () => {
+    const [args] = parseArgs(["--test-timeout", "1.5"]);
+    expect(args.testTimeout).toBe(1.5);
+  });
+
   it("parses --plan-retries <n>", () => {
     const [args, flags] = parseArgs(["--plan-retries", "3"]);
     expect(args.planRetries).toBe(3);
@@ -413,6 +424,20 @@ describe("parseArgs error cases", () => {
 
   it("exits for non-numeric --plan-timeout", () => {
     expect(() => parseArgs(["--plan-timeout", "abc"])).toThrow("process.exit called");
+  });
+
+  it("exits for non-positive --test-timeout", () => {
+    expect(() => parseArgs(["--test-timeout", "0"])).toThrow("process.exit called");
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
+
+  it("exits for non-numeric --test-timeout", () => {
+    expect(() => parseArgs(["--test-timeout", "abc"])).toThrow("process.exit called");
+  });
+
+  it("exits for negative --test-timeout", () => {
+    expect(() => parseArgs(["--test-timeout", "-1"])).toThrow("process.exit called");
+    expect(mockExit).toHaveBeenCalledWith(1);
   });
 
   it("exits for negative --plan-retries", () => {

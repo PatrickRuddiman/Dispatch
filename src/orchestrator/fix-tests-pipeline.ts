@@ -23,6 +23,7 @@ export interface FixTestsPipelineOptions {
   serverUrl?: string;
   verbose: boolean;
   dryRun?: boolean;
+  testTimeout?: number;
 }
 
 export interface TestRunResult {
@@ -131,6 +132,7 @@ export async function runFixTestsPipeline(
   opts: FixTestsPipelineOptions,
 ): Promise<FixTestsSummary> {
   const { cwd } = opts;
+  const testTimeoutMs = (opts.testTimeout ?? 5) * 60_000;
   const start = Date.now();
 
   // Detect test command

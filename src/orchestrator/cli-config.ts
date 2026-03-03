@@ -26,6 +26,7 @@ const CONFIG_TO_CLI: Record<ConfigKey, keyof RawCliArgs> = {
   provider: "provider",
   model: "model",
   source: "issueSource",
+  testTimeout: "testTimeout",
 };
 
 /** Type-safe indexed write into a RawCliArgs object. */

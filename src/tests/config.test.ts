@@ -150,6 +150,32 @@ describe("validateConfigValue", () => {
     expect(result).not.toBe(null);
     expect(result).toContain("Invalid source");
   });
+
+  it("accepts valid testTimeout (positive number)", () => {
+    expect(validateConfigValue("testTimeout", "1")).toBe(null);
+    expect(validateConfigValue("testTimeout", "10")).toBe(null);
+    expect(validateConfigValue("testTimeout", "1.5")).toBe(null);
+    expect(validateConfigValue("testTimeout", "0.5")).toBe(null);
+  });
+
+  it("rejects non-positive testTimeout", () => {
+    const zero = validateConfigValue("testTimeout", "0");
+    expect(zero).not.toBe(null);
+    expect(zero).toContain("positive number");
+
+    const negative = validateConfigValue("testTimeout", "-5");
+    expect(negative).not.toBe(null);
+    expect(negative).toContain("positive number");
+  });
+
+  it("rejects non-numeric testTimeout", () => {
+    const text = validateConfigValue("testTimeout", "abc");
+    expect(text).not.toBe(null);
+    expect(text).toContain("positive number");
+
+    const empty = validateConfigValue("testTimeout", "");
+    expect(empty).not.toBe(null);
+  });
 });
 
 // ─── Merge precedence (CLI > config > default) ─────────────────────

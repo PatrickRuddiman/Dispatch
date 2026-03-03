@@ -46,6 +46,7 @@ const HELP = `
     --plan-timeout <min>   Planning timeout in minutes (default: 10)
     --retries <n>          Retry attempts for all agents (default: 2)
     --plan-retries <n>     Retry attempts after planning timeout (overrides --retries for planner)
+    --test-timeout <min>   Test timeout in minutes (default: 5)
     --cwd <dir>            Working directory (default: cwd)
 
   Spec options:
@@ -236,6 +237,15 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
       }
       args.planRetries = val;
       explicitFlags.add("planRetries");
+    } else if (arg === "--test-timeout") {
+      i++;
+      const val = parseFloat(argv[i]);
+      if (isNaN(val) || val <= 0) {
+        log.error("--test-timeout must be a positive number (minutes)");
+        process.exit(1);
+      }
+      args.testTimeout = val;
+      explicitFlags.add("testTimeout");
     } else if (arg === "--cwd") {
       i++;
       args.cwd = resolve(argv[i]);
