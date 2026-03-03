@@ -15,9 +15,13 @@ vi.mock("../helpers/logger.js", () => ({
   },
 }));
 
-vi.mock("../config.js", () => ({
-  loadConfig: vi.fn().mockResolvedValue({}),
-}));
+vi.mock("../config.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../config.js")>();
+  return {
+    ...actual,
+    loadConfig: vi.fn().mockResolvedValue({}),
+  };
+});
 
 vi.mock("../datasources/index.js", () => ({
   detectDatasource: vi.fn().mockResolvedValue(null),
