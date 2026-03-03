@@ -523,7 +523,7 @@ describe("runSpecPipeline", () => {
     it("counts generate() exception as failed (not just { success: false })", async () => {
       mocks.mockGenerate.mockRejectedValueOnce(new Error("agent crashed"));
 
-      const result = await runSpecPipeline(baseOpts({ issues: "1", concurrency: 1 }));
+      const result = await runSpecPipeline(baseOpts({ issues: "1", concurrency: 1, retries: 0 }));
 
       expect(result.total).toBe(1);
       expect(result.generated).toBe(0);

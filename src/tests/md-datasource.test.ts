@@ -44,23 +44,14 @@ describe("getUsername", () => {
 });
 
 describe("buildBranchName", () => {
-  it("builds branch name with username/dispatch/issueNumber-slug pattern", () => {
-    const result = datasource.buildBranchName(
-      "42",
-      "Add login page",
-      "john-doe",
-    );
-    expect(result).toBe("john-doe/dispatch/42-add-login-page");
+  it("builds branch name with username/dispatch/issueNumber pattern", () => {
+    const result = datasource.buildBranchName("42", "john-doe");
+    expect(result).toBe("john-doe/dispatch/42");
   });
 
-  it("truncates slug to 50 characters", () => {
-    const longTitle =
-      "This is a very long title that should definitely be truncated to fifty characters maximum";
-    const result = datasource.buildBranchName("99", longTitle, "user");
-    const slug = result.split("/dispatch/")[1]; // "99-<slug>"
-    const titleSlug = slug.split("-").slice(1).join("-"); // remove "99-" prefix
-    expect(titleSlug.length).toBeLessThanOrEqual(50);
-    expect(result).toMatch(/^user\/dispatch\/99-.+/);
+  it("builds branch name with default username when not provided", () => {
+    const result = datasource.buildBranchName("99");
+    expect(result).toBe("local/dispatch/99");
   });
 });
 
