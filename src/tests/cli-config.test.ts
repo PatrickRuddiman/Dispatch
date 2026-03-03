@@ -139,6 +139,7 @@ describe("resolveCliConfig()", () => {
         serverUrl: "https://example.com",
         planTimeout: 15,
         planRetries: 3,
+        retries: 2,
       });
 
       const args = createRawCliArgs({
@@ -155,6 +156,7 @@ describe("resolveCliConfig()", () => {
       expect(result.serverUrl).toBe("https://example.com");
       expect(result.planTimeout).toBe(15);
       expect(result.planRetries).toBe(3);
+      expect(result.retries).toBe(2);
     });
   });
 

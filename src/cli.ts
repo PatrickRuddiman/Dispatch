@@ -41,7 +41,8 @@ const HELP = `
     --provider <name>      Agent backend: ${PROVIDER_NAMES.join(", ")} (default: opencode)
     --server-url <url>     URL of a running provider server
     --plan-timeout <min>   Planning timeout in minutes (default: 10)
-    --plan-retries <n>     Retry attempts after planning timeout (default: 1)
+    --retries <n>          Retry attempts for all agents (default: 2)
+    --plan-retries <n>     Retry attempts after planning timeout (overrides --retries for planner)
     --cwd <dir>            Working directory (default: cwd)
 
   Spec options:
@@ -206,6 +207,15 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
       }
       args.planTimeout = val;
       explicitFlags.add("planTimeout");
+    } else if (arg === "--retries") {
+      i++;
+      const val = parseInt(argv[i], 10);
+      if (isNaN(val) || val < 0) {
+        log.error("--retries must be a non-negative integer");
+        process.exit(1);
+      }
+      args.retries = val;
+      explicitFlags.add("retries");
     } else if (arg === "--plan-retries") {
       i++;
       const val = parseInt(argv[i], 10);

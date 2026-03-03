@@ -281,7 +281,7 @@ describe("planning timeout and retry", () => {
     expect(result.failed).toBe(0);
     expect(mocks.mockPlan).toHaveBeenCalledTimes(2);
     expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
-      expect.stringContaining("Planning timed out"),
+      expect.stringContaining("Attempt 1/2 failed"),
     );
     expect(mocks.mockExecute).toHaveBeenCalledOnce();
   });
@@ -309,11 +309,11 @@ describe("planning timeout and retry", () => {
     // Executor should NOT have been called since planning failed
     expect(mocks.mockExecute).not.toHaveBeenCalled();
     expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
-      expect.stringContaining("Planning timed out"),
+      expect.stringContaining("Attempt 1/2 failed"),
     );
   });
 
-  it("does not retry when planning fails with a non-timeout error", async () => {
+  it("retries on non-timeout errors and fails when all attempts exhausted", async () => {
     mocks.mockPlan.mockRejectedValue(new Error("Provider connection refused"));
 
     const resultPromise = runDispatchPipeline(baseOpts({ planRetries: 2 }), "/tmp/test");
@@ -323,8 +323,8 @@ describe("planning timeout and retry", () => {
 
     expect(result.completed).toBe(0);
     expect(result.failed).toBe(1);
-    // Should only be called once — no retry for non-timeout errors
-    expect(mocks.mockPlan).toHaveBeenCalledOnce();
+    // Should be called 3 times (2 retries + 1 initial = 3 attempts)
+    expect(mocks.mockPlan).toHaveBeenCalledTimes(3);
     expect(mocks.mockExecute).not.toHaveBeenCalled();
   });
 
@@ -358,7 +358,7 @@ describe("planning timeout and retry", () => {
     expect(mocks.mockExecute).not.toHaveBeenCalled();
   });
 
-  it("uses default timeout (10 min) and retries (1) when not configured", async () => {
+  it("uses default timeout (10 min) and retries (2) when not configured", async () => {
     mocks.mockPlan.mockImplementation(
       () => new Promise<PlanResult>(() => {}), // never resolves
     );
@@ -368,15 +368,58 @@ describe("planning timeout and retry", () => {
       "/tmp/test",
     );
 
-    // Default is 10 minutes = 600_000ms; advance past two attempts
+    // Default is 10 minutes = 600_000ms; advance past three attempts (default retries=2)
     await vi.advanceTimersByTimeAsync(600_000); // first attempt timeout
     await vi.advanceTimersByTimeAsync(600_000); // second attempt timeout
+    await vi.advanceTimersByTimeAsync(600_000); // third attempt timeout
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result.failed).toBe(1);
+    expect(mocks.mockPlan).toHaveBeenCalledTimes(3); // 2 retries = 3 attempts
+  });
+
+  it("falls back to general retries when planRetries is not set", async () => {
+    mocks.mockPlan.mockImplementation(
+      () => new Promise<PlanResult>(() => {}), // never resolves
+    );
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ planTimeout: 1, planRetries: undefined, retries: 1 }),
+      "/tmp/test",
+    );
+
+    // retries=1 → 2 total attempts at 1 min each
+    await vi.advanceTimersByTimeAsync(60_000); // first attempt timeout
+    await vi.advanceTimersByTimeAsync(60_000); // second attempt timeout
     await vi.runAllTimersAsync();
 
     const result = await resultPromise;
 
     expect(result.failed).toBe(1);
     expect(mocks.mockPlan).toHaveBeenCalledTimes(2); // 1 retry = 2 attempts
+  });
+
+  it("retries on non-timeout error and succeeds on second attempt", async () => {
+    let callCount = 0;
+    mocks.mockPlan.mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.reject(new Error("Transient API failure"));
+      }
+      return Promise.resolve({ prompt: "Execute step 1", success: true });
+    });
+
+    const resultPromise = runDispatchPipeline(baseOpts({ planRetries: 1 }), "/tmp/test");
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result.completed).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(mocks.mockPlan).toHaveBeenCalledTimes(2);
+    expect(mocks.mockExecute).toHaveBeenCalledOnce();
   });
 });
 
@@ -889,6 +932,100 @@ describe("worktree dispatch pipeline", () => {
       const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
       expect(ds.createAndSwitchBranch).toHaveBeenCalledTimes(2);
       expect(ds.switchBranch).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // ─── Executor retry ─────────────────────────────────────────────────
+
+  describe("executor retry", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.clearAllMocks();
+      // Restore single-issue defaults (may have been overridden by setupMultiIssueScenario)
+      vi.mocked(fetchItemsById).mockResolvedValue([ISSUE_1]);
+      vi.mocked(writeItemsToTempDir).mockResolvedValue({
+        files: ["/tmp/dispatch-test/1-test.md"],
+        issueDetailsByFile: new Map([["/tmp/dispatch-test/1-test.md", ISSUE_1]]),
+      });
+      vi.mocked(parseTaskFile).mockResolvedValue(TASK_FILE_FIXTURE);
+      vi.mocked(parseIssueFilename).mockReturnValue({ issueId: "1", slug: "test" });
+      mocks.mockPlan.mockImplementation(() =>
+        new Promise<PlanResult>((resolve) => {
+          setTimeout(() => resolve({ prompt: "Execute step 1", success: true }), 100);
+        }),
+      );
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("retries executor on failure and succeeds on retry", async () => {
+      let callCount = 0;
+      mocks.mockExecute.mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            success: false,
+            dispatchResult: { task: TASK_FIXTURE, success: false, error: "transient error" },
+            error: "transient error",
+            elapsedMs: 50,
+          };
+        }
+        return {
+          success: true,
+          dispatchResult: { task: TASK_FIXTURE, success: true },
+          elapsedMs: 100,
+        };
+      });
+
+      const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.runAllTimersAsync();
+
+      const result = await resultPromise;
+
+      expect(result.completed).toBe(1);
+      expect(result.failed).toBe(0);
+      expect(mocks.mockExecute).toHaveBeenCalledTimes(2);
+    });
+
+    it("fails the task when all executor attempts are exhausted", async () => {
+      mocks.mockExecute.mockResolvedValue({
+        success: false,
+        dispatchResult: { task: TASK_FIXTURE, success: false, error: "persistent error" },
+        error: "persistent error",
+        elapsedMs: 50,
+      });
+
+      const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.runAllTimersAsync();
+
+      const result = await resultPromise;
+
+      expect(result.completed).toBe(0);
+      expect(result.failed).toBe(1);
+      // 2 retries + 1 initial = 3 total attempts
+      expect(mocks.mockExecute).toHaveBeenCalledTimes(3);
+    });
+
+    it("does not retry when executor succeeds on first attempt", async () => {
+      mocks.mockExecute.mockResolvedValue({
+        success: true,
+        dispatchResult: { task: TASK_FIXTURE, success: true },
+        elapsedMs: 100,
+      });
+
+      const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.runAllTimersAsync();
+
+      const result = await resultPromise;
+
+      expect(result.completed).toBe(1);
+      expect(result.failed).toBe(0);
+      expect(mocks.mockExecute).toHaveBeenCalledOnce();
     });
   });
 });

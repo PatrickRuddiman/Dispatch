@@ -32,6 +32,7 @@ export interface DispatchConfig {
   workItemType?: string;
   serverUrl?: string;
   planTimeout?: number;
+  retries?: number;
   planRetries?: number;
 }
 
@@ -46,6 +47,7 @@ export const CONFIG_KEYS = [
   "workItemType",
   "serverUrl",
   "planTimeout",
+  "retries",
   "planRetries",
 ] as const;
 
@@ -135,6 +137,14 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
       const num = Number(value);
       if (!Number.isFinite(num) || num <= 0) {
         return `Invalid planTimeout "${value}". Must be a positive number (minutes)`;
+      }
+      return null;
+    }
+
+    case "retries": {
+      const num = Number(value);
+      if (!Number.isInteger(num) || num < 0) {
+        return `Invalid retries "${value}". Must be a non-negative integer`;
       }
       return null;
     }

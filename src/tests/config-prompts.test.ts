@@ -185,6 +185,7 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(number)
       .mockResolvedValueOnce(4) // concurrency
       .mockResolvedValueOnce(10) // planTimeout
+      .mockResolvedValueOnce(2) // retries
       .mockResolvedValueOnce(2); // planRetries
     vi.mocked(input).mockResolvedValueOnce("http://localhost:3000"); // serverUrl
     await runInteractiveConfigWizard();
@@ -195,6 +196,7 @@ describe("runInteractiveConfigWizard", () => {
         concurrency: 4,
         serverUrl: "http://localhost:3000",
         planTimeout: 10,
+        retries: 2,
         planRetries: 2,
       }),
       undefined,
