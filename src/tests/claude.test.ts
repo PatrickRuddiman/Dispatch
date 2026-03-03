@@ -85,6 +85,25 @@ describe("createSession", () => {
     expect(mockCreateSession).toHaveBeenCalledWith({ model: "claude-sonnet-4", permissionMode: "acceptEdits" });
   });
 
+  it("passes cwd to unstable_v2_createSession when opts.cwd is set", async () => {
+    const instance = await boot({ cwd: "/tmp/worktree" });
+    await instance.createSession();
+    expect(mockCreateSession).toHaveBeenCalledWith({
+      model: "claude-sonnet-4",
+      permissionMode: "acceptEdits",
+      cwd: "/tmp/worktree",
+    });
+  });
+
+  it("omits cwd from session options when opts.cwd is not set", async () => {
+    const instance = await boot({ model: "claude-opus-4-6" });
+    await instance.createSession();
+    expect(mockCreateSession).toHaveBeenCalledWith({
+      model: "claude-opus-4-6",
+      permissionMode: "acceptEdits",
+    });
+  });
+
   it("throws when unstable_v2_createSession fails", async () => {
     mockCreateSession.mockImplementation(() => {
       throw new Error("session fail");
