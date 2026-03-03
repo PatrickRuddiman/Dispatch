@@ -6,7 +6,8 @@ import type { ProviderInstance, ProviderBootOptions } from "../providers/interfa
 const { mocks } = vi.hoisted(() => {
   const mockBootOpencode = vi.fn<(opts?: ProviderBootOptions) => Promise<ProviderInstance>>();
   const mockBootCopilot = vi.fn<(opts?: ProviderBootOptions) => Promise<ProviderInstance>>();
-  return { mocks: { mockBootOpencode, mockBootCopilot } };
+  const mockBootClaude = vi.fn<(opts?: ProviderBootOptions) => Promise<ProviderInstance>>();
+  return { mocks: { mockBootOpencode, mockBootCopilot, mockBootClaude } };
 });
 
 // ─── Module mocks ───────────────────────────────────────────────────
@@ -18,6 +19,11 @@ vi.mock("../providers/opencode.js", () => ({
 
 vi.mock("../providers/copilot.js", () => ({
   boot: mocks.mockBootCopilot,
+  listModels: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("../providers/claude.js", () => ({
+  boot: mocks.mockBootClaude,
   listModels: vi.fn().mockResolvedValue([]),
 }));
 
@@ -41,13 +47,14 @@ beforeEach(() => {
 });
 
 describe("PROVIDER_NAMES", () => {
-  it("includes 'opencode' and 'copilot'", () => {
+  it("includes 'opencode', 'copilot', and 'claude'", () => {
     expect(PROVIDER_NAMES).toContain("opencode");
     expect(PROVIDER_NAMES).toContain("copilot");
+    expect(PROVIDER_NAMES).toContain("claude");
   });
 
-  it("has exactly two entries", () => {
-    expect(PROVIDER_NAMES).toHaveLength(2);
+  it("has exactly three entries", () => {
+    expect(PROVIDER_NAMES).toHaveLength(3);
   });
 
   it("is an array of strings", () => {
@@ -77,6 +84,16 @@ describe("bootProvider", () => {
 
     expect(instance.name).toBe("copilot");
     expect(mocks.mockBootCopilot).toHaveBeenCalledOnce();
+  });
+
+  it("boots the claude provider", async () => {
+    const mock = createMockProvider("claude");
+    mocks.mockBootClaude.mockResolvedValue(mock);
+
+    const instance = await bootProvider("claude");
+
+    expect(instance.name).toBe("claude");
+    expect(mocks.mockBootClaude).toHaveBeenCalledOnce();
   });
 
   it("passes options to the boot function", async () => {
