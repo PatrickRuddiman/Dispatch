@@ -321,5 +321,8 @@ dispatch "tasks/**/*.md" --provider copilot
   sessions for read-only exploration
 - [CLI Options](../cli-orchestration/cli.md) -- `--provider copilot` and
   `--server-url` flags
-- [Testing Overview](../testing/overview.md) -- test suite structure (note:
-  the Copilot provider is not currently unit-tested)
+- [Testing Overview](../testing/overview.md) -- test suite structure
+- [Provider Tests](../testing/provider-tests.md) -- detailed breakdown of the
+  Copilot provider unit tests (`copilot.test.ts`)
+- [Prerequisites & Safety Checks](../prereqs-and-safety/overview.md) --
+  `checkProviderInstalled()` that probes for the `copilot` binary on PATH

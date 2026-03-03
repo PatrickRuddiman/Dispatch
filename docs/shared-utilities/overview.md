@@ -60,7 +60,7 @@ Consumers have settled on two truncation limits:
 
 | maxLength | Context | Rationale |
 |-----------|---------|-----------|
-| **50** | Git branch names (`dispatch/<number>-<slug>`) | Practical limit for branch name portability across Git hosts |
+| **50** | Git branch names (`<username>/dispatch/<number>-<slug>`) | Practical limit for branch name portability across Git hosts |
 | **60** | Spec filenames (`<id>-<slug>.md`) | Keeps filenames readable while accommodating longer titles |
 | *(none)* | Markdown datasource `create()` | No truncation needed for internal identifiers |
 
@@ -92,4 +92,8 @@ Consumers have settled on two truncation limits:
   that is subject to `withTimeout` deadline enforcement
 - [Testing Overview](../testing/overview.md) -- Project-wide test suite
   including slugify and timeout test coverage
+- [Config Tests](../testing/config-tests.md) -- Tests covering `planTimeout`
+  and `planRetries` validation, which are consumed by the timeout utility
+- [GitHub Datasource](../datasource-system/github-datasource.md) -- Where
+  `slugify` is used for branch naming
 - [Architecture overview](../architecture.md) -- System-wide context

@@ -3,7 +3,8 @@
 The provider module (`src/provider.ts`) defines the `ProviderName`,
 `ProviderBootOptions`, and `ProviderInstance` types that abstract the AI agent
 runtime. This abstraction enables the orchestrator to interact with OpenCode,
-GitHub Copilot, or any future backend through a uniform lifecycle contract.
+GitHub Copilot, Claude, Codex, or any future backend through a uniform
+lifecycle contract.
 
 ## What it defines
 
@@ -11,7 +12,7 @@ The module exports three types and no runtime code:
 
 | Export | Kind | Description |
 |--------|------|-------------|
-| `ProviderName` | Type (string literal union) | `"opencode" \| "copilot"` |
+| `ProviderName` | Type (string literal union) | `"opencode" \| "copilot" \| "claude" \| "codex"` |
 | `ProviderBootOptions` | Interface | Options passed when booting a provider |
 | `ProviderInstance` | Interface | The lifecycle contract for a booted AI agent |
 
@@ -131,3 +132,7 @@ see [Adding a New Provider](../provider-system/adding-a-provider.md).
 - [CLI & Orchestration](../cli-orchestration/overview.md) -- Provider boot and cleanup lifecycle
 - [Timeout Utility](../shared-utilities/timeout.md) -- Deadline enforcement for provider prompt calls
 - [Integrations Reference](./integrations.md) -- External dependencies of the shared types layer
+- [Configuration System](../cli-orchestration/configuration.md) -- `--provider`
+  flag persistence and three-tier merge logic
+- [Provider Tests](../testing/provider-tests.md) -- Unit test coverage for
+  OpenCode and Copilot provider implementations
