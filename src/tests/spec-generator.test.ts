@@ -587,7 +587,7 @@ describe("buildFileSpecPrompt", () => {
     expect(result).toContain("**Explain WHAT, WHY, and HOW (strategically).**");
     expect(result).toContain("**Detail integration points.**");
     expect(result).toContain("**Keep tasks atomic and ordered.**");
-    expect(result).toContain("**Tag every task with `(P)` or `(S)`.**");
+    expect(result).toContain("**Tag every task with `(P)`, `(S)`, or `(I)`.**");
     expect(result).toContain("**Keep the markdown clean**");
   });
 });
