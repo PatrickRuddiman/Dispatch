@@ -1,10 +1,10 @@
 # Cleanup Registry
 
-The cleanup registry (`src/cleanup.ts`) implements a process-level callback
-registry that ensures AI [provider](../provider-system/provider-overview.md) resources are properly released before the
-Dispatch process exits. Sub-modules register their provider's `cleanup()`
-function at boot time, and the [CLI's](../cli-orchestration/cli.md) signal handlers and error handler drain
-the registry before calling `process.exit()`.
+The cleanup registry (`src/helpers/cleanup.ts`) implements a process-level
+callback registry that ensures AI [provider](../provider-system/provider-overview.md) resources are properly released
+before the Dispatch process exits. Sub-modules register their provider's
+`cleanup()` function at boot time, and the [CLI's](../cli-orchestration/cli.md) signal handlers and error
+handler drain the registry before calling `process.exit()`.
 
 ## What it does
 
@@ -28,9 +28,9 @@ method, these child processes can be left as orphans consuming system
 resources. The cleanup registry solves this by:
 
 - **Centralizing teardown responsibility.** Registration happens in the modules
-  that create resources ([orchestrator](../cli-orchestration/orchestrator.md), [spec-generator](../spec-generation/overview.md)), while draining happens
-  in the CLI's exit paths (signal handlers, error handler). Neither side needs
-  to know about the other's internals.
+  that create resources ([dispatch pipeline](../cli-orchestration/orchestrator.md), [spec pipeline](../spec-generation/overview.md), [fix-tests pipeline](../cli-orchestration/overview.md)),
+  while draining happens in the CLI's exit paths (signal handlers, error
+  handler). Neither side needs to know about the other's internals.
 - **Making shutdown idempotent.** The `splice(0)` pattern empties the registry
   atomically, so a second `runCleanup()` call is a harmless no-op. This is
   important because signals and errors can race.
@@ -46,16 +46,19 @@ from three distinct exit paths.
 
 ```mermaid
 sequenceDiagram
-    participant Orch as orchestrator.ts
-    participant Spec as spec-generator.ts
+    participant DP as dispatch-pipeline.ts
+    participant SP as spec-pipeline.ts
+    participant FP as fix-tests-pipeline.ts
     participant Reg as cleanup.ts (registry)
     participant CLI as cli.ts
     participant Prov as Provider (cleanup)
 
-    Note over Orch,Spec: Boot phase
+    Note over DP,FP: Boot phase
 
-    Orch->>Reg: registerCleanup(() => instance.cleanup())
-    Spec->>Reg: registerCleanup(() => instance.cleanup())
+    DP->>Reg: registerCleanup(() => instance.cleanup())
+    DP->>Reg: registerCleanup(() => removeWorktree())
+    SP->>Reg: registerCleanup(() => instance.cleanup())
+    FP->>Reg: registerCleanup(() => instance.cleanup())
 
     Note over CLI: Exit paths (any one fires)
 
@@ -79,17 +82,19 @@ sequenceDiagram
 
 ## Which modules register cleanup functions
 
-Three call sites register cleanup functions, all wrapping provider
-`instance.cleanup()`:
+Five call sites register cleanup functions across three pipeline modules:
 
 | Call site | Resource being cleaned up |
 |-----------|--------------------------|
-| `src/agents/orchestrator.ts:151` | AI provider server booted for dispatch mode |
-| `src/spec-generator.ts:308` | AI provider server booted for issue-based spec generation |
-| `src/spec-generator.ts:431` | AI provider server booted for file-based spec generation |
+| `src/orchestrator/dispatch-pipeline.ts:205` | AI provider server booted for dispatch mode |
+| `src/orchestrator/dispatch-pipeline.ts:251` | Worktree removal (per-file) |
+| `src/orchestrator/dispatch-pipeline.ts:291` | Per-worktree provider instance cleanup |
+| `src/orchestrator/spec-pipeline.ts:209` | AI provider server booted for spec generation |
+| `src/orchestrator/fix-tests-pipeline.ts:172` | AI provider server booted for fix-tests mode |
 
-In every case, the registered function is `() => instance.cleanup()`, which
-delegates to the provider's own teardown logic:
+In most cases, the registered function is `() => instance.cleanup()`, which
+delegates to the provider's own teardown logic. The dispatch pipeline also
+registers worktree cleanup functions to remove temporary git worktrees:
 
 - **OpenCode provider**: Calls `server.close()` to stop the spawned OpenCode
   server process. See
@@ -99,12 +104,12 @@ delegates to the provider's own teardown logic:
   [Copilot backend](../provider-system/copilot-backend.md).
 
 No other resource types (temp files, database connections, etc.) are currently
-registered. The registry's design supports any `() => Promise<void>` function
-if future modules need it.
+registered beyond provider instances and worktrees. The registry's design
+supports any `() => Promise<void>` function if future modules need it.
 
 ## How signals coordinate with the cleanup registry
 
-The CLI installs signal handlers at `src/cli.ts:242-252` that drain the
+The CLI installs signal handlers at `src/cli.ts:289-298` that drain the
 registry before exiting:
 
 ```
@@ -121,7 +126,7 @@ process.on("SIGTERM", async () => {
 });
 ```
 
-A third drain site is the top-level `.catch()` handler at `src/cli.ts:304-307`,
+A third drain site is the top-level `.catch()` handler at `src/cli.ts:321-324`,
 which catches unhandled errors from `main()`:
 
 ```
@@ -269,11 +274,12 @@ This would give each cleanup function 5 seconds before the loop moves on.
 
 ## Source reference
 
-- `src/cleanup.ts` -- Full cleanup registry implementation (35 lines)
-- `src/cli.ts:242-252` -- Signal handler installation
-- `src/cli.ts:304-307` -- Error handler with cleanup drain
-- `src/agents/orchestrator.ts:151` -- Dispatch-mode cleanup registration
-- `src/spec-generator.ts:308, 431` -- Spec-mode cleanup registration
+- `src/helpers/cleanup.ts` -- Full cleanup registry implementation (35 lines)
+- `src/cli.ts:289-298` -- Signal handler installation
+- `src/cli.ts:321-324` -- Error handler with cleanup drain
+- `src/orchestrator/dispatch-pipeline.ts:205, 251, 291` -- Dispatch-mode cleanup registration (provider + worktrees)
+- `src/orchestrator/spec-pipeline.ts:209` -- Spec-mode cleanup registration
+- `src/orchestrator/fix-tests-pipeline.ts:172` -- Fix-tests-mode cleanup registration
 
 ## Related documentation
 
@@ -287,11 +293,13 @@ This would give each cleanup function 5 seconds before the loop moves on.
   dispatch-mode cleanup is registered
 - [Spec Generation](../spec-generation/overview.md) -- Where spec-mode
   cleanup is registered
+- [Resilience overview](../shared-utilities/resilience.md) -- How cleanup,
+  retry, and timeout compose in the dispatch pipeline
 - [Provider Abstraction](../provider-system/provider-overview.md) -- The
   `cleanup()` method on ProviderInstance
 - [Provider Interface](./provider.md) -- The `ProviderInstance` type that
   defines the `cleanup()` method
 - [Adding a Provider](../provider-system/adding-a-provider.md) -- Guide for
   implementing cleanup idempotency in new providers
-- [Testing Overview](../testing/overview.md) -- Test coverage (note: the
-  cleanup registry is not unit tested)
+- [Testing Overview](../testing/overview.md) -- Test coverage for the
+  cleanup registry

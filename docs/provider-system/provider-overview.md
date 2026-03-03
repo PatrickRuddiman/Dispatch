@@ -132,7 +132,7 @@ graph TD
 
     subgraph "Interface (provider.ts)"
         IF["ProviderInstance interface"]
-        PN["ProviderName union type<br/>&quot;opencode&quot; | &quot;copilot&quot;"]
+        PN["ProviderName union type<br/>&quot;opencode&quot; | &quot;copilot&quot; | &quot;claude&quot; | &quot;codex&quot;"]
     end
 
     subgraph "Backends"
@@ -177,14 +177,14 @@ dispatch "tasks/**/*.md" --provider opencode --server-url http://localhost:4096
 
 ## Why ProviderName is a compile-time union
 
-`ProviderName` is defined as `"opencode" | "copilot"` -- a string literal union
+`ProviderName` is defined as `"opencode" | "copilot" | "claude" | "codex"` -- a string literal union
 type rather than a runtime-discovered plugin set. This is a deliberate design
 choice:
 
 - **Type safety**: TypeScript can verify at compile time that only valid provider
   names flow through the CLI, orchestrator, and registry. Misspelled names are
   caught by `tsc`, not at runtime.
-- **Simplicity**: The project is small (two providers). A plugin discovery system
+- **Simplicity**: The project has four providers. A plugin discovery system
   (dynamic `import()`, file scanning, or a plugin manifest) would add complexity
   without proportional benefit.
 - **Explicitness**: All available providers are visible in a single union type and

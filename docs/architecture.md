@@ -46,12 +46,12 @@ C4Context
 
         Container(ds_layer, "Datasource Layer", "src/datasources/", "Unified CRUD + git lifecycle across backends")
         Container(prov_layer, "Provider Layer", "src/providers/", "AI runtime abstraction: boot, session, prompt, cleanup")
-        Container(agent_layer, "Agent Layer", "src/agents/", "Planner, executor, spec agent roles")
+        Container(agent_layer, "Agent Layer", "src/agents/", "Planner, executor, spec, commit agent roles")
 
         Container(parser, "Task Parser", "src/parser.ts", "Markdown checkbox extraction, context filtering, completion marking")
         Container(specgen, "Spec Generator", "src/spec-generator.ts", "Input classification, post-processing, validation")
         Container(tui, "Terminal UI", "src/tui.ts", "Real-time progress dashboard with spinner and task list")
-        Container(shared, "Shared Utilities", "src/cleanup.ts, logger.ts, format.ts, slugify.ts, timeout.ts", "Cleanup registry, logging, formatting, slugification, timeout")
+        Container(shared, "Shared Utilities", "src/helpers/cleanup.ts, logger.ts, format.ts, slugify.ts, helpers/timeout.ts, helpers/retry.ts", "Cleanup registry, logging, formatting, slugification, timeout, retry")
     }
 
     System_Ext(github, "GitHub", "Issues, PRs via gh CLI")
@@ -72,7 +72,7 @@ C4Context
     Rel(spec_pipe, agent_layer, "spec agent")
     Rel(dispatch_pipe, ds_layer, "fetch, close, git lifecycle")
     Rel(dispatch_pipe, prov_layer, "boot, session, prompt")
-    Rel(dispatch_pipe, agent_layer, "planner + executor agents")
+    Rel(dispatch_pipe, agent_layer, "planner + executor + commit agents")
     Rel(dispatch_pipe, parser, "parse, mark complete, group by mode")
     Rel(dispatch_pipe, tui, "real-time progress")
     Rel(fix_pipe, prov_layer, "boot, session, prompt")
@@ -104,7 +104,8 @@ flowchart LR
     B -->|".dispatch/specs/*.md"| C["dispatch 42"]
     C --> D["Planner Agent<br/>Read-only exploration,<br/>detailed plan per task"]
     D --> E["Executor Agent<br/>Implements changes<br/>per plan"]
-    E --> F["Git: branch, commit,<br/>push, open PR"]
+    E --> E2["Commit Agent<br/>Squashes commits,<br/>generates PR metadata"]
+    E2 --> F["Git: branch, commit,<br/>push, open PR"]
 ```
 
 | Stage | Command | Agent | Output |
@@ -222,8 +223,8 @@ compile-time string literal union keys, and a boot/get function:
 
 | Registry | Key type | Location | Extension guide |
 |----------|----------|----------|-----------------|
-| Providers | `ProviderName` (`"opencode"` \| `"copilot"`) | `src/providers/index.ts` | [Adding a provider](provider-system/adding-a-provider.md) |
-| Agents | `AgentName` (`"planner"` \| `"executor"` \| `"spec"`) | `src/agents/index.ts` | `src/agents/interface.ts` docstring |
+| Providers | `ProviderName` (`"opencode"` \| `"copilot"` \| `"claude"` \| `"codex"`) | `src/providers/index.ts` | [Adding a provider](provider-system/adding-a-provider.md) |
+| Agents | `AgentName` (`"planner"` \| `"executor"` \| `"spec"` \| `"commit"`) | `src/agents/index.ts` | `src/agents/interface.ts` docstring |
 | Datasources | `DatasourceName` (`"github"` \| `"azdevops"` \| `"md"`) | `src/datasources/index.ts` | [Adding a datasource](datasource-system/overview.md#adding-a-new-datasource) |
 
 ### Datasource layer
@@ -275,6 +276,7 @@ pipeline:
 | **Spec** | Explore codebase, generate strategic specs | Writes to `.dispatch/tmp/` via AI, reads back, post-processes | [Spec generation](spec-generation/overview.md) |
 | **Planner** | Read-only exploration, produce execution plan | Read-only enforcement via prompt instructions (not tool restrictions) | [Planner](planning-and-dispatch/planner.md) |
 | **Executor** | Follow plan, make code changes | Gets plan context from planner output | [Dispatcher](planning-and-dispatch/dispatcher.md) |
+| **Commit** | Generate commit message and PR metadata | Analyzes branch diff, squashes per-task commits into one | [Commit agent](planning-and-dispatch/commit-agent.md) |
 
 The optional `--no-plan` flag bypasses the planner for simpler tasks.
 
@@ -301,8 +303,8 @@ See [datasource integrations](datasource-system/integrations.md) and
 
 ### Process cleanup and graceful shutdown
 
-The [cleanup registry](shared-types/cleanup.md) (`src/cleanup.ts`) provides a
-safety net for resource teardown:
+The [cleanup registry](shared-types/cleanup.md) (`src/helpers/cleanup.ts`)
+provides a safety net for resource teardown:
 
 1. When a provider boots, its `cleanup()` is registered immediately via
    `registerCleanup()`.
@@ -330,6 +332,7 @@ operations:
 | Spec generation fails for one issue | `failed` counter incremented; others continue | [Spec generation](spec-generation/overview.md#error-handling-and-exit-codes) |
 | Planner times out | Retried up to `--plan-retries` (default 1) with `--plan-timeout` (default 10 min) | [Orchestrator](cli-orchestration/orchestrator.md) |
 | Executor returns null | Task marked failed; pipeline continues | [Dispatcher](planning-and-dispatch/dispatcher.md) |
+| Commit agent fails | Fallback to heuristic PR title/body; per-task commits preserved | [Commit agent](planning-and-dispatch/commit-agent.md) |
 | Datasource sync fails post-execution | Warning logged; task still counted as done | [Orchestrator](cli-orchestration/orchestrator.md) |
 | Provider boot fails | Entire run aborts (misconfiguration — no retry) | [Provider error recovery](provider-system/provider-overview.md#error-recovery-on-boot-failure) |
 | PR already exists for branch | Falls back to returning existing PR URL | [Datasource overview](datasource-system/overview.md#existing-pr-handling) |
@@ -373,33 +376,47 @@ Concurrent task execution (`--concurrency > 1`) introduces risks documented in
 2. **Git commit cross-contamination**: `git add -A` stages all changes; one
    task's commit can include another's uncommitted work.
 
-### Timeout and retry
+### Timeout, retry, and resilience
 
 The planner agent is wrapped in [`withTimeout()`](shared-utilities/timeout.md)
-with configurable bounds:
+with configurable bounds, and the executor agent is wrapped in
+[`withRetry()`](shared-utilities/retry.md) for automatic retry on transient
+failures:
 
 | Setting | CLI flag | Default | Config key |
 |---------|----------|---------|------------|
 | Planning timeout | `--plan-timeout` | 10 minutes | `planTimeout` |
 | Planning retries | `--plan-retries` | 1 | `planRetries` |
+| Executor retries | (hardcoded) | 2 | -- |
 
 On `TimeoutError`, the pipeline retries up to `maxPlanAttempts`. Non-timeout
-errors break immediately. Provider `prompt()` calls themselves have no timeout
-or cancellation mechanism — a hung agent blocks the pipeline indefinitely. See
-[provider timeouts](provider-system/provider-overview.md#prompt-timeouts-and-cancellation).
+errors break immediately. The executor uses `withRetry` with unconditional
+retry on any error. Provider `prompt()` calls themselves have no timeout
+or cancellation mechanism -- a hung agent blocks the pipeline indefinitely.
+
+See [resilience overview](shared-utilities/resilience.md) for how cleanup,
+timeout, and retry compose across all pipeline modes, and
+[provider timeouts](provider-system/provider-overview.md#prompt-timeouts-and-cancellation)
+for prompt-level considerations.
 
 ### External tool dependencies
 
-Dispatch depends on external CLI tools at runtime but performs no pre-flight
-checks for their presence:
+Dispatch depends on external CLI tools at runtime. The
+[prerequisite checker](shared-helpers/prereqs.md) (`src/helpers/prereqs.ts`)
+validates tool availability at startup before any pipeline logic runs:
 
-| Tool | Required when | Failure mode |
-|------|--------------|-------------|
-| `git` | Always in dispatch mode | `commitTask()` throws |
-| `gh` | GitHub datasource operations | ENOENT from `execFile` |
-| `az` + `azure-devops` extension | Azure DevOps operations | ENOENT or "not a recognized command" |
-| OpenCode CLI or server | `--provider opencode` | `bootProvider()` throws |
-| Copilot CLI | `--provider copilot` | `client.start()` throws |
+| Tool | Required when | Pre-flight check | Failure mode if unchecked |
+|------|--------------|------------------|--------------------------|
+| `git` | Always in dispatch mode | `git --version` | `commitTask()` throws |
+| `gh` | GitHub datasource operations | `gh --version` (when datasource is `github`) | ENOENT from `execFile` |
+| `az` + `azure-devops` extension | Azure DevOps operations | `az --version` (when datasource is `azdevops`) | ENOENT or "not a recognized command" |
+| Node.js >= 20.12.0 | Always | `process.versions.node` semver check | Runtime errors |
+| OpenCode CLI or server | `--provider opencode` | *(not checked by prereqs)* | `bootProvider()` throws |
+| Copilot CLI | `--provider copilot` | *(not checked by prereqs)* | `client.start()` throws |
+
+The prereq checker validates tool presence but **not** authentication status
+(`gh auth status`, `az account show`) or CLI extension availability. See
+[Prerequisite Checker](shared-helpers/prereqs.md) for details.
 
 There are no subprocess timeouts on `execFile` calls (except the 10 MB
 `maxBuffer` limit in the fix-tests pipeline). See
@@ -413,6 +430,8 @@ There are no subprocess timeouts on `execFile` calls (except the 10 MB
 | `.dispatch/specs/` | Generated spec files; markdown datasource storage | Managed by datasource lifecycle |
 | `.dispatch/specs/archive/` | Closed specs (markdown datasource) | Manual recovery via file move |
 | `.dispatch/tmp/` | Temp spec files during AI generation (UUID-named) | Cleaned per-spec; may accumulate on crash |
+| `.dispatch/tmp/commit-*.md` | Commit agent output files (UUID-named) | Written per-issue; may accumulate on crash |
+| `.dispatch/run-state.json` | Execution state for resumable runs | Managed by [run-state](shared-helpers/run-state.md) module; should be gitignored |
 | `/tmp/dispatch-*` | Temp directories for datasource-fetched issues | Cleaned on completion; orphaned on crash |
 
 No external databases are used. All state is file-based.
@@ -483,8 +502,12 @@ writes LF line endings. See [task parsing](task-parsing/overview.md).
 
 After each task completes, `git.ts` stages all changes (`git add -A`) and
 creates a conventional commit. The commit type (`feat`, `fix`, `docs`,
-`refactor`, etc.) is inferred from the task text via regex patterns. See
-[git operations](planning-and-dispatch/git.md).
+`refactor`, etc.) is inferred from the task text via regex patterns. After all
+tasks complete, the [commit agent](planning-and-dispatch/commit-agent.md)
+analyzes the full branch diff and squashes these per-task commits into a single
+AI-generated conventional commit with a PR title and description. See
+[git operations](planning-and-dispatch/git.md) and
+[commit agent](planning-and-dispatch/commit-agent.md).
 
 ### Three-tier configuration precedence
 
@@ -555,6 +578,7 @@ guidance and removal safety assessment.
   engine
   - [Planner agent](planning-and-dispatch/planner.md)
   - [Dispatcher](planning-and-dispatch/dispatcher.md)
+  - [Commit agent](planning-and-dispatch/commit-agent.md)
   - [Git operations](planning-and-dispatch/git.md)
   - [Task context & lifecycle](planning-and-dispatch/task-context-and-lifecycle.md)
   - [Integrations](planning-and-dispatch/integrations.md)
@@ -594,10 +618,17 @@ guidance and removal safety assessment.
   - [Parser types](shared-types/parser.md)
   - [Provider interface](shared-types/provider.md)
   - [Integrations](shared-types/integrations.md)
-- [Shared utilities](shared-utilities/overview.md) — Slugify and timeout
+- [Shared utilities](shared-utilities/overview.md) — Slugify, timeout, and retry
   - [Slugify](shared-utilities/slugify.md)
   - [Timeout](shared-utilities/timeout.md)
+  - [Retry](shared-utilities/retry.md)
+  - [Resilience overview](shared-utilities/resilience.md)
   - [Testing](shared-utilities/testing.md)
+- [Shared helpers](shared-helpers/prereqs.md) — Prerequisite checking,
+  batch confirmation, run state persistence
+  - [Prerequisite Checker](shared-helpers/prereqs.md)
+  - [Confirm Large Batch](shared-helpers/confirm-large-batch.md)
+  - [Run State](shared-helpers/run-state.md)
 
 ### Testing
 
@@ -607,6 +638,7 @@ guidance and removal safety assessment.
   - [Format tests](testing/format-tests.md)
   - [Parser tests](testing/parser-tests.md)
   - [Spec generator tests](testing/spec-generator-tests.md)
+  - [Shared helpers tests](testing/shared-helpers-tests.md)
 
 ### Deprecated
 

@@ -5,6 +5,11 @@ provider in isolated sessions. It is the execution phase of the pipeline,
 responsible for constructing the prompt, invoking the provider, and returning
 a structured result.
 
+The dispatcher is called by the [executor agent](./executor.md), which wraps
+it with task-completion tracking, timing, and error handling. The dispatcher
+itself is stateless -- it does not mark tasks complete or manage provider
+lifecycle.
+
 ## What it does
 
 The dispatcher receives a [`Task`](../task-parsing/api-reference.md#task) object and an optional execution plan (produced
@@ -174,8 +179,9 @@ agent as a best-effort executor. If verification is needed, it should be added
 at the orchestrator level (e.g., running tests after each task) rather than
 inside the dispatcher.
 
-After a successful dispatch, the [orchestrator](../cli-orchestration/orchestrator.md) (`src/orchestrator.ts:144-146`)
-calls [`markTaskComplete()`](../task-parsing/api-reference.md#marktaskcomplete) and [`commitTask()`](./git.md#the-committask-function) unconditionally, trusting the
+After a successful dispatch, the [executor agent](./executor.md) (`src/agents/executor.ts:85-87`)
+calls [`markTaskComplete()`](../task-parsing/api-reference.md#marktaskcomplete) to check off the task in the source
+markdown. The [orchestrator](../cli-orchestration/orchestrator.md) then calls [`commitTask()`](./git.md#the-committask-function), trusting the
 agent's response as an indication of completion.
 
 ### Error handling
@@ -273,6 +279,8 @@ Returned by `dispatchTask()`:
 
 ## Related documentation
 
+- [Executor Agent](./executor.md) -- The executor agent that wraps
+  `dispatchTask` with task-completion, timing, and error handling
 - [Pipeline Overview](./overview.md) -- Full pipeline flow and state machine
 - [Planner Agent](./planner.md) -- How plans are generated
 - [Git Operations](./git.md) -- What happens after successful dispatch
@@ -287,5 +295,7 @@ Returned by `dispatchTask()`:
   used for plan generation timeout
 - [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) --
   File I/O safety relevant to `markTaskComplete` after dispatch
+- [Executor & Dispatcher Tests](../testing/executor-and-dispatcher-tests.md) --
+  Test coverage for the dispatcher and executor agent
 - [Datasource Helpers](../datasource-system/datasource-helpers.md) -- Helper
   utilities for datasource operations referenced by the dispatcher

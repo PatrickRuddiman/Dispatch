@@ -6,7 +6,7 @@ other module in the Dispatch CLI depends on. Seven files compose this layer:
 | File | Purpose |
 |------|---------|
 | `src/cleanup.ts` | Process-level [cleanup registry](./cleanup.md) for graceful shutdown of provider resources |
-| `src/format.ts` | Duration [formatting helper](./format.md) (`elapsed()`) for progress reporting |
+| `src/helpers/format.ts` | [Formatting helpers](./format.md) (`elapsed()`, `renderHeaderLines()`) for duration display and header rendering |
 | `src/logger.ts` | Minimal chalk-based structured [logger](./logger.md) for CLI output with verbose/debug support |
 | `src/parser.ts` | [Task/TaskFile data types](./parser.md) and pure + async helpers for markdown checkbox parsing |
 | `src/provider.ts` | [ProviderName, ProviderBootOptions, and ProviderInstance](./provider.md) abstractions for AI agent runtimes |
@@ -22,7 +22,7 @@ types and utilities decouple:
 
 - The **CLI entry point** (`src/cli.ts`) from the provider implementation details
 - The **task parsing pipeline** from the planning and dispatch logic
-- The **orchestrator** from specific AI backends (OpenCode, Copilot)
+- The **orchestrator** from specific AI backends (OpenCode, Copilot, Claude, Codex)
 - The **planner** from raw file I/O concerns
 - The **signal handlers** from individual provider teardown mechanics (via the
   [cleanup registry](./cleanup.md))

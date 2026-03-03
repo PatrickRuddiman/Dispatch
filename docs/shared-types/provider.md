@@ -3,7 +3,7 @@
 The provider module (`src/provider.ts`) defines the `ProviderName`,
 `ProviderBootOptions`, and `ProviderInstance` types that abstract the AI agent
 runtime. This abstraction enables the orchestrator to interact with OpenCode,
-GitHub Copilot, or any future backend through a uniform lifecycle contract.
+GitHub Copilot, Claude, Codex, or any future backend through a uniform lifecycle contract.
 
 ## What it defines
 
@@ -11,7 +11,7 @@ The module exports three types and no runtime code:
 
 | Export | Kind | Description |
 |--------|------|-------------|
-| `ProviderName` | Type (string literal union) | `"opencode" \| "copilot"` |
+| `ProviderName` | Type (string literal union) | `"opencode" \| "copilot" \| "claude" \| "codex"` |
 | `ProviderBootOptions` | Interface | Options passed when booting a provider |
 | `ProviderInstance` | Interface | The lifecycle contract for a booted AI agent |
 
@@ -61,7 +61,13 @@ rather than spawning a new one. This enables several operational modes:
 ### `name: string` (readonly)
 
 Human-readable provider identifier. Used in TUI display and logging. Examples:
-`"opencode"`, `"copilot"`.
+`"opencode"`, `"copilot"`, `"claude"`, `"codex"`.
+
+### `model?: string` (optional, readonly)
+
+The model identifier used by this provider instance, if applicable. Not all
+providers expose a model name; this field is `undefined` when the provider
+does not surface model information.
 
 ### `createSession(): Promise<string>`
 
@@ -112,10 +118,14 @@ see [Adding a New Provider](../provider-system/adding-a-provider.md).
 
 ## Source reference
 
-- `src/provider.ts` -- Type definitions (52 lines)
-- `src/providers/index.ts` -- Registry (42 lines)
-- `src/providers/opencode.ts` -- OpenCode implementation (67 lines)
-- `src/providers/copilot.ts` -- Copilot implementation (62 lines)
+- `src/provider.ts` -- Type definitions
+- `src/providers/index.ts` -- Registry
+- `src/providers/opencode.ts` -- OpenCode implementation
+- `src/providers/copilot.ts` -- Copilot implementation
+- `src/providers/claude.ts` -- Claude implementation
+- `src/providers/codex.ts` -- Codex implementation (uses dynamic import; see
+  [Type Declarations and Mocks](../testing/type-declarations-and-mocks.md) for
+  the ambient module declaration and test mock)
 
 ## Related documentation
 

@@ -86,7 +86,7 @@ string (before CRLF normalization).
    number
 5. Returns the `TaskFile` with the original (un-normalized) content
 
-Defined at `src/parser.ts:69-99`.
+Defined at `src/parser.ts:69-104`.
 
 ### parseTaskFile
 
@@ -115,11 +115,11 @@ Read a file from disk and parse its contents. Thin wrapper around
 
 **Notes:**
 
-- Reads the file as UTF-8 (`src/parser.ts:105`)
+- Reads the file as UTF-8 (`src/parser.ts:110`)
 - Accepts any file path -- does not enforce `.md` extension
 - The `filePath` value is stored in `TaskFile.path` and each `Task.file`
 
-Defined at `src/parser.ts:104-107`.
+Defined at `src/parser.ts:109-112`.
 
 ### buildTaskContext
 
@@ -205,7 +205,7 @@ successfully dispatched.
 - See [Architecture & Concurrency](./architecture-and-concurrency.md#concurrent-task-completion)
   for concurrency analysis
 
-Defined at `src/parser.ts:112-134`.
+Defined at `src/parser.ts:117-139`.
 
 ### groupTasksByMode
 
@@ -253,7 +253,7 @@ The algorithm iterates through tasks in order, accumulating them into groups:
 | `[I, I, I]` | `[[I], [I], [I]]` | Each isolated task forms its own group |
 | `[]` | `[]` | Empty input produces empty output |
 
-See [Parser Tests — groupTasksByMode](../testing/parser-tests.md#grouptasksbymode-10-tests)
+See [Parser Tests — groupTasksByMode](../testing/parser-tests.md#grouptasksbymode-18-tests)
 for the full test coverage of this algorithm.
 
 **Execution order guarantee:** Groups are processed sequentially (group N
@@ -265,7 +265,7 @@ in its group complete before the next group begins.
 See [Orchestrator — Concurrency Model](../cli-orchestration/orchestrator.md#concurrency-model)
 for how the orchestrator uses these groups.
 
-Defined at `src/parser.ts:146-171`.
+Defined at `src/parser.ts:154-187`.
 
 ## Internal constants
 
@@ -291,9 +291,9 @@ The parser uses `readFile` and `writeFile` from `node:fs/promises`:
 
 | Function | Used in | Purpose |
 |---|---|---|
-| `readFile(path, "utf-8")` | `parseTaskFile` (`src/parser.ts:105`) | Read task file content |
-| `readFile(path, "utf-8")` | `markTaskComplete` (`src/parser.ts:113`) | Re-read file for freshness |
-| `writeFile(path, data, "utf-8")` | `markTaskComplete` (`src/parser.ts:133`) | Write updated file content |
+| `readFile(path, "utf-8")` | `parseTaskFile` (`src/parser.ts:110`) | Read task file content |
+| `readFile(path, "utf-8")` | `markTaskComplete` (`src/parser.ts:118`) | Re-read file for freshness |
+| `writeFile(path, data, "utf-8")` | `markTaskComplete` (`src/parser.ts:138`) | Write updated file content |
 
 **Key characteristics from the [Node.js documentation](https://nodejs.org/api/fs.html#promises-api):**
 
@@ -315,7 +315,7 @@ The parser uses `readFile` and `writeFile` from `node:fs/promises`:
   safety and race conditions
 - [Testing Guide](./testing-guide.md) -- how to run and extend tests
 - [Parser Tests (detailed)](../testing/parser-tests.md) -- comprehensive
-  breakdown of all 62 parser tests verifying these function contracts
+  breakdown of all 72 parser tests verifying these function contracts
 - [Shared Parser Types](../shared-types/parser.md) -- summary of types and
   functions from the shared-types perspective
 - [Task Context & Lifecycle](../planning-and-dispatch/task-context-and-lifecycle.md) --

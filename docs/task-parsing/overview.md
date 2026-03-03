@@ -89,7 +89,7 @@ for a detailed analysis.
 | File | Purpose |
 |---|---|
 | `src/parser.ts` | All parsing logic, types, and file mutation |
-| `src/tests/parser.test.ts` | Comprehensive test suite (995 lines, 62 tests) |
+| `src/tests/parser.test.ts` | Comprehensive test suite (1116 lines, 72 tests) |
 
 ## Related documentation
 
@@ -112,6 +112,6 @@ for a detailed analysis.
 - [Spec Generation](../spec-generation/overview.md) -- the `--spec` pipeline
   that produces the markdown task files consumed by the parser
 - [Testing Overview](../testing/overview.md) -- project-wide test suite
-  including [parser tests](../testing/parser-tests.md) (62 test cases)
+  including [parser tests](../testing/parser-tests.md) (72 test cases)
 - [Datasource System](../datasource-system/overview.md) -- the markdown
   datasource also reads/writes `.md` files (in `.dispatch/specs/`)

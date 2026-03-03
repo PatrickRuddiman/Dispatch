@@ -17,7 +17,7 @@ five public functions.
 
 ## Describe blocks
 
-The test file contains **5 describe blocks** with **62 tests** total — the
+The test file contains **5 describe blocks** with **72 tests** total — the
 largest test file in the project.
 
 ### parseTaskContent — basic extraction (19 tests)
@@ -74,10 +74,10 @@ Each extracted task has these fields:
 | `file` | `string` | Absolute file path |
 | `mode` | `"parallel" \| "serial" \| "isolated" \| undefined` | Execution mode from prefix |
 
-### parseTaskContent — mode extraction (17 tests)
+### parseTaskContent — mode extraction (22 tests)
 
-Tests the `(P)` and `(S)` mode prefix system that controls parallel vs. serial
-task execution.
+Tests the `(P)`, `(S)`, and `(I)` mode prefix system that controls parallel,
+serial, and isolated task execution.
 
 ```mermaid
 flowchart TD
@@ -85,7 +85,9 @@ flowchart TD
     B -->|Yes| C["mode = 'parallel'<br/>Strip '(P) ' from text"]
     B -->|No| D{"Starts with '(S) '?"}
     D -->|Yes| E["mode = 'serial'<br/>Strip '(S) ' from text"]
-    D -->|No| F["mode = 'serial' (default)<br/>Text unchanged"]
+    D -->|No| F{"Starts with '(I) '?"}
+    F -->|Yes| G["mode = 'isolated'<br/>Strip '(I) ' from text"]
+    F -->|No| H["mode = 'serial' (default)<br/>Text unchanged"]
 ```
 
 | Test | What it verifies |
@@ -107,13 +109,20 @@ flowchart TD
 | only strips the first mode prefix | `(P) (S) text` → parallel, text = `(S) text` |
 | handles inline markdown after prefix | Bold, links, italic after prefix preserved |
 | assigns serial to all untagged tasks in mixed file | Untagged surrounded by tagged = serial |
+| handles tab character after mode prefix | Tab after `(P)` still recognized |
+| does not extract mode when `(P)` or `(S)` appears mid-text | Mid-text mode letters are not prefixes |
+| handles long task descriptions with special punctuation | Em dash, issue refs, backticks after prefix |
+| extracts `(I)` prefix as isolated mode | `(I) text` → `mode: "isolated"` |
+| preserves raw line with `(I)` prefix intact | `raw` field keeps `(I)` |
+| handles `(I)` on indented tasks | Indentation does not affect isolated mode detection |
+| handles `(I)` with CRLF line endings | CRLF does not break isolated mode parsing |
 
 **Mode prefix rules:**
 
 - Case-sensitive: only uppercase `(P)`, `(S)`, and `(I)` are recognized
 - A space (or tab) is required after the closing parenthesis
 - Only the first prefix is consumed when multiple appear
-- `(P)` or `(S)` appearing mid-text (not at start) is not treated as a prefix
+- `(P)`, `(S)`, or `(I)` appearing mid-text (not at start) is not treated as a prefix
 - The prefix is stripped from `text` but preserved in `raw`
 
 ### parseTaskFile (1 test)
@@ -177,7 +186,7 @@ current one.
 - All other content (headings, prose, blank lines, regular list items) is
   preserved verbatim
 
-### groupTasksByMode (10 tests)
+### groupTasksByMode (18 tests)
 
 Tests the [`groupTasksByMode()`](../task-parsing/api-reference.md#grouptasksbymode) function, which partitions a flat list of tasks
 into execution groups based on their `mode` field.
@@ -190,8 +199,10 @@ flowchart TD
     B --> C{"Task mode?"}
     C -->|parallel| D["Add to current group"]
     C -->|serial or undefined| E["Add to current group<br/>then cap group<br/>(start new group for next task)"]
+    C -->|isolated| F["Flush current group if non-empty<br/>Push solo group for isolated task<br/>Start new empty group"]
     D --> B
     E --> B
+    F --> B
 ```
 
 Groups execute sequentially. Tasks within a group execute concurrently (if the
@@ -209,6 +220,14 @@ group contains parallel tasks).
 | treats undefined mode as serial | `[U,P,U]` → `[[U], [P,U]]` |
 | preserves task order within groups | Indices maintained |
 | handles serial at start followed by parallel | `[S,P,P]` → `[[S], [P,P]]` |
+| handles alternating P S P S pattern | `[P,S,P,S]` → `[[P,S], [P,S]]` |
+| single serial task produces exactly one group of length 1 | `[S]` → `[[S]]` (identity) |
+| groups a lone isolated task as a solo group | `[I]` → `[[I]]` |
+| isolated task at start flushes into solo group before remaining tasks | `[I,P,P]` → `[[I], [P,P]]` |
+| isolated task in middle produces three groups (P P I P P) | `[P,P,I,P,P]` → `[[P,P], [I], [P,P]]` |
+| isolated task at end flushes preceding group first | `[P,P,I]` → `[[P,P], [I]]` |
+| consecutive isolated tasks each get their own solo group | `[I,I,I]` → `[[I], [I], [I]]` |
+| handles mixed P/S/I sequences | `[P,S,I,P,P,I,S]` → `[[P,S], [I], [P,P], [I], [S]]` |
 
 **Grouping examples:**
 
@@ -220,6 +239,12 @@ group contains parallel tasks).
 | `P S P P` | `[[P,S],[P,P]]` | Serial caps first group, parallels accumulate |
 | `P S S P P P` | `[[P,S],[S],[P,P,P]]` | Three groups |
 | `S P P` | `[[S],[P,P]]` | Serial alone, then parallel group |
+| `I` | `[[I]]` | Lone isolated → solo group |
+| `I P P` | `[[I],[P,P]]` | Isolated flushes first, parallels accumulate |
+| `P P I P P` | `[[P,P],[I],[P,P]]` | Isolated in middle splits parallel runs |
+| `P P I` | `[[P,P],[I]]` | Isolated at end flushes preceding group |
+| `I I I` | `[[I],[I],[I]]` | Each isolated always gets its own group |
+| `P S I P P I S` | `[[P,S],[I],[P,P],[I],[S]]` | Mixed modes: all three interact |
 
 ## Temporary file cleanup
 

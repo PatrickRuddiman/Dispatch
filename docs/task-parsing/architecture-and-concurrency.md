@@ -12,7 +12,7 @@ file I/O safety, and how the orchestrator mitigates these risks.
 2. **Modify** the target line in memory (regex replace)
 3. **Write** the entire file back to disk (`writeFile`)
 
-This pattern is used in `src/parser.ts:99-121`.
+This pattern is used in `src/parser.ts:117-139`.
 
 ### Why markTaskComplete re-reads the file from disk
 
@@ -102,7 +102,7 @@ for full details on the group-aware batch-sequential algorithm.
   window for collision on the `markTaskComplete` call is narrow.
 - **The parser detects conflicts**: If the file was modified between the read
   and the regex match, `markTaskComplete` throws an error at
-  `src/parser.ts:113-117` ("does not match expected unchecked pattern"). This
+  `src/parser.ts:131-134` ("does not match expected unchecked pattern"). This
   acts as a safety net -- a corrupted write would cause the line to no longer
   match `UNCHECKED_RE`, and the error would surface rather than silently
   corrupting data.
@@ -118,6 +118,63 @@ For production use with high concurrency, consider:
    the file to get fresh line numbers before marking the next task.
 3. **Atomic write**: Use a write-to-temp-then-rename pattern for safer file
    updates.
+
+### Is this a true TOCTOU vulnerability?
+
+Yes, the `markTaskComplete` read-modify-write pattern is a textbook TOCTOU
+(time-of-check-time-of-use) race condition. The "check" (reading the file and
+finding the unchecked line) and the "use" (writing the updated content) are not
+atomic. Between the read and the write, another process or concurrent agent can
+modify the file, and the write will overwrite those changes.
+
+However, the practical impact is mitigated by three factors:
+
+1. **Narrow window**: The time between `readFile` and `writeFile` in
+   `markTaskComplete` is microseconds (only in-memory string manipulation
+   occurs between them). The race window is far shorter than typical agent
+   execution times of seconds to minutes.
+2. **Validation check**: The regex match at `src/parser.ts:131-134` catches
+   cases where the target line was modified between parse time and completion
+   time (though not between the `readFile` and `writeFile` within
+   `markTaskComplete` itself).
+3. **Orchestrator serialization**: The default `--concurrency 1` mode serializes
+   all task execution, eliminating concurrent `markTaskComplete` calls entirely.
+   Even with higher concurrency, the `groupTasksByMode` algorithm ensures that
+   serial and isolated tasks run alone.
+
+Node.js `fs/promises` does not provide file locking or atomic file operations.
+The `writeFile` function uses the `w` flag by default, which truncates and
+rewrites the entire file. There is no built-in compare-and-swap or
+advisory-lock mechanism. For production use with high concurrency on shared
+files, an application-level lock (per-file mutex or lock file) is required.
+
+## Blast radius of Task and TaskFile changes
+
+The `Task` and `TaskFile` interfaces are the parser's primary data contracts.
+Any change to these types (adding fields, renaming fields, changing types)
+affects every module that imports them. The current import graph shows five
+direct consumers:
+
+| Consumer | Import style | Fields used |
+|---|---|---|
+| Orchestrator (`src/agents/orchestrator.ts`) | Value + type import | All `Task` fields, `TaskFile.path`, `TaskFile.tasks`, `TaskFile.content` |
+| Planner (`src/agents/planner.ts`) | Type-only import | `Task.text`, `Task.file`, `Task.index` |
+| Dispatcher (`src/dispatcher.ts`) | Type-only import | `Task.text`, `Task.file` |
+| TUI (`src/tui.ts`) | Type-only import | `Task.text`, `Task.index`, `Task.file` |
+| Git (`src/git.ts`) | Type-only import | `Task.text` |
+
+**Adding a new optional field** (like `mode` was added) is backward-compatible:
+existing consumers that do not reference the new field continue to work.
+TypeScript's structural typing means type-only imports are unaffected.
+
+**Changing an existing field's type or removing a field** would break all five
+consumers and require coordinated updates. The orchestrator is the highest-risk
+consumer because it uses both value imports (functions) and type imports, and
+accesses nearly every field.
+
+**Adding a new exported function** (like `groupTasksByMode` was added) has zero
+blast radius on existing consumers -- only the orchestrator needs to import and
+call it.
 
 ## Line-number staleness
 
@@ -137,11 +194,11 @@ complete** because:
 
 1. `markTaskComplete` replaces content on a single line without adding or
    removing lines
-2. The `lines.join("\n")` at `src/parser.ts:120` preserves the line structure
+2. The `lines.join("\n")` at `src/parser.ts:138` preserves the line structure
 
 However, if the file is modified externally (e.g., a user adds or removes
 lines), the stored line numbers will be wrong. The parser's safety check at
-`src/parser.ts:113-117` catches this: if the line at the stored offset does not
+`src/parser.ts:131-134` catches this: if the line at the stored offset does not
 match `UNCHECKED_RE`, it throws an error rather than checking off the wrong
 line.
 
@@ -198,7 +255,7 @@ failed in the [TUI](../cli-orchestration/tui.md) with the error message.
 ### Encoding
 
 Both `readFile` and `writeFile` use explicit `"utf-8"` encoding
-(`src/parser.ts:92`, `src/parser.ts:100`, `src/parser.ts:120`). This means:
+(`src/parser.ts:110`, `src/parser.ts:118`, `src/parser.ts:138`). This means:
 
 - Files are assumed to be UTF-8
 - Non-UTF-8 files (e.g., UTF-16, Latin-1) will be read without error but
@@ -221,7 +278,7 @@ function would need to detect and preserve the original line ending style.
 ## How TaskFile.content is consumed downstream
 
 The `TaskFile.content` field stores the **original, un-normalized** file content
-as passed to [`parseTaskContent`](./api-reference.md#parsetaskcontent) (`src/parser.ts:85`). In the [orchestrator](../cli-orchestration/orchestrator.md):
+as passed to [`parseTaskContent`](./api-reference.md#parsetaskcontent) (`src/parser.ts:103`). In the [orchestrator](../cli-orchestration/orchestrator.md):
 
 1. `parseTaskFile` is called, which reads the file and passes content to
    `parseTaskContent`
@@ -239,7 +296,7 @@ this context is incorporated into the planner prompt.
 
 ## Why buildTaskContext strips sibling tasks
 
-The `buildTaskContext` function (`src/parser.ts:36-60`) removes all unchecked
+The `buildTaskContext` function (`src/parser.ts:49-63`) removes all unchecked
 task lines except the one being planned. This design serves several purposes:
 
 1. **Focus**: The [planner](../planning-and-dispatch/planner.md) agent should implement one task at a time. Showing
@@ -261,7 +318,7 @@ instructed to review non-task prose for implementation details.
 ## Type sharing across modules
 
 The [`Task`](./api-reference.md#task) and [`TaskFile`](./api-reference.md#taskfile) interfaces are exported directly from `src/parser.ts`
-(`src/parser.ts:11-29`) and imported by consumers using standard ES module
+(`src/parser.ts:11-31`) and imported by consumers using standard ES module
 imports:
 
 ```typescript

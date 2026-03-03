@@ -75,7 +75,7 @@ flowchart TD
     subgraph "Phase 3: Provider Boot"
         G -->|Yes| I["bootProvider(provider, {url, cwd})"]
         I --> I2["registerCleanup(() => instance.cleanup())"]
-        I2 --> I3["bootPlanner + bootExecutor"]
+        I2 --> I3["bootPlanner + bootExecutor + bootCommit"]
     end
 
     subgraph "Phase 4: Per-Issue Dispatch"
@@ -105,7 +105,14 @@ flowchart TD
         V -->|Yes| W{"more groups?"}
         W -->|Yes| M
 
-        W -->|No| W2{"branch was created?"}
+        W -->|No| W1a{"branchDiff non-empty?"}
+        W1a -->|Yes| W1b["commitAgent.generate(branchDiff, issue, taskResults)"]
+        W1b --> W1c{"success?"}
+        W1c -->|Yes| W1d["squashBranchCommits(defaultBranch, commitMessage)"]
+        W1c -->|No| W1e["fallback: buildPrTitle() / buildPrBody()"]
+        W1a -->|No| W1e
+        W1d --> W2{"branch was created?"}
+        W1e --> W2
         W2 -->|Yes| W3["pushBranch → createPullRequest → switchBranch(default)"]
         W2 -->|No| W4["Continue"]
         W3 --> W4
@@ -119,7 +126,7 @@ flowchart TD
     end
 
     subgraph "Phase 6: Cleanup"
-        Y --> Z["executor.cleanup() + planner.cleanup() + instance.cleanup()"]
+        Y --> Z["executor.cleanup() + planner.cleanup() + commitAgent.cleanup() + instance.cleanup()"]
         Z --> ZZ["TUI stop, return DispatchSummary"]
     end
 ```
@@ -278,6 +285,97 @@ This per-file grouping is what enables the branch lifecycle: all tasks for a
 given issue are dispatched on the same feature branch before the pipeline moves
 to the next issue.
 
+## Worktree-based parallel execution
+
+When multiple issues are discovered, the pipeline can process them in parallel
+using [git worktrees](https://git-scm.com/docs/git-worktree). Each issue gets
+its own isolated working directory, provider instance, planner, executor, and
+commit agent — enabling true parallel execution without branch-switching
+conflicts.
+
+### Decision logic
+
+The pipeline decides whether to use worktrees at
+`src/orchestrator/dispatch-pipeline.ts:186`:
+
+```mermaid
+flowchart TD
+    A{"--no-worktree?"} -->|Yes| B["Serial mode"]
+    A -->|No| C{"--no-branch?"}
+    C -->|Yes| B
+    C -->|No| D{"tasksByFile.size > 1?"}
+    D -->|No| B
+    D -->|Yes| E["Worktree mode"]
+```
+
+All three conditions must pass for worktree mode: `!noWorktree && !noBranch && tasksByFile.size > 1`. Single-issue runs always use serial mode to avoid
+unnecessary worktree overhead.
+
+### Per-issue processing (processIssueFile)
+
+The `processIssueFile` inner function (`src/orchestrator/dispatch-pipeline.ts:236-549`) handles both modes. In worktree mode:
+
+1. **Worktree creation**: `createWorktree(cwd, file, branchName)` creates an
+   isolated working directory with its own branch
+   (`src/orchestrator/dispatch-pipeline.ts:250`).
+2. **Cleanup registration**: `registerCleanup()` is called to ensure the
+   worktree is removed on process exit
+   (`src/orchestrator/dispatch-pipeline.ts:251`).
+3. **Per-worktree provider boot**: A separate `ProviderInstance`, planner,
+   executor, and commit agent are booted with `cwd` set to the worktree path
+   (`src/orchestrator/dispatch-pipeline.ts:289-298`).
+4. **TUI tagging**: Tasks are tagged with the worktree name for display
+   (`src/orchestrator/dispatch-pipeline.ts:256-259`).
+5. **Per-worktree cleanup**: After all tasks complete, the worktree's provider
+   and agents are cleaned up independently
+   (`src/orchestrator/dispatch-pipeline.ts:544-548`).
+
+In serial mode, the function uses the shared provider and agents booted at the
+top level, and branch creation uses `createAndSwitchBranch` instead of worktrees.
+
+### Execution topology
+
+```
+Worktree mode (Promise.all):       Serial mode (for...of):
+┌─────────────┐                    ┌─────────────┐
+│ Issue #1    │  ← own provider    │ Issue #1    │  ← shared provider
+│ Issue #2    │  ← own provider    │   (done)    │
+│ Issue #3    │  ← own provider    │ Issue #2    │  ← shared provider
+└─────────────┘                    │   (done)    │
+All run concurrently               │ Issue #3    │  ← shared provider
+via Promise.all()                  └─────────────┘
+(line 553)                         Sequential for...of loop
+                                   (line 559)
+```
+
+### Branch creation failure handling
+
+If branch or worktree creation fails for an issue, all tasks in that issue are
+immediately marked as failed and the `processIssueFile` function returns early
+(`src/orchestrator/dispatch-pipeline.ts:265-278`). Other issues continue
+processing independently.
+
+## Executor retry mechanism
+
+After planning, the executor runs with a hardcoded retry count:
+
+    const execRetries = 2;
+
+This value is **not configurable** via CLI or config — it is defined at
+`src/orchestrator/dispatch-pipeline.ts:384`. The retry uses the `withRetry`
+utility (`src/helpers/retry.ts`), which re-invokes the executor if it returns
+`success: false`. Non-success results are converted to thrown errors to trigger
+the retry:
+
+1. `localExecutor.execute()` is called
+2. If `result.success` is `false`, an error is thrown
+3. `withRetry` catches the error and retries up to `execRetries` times
+4. If all retries fail, the `.catch()` handler produces a failed
+   `ExecuteResult`
+
+Unlike planner retries (which only retry on `TimeoutError`), executor retries
+fire on **any** failure — including non-timeout errors.
+
 ## Automatic issue closing
 
 After all issues have been dispatched, the pipeline calls
@@ -366,6 +464,7 @@ path (lines 287-289):
 ```
 await executor.cleanup();
 await planner?.cleanup();
+await commitAgent?.cleanup();
 await instance.cleanup();
 ```
 
@@ -453,6 +552,11 @@ time via `bootOrchestrator({ cwd })` rather than passed per-invocation:
 | `project` | `string?` | Azure DevOps project name |
 | `planTimeout` | `number?` | Planning timeout in minutes. Passed through from CLI `--plan-timeout` or config `planTimeout`. Used with [`withTimeout()`](../shared-utilities/timeout.md). |
 | `planRetries` | `number?` | Number of retry attempts after planning timeout. Passed through from CLI `--plan-retries` or config `planRetries`. |
+| `noWorktree` | `boolean?` | Disable worktree-based parallel execution even when multiple issues are present. Defaults to `false`. Passed through from CLI `--no-worktree` or config `noWorktree`. |
+| `model` | `string?` | Model override to pass to the provider (provider-specific format). Passed through from CLI `--model` or config `model`. |
+| `workItemType` | `string?` | Azure DevOps work item type (e.g., `"Product Backlog Item"`). Passed through from CLI `--work-item-type` or config `workItemType`. Used in datasource fetch options and issue closing. |
+| `retries` | `number?` | General retry count. Falls back to this value when `planRetries` is not set: `maxPlanAttempts = (planRetries ?? retries ?? 1) + 1` (`src/orchestrator/dispatch-pipeline.ts:74`). |
+| `force` | `boolean?` | Force re-dispatch of already-completed tasks. |
 
 ### DispatchSummary
 
@@ -481,6 +585,8 @@ Returned from `orchestrate()` to the CLI:
   signatures including `groupTasksByMode()`
 - [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) -- `planTask()`,
   `dispatchTask()`, and `commitTask()` internals
+- [Commit Agent](../planning-and-dispatch/commit-agent.md) -- AI-generated
+  commit messages, PR metadata, and post-execution squash
 - [Provider Abstraction & Backends](../provider-system/provider-overview.md) -- `bootProvider()`
   lifecycle
 - [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) -- concurrent
@@ -504,4 +610,8 @@ Returned from `orchestrate()` to the CLI:
 - [Timeout Utility](../shared-utilities/timeout.md) -- `withTimeout()` used for
   controlling planning execution timeouts (`planTimeout` option)
 - [Testing Overview](../testing/overview.md) -- project-wide test suite
-  documentation (note: orchestrator is not directly tested)
+  documentation (note: orchestrator is not directly tested; dispatch-pipeline
+  and datasource-helpers have dedicated test files)
+- [Planning & Dispatch Integrations](../planning-and-dispatch/integrations.md) --
+  Git worktree operations, squash via soft reset, and other external tool
+  integrations used by the dispatch pipeline

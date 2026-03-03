@@ -21,6 +21,9 @@ The tool is backend-agnostic: it supports multiple issue trackers via a datasour
 - **Real-time TUI dashboard** — terminal UI with spinner, progress bar, and per-task status tracking
 - **Three-tier configuration** — CLI flags > project-local config file (`.dispatch/config.json`) > defaults
 - **Configurable concurrency** — control parallel task execution per batch
+- **AI-generated commit messages & PR descriptions** — a commit agent analyzes the branch diff and generates conventional commit messages, PR titles, and PR descriptions via AI
+- **Run-state persistence** — interrupted runs resume automatically by skipping completed tasks; use `--force` to override and re-run all tasks
+- **Git worktree isolation** — each issue is processed in its own git worktree for safe parallel execution (`--no-worktree` to disable)
 
 ## Supported Backends
 
@@ -30,6 +33,8 @@ The tool is backend-agnostic: it supports multiple issue trackers via a datasour
 |----------|-----|-------------|
 | OpenCode | `@opencode-ai/sdk` | Async — fire-and-forget + SSE event stream |
 | GitHub Copilot | `@github/copilot-sdk` | Synchronous — blocking request/response |
+| Claude Code | `@anthropic-ai/claude-agent-sdk` | Streaming — session-based send + async stream |
+| Codex | `@openai/codex` | Synchronous — AgentLoop blocking request/response |
 
 ### Datasources (Issue Trackers)
 
@@ -85,6 +90,36 @@ copilot --version
 ```
 
 See [Copilot backend docs](./docs/provider-system/copilot-backend.md) for full setup options.
+
+**Claude Code**
+
+Requires an [Anthropic API key](https://console.anthropic.com/).
+
+```sh
+# Install
+npm install -g @anthropic-ai/claude-code
+```
+
+Run `claude` and follow the authentication prompts, or set the `ANTHROPIC_API_KEY` environment variable. Then verify:
+
+```sh
+claude --version
+```
+
+**Codex**
+
+Requires an [OpenAI API key](https://platform.openai.com/api-keys).
+
+```sh
+# Install
+npm install -g @openai/codex
+```
+
+Run `codex` and follow the authentication prompts, or set the `OPENAI_API_KEY` environment variable. Then verify:
+
+```sh
+codex --version
+```
 
 ## Installation
 
@@ -157,14 +192,20 @@ dispatch --fix-tests
 ### Common options
 
 ```bash
+dispatch --dry-run "tasks.md"          # List tasks without dispatching
 dispatch --no-plan "tasks.md"          # Skip the planning phase
 dispatch --no-branch "tasks.md"        # Skip branch creation, push, and PR lifecycle
-dispatch --provider copilot "tasks.md" # Use GitHub Copilot instead of OpenCode
-dispatch --source github "tasks.md"    # Explicitly set the datasource
+dispatch --no-worktree "tasks.md"      # Skip git worktree isolation for parallel issues
+dispatch --force "tasks.md"            # Ignore prior run state and re-run all tasks
 dispatch --concurrency 3 "tasks.md"    # Run up to 3 tasks in parallel
+dispatch --provider copilot "tasks.md" # Use GitHub Copilot instead of OpenCode
 dispatch --server-url http://localhost:3000 "tasks.md"  # Use a running provider server
 dispatch --plan-timeout 15 "tasks.md"  # Set planning timeout to 15 minutes
+dispatch --retries 3 "tasks.md"        # Retry attempts for all agents (default: 2)
 dispatch --plan-retries 2 "tasks.md"   # Retry planning up to 2 times
+dispatch --test-timeout 10 "tasks.md"  # Set test timeout to 10 minutes (default: 5)
+dispatch --cwd ./my-project "tasks.md" # Set working directory
+dispatch --source github "tasks.md"    # Explicitly set the datasource
 dispatch --output-dir ./my-specs --spec 42  # Custom output directory for specs
 dispatch --verbose "tasks.md"          # Show detailed debug output
 ```
@@ -186,10 +227,12 @@ dispatch config
 
 Running `dispatch config` launches an interactive wizard that guides you through viewing, setting, and resetting your configuration.
 
-Valid config keys: `provider`, `model`, `concurrency`, `source`, `org`, `project`, `workItemType`, `serverUrl`, `planTimeout`, `planRetries`.
+Valid config keys: `provider`, `model`, `source`, `testTimeout`.
 
+- **`provider`** — AI agent runtime to use (`opencode`, `copilot`, `claude`, or `codex`). When omitted dispatch auto-detects an installed provider.
 - **`model`** — AI model override in provider-specific format (e.g. `"claude-sonnet-4-5"` for Copilot, `"anthropic/claude-sonnet-4"` for OpenCode). When omitted the provider uses its default.
-- **`workItemType`** — Azure DevOps work item type (e.g. `"User Story"`, `"Bug"`). Only relevant when using the `azdevops` datasource.
+- **`source`** — Datasource backend (`github`, `azdevops`, or `md`). When omitted dispatch auto-detects from the git remote URL.
+- **`testTimeout`** — Test command timeout in minutes. Must be a positive number.
 
 ## Requirements
 
@@ -199,7 +242,7 @@ Valid config keys: `provider`, `model`, `concurrency`, `source`, `org`, `project
 | git | Any | Required — auto-detection, conventional commits |
 | `gh` CLI | Any | Optional — required for GitHub datasource |
 | `az` CLI + azure-devops extension | Any | Optional — required for Azure DevOps datasource |
-| OpenCode or GitHub Copilot | Varies | At least one AI agent runtime required |
+| OpenCode, GitHub Copilot, Claude Code, or Codex | Varies | At least one AI agent runtime required |
 
 ## Development
 
@@ -234,16 +277,18 @@ dispatch --source azdevops "tasks.md"
 
 ### Provider binary not found
 
-dispatch requires a provider runtime (`opencode` or `copilot`) to be installed and on your `PATH`. If the binary is missing, the provider will fail to start.
+dispatch requires a provider runtime (`opencode`, `copilot`, `claude`, or `codex`) to be installed and on your `PATH`. If the binary is missing, the provider will fail to start.
 
 **Verify installation:**
 
 ```sh
 opencode --version
 copilot --version
+claude --version
+codex --version
 ```
 
-If not installed, see [OpenCode setup](./docs/provider-system/opencode-backend.md) or [Copilot setup](./docs/provider-system/copilot-backend.md).
+If not installed, see [OpenCode setup](./docs/provider-system/opencode-backend.md) or [Copilot setup](./docs/provider-system/copilot-backend.md). For Claude Code and Codex, refer to their official documentation for installation instructions.
 
 ### Planning timeout exceeded
 
@@ -256,7 +301,6 @@ dispatch --plan-timeout 20 "tasks.md"   # 20-minute timeout
 dispatch --plan-retries 3 "tasks.md"    # Retry planning up to 3 times
 ```
 
-Both values can also be set in `.dispatch/config.json` via the `planTimeout` and `planRetries` keys.
 
 ### Branch creation failed
 
@@ -293,7 +337,7 @@ dispatch looks for unchecked markdown checkboxes in the `## Tasks` section. Task
 ## Error Handling & Recovery
 
 - **Batch failure isolation** — when a task fails, other tasks in the same batch continue executing. Failed tasks are tracked and reported in the final summary (e.g., `Done — 5 completed, 1 failed`).
-- **No run resumption** — runs cannot currently be resumed after interruption. Re-running will re-process all unchecked (`- [ ]`) tasks; tasks already marked complete (`- [x]`) in the source file are skipped.
+- **Run-state persistence** — Dispatch saves task status to `.dispatch/run-state.json`. If a run is interrupted, re-running the same source file resumes from where it left off, skipping tasks that already succeeded. Use `--force` to ignore prior run state and re-run all tasks.
 - **`--dry-run` scope** — `--dry-run` covers task discovery and parsing only. It does not trigger spec generation, planning, or execution.
 
 ## License

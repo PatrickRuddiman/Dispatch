@@ -43,7 +43,7 @@ The `package.json` defines two test scripts:
 ## Test suite structure
 
 The test file (`src/tests/parser.test.ts`) is organized into five `describe` blocks
-covering each public function. For a comprehensive breakdown of all 62 tests, see
+covering each public function. For a comprehensive breakdown of all 72 tests, see
 the [detailed parser tests](../testing/parser-tests.md) documentation.
 
 ### [parseTaskContent](./api-reference.md#parsetaskcontent) (pure, no I/O)
@@ -125,9 +125,17 @@ These tests verify the execution group partitioning logic.
 | treats undefined mode as serial | Default mode behavior |
 | preserves task order within groups | Index ordering |
 | handles serial at start followed by parallel | `[S,P,P]` → `[[S],[P,P]]` |
+| handles alternating P S P S pattern | `[P,S,P,S]` → `[[P,S],[P,S]]` |
+| single serial task produces exactly one group of length 1 | `[S]` → `[[S]]` identity |
+| groups a lone isolated task as a solo group | `[I]` → `[[I]]` |
+| isolated task at start flushes into solo group | `[I,P,P]` → `[[I],[P,P]]` |
+| isolated task in middle produces three groups | `[P,P,I,P,P]` → `[[P,P],[I],[P,P]]` |
+| isolated task at end flushes preceding group | `[P,P,I]` → `[[P,P],[I]]` |
+| consecutive isolated tasks each get own group | `[I,I,I]` → `[[I],[I],[I]]` |
+| handles mixed P/S/I sequences | `[P,S,I,P,P,I,S]` → 5 groups |
 
 For the detailed grouping algorithm and examples, see
-[Parser Tests (detailed)](../testing/parser-tests.md#grouptasksbymode-10-tests).
+[Parser Tests (detailed)](../testing/parser-tests.md#grouptasksbymode-18-tests).
 
 ## Temporary file cleanup
 
@@ -173,6 +181,56 @@ When adding tests for the parser:
    documenting the parser's rejection criteria. Add them to the `parseTaskContent`
    block.
 
+## Integration: Vitest
+
+The parser tests use [Vitest](https://vitest.dev/) (v4.x), a Vite-native test
+framework that provides Jest-compatible APIs (`describe`, `it`, `expect`,
+`afterEach`) with ESM and TypeScript support out of the box.
+
+### Running a single test in isolation
+
+To run a specific test by name:
+
+```bash
+npx vitest run src/tests/parser.test.ts -t "extracts basic dash tasks"
+```
+
+The `-t` flag accepts a string or regex pattern matched against test names.
+Vitest also supports `.only` and `.skip` modifiers on `it()` and `describe()`
+blocks for focused testing during development.
+
+### Code coverage
+
+Generate a coverage report for the parser module:
+
+```bash
+npx vitest run --coverage src/tests/parser.test.ts
+```
+
+Vitest supports multiple coverage providers. The default provider uses V8
+coverage (built into Node.js). No additional configuration is required for
+basic coverage. Coverage reports are output to `./coverage/` by default and
+can be configured in `vitest.config.ts` or the `test` field in `vite.config.ts`.
+
+### Debugging tests
+
+To debug parser tests with Node.js inspector:
+
+```bash
+node --inspect-brk ./node_modules/.bin/vitest run src/tests/parser.test.ts
+```
+
+Then attach a debugger (VS Code, Chrome DevTools) to the Node.js inspector
+port (default 9229). Vitest also supports the `--inspect` and
+`--inspect-brk` flags directly:
+
+```bash
+npx vitest run --inspect-brk src/tests/parser.test.ts
+```
+
+For VS Code, create a launch configuration targeting the vitest binary with
+the test file path as an argument.
+
 ## Related documentation
 
 - [Overview](./overview.md) -- what the parser does and why
@@ -197,7 +255,7 @@ the [Testing section](../testing/overview.md):
 - [Test suite overview](../testing/overview.md) -- framework, patterns, and
   coverage map for all test files
 - [Parser tests (detailed)](../testing/parser-tests.md) -- comprehensive
-  breakdown of all 62 parser tests including mode extraction and grouping
+  breakdown of all 72 parser tests including mode extraction and grouping
 - [Configuration tests](../testing/config-tests.md) -- config I/O, validation,
   merge precedence, and `handleConfigCommand` tests
 - [Format utility tests](../testing/format-tests.md) -- `elapsed()` duration

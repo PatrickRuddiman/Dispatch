@@ -40,7 +40,8 @@ serve as the source of truth for work items. Use cases include:
 
 The default specs directory is `.dispatch/specs/` relative to the working
 directory (`src/datasources/md.ts:16`). This is not configurable through the
-datasource interface -- it is always resolved as `join(cwd, ".dispatch/specs")`.
+datasource interface -- it is always resolved as `join(cwd, ".dispatch/specs")`
+(`src/datasources/md.ts:28`).
 
 ```
 project/
@@ -64,7 +65,7 @@ contains the full filename including the `.md` extension (e.g.,
 ### Automatic `.md` extension handling
 
 The `fetch()`, `update()`, and `close()` methods accept an `issueId` either
-with or without the `.md` extension (`src/datasources/md.ts:79`):
+with or without the `.md` extension (`src/datasources/md.ts:108`):
 
 - `fetch("my-feature")` reads `my-feature.md`
 - `fetch("my-feature.md")` reads `my-feature.md`
@@ -72,7 +73,7 @@ with or without the `.md` extension (`src/datasources/md.ts:79`):
 ### Title slugification in `create()`
 
 When creating a new spec, the title is [slugified](../shared-utilities/slugify.md) to produce the filename
-(`src/datasources/md.ts:104`):
+(`src/datasources/md.ts:133`):
 
 ```
 title.toLowerCase()
@@ -93,7 +94,7 @@ Examples:
 ### Filename collision risk
 
 The `create()` method uses `writeFile()` without checking for existing files
-(`src/datasources/md.ts:106`). If two specs produce the same slugified
+(`src/datasources/md.ts:135`). If two specs produce the same slugified
 filename, the second `create()` call will **silently overwrite** the first
 file. There is no collision detection or conflict resolution.
 
@@ -102,21 +103,78 @@ both produce `my-feature.md`, and the second call would overwrite the first.
 
 ## Title extraction
 
-The `extractTitle()` helper function (`src/datasources/md.ts:32`, exported)
-extracts the title from markdown content:
+The `extractTitle()` helper function (`src/datasources/md.ts:40`, exported)
+extracts the title from markdown content using a three-tier fallback:
 
-1. Looks for the first `# Heading` line (ATX heading level 1) using the regex
-   `/^#\s+(.+)$/m`.
-2. If found, returns the heading text (trimmed).
-3. If no H1 heading exists, falls back to the filename stem (without `.md`
-   extension).
+1. **H1 heading.** Looks for the first `# Heading` line (ATX heading level 1)
+   using the regex `/^#\s+(.+)$/m`. If found, returns the heading text
+   (trimmed).
+2. **First meaningful content line.** If no H1 heading exists, iterates through
+   all lines looking for the first non-empty line. Leading markdown prefixes
+   (`#`, `>`, `*`, `-`, and combinations) are stripped via the regex
+   `/^[#>*\-]+\s*/`. If the cleaned line exceeds 80 characters, it is truncated
+   at the last word boundary within 80 characters.
+3. **Filename stem.** If the content has no usable text at all (empty or only
+   whitespace/markdown prefixes), falls back to the filename stem (without
+   `.md` extension) via `parsePath(filename).name`.
 
 This means the `IssueDetails.title` may differ from the original title passed
 to `create()`. The `create()` method writes the `body` parameter as-is to the
 file. If the body does not contain an H1 heading, the title in subsequent
-`list()` or `fetch()` calls will be the filename stem, not the original title.
+`list()` or `fetch()` calls will be derived from the first meaningful line or
+the filename stem, not the original title.
+
+### Title extraction examples
+
+| Content | Filename | Extracted title |
+|---------|----------|----------------|
+| `"# My Feature\nSome details"` | `my-feature.md` | `"My Feature"` |
+| `"No heading here\njust text"` | `my-feature.md` | `"No heading here"` |
+| `"> A blockquote line"` | `my-feature.md` | `"A blockquote line"` |
+| `"- A list item"` | `my-feature.md` | `"A list item"` |
+| `""` (empty) | `my-feature.md` | `"my-feature"` |
+| `"## Second level only"` | `notes.md` | `"Second level only"` |
+| (80+ chars, no heading) | `long.md` | Truncated at last word boundary within 80 chars |
 
 ## Operation details
+
+The following diagram shows the file-based state machine for a markdown spec's
+lifecycle:
+
+```mermaid
+stateDiagram-v2
+    [*] --> NonExistent: Initial state
+
+    NonExistent --> Open: create()
+    note right of Open
+        File at .dispatch/specs/<slug>.md
+        mkdir({ recursive: true }) + writeFile()
+    end note
+
+    Open --> Open: update()
+    note right of Open
+        writeFile() overwrites body
+        title param ignored
+    end note
+
+    Open --> Open: fetch() / list()
+    note left of Open
+        readFile() + extractTitle()
+        Returns IssueDetails
+    end note
+
+    Open --> Archived: close()
+    note right of Archived
+        rename() to .dispatch/specs/archive/<id>.md
+        mkdir({ recursive: true }) for archive dir
+    end note
+
+    Archived --> Open: Manual move back
+    note left of Archived
+        No API method — user moves
+        file from archive/ to specs/
+    end note
+```
 
 ### `list()`
 
@@ -124,7 +182,7 @@ Lists all `.md` files in the specs directory, sorted alphabetically.
 
 **Missing directory handling:** If the specs directory does not exist,
 `list()` catches the `readdir()` error and returns an empty array
-(`src/datasources/md.ts:61`). This is a graceful fallback -- no error is
+(`src/datasources/md.ts:90`). This is a graceful fallback -- no error is
 thrown.
 
 **Non-.md files ignored:** Only files ending in `.md` are included. Other
@@ -139,7 +197,7 @@ subdirectory. Archived specs are not included in list results.
 | Source | `IssueDetails` field | Value |
 |--------|---------------------|-------|
 | Filename | `number` | Full filename (e.g., `"my-feature.md"`) |
-| First H1 or filename | `title` | Extracted via `extractTitle()` |
+| First H1, first line, or filename | `title` | Extracted via `extractTitle()` (three-tier fallback) |
 | File content | `body` | Complete file content as-is |
 | _(not available)_ | `labels` | Always `[]` |
 | _(hardcoded)_ | `state` | Always `"open"` |
@@ -163,7 +221,7 @@ Writes new body content to an existing spec file.
 
 **Title parameter is ignored:** The `_title` parameter is accepted by the
 method signature (to satisfy the `Datasource` interface) but is **not used**
-(`src/datasources/md.ts:85`). Only the `body` parameter is written to the
+(`src/datasources/md.ts:114`). Only the `body` parameter is written to the
 file. If you need to change the title, you must include the new title as an H1
 heading in the body content.
 
@@ -176,7 +234,7 @@ from the body content (falling back to the filename if no H1 heading is found).
 Moves the spec file from the specs directory to an `archive/` subdirectory.
 
 The archive directory is created with `mkdir({ recursive: true })` if it does
-not already exist (`src/datasources/md.ts:97`).
+not already exist (`src/datasources/md.ts:126`).
 
 **Not a state change:** Unlike GitHub and Azure DevOps where `close()` changes
 a state field, the markdown datasource physically moves the file. The file
@@ -209,7 +267,7 @@ heading.
 
 ## Git lifecycle operations (no-ops)
 
-The markdown datasource implements all seven git lifecycle methods from the
+The markdown datasource implements all eight git lifecycle methods from the
 `Datasource` interface, but most are intentional no-ops. This is because the
 markdown datasource is designed for local-first, offline workflows where git
 branching, pushing, and PR creation do not apply.
@@ -217,7 +275,8 @@ branching, pushing, and PR creation do not apply.
 | Method | Implementation | Return value |
 |--------|---------------|-------------|
 | `getDefaultBranch()` | Returns `"main"` without checking git | `"main"` |
-| `buildBranchName()` | Same slug logic as GitHub/Azure DevOps | `dispatch/<number>-<slug>` |
+| `getUsername()` | Shells out to `git config user.name`, slugifies the result | Slugified username or `"local"` |
+| `buildBranchName()` | Constructs `<username>/dispatch/<number>-<slug>` | e.g., `"jdoe/dispatch/42-add-auth"` |
 | `createAndSwitchBranch()` | No-op (empty function body) | `void` |
 | `switchBranch()` | No-op (empty function body) | `void` |
 | `pushBranch()` | No-op (empty function body) | `void` |
@@ -233,13 +292,56 @@ silent no-ops, the pipeline runs to completion -- it just skips the git
 workflow steps. The markdown datasource user is expected to manage their own
 git workflow (if any) outside of dispatch.
 
-### `buildBranchName()` is not a no-op
+### `getUsername()`
 
-Note that `buildBranchName()` is fully implemented (not a no-op) even in the
-markdown datasource. It produces `dispatch/<number>-<slug>` using the same
-slugification logic as the other datasources. This is because `buildBranchName`
-may be called for informational purposes (e.g., logging) even when the
-branching operations themselves are no-ops.
+The `getUsername()` method (`src/datasources/md.ts:143`) resolves the current
+git user's name for use as a branch namespace prefix. It shells out to
+`git config user.name` via `execFile` (the only external subprocess call in
+the markdown datasource) and applies three-stage resolution:
+
+1. **Success with non-empty output.** The raw `stdout` is trimmed and passed
+   through [`slugify()`](../shared-utilities/slugify.md) to produce a
+   branch-safe string (e.g., `"John Doe"` becomes `"john-doe"`).
+2. **Success with empty output.** If `git config user.name` returns an empty
+   string (user.name is set but blank), returns `"local"`.
+3. **Error.** If the `git config` command fails (e.g., not a git repository,
+   git not installed), the `catch` block returns `"local"`.
+
+The returned username is used by `buildBranchName()` to construct the full
+branch path. See [git-config documentation](https://git-scm.com/docs/git-config)
+for details on how `user.name` is resolved across system, global, and local
+configuration scopes.
+
+### `buildBranchName()` format
+
+`buildBranchName()` (`src/datasources/md.ts:154`) is fully implemented (not
+a no-op). It produces a branch name with the format:
+
+```
+<username>/dispatch/<issueNumber>-<slugified-title>
+```
+
+The title is slugified using [`slugify(title, 50)`](../shared-utilities/slugify.md)
+(truncated to 50 characters). Examples:
+
+| Username | Issue number | Title | Branch name |
+|----------|-------------|-------|-------------|
+| `"jdoe"` | `42` | `"Add user authentication"` | `jdoe/dispatch/42-add-user-authentication` |
+| `"local"` | `7` | `"Fix Bug #123!!"` | `local/dispatch/7-fix-bug-123` |
+
+The `<username>/dispatch/` prefix serves as a namespace to distinguish
+dispatch-created branches per user. This is useful for CI/CD pipelines that
+want to trigger only on dispatch branches (e.g.,
+`on: push: branches: ['*/dispatch/**']`).
+
+### `createPullRequest()` signature
+
+The `createPullRequest()` method accepts five parameters (`branchName`,
+`issueNumber`, `title`, `body`, `opts`) to match the full `Datasource`
+interface contract (`src/datasources/interface.ts:189`). All parameters are
+ignored in the markdown implementation -- the method returns `""` immediately.
+The `body` parameter was added to the interface to support custom PR
+descriptions in the GitHub and Azure DevOps datasources.
 
 ### `getDefaultBranch()` hardcodes `"main"`
 
@@ -252,16 +354,36 @@ when using `--source md`.
 
 When the dispatch pipeline runs with [`--source md`](../cli-orchestration/cli.md):
 
-1. **Branching:** `createAndSwitchBranch()` is a no-op -- the pipeline stays
+1. **Username resolution:** `getUsername()` shells out to `git config user.name`
+   and slugifies the result (the only subprocess call in this datasource).
+   Falls back to `"local"` on error or empty output.
+2. **Branch naming:** `buildBranchName()` produces
+   `<username>/dispatch/<number>-<slug>` (e.g.,
+   `jdoe/dispatch/42-add-auth`), but the branch is never actually created
+   because `createAndSwitchBranch()` is a no-op.
+3. **Branching:** `createAndSwitchBranch()` is a no-op -- the pipeline stays
    on whatever branch is currently checked out.
-2. **Committing:** `commitAllChanges()` is a no-op -- file changes from task
+4. **Committing:** `commitAllChanges()` is a no-op -- file changes from task
    execution remain uncommitted.
-3. **Pushing:** `pushBranch()` is a no-op -- nothing is pushed to a remote.
-4. **PR creation:** `createPullRequest()` returns `""` -- no PR is created.
+5. **Pushing:** `pushBranch()` is a no-op -- nothing is pushed to a remote.
+6. **PR creation:** `createPullRequest()` returns `""` -- no PR is created.
    The pipeline handles the empty string as "no PR URL available".
-5. **Auto-close:** `closeCompletedSpecIssues()` in the
+7. **Auto-close:** `closeCompletedSpecIssues()` in the
    [datasource helpers](./datasource-helpers.md) still calls `close()` on
    completed specs, which moves them to the `archive/` directory.
+
+## Encoding
+
+All file operations (`readFile` and `writeFile`) explicitly specify `"utf-8"`
+encoding (`src/datasources/md.ts:99,110,118,135`). This ensures consistent
+text handling across platforms and avoids the Node.js default of returning
+`Buffer` objects from `readFile`. See the
+[Node.js `fs/promises` documentation](https://nodejs.org/api/fs.html#fspromisesreadfilepath-options)
+for details on encoding behavior.
+
+Files that contain non-UTF-8 byte sequences will be read as UTF-8 with
+replacement characters (U+FFFD) per the WHATWG Encoding standard. There is no
+validation that input files are valid UTF-8.
 
 ## Version control considerations
 
@@ -296,9 +418,11 @@ The specified spec file does not exist. Verify the filename and that it is in
 
 ### Title not matching what was passed to `create()`
 
-The title is extracted from the file content, not stored separately. If the
-body does not contain an H1 heading (`# Title`), the title falls back to the
-filename stem. Include an H1 heading in the body for consistent titles.
+The title is extracted from the file content, not stored separately. The
+extraction uses a three-tier fallback: first an H1 heading (`# Title`), then
+the first meaningful content line (with markdown prefix stripping and 80-char
+truncation), then the filename stem. Include an H1 heading in the body for
+consistent, predictable titles.
 
 ### File overwritten on `create()`
 
