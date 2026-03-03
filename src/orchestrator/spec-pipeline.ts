@@ -153,7 +153,9 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     }
   }
 
-  const validItems = items.filter((i) => i.details !== null);
+  const validItems = items.filter(
+    (i): i is { id: string; details: IssueDetails; error?: string } => i.details !== null,
+  );
   if (validItems.length === 0) {
     const noun = isTrackerMode ? "issues" : isInlineText ? "inline specs" : "files";
     log.error(`No ${noun} could be loaded. Aborting spec generation.`);
@@ -210,11 +212,18 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
       batch.map(async ({ id, details }) => {
         const specStart = Date.now();
 
+        // Defensive guard: protects against future refactors that might
+        // bypass the type-predicate filter.
+        if (!details) {
+          log.error(`Skipping item ${id}: missing issue details`);
+          return null;
+        }
+
         // Determine the spec output filepath
         let filepath: string;
         if (isTrackerMode) {
           // Issue-tracker: write to outputDir with slug filename
-          const slug = slugify(details!.title, 60);
+          const slug = slugify(details.title, 60);
           const filename = `${id}-${slug}.md`;
           filepath = join(outputDir, filename);
         } else if (isInlineText) {
@@ -226,12 +235,12 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
         }
 
         try {
-          log.info(`Generating spec for ${isTrackerMode ? `#${id}` : filepath}: ${details!.title}...`);
+          log.info(`Generating spec for ${isTrackerMode ? `#${id}` : filepath}: ${details.title}...`);
 
           const result = await specAgent.generate({
-            issue: isTrackerMode ? details! : undefined,
+            issue: isTrackerMode ? details : undefined,
             filePath: isTrackerMode ? undefined : id,
-            fileContent: isTrackerMode ? undefined : details!.body,
+            fileContent: isTrackerMode ? undefined : details.body,
             cwd: specCwd,
             outputPath: filepath,
           });
@@ -263,13 +272,13 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
           try {
             if (isTrackerMode) {
               // Tracker mode: update the existing issue with the generated spec
-              await datasource.update(id, details!.title, result.content, fetchOpts);
+              await datasource.update(id, details.title, result.content, fetchOpts);
               log.success(`Updated issue #${id} with spec content`);
               identifier = id;
               issueNumbers.push(id);
             } else if (datasource.name !== "md") {
               // File/glob mode with tracker datasource: create a new issue and delete the local file
-              const created = await datasource.create(details!.title, result.content, fetchOpts);
+              const created = await datasource.create(details.title, result.content, fetchOpts);
               log.success(`Created issue #${created.number} from ${filepath}`);
               await unlink(filepath);
               log.success(`Deleted local spec ${filepath} (now tracked as issue #${created.number})`);

@@ -438,6 +438,63 @@ describe("runSpecPipeline", () => {
     });
   });
 
+  // ── Defensive guard ───────────────────────────────────────────────
+
+  describe("defensive guard for null details", () => {
+    it("logs error and skips item when details is unexpectedly null in generation loop", async () => {
+      // One issue fetches OK, the other fails (producing null details)
+      mocks.mockFetch
+        .mockResolvedValueOnce({
+          number: "1",
+          title: "Test Issue",
+          body: "Issue body",
+          labels: [],
+          state: "open",
+          url: "https://example.com/1",
+          comments: [],
+          acceptanceCriteria: "",
+        })
+        .mockRejectedValueOnce(new Error("Not found"));
+
+      // Patch Array.prototype.filter so the validItems filter lets the
+      // null-details item through, simulating a future refactor that
+      // might bypass the type-predicate filter.
+      const origFilter = Array.prototype.filter;
+      let detailsFilterHit = 0;
+      vi.spyOn(Array.prototype, "filter").mockImplementation(function (
+        this: unknown[],
+        cb: any,
+        thisArg?: any,
+      ) {
+        // Identify calls on the items array by checking for `details` key
+        if (
+          this.length > 0 &&
+          typeof this[0] === "object" &&
+          this[0] !== null &&
+          "details" in this[0]
+        ) {
+          detailsFilterHit++;
+          if (detailsFilterHit === 1) {
+            // validItems filter: let ALL items through (including null details)
+            return origFilter.call(this, () => true);
+          }
+        }
+        return origFilter.call(this, cb, thisArg);
+      });
+
+      const result = await runSpecPipeline(baseOpts({ issues: "1,2", concurrency: 2 }));
+
+      // Restore filter before assertions (so test cleanup runs cleanly)
+      vi.mocked(Array.prototype.filter).mockRestore();
+
+      expect(vi.mocked(log.error)).toHaveBeenCalledWith(
+        "Skipping item 2: missing issue details",
+      );
+      // The null-details item should be counted as failed
+      expect(result.failed).toBeGreaterThanOrEqual(1);
+    });
+  });
+
   // ── Summary output ──────────────────────────────────────────────
 
   describe("summary output", () => {
