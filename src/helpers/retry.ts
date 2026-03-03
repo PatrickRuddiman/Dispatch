@@ -1,45 +1,39 @@
 /**
- * Generic async retry utility.
+ * Generic retry utility.
  *
- * Provides a reusable `withRetry` wrapper that re-executes a failing async
- * operation up to a configurable number of times.  Each retry attempt is
- * logged via the structured `log` helper so operators can observe transient
- * failures in verbose mode.  If every attempt fails the **last** error is
- * re-thrown so callers see the most recent failure context.
+ * Provides a reusable `withRetry` wrapper that retries an async function
+ * on any thrown error up to a configurable number of times. Used by the
+ * dispatch pipeline to add resilience to agent calls.
  */
 
 import { log } from "./logger.js";
 
-/** Options accepted by {@link withRetry}. */
+/** Options for `withRetry`. */
 export interface RetryOptions {
-  /** Human-readable label included in log messages (e.g. `"planner.plan()"`). */
+  /** Label for log messages identifying the operation being retried. */
   label?: string;
 }
 
 /**
- * Retry an async operation up to `maxAttempts` times.
+ * Retry an async function up to `maxRetries` times on failure.
  *
- * The `fn` callback is invoked on each attempt.  If it resolves, the value
- * is returned immediately.  If it rejects, the error is caught and — unless
- * the maximum number of attempts has been reached — `fn` is called again.
+ * Calls `fn` and returns its result on the first success. If `fn` throws,
+ * it is retried up to `maxRetries` additional times. If all attempts fail,
+ * the last error is re-thrown.
  *
- * When all attempts are exhausted the **last** error thrown by `fn` is
- * re-thrown to the caller.
- *
- * @param fn          - A zero-argument async function to execute (and potentially retry)
- * @param maxAttempts - Total number of attempts (must be ≥ 1)
- * @param options     - Optional settings (label for log messages)
+ * @param fn         - Async function to execute (called with no arguments)
+ * @param maxRetries - Number of retry attempts (0 = no retries, 1 = one retry, etc.)
+ * @param options    - Optional label for log output
  * @returns The resolved value of `fn`
- * @throws The last error thrown by `fn` if all attempts fail
+ * @throws The last error if all attempts are exhausted
  */
 export async function withRetry<T>(
   fn: () => Promise<T>,
-  maxAttempts: number,
+  maxRetries: number,
   options?: RetryOptions,
 ): Promise<T> {
+  const maxAttempts = maxRetries + 1;
   const label = options?.label;
-  const suffix = label ? ` [${label}]` : "";
-
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -47,7 +41,7 @@ export async function withRetry<T>(
       return await fn();
     } catch (err) {
       lastError = err;
-
+      const suffix = label ? ` [${label}]` : "";
       if (attempt < maxAttempts) {
         log.warn(
           `Attempt ${attempt}/${maxAttempts} failed${suffix}: ${log.extractMessage(err)}`,

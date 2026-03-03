@@ -27,7 +27,8 @@ import {
   buildPrBody,
   buildPrTitle,
 } from "./datasource-helpers.js";
-import { withTimeout, TimeoutError } from "../helpers/timeout.js";
+import { withTimeout } from "../helpers/timeout.js";
+import { withRetry } from "../helpers/retry.js";
 import chalk from "chalk";
 import { elapsed, renderHeaderLines } from "../helpers/format.js";
 
@@ -56,11 +57,12 @@ export async function runDispatchPipeline(
     workItemType,
     planTimeout,
     planRetries,
+    retries,
   } = opts;
 
   // Planning timeout/retry defaults
   const planTimeoutMs = (planTimeout ?? 10) * 60_000; // default 10 minutes → ms
-  const maxPlanAttempts = (planRetries ?? 1) + 1;     // retries + initial attempt
+  const effectivePlanRetries = planRetries ?? retries ?? 2;
 
   // Dry-run mode uses simple log output
   if (dryRun) {
@@ -275,41 +277,21 @@ export async function runDispatchPipeline(
 
                 let planResult: PlanResult | undefined;
 
-                for (let attempt = 1; attempt <= maxPlanAttempts; attempt++) {
-                  try {
-                    planResult = await withTimeout(
+                try {
+                  planResult = await withRetry(
+                    () => withTimeout(
                       planner.plan(task, fileContext),
                       planTimeoutMs,
                       "planner.plan()",
-                    );
-                    break; // success — exit retry loop
-                  } catch (err) {
-                    if (err instanceof TimeoutError) {
-                      log.warn(
-                        `Planning timed out for task "${task.text}" (attempt ${attempt}/${maxPlanAttempts})`,
-                      );
-                      if (attempt < maxPlanAttempts) {
-                        log.debug(`Retrying planning (attempt ${attempt + 1}/${maxPlanAttempts})`);
-                      }
-                    } else {
-                      // Non-timeout error — do not retry, surface immediately
-                      planResult = {
-                        prompt: "",
-                        success: false,
-                        error: log.extractMessage(err),
-                      };
-                      break;
-                    }
-                  }
-                }
-
-                // All attempts exhausted with timeout — produce failure result
-                if (!planResult) {
-                  const timeoutMin = planTimeout ?? 10;
+                    ),
+                    effectivePlanRetries,
+                    { label: "planner.plan()" },
+                  );
+                } catch (err) {
                   planResult = {
                     prompt: "",
                     success: false,
-                    error: `Planning timed out after ${timeoutMin}m (${maxPlanAttempts} attempts)`,
+                    error: log.extractMessage(err),
                   };
                 }
 

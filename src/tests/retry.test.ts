@@ -65,16 +65,17 @@ describe("withRetry", () => {
     const fn = vi.fn()
       .mockRejectedValueOnce(new Error("fail-1"))
       .mockRejectedValueOnce(new Error("fail-2"))
-      .mockRejectedValueOnce(new Error("fail-3"));
+      .mockRejectedValueOnce(new Error("fail-3"))
+      .mockRejectedValueOnce(new Error("fail-4"));
 
-    await expect(withRetry(fn, 3)).rejects.toThrow("fail-3");
-    expect(fn).toHaveBeenCalledTimes(3);
+    await expect(withRetry(fn, 3)).rejects.toThrow("fail-4");
+    expect(fn).toHaveBeenCalledTimes(4);
   });
 
-  it("throws immediately when maxAttempts is 1 and fn fails", async () => {
+  it("throws immediately when maxRetries is 0 and fn fails", async () => {
     const fn = vi.fn().mockRejectedValue(new Error("only-try"));
 
-    await expect(withRetry(fn, 1)).rejects.toThrow("only-try");
+    await expect(withRetry(fn, 0)).rejects.toThrow("only-try");
     expect(fn).toHaveBeenCalledTimes(1);
   });
 
@@ -95,13 +96,14 @@ describe("withRetry", () => {
   it("does not log on the final failed attempt", async () => {
     const fn = vi.fn()
       .mockRejectedValueOnce(new Error("err-1"))
-      .mockRejectedValueOnce(new Error("err-2"));
+      .mockRejectedValueOnce(new Error("err-2"))
+      .mockRejectedValueOnce(new Error("err-3"));
 
-    await expect(withRetry(fn, 2)).rejects.toThrow("err-2");
+    await expect(withRetry(fn, 2)).rejects.toThrow("err-3");
 
-    // Only the first failure should be logged (attempt 1 of 2)
-    expect(log.warn).toHaveBeenCalledTimes(1);
-    expect(log.debug).toHaveBeenCalledTimes(1);
+    // Only the first two failures should be logged (attempts 1 and 2 of 3)
+    expect(log.warn).toHaveBeenCalledTimes(2);
+    expect(log.debug).toHaveBeenCalledTimes(2);
   });
 
   it("includes the label in log messages when provided", async () => {
@@ -127,10 +129,10 @@ describe("withRetry", () => {
     await withRetry(fn, 3);
 
     expect(log.warn).toHaveBeenCalledWith(
-      expect.stringContaining("1/3"),
+      expect.stringContaining("1/4"),
     );
     expect(log.debug).toHaveBeenCalledWith(
-      expect.stringContaining("2/3"),
+      expect.stringContaining("2/4"),
     );
   });
 
@@ -142,19 +144,19 @@ describe("withRetry", () => {
     }
     const fn = vi.fn().mockRejectedValue(new CustomError("custom"));
 
-    await expect(withRetry(fn, 1)).rejects.toBeInstanceOf(CustomError);
+    await expect(withRetry(fn, 0)).rejects.toBeInstanceOf(CustomError);
   });
 
   it("handles non-Error thrown values", async () => {
     const fn = vi.fn().mockRejectedValue("string-error");
 
-    await expect(withRetry(fn, 1)).rejects.toBe("string-error");
+    await expect(withRetry(fn, 0)).rejects.toBe("string-error");
   });
 
-  it("works with maxAttempts of 1 and successful fn", async () => {
+  it("works with maxRetries of 0 and successful fn", async () => {
     const fn = vi.fn().mockResolvedValue(42);
 
-    const result = await withRetry(fn, 1);
+    const result = await withRetry(fn, 0);
 
     expect(result).toBe(42);
     expect(fn).toHaveBeenCalledTimes(1);
