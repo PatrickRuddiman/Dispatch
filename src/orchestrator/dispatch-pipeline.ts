@@ -257,12 +257,18 @@ export async function runDispatchPipeline(
             log.debug(`Switched to branch ${branchName}`);
           }
         } catch (err) {
-          log.warn(`Could not create branch for issue #${details.number}: ${log.formatErrorChain(err)}`);
-          // Continue without branching
-          branchName = undefined;
-          defaultBranch = undefined;
-          worktreePath = undefined;
-          issueCwd = cwd;
+          const errorMsg = `Branch creation failed for issue #${details.number}: ${log.extractMessage(err)}`;
+          log.error(errorMsg);
+          for (const task of fileTasks) {
+            const tuiTask = tui.state.tasks.find((t) => t.task === task);
+            if (tuiTask) {
+              tuiTask.status = "failed";
+              tuiTask.error = errorMsg;
+            }
+            results.push({ task, success: false, error: errorMsg });
+          }
+          failed += fileTasks.length;
+          return;
         }
       }
 
