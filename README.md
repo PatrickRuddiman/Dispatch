@@ -19,7 +19,7 @@ The tool is backend-agnostic: it supports multiple issue trackers via a datasour
 - **Markdown as source of truth** — task files use `- [ ]` checkbox syntax with `(P)`arallel, `(S)`erial, and `(I)`solated execution mode prefixes
 - **Automatic conventional commits** — commit type (feat, fix, docs, refactor, etc.) is inferred from task text
 - **Real-time TUI dashboard** — terminal UI with spinner, progress bar, and per-task status tracking
-- **Three-tier configuration** — CLI flags > persistent config file (`~/.dispatch/config.json`) > defaults
+- **Three-tier configuration** — CLI flags > project-local config file (`.dispatch/config.json`) > defaults
 - **Configurable concurrency** — control parallel task execution per batch
 
 ## Supported Backends
@@ -51,7 +51,7 @@ node --version   # must be >= 20.12.0
 
 ### AI Agent Runtime
 
-At least one AI agent runtime must be installed and authenticated with a default model configured. dispatch-tasks cannot function without a provider backend.
+At least one AI agent runtime must be installed and authenticated with a default model configured. dispatch cannot function without a provider backend.
 
 **OpenCode**
 
@@ -171,7 +171,7 @@ dispatch --verbose "tasks.md"          # Show detailed debug output
 
 ## Configuration
 
-dispatch uses a three-tier configuration system: CLI flags > persistent config file (`~/.dispatch/config.json`) > defaults.
+dispatch uses a three-tier configuration system: CLI flags > project-local config file (`.dispatch/config.json`) > defaults.
 
 ### Interactive configuration
 
@@ -181,7 +181,10 @@ dispatch config
 
 Running `dispatch config` launches an interactive wizard that guides you through viewing, setting, and resetting your configuration.
 
-Valid config keys: `provider`, `concurrency`, `source`, `org`, `project`, `serverUrl`, `planTimeout`, `planRetries`.
+Valid config keys: `provider`, `model`, `concurrency`, `source`, `org`, `project`, `workItemType`, `serverUrl`, `planTimeout`, `planRetries`.
+
+- **`model`** — AI model override in provider-specific format (e.g. `"claude-sonnet-4-5"` for Copilot, `"anthropic/claude-sonnet-4"` for OpenCode). When omitted the provider uses its default.
+- **`workItemType`** — Azure DevOps work item type (e.g. `"User Story"`, `"Bug"`). Only relevant when using the `azdevops` datasource.
 
 ## Requirements
 
