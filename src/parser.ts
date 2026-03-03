@@ -30,9 +30,13 @@ export interface TaskFile {
   content: string;
 }
 
+/** Matches an unchecked markdown task item, e.g. `- [ ] Implement feature` */
 const UNCHECKED_RE = /^(\s*[-*]\s)\[ \]\s+(.+)$/;
+/** Matches a checked markdown task item, e.g. `- [x] Implement feature` */
 const CHECKED_RE = /^(\s*[-*]\s)\[[xX]\]\s+/;
+/** Replacement string used with UNCHECKED_RE to mark a task complete, e.g. `- [ ] task` → `- [x] task` */
 const CHECKED_SUB = "$1[x] $2";
+/** Matches a mode prefix at the start of task text, e.g. `(P) Run tests in parallel` */
 const MODE_PREFIX_RE = /^\(([PSI])\)\s+/;
 
 /**
