@@ -41,6 +41,7 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
 
   const client = new CopilotClient({
     ...(opts?.url ? { cliUrl: opts.url } : {}),
+    ...(opts?.cwd ? { cwd: opts.cwd } : {}),
   });
 
   try {
@@ -69,6 +70,7 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
       try {
         const session = await client.createSession({
           ...(opts?.model ? { model: opts.model } : {}),
+          ...(opts?.cwd ? { workingDirectory: opts.cwd } : {}),
           onPermissionRequest: approveAll,
         });
         sessions.set(session.sessionId, session);
