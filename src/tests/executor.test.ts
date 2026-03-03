@@ -207,7 +207,7 @@ describe("execute", () => {
 
     // Add a small delay to ensure elapsedMs > 0
     mockDispatch.mockImplementation(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 20));
       return { task: TASK_FIXTURE, success: true };
     });
     mockMarkComplete.mockResolvedValue(undefined);
@@ -219,7 +219,7 @@ describe("execute", () => {
       plan: "plan",
     });
 
-    expect(result.elapsedMs).toBeGreaterThanOrEqual(10);
+    expect(result.elapsedMs).toBeGreaterThanOrEqual(20);
     expect(result.elapsedMs).toBeLessThan(2000);
   });
 });
