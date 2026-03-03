@@ -276,6 +276,8 @@ describe("runTests timeout", () => {
     vi.mocked(spawn).mockReturnValue(child as any);
 
     const promise = runTests("/project", 5000);
+    // Prevent unhandled rejection during fake-timer advancement
+    promise.catch(() => {});
 
     await vi.advanceTimersByTimeAsync(5000);
 
@@ -294,6 +296,8 @@ describe("runTests timeout", () => {
     vi.mocked(spawn).mockReturnValue(child as any);
 
     const promise = runTests("/project", 5000);
+    // Prevent unhandled rejection during fake-timer advancement
+    promise.catch(() => {});
 
     await vi.advanceTimersByTimeAsync(5000);
 
@@ -332,6 +336,8 @@ describe("runTests timeout", () => {
     vi.mocked(spawn).mockReturnValue(child as any);
 
     const promise = runTests("/project");
+    // Prevent unhandled rejection during fake-timer advancement
+    promise.catch(() => {});
 
     // Advance to just before default timeout — should not throw
     await vi.advanceTimersByTimeAsync(299_999);
