@@ -26,6 +26,14 @@ async function gh(args: string[], cwd: string): Promise<string> {
   return stdout;
 }
 
+/** Strict pattern for valid git branch name components. */
+const VALID_BRANCH_NAME_RE = /^[a-zA-Z0-9._\-/]+$/;
+
+/** Check whether a branch name is safe to use in git/gh commands. */
+function isValidBranchName(name: string): boolean {
+  return name.length > 0 && name.length <= 255 && VALID_BRANCH_NAME_RE.test(name);
+}
+
 /**
  * Build a branch name from an issue number, title, and username.
  * Produces: `<username>/dispatch/<number>-<slugified-title>`
@@ -49,8 +57,17 @@ async function getDefaultBranch(cwd: string): Promise<string> {
     const ref = await git(["symbolic-ref", "refs/remotes/origin/HEAD"], cwd);
     // ref looks like "refs/remotes/origin/main"
     const parts = ref.trim().split("/");
-    return parts[parts.length - 1];
-  } catch {
+    const branch = parts[parts.length - 1];
+    if (!isValidBranchName(branch)) {
+      throw new Error(
+        `Invalid branch name from symbolic-ref output: "${branch}"`,
+      );
+    }
+    return branch;
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("Invalid branch name")) {
+      throw err;
+    }
     // Fallback: check if "main" branch exists
     try {
       await git(["rev-parse", "--verify", "main"], cwd);
