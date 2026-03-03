@@ -178,6 +178,9 @@ describe("runSpecPipeline", () => {
     mocks.mockCreate.mockResolvedValue({ number: "99", title: "Created Issue" });
     mocks.mockProviderCleanup.mockResolvedValue(undefined);
     mocks.mockAgentCleanup.mockResolvedValue(undefined);
+
+    // Default: large batch confirmation auto-accepts
+    vi.mocked(confirmLargeBatch).mockResolvedValue(true);
   });
 
   afterEach(() => {

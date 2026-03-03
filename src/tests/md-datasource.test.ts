@@ -15,7 +15,7 @@ describe("getUsername", () => {
   it("returns slugified git user name", async () => {
     vi.mocked(execFile).mockImplementation(
       ((_cmd: string, _args: string[], _opts: any, cb: Function) => {
-        cb(null, "John Doe\n", "");
+        cb(null, { stdout: "John Doe\n", stderr: "" });
       }) as any,
     );
     const result = await datasource.getUsername({ cwd: "/tmp" });
@@ -25,7 +25,7 @@ describe("getUsername", () => {
   it('returns "local" when git returns empty string', async () => {
     vi.mocked(execFile).mockImplementation(
       ((_cmd: string, _args: string[], _opts: any, cb: Function) => {
-        cb(null, "  \n", "");
+        cb(null, { stdout: "  \n", stderr: "" });
       }) as any,
     );
     const result = await datasource.getUsername({ cwd: "/tmp" });
@@ -35,7 +35,7 @@ describe("getUsername", () => {
   it('returns "local" when git command fails', async () => {
     vi.mocked(execFile).mockImplementation(
       ((_cmd: string, _args: string[], _opts: any, cb: Function) => {
-        cb(new Error("git not found"), "", "");
+        cb(new Error("git not found"));
       }) as any,
     );
     const result = await datasource.getUsername({ cwd: "/tmp" });
