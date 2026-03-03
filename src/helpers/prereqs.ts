@@ -9,6 +9,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import type { DatasourceName } from "../datasources/interface.js";
+
 const exec = promisify(execFile);
 
 /** Minimum supported Node.js version (matches package.json engines field). */
@@ -44,7 +46,12 @@ function semverGte(current: string, minimum: string): boolean {
  * @returns An array of human-readable failure message strings.
  *          An empty array means all checks passed.
  */
-export async function checkPrereqs(): Promise<string[]> {
+/** Optional context for datasource-specific prerequisite checks. */
+export interface PrereqContext {
+  datasource?: DatasourceName;
+}
+
+export async function checkPrereqs(context?: PrereqContext): Promise<string[]> {
   const failures: string[] = [];
 
   // Check git availability
@@ -60,6 +67,27 @@ export async function checkPrereqs(): Promise<string[]> {
     failures.push(
       `Node.js >= ${MIN_NODE_VERSION} is required but found ${nodeVersion}. Please upgrade Node.js`,
     );
+  }
+
+  // Datasource-specific CLI tool checks
+  if (context?.datasource === "github") {
+    try {
+      await exec("gh", ["--version"]);
+    } catch {
+      failures.push(
+        "gh (GitHub CLI) is required for the github datasource but was not found on PATH. Install it from https://cli.github.com/",
+      );
+    }
+  }
+
+  if (context?.datasource === "azdevops") {
+    try {
+      await exec("az", ["--version"]);
+    } catch {
+      failures.push(
+        "az (Azure CLI) is required for the azdevops datasource but was not found on PATH. Install it from https://learn.microsoft.com/en-us/cli/azure/",
+      );
+    }
   }
 
   return failures;
