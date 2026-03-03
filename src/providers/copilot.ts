@@ -13,6 +13,7 @@
 import { CopilotClient, approveAll, type AssistantMessageEvent, type CopilotSession } from "@github/copilot-sdk";
 import type { ProviderInstance, ProviderBootOptions } from "./interface.js";
 import { log } from "../helpers/logger.js";
+import { withTimeout } from "../helpers/timeout.js";
 
 /**
  * List available Copilot models.
@@ -110,19 +111,26 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
         log.debug("Async prompt accepted, waiting for session to become idle...");
 
         // ── 2. Wait for session.idle or session.error ─────────────
-        await new Promise<void>((resolve, reject) => {
-          const unsubIdle = session.on("session.idle", () => {
-            unsubIdle();
-            unsubErr();
-            resolve();
-          });
+        let unsubIdle: (() => void) | undefined;
+        let unsubErr: (() => void) | undefined;
+        try {
+          await withTimeout(
+            new Promise<void>((resolve, reject) => {
+              unsubIdle = session.on("session.idle", () => {
+                resolve();
+              });
 
-          const unsubErr = session.on("session.error", (event) => {
-            unsubIdle();
-            unsubErr();
-            reject(new Error(`Copilot session error: ${event.data.message}`));
-          });
-        });
+              unsubErr = session.on("session.error", (event) => {
+                reject(new Error(`Copilot session error: ${event.data.message}`));
+              });
+            }),
+            300_000,
+            "copilot session ready",
+          );
+        } finally {
+          unsubIdle?.();
+          unsubErr?.();
+        }
 
         log.debug("Session went idle, fetching result...");
 

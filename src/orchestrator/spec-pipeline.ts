@@ -23,7 +23,11 @@ import { confirmLargeBatch } from "../helpers/confirm-large-batch.js";
 import chalk from "chalk";
 import { elapsed, renderHeaderLines } from "../helpers/format.js";
 import { withRetry } from "../helpers/retry.js";
+import { withTimeout } from "../helpers/timeout.js";
 import { slugify, MAX_SLUG_LENGTH } from "../helpers/slugify.js";
+
+/** Per-item timeout for datasource fetch calls (ms). */
+const FETCH_TIMEOUT_MS = 30_000;
 
 /**
  * Run the spec-generation pipeline end-to-end.
@@ -87,7 +91,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
       const batchResults = await Promise.all(
         batch.map(async (id) => {
           try {
-            const details = await datasource.fetch(id, fetchOpts);
+            const details = await withTimeout(datasource.fetch(id, fetchOpts), FETCH_TIMEOUT_MS, "datasource fetch");
             log.success(`Fetched #${id}: ${details.title}`);
             log.debug(`Body: ${details.body?.length ?? 0} chars, Labels: ${details.labels.length}, Comments: ${details.comments.length}`);
             return { id, details };
