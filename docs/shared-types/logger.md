@@ -333,5 +333,7 @@ a full log-level hierarchy.
   prompt dispatch and error chain formatting
 - [Provider Overview](../provider-system/provider-overview.md) -- Debug
   tracing of provider boot, session creation, and cleanup
+- [Provider Detection](../prereqs-and-safety/provider-detection.md) -- The
+  config wizard that uses chalk-styled indicators informed by logger output
 - [Datasource Helpers](../datasource-system/datasource-helpers.md) -- How
   datasource helper functions use `log.warn()` and `log.success()`

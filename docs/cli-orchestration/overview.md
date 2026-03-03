@@ -23,9 +23,9 @@ Dispatch needs a single coherent entry point that:
 | File | Purpose |
 |------|---------|
 | [`src/cli.ts`](cli.md) | Hand-rolled argument parser, `main()` entry point, config subcommand routing, exit code logic |
-| [`src/config.ts`](configuration.md) | Persistent config data layer: file I/O (`~/.dispatch/config.json`), validation, `handleConfigCommand()` |
+| [`src/config.ts`](configuration.md) | Persistent config data layer: file I/O (`{CWD}/.dispatch/config.json`), validation, `handleConfigCommand()` |
 | [`src/orchestrator/cli-config.ts`](configuration.md#three-tier-configuration-precedence) | Config resolution: three-tier merge of CLI flags, config file, and hardcoded defaults |
-| [`src/agents/orchestrator.ts`](orchestrator.md) | Core multi-phase pipeline: discover, parse, boot, plan, dispatch, commit |
+| [`src/orchestrator/runner.ts`](orchestrator.md) | Pipeline router: dispatch, spec, and fix-tests modes |
 | [`src/tui.ts`](tui.md) | Real-time terminal dashboard with spinner, progress bar, and task list |
 | [`src/logger.ts`](../shared-types/logger.md) | Minimal structured logger with chalk formatting for non-TUI contexts |
 
@@ -34,15 +34,16 @@ Dispatch needs a single coherent entry point that:
 ```mermaid
 flowchart TD
     A["cli.ts<br/>config subcommand or parseArgs()"] -->|"config"| A2["config.ts<br/>handleConfigCommand()"]
-    A -->|"RawCliArgs + explicitFlags"| B["bootOrchestrator({ cwd })"]
-    B --> B2["orchestrator.runFromCli(args)"]
+    A -->|"RawCliArgs + explicitFlags"| B["runner.ts<br/>OrchestratorAgent"]
+    B --> B2["runFromCli(args)"]
     B2 --> B3["cli-config.ts<br/>resolveCliConfig(args)"]
-    B3 -->|"merged args"| C{"--spec?"}
-    C -->|Yes| C2["Spec pipeline"]
-    C -->|No| D{"dryRun?"}
+    B3 -->|"merged args"| C{"Mode?"}
+    C -->|"--spec / --respec"| C2["Spec pipeline"]
+    C -->|"--fix-tests"| C3["Fix-tests pipeline"]
+    C -->|"default"| D{"dryRun?"}
     D -->|Yes| E["dryRunMode()<br/>logger output"]
     D -->|No| F["createTui()"]
-    F --> G["1. glob() — discover files"]
+    F --> G["1. Datasource — discover items"]
     G --> H["2. parseTaskFile() — extract tasks"]
     H --> I["3. bootProvider() — start AI agent"]
     I --> J["4. Batch dispatch loop"]
@@ -50,12 +51,12 @@ flowchart TD
     K -->|No| L["planTask() — planner agent"]
     K -->|Yes| M["dispatchTask() — executor agent"]
     L --> M
-    M --> N["markTaskComplete() — update markdown"]
-    N --> O["commitTask() — git commit"]
+    M --> N["datasource.update() — sync completion"]
+    N --> O["commitAllChanges() — git commit"]
     O -->|next batch| J
     J -->|all done| P["5. instance.cleanup()"]
     P --> Q["TUI stop, return summary"]
-    Q --> R["cli.ts<br/>process.exit(summary.failed > 0 ? 1 : 0)"]
+    Q --> R["cli.ts<br/>process.exit(exitCode)"]
 ```
 
 ## Cross-group dependencies
@@ -74,8 +75,12 @@ This group depends on every other group in the project:
   invoked in `--spec` mode
 - **[Shared Interfaces & Utilities](../shared-types/overview.md)**: `Task`, `TaskFile`,
   `ProviderName` type definitions
-- **Node.js built-ins**: `fs/promises` (config file I/O), `os` (homedir,
-  cpus, freemem), `path`, `child_process` (git remote detection)
+- **[Prerequisites & Safety](../prereqs-and-safety/overview.md)**: `checkPrereqs()`,
+  `confirmLargeBatch()`, `checkProviderInstalled()`
+- **[Git Worktree Helpers](../git-and-worktree/overview.md)**: `createWorktree()`,
+  `removeWorktree()`, `ensureGitignoreEntry()`
+- **Node.js built-ins**: `fs/promises` (config file I/O, output-dir
+  validation), `path`, `child_process` (provider binary detection)
 
 ## Quick reference
 
@@ -89,15 +94,17 @@ dispatch 14,15,16
 dispatch 14 15 16
 
 # With options
-dispatch 14 --provider copilot --concurrency 3
+dispatch 14 --provider copilot
 dispatch --dry-run
 dispatch 14 --no-plan
-dispatch --server-url http://localhost:4096
 dispatch --cwd /path/to/project
 
 # Spec generation
 dispatch --spec 42,43,44
 dispatch --spec "drafts/*.md" --source github
+
+# Fix failing tests
+dispatch --fix-tests
 
 # Config management (interactive wizard)
 dispatch config
@@ -125,3 +132,8 @@ dispatch config
 - [Deprecated Compatibility Layer](../deprecated-compat/overview.md) -- legacy
   `IssueFetcher` shims (slated for removal)
 - [Testing Overview](../testing/overview.md) -- test suite structure and coverage
+- [Prerequisites & Safety Checks](../prereqs-and-safety/overview.md) --
+  pre-flight validation (prerequisite checker, batch confirmation, provider
+  detection) that runs before pipeline execution
+- [Git Worktree Helpers](../git-and-worktree/overview.md) -- worktree
+  isolation model used for parallel dispatch execution

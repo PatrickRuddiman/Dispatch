@@ -168,3 +168,8 @@ directories.
   for the slugify and timeout utilities used by datasources
 - [Spec Generator Tests](../testing/spec-generator-tests.md) -- Tests for the
   spec pipeline that consumes datasource output
+- [Task Parsing Testing Guide](../task-parsing/testing-guide.md) -- Similar
+  temporary directory test patterns for the parser test suite
+- [Prerequisites & Safety Checks](../prereqs-and-safety/overview.md) -- The
+  `checkPrereqs()` function that validates `gh`/`az` CLI availability (relevant
+  to why GitHub and Azure DevOps datasources are untested)

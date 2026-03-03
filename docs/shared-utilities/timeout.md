@@ -162,5 +162,9 @@ these tests.
   pattern similar to timeout wrapping
 - [Provider Interface](../shared-types/provider.md) -- The `ProviderInstance`
   whose `prompt()` calls are timeout-wrapped
+- [Provider Tests](../testing/provider-tests.md) -- Unit tests for provider
+  implementations that exercise the prompt interface
+- [Prerequisite Checker](../prereqs-and-safety/prereqs.md) -- Startup validation
+  that runs before timeout-wrapped pipeline operations
 - [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) --
   Concurrency concerns in the task processing pipeline
