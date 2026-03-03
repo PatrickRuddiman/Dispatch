@@ -8,6 +8,11 @@ export default defineConfig({
     },
   },
   test: {
+    exclude: [
+      "**/node_modules/**",
+      "**/dist/**",
+      ".worktrees/**",
+    ],
     coverage: {
       provider: "v8",
       reporter: ["text", "json"],

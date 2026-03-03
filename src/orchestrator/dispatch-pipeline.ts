@@ -67,6 +67,7 @@ export async function runDispatchPipeline(
   const planTimeoutMs = (planTimeout ?? 10) * 60_000; // default 10 minutes → ms
   const effectivePlanRetries = planRetries ?? retries ?? 2;
 
+  const maxPlanAttempts = effectivePlanRetries + 1;
   log.debug(`Plan timeout: ${planTimeout ?? 10}m (${planTimeoutMs}ms), max attempts: ${maxPlanAttempts}`);
 
   // Dry-run mode uses simple log output
