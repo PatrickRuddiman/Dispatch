@@ -356,8 +356,16 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
   }
 
   // ── Cleanup ─────────────────────────────────────────────────
-  await specAgent.cleanup();
-  await instance.cleanup();
+  try {
+    await specAgent.cleanup();
+  } catch (err) {
+    log.warn(`Spec agent cleanup failed: ${log.formatErrorChain(err)}`);
+  }
+  try {
+    await instance.cleanup();
+  } catch (err) {
+    log.warn(`Provider cleanup failed: ${log.formatErrorChain(err)}`);
+  }
 
   const totalDuration = Date.now() - pipelineStart;
   log.info(

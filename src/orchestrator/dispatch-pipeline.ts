@@ -556,7 +556,11 @@ export async function runDispatchPipeline(
     }
 
     // ── 6. Close originating issues for completed spec files ────
-    await closeCompletedSpecIssues(taskFiles, results, cwd, source, org, project, workItemType);
+    try {
+      await closeCompletedSpecIssues(taskFiles, results, cwd, source, org, project, workItemType);
+    } catch (err) {
+      log.warn(`Could not close completed spec issues: ${log.formatErrorChain(err)}`);
+    }
 
     // ── 7. Cleanup ──────────────────────────────────────────────
     // Per-worktree resources are cleaned up inside processIssueFile.

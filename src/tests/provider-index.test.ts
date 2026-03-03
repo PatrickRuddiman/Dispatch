@@ -8,24 +8,37 @@ const { mocks } = vi.hoisted(() => {
   const mockBootCopilot = vi.fn<(opts?: ProviderBootOptions) => Promise<ProviderInstance>>();
   const mockBootClaude = vi.fn<(opts?: ProviderBootOptions) => Promise<ProviderInstance>>();
   const mockBootCodex = vi.fn<(opts?: ProviderBootOptions) => Promise<ProviderInstance>>();
-  return { mocks: { mockBootOpencode, mockBootCopilot, mockBootClaude, mockBootCodex } };
+  const mockListOpencode = vi.fn<(opts?: ProviderBootOptions) => Promise<string[]>>();
+  const mockListCopilot = vi.fn<(opts?: ProviderBootOptions) => Promise<string[]>>();
+  const mockListClaude = vi.fn<(opts?: ProviderBootOptions) => Promise<string[]>>();
+  return {
+    mocks: {
+      mockBootOpencode,
+      mockBootCopilot,
+      mockBootClaude,
+      mockBootCodex,
+      mockListOpencode,
+      mockListCopilot,
+      mockListClaude,
+    },
+  };
 });
 
 // ─── Module mocks ───────────────────────────────────────────────────
 
 vi.mock("../providers/opencode.js", () => ({
   boot: mocks.mockBootOpencode,
-  listModels: vi.fn().mockResolvedValue([]),
+  listModels: mocks.mockListOpencode,
 }));
 
 vi.mock("../providers/copilot.js", () => ({
   boot: mocks.mockBootCopilot,
-  listModels: vi.fn().mockResolvedValue([]),
+  listModels: mocks.mockListCopilot,
 }));
 
 vi.mock("../providers/claude.js", () => ({
   boot: mocks.mockBootClaude,
-  listModels: vi.fn().mockResolvedValue([]),
+  listModels: mocks.mockListClaude,
 }));
 
 vi.mock("../providers/codex.js", () => ({
@@ -35,7 +48,7 @@ vi.mock("../providers/codex.js", () => ({
 
 // ─── Imports (after mocks) ──────────────────────────────────────────
 
-import { bootProvider, PROVIDER_NAMES } from "../providers/index.js";
+import { bootProvider, listProviderModels, PROVIDER_NAMES } from "../providers/index.js";
 import type { ProviderName } from "../providers/interface.js";
 
 function createMockProvider(name: string): ProviderInstance {
@@ -147,5 +160,38 @@ describe("bootProvider", () => {
     mocks.mockBootOpencode.mockRejectedValue(new Error("connection failed"));
 
     await expect(bootProvider("opencode")).rejects.toThrow("connection failed");
+  });
+});
+
+describe("listProviderModels", () => {
+  it("returns model list from the underlying provider", async () => {
+    const models = ["model-a", "model-b"];
+    mocks.mockListOpencode.mockResolvedValue(models);
+
+    const result = await listProviderModels("opencode");
+
+    expect(result).toEqual(models);
+    expect(mocks.mockListOpencode).toHaveBeenCalledOnce();
+  });
+
+  it("passes options to the list function", async () => {
+    mocks.mockListCopilot.mockResolvedValue([]);
+    const opts: ProviderBootOptions = { url: "http://localhost:3000" };
+
+    await listProviderModels("copilot", opts);
+
+    expect(mocks.mockListCopilot).toHaveBeenCalledWith(opts);
+  });
+
+  it("throws for unknown provider name", async () => {
+    await expect(listProviderModels("unknown" as ProviderName)).rejects.toThrow(
+      'Unknown provider "unknown"',
+    );
+  });
+
+  it("propagates errors from the list function", async () => {
+    mocks.mockListClaude.mockRejectedValue(new Error("service unavailable"));
+
+    await expect(listProviderModels("claude")).rejects.toThrow("service unavailable");
   });
 });

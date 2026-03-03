@@ -194,7 +194,7 @@ import { createTui } from "../tui.js";
 import { createWorktree, removeWorktree, worktreeName } from "../helpers/worktree.js";
 import { registerCleanup } from "../helpers/cleanup.js";
 import { parseTaskFile } from "../parser.js";
-import { fetchItemsById, writeItemsToTempDir, parseIssueFilename, getBranchDiff, squashBranchCommits } from "../orchestrator/datasource-helpers.js";
+import { fetchItemsById, writeItemsToTempDir, parseIssueFilename, closeCompletedSpecIssues, getBranchDiff, squashBranchCommits } from "../orchestrator/datasource-helpers.js";
 import { bootProvider } from "../providers/index.js";
 import { boot as bootPlannerBoot } from "../agents/planner.js";
 import { boot as bootExecutorBoot } from "../agents/executor.js";
@@ -1401,4 +1401,83 @@ describe("worktree dispatch pipeline", () => {
   });
 });
 
+// ─── Error-path handling ────────────────────────────────────────
+
+describe("error-path handling", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Re-establish baseline mocks cleared by vi.clearAllMocks()
+    vi.mocked(fetchItemsById).mockResolvedValue([{
+      number: "1",
+      title: "Test",
+      body: "# Test\n\n- [ ] Implement the feature",
+      labels: [],
+      state: "open",
+      url: "https://example.com/1",
+      comments: [],
+      acceptanceCriteria: "",
+    }]);
+    vi.mocked(writeItemsToTempDir).mockResolvedValue({
+      files: ["/tmp/dispatch-test/1-test.md"],
+      issueDetailsByFile: new Map([["/tmp/dispatch-test/1-test.md", {
+        number: "1",
+        title: "Test",
+        body: "# Test\n\n- [ ] Implement the feature",
+        labels: [],
+        state: "open",
+        url: "https://example.com/1",
+        comments: [],
+        acceptanceCriteria: "",
+      }]]),
+    });
+    vi.mocked(parseTaskFile).mockResolvedValue(TASK_FILE_FIXTURE);
+    vi.mocked(parseIssueFilename).mockReturnValue({ issueId: "1", slug: "test" });
+    mocks.mockExecute.mockResolvedValue({
+      success: true,
+      dispatchResult: { task: TASK_FIXTURE, success: true },
+      elapsedMs: 100,
+    });
+  });
+
+  it("propagates error when fetchItemsById rejects during item discovery", async () => {
+    vi.mocked(fetchItemsById).mockRejectedValueOnce(new Error("network failure"));
+
+    await expect(
+      runDispatchPipeline(baseOpts({ noPlan: true }), "/tmp/test"),
+    ).rejects.toThrow("network failure");
+  });
+
+  it("continues and logs warning when closeCompletedSpecIssues rejects", async () => {
+    vi.mocked(closeCompletedSpecIssues).mockRejectedValueOnce(
+      new Error("close failed"),
+    );
+
+    const result = await runDispatchPipeline(
+      baseOpts({ noPlan: true }),
+      "/tmp/test",
+    );
+
+    expect(result.completed).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
+      expect.stringContaining("close completed spec issues"),
+    );
+  });
+
+  it("logs warning and continues when datasource.update() fails in post-execution sync", async () => {
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    vi.mocked(ds.update).mockRejectedValueOnce(new Error("sync failed"));
+
+    const result = await runDispatchPipeline(
+      baseOpts({ noPlan: true }),
+      "/tmp/test",
+    );
+
+    expect(result.completed).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
+      expect.stringContaining("Could not sync task completion"),
+    );
+  });
+});
 
