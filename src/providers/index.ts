@@ -73,3 +73,4 @@ export async function listProviderModels(
 }
 
 export type { ProviderName, ProviderInstance, ProviderBootOptions } from "./interface.js";
+export { PROVIDER_BINARIES, checkProviderInstalled } from "./detect.js";

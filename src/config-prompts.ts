@@ -14,7 +14,7 @@ import {
   validateConfigValue,
   type DispatchConfig,
 } from "./config.js";
-import { PROVIDER_NAMES, listProviderModels } from "./providers/index.js";
+import { PROVIDER_NAMES, listProviderModels, checkProviderInstalled } from "./providers/index.js";
 import type { ProviderName } from "./providers/interface.js";
 import { DATASOURCE_NAMES, detectDatasource } from "./datasources/index.js";
 import type { DatasourceName } from "./datasources/interface.js";
@@ -58,9 +58,16 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
   }
 
   // ── Provider selection ─────────────────────────────────────
+  const installStatuses = await Promise.all(
+    PROVIDER_NAMES.map((name) => checkProviderInstalled(name)),
+  );
+
   const provider = await select<ProviderName>({
     message: "Select a provider:",
-    choices: PROVIDER_NAMES.map((name) => ({ name, value: name })),
+    choices: PROVIDER_NAMES.map((name, i) => ({
+      name: `${installStatuses[i] ? chalk.green("●") : chalk.red("●")} ${name}`,
+      value: name,
+    })),
     default: existing.provider,
   });
 
