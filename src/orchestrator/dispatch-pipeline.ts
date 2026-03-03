@@ -10,8 +10,10 @@ import { parseTaskFile, buildTaskContext, groupTasksByMode, type TaskFile } from
 import type { DispatchResult } from "../dispatcher.js";
 import { boot as bootPlanner, type PlanResult } from "../agents/planner.js";
 import { boot as bootExecutor } from "../agents/executor.js";
+import { boot as bootCommit } from "../agents/commit.js";
 import { log } from "../helpers/logger.js";
 import { registerCleanup } from "../helpers/cleanup.js";
+import { createWorktree, removeWorktree, worktreeName } from "../helpers/worktree.js";
 import { createTui, type TuiState } from "../tui.js";
 import type { ProviderName } from "../providers/interface.js";
 import { bootProvider } from "../providers/index.js";
@@ -25,6 +27,8 @@ import {
   parseIssueFilename,
   buildPrBody,
   buildPrTitle,
+  getBranchDiff,
+  squashBranchCommits,
 } from "./datasource-helpers.js";
 import { withTimeout, TimeoutError } from "../helpers/timeout.js";
 import chalk from "chalk";
@@ -46,6 +50,7 @@ export async function runDispatchPipeline(
     serverUrl,
     noPlan,
     noBranch,
+    noWorktree,
     provider = "opencode",
     model,
     source,
@@ -173,6 +178,7 @@ export async function runDispatchPipeline(
     // ── 4. Boot planner agent (unless --no-plan) ────────────────
     const planner = noPlan ? null : await bootPlanner({ provider: instance, cwd });
     const executor = await bootExecutor({ provider: instance, cwd });
+    const commitAgent = await bootCommit({ provider: instance, cwd });
 
     // ── 5. Dispatch tasks ───────────────────────────────────────
     tui.state.phase = "dispatching";
@@ -199,29 +205,58 @@ export async function runDispatchPipeline(
       tasksByFile.set(task.file, list);
     }
 
-    // Process each issue's tasks, optionally wrapping with branch lifecycle
-    for (const [file, fileTasks] of tasksByFile) {
+    // Determine whether to use worktree-based parallel execution.
+    // Worktrees are used when: not opted out, branching is enabled, and
+    // there are multiple issues to process (single-issue runs use serial
+    // mode to avoid unnecessary worktree overhead).
+    const useWorktrees = !noWorktree && !noBranch && tasksByFile.size > 1;
+
+    // Process a single issue file's tasks — handles both worktree and
+    // serial branch modes, parameterised by useWorktrees.
+    const processIssueFile = async (file: string, fileTasks: typeof allTasks) => {
       const details = issueDetailsByFile.get(file);
       let defaultBranch: string | undefined;
       let branchName: string | undefined;
+      let worktreePath: string | undefined;
+      let issueCwd = cwd;
 
-      // ── Branch setup (unless --no-branch) ───────────────────
+      // ── Branch / worktree setup (unless --no-branch) ────────────
       if (!noBranch && details) {
         try {
           defaultBranch = await datasource.getDefaultBranch(lifecycleOpts);
           branchName = datasource.buildBranchName(details.number, details.title, username);
-          await datasource.createAndSwitchBranch(branchName, lifecycleOpts);
-          log.debug(`Switched to branch ${branchName}`);
+
+          if (useWorktrees) {
+            worktreePath = await createWorktree(cwd, file, branchName);
+            registerCleanup(async () => { await removeWorktree(cwd, file); });
+            issueCwd = worktreePath;
+            log.debug(`Created worktree for issue #${details.number} at ${worktreePath}`);
+
+            // Tag TUI tasks with worktree name for display
+            const wtName = worktreeName(file);
+            for (const task of fileTasks) {
+              const tuiTask = tui.state.tasks.find((t) => t.task === task);
+              if (tuiTask) tuiTask.worktree = wtName;
+            }
+          } else {
+            await datasource.createAndSwitchBranch(branchName, lifecycleOpts);
+            log.debug(`Switched to branch ${branchName}`);
+          }
         } catch (err) {
           log.warn(`Could not create branch for issue #${details.number}: ${log.formatErrorChain(err)}`);
           // Continue without branching
           branchName = undefined;
           defaultBranch = undefined;
+          worktreePath = undefined;
+          issueCwd = cwd;
         }
       }
 
+      const issueLifecycleOpts: DispatchLifecycleOptions = { cwd: issueCwd };
+
       // ── Dispatch file's tasks ─────────────────────────────────
       const groups = groupTasksByMode(fileTasks);
+      const issueResults: DispatchResult[] = [];
 
       for (const group of groups) {
         const groupQueue = [...group];
@@ -299,7 +334,7 @@ export async function runDispatchPipeline(
               if (verbose) log.info(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: executing — "${task.text}"`);
               const execResult = await executor.execute({
                 task,
-                cwd,
+                cwd: issueCwd,
                 plan: plan ?? null,
               });
 
@@ -334,7 +369,7 @@ export async function runDispatchPipeline(
             })
           );
 
-          results.push(...batchResults);
+          issueResults.push(...batchResults);
 
           // Update TUI once the provider detects the actual model (lazy detection)
           if (!tui.state.model && instance.model) {
@@ -343,12 +378,14 @@ export async function runDispatchPipeline(
         }
       }
 
+      results.push(...issueResults);
+
       // ── Safety-net commit (stage any uncommitted changes) ─────
       if (!noBranch && branchName && defaultBranch && details) {
         try {
           await datasource.commitAllChanges(
             `chore: stage uncommitted changes for issue #${details.number}`,
-            lifecycleOpts,
+            issueLifecycleOpts,
           );
           log.debug(`Staged uncommitted changes for issue #${details.number}`);
         } catch (err) {
@@ -356,31 +393,63 @@ export async function runDispatchPipeline(
         }
       }
 
-      // ── Branch teardown (push, PR, switch back) ──────────────
+      // ── Commit agent (rewrite commits + generate PR metadata) ───
+      let commitAgentResult: import("../agents/commit.js").CommitResult | undefined;
       if (!noBranch && branchName && defaultBranch && details) {
         try {
-          await datasource.pushBranch(branchName, lifecycleOpts);
+          const branchDiff = await getBranchDiff(defaultBranch, issueCwd);
+          if (branchDiff) {
+            const result = await commitAgent.generate({
+              branchDiff,
+              issue: details,
+              taskResults: issueResults,
+              cwd: issueCwd,
+            });
+            if (result.success) {
+              commitAgentResult = result;
+              // Rewrite commit history with the generated message
+              try {
+                await squashBranchCommits(defaultBranch, result.commitMessage, issueCwd);
+                log.debug(`Rewrote commit message for issue #${details.number}`);
+              } catch (err) {
+                log.warn(`Could not rewrite commit message for issue #${details.number}: ${log.formatErrorChain(err)}`);
+              }
+            } else {
+              log.warn(`Commit agent failed for issue #${details.number}: ${result.error}`);
+            }
+          }
+        } catch (err) {
+          log.warn(`Commit agent error for issue #${details.number}: ${log.formatErrorChain(err)}`);
+        }
+      }
+
+      // ── Branch teardown (push, PR, cleanup) ──────────────────
+      if (!noBranch && branchName && defaultBranch && details) {
+        try {
+          await datasource.pushBranch(branchName, issueLifecycleOpts);
           log.debug(`Pushed branch ${branchName}`);
         } catch (err) {
           log.warn(`Could not push branch ${branchName}: ${log.formatErrorChain(err)}`);
         }
 
         try {
-          const prTitle = await buildPrTitle(details.title, defaultBranch, lifecycleOpts.cwd);
-          const prBody = await buildPrBody(
-            details,
-            fileTasks,
-            results,
-            defaultBranch,
-            datasource.name,
-            lifecycleOpts.cwd,
-          );
+          const prTitle = commitAgentResult?.prTitle
+            || await buildPrTitle(details.title, defaultBranch, issueLifecycleOpts.cwd);
+          const prBody = commitAgentResult?.prDescription
+            || await buildPrBody(
+              details,
+              fileTasks,
+              issueResults,
+              defaultBranch,
+              datasource.name,
+              issueLifecycleOpts.cwd,
+            );
           const prUrl = await datasource.createPullRequest(
             branchName,
             details.number,
             prTitle,
             prBody,
-            lifecycleOpts,
+            issueLifecycleOpts,
           );
           if (prUrl) {
             log.success(`Created PR for issue #${details.number}: ${prUrl}`);
@@ -389,12 +458,34 @@ export async function runDispatchPipeline(
           log.warn(`Could not create PR for issue #${details.number}: ${log.formatErrorChain(err)}`);
         }
 
-        try {
-          await datasource.switchBranch(defaultBranch, lifecycleOpts);
-          log.debug(`Switched back to ${defaultBranch}`);
-        } catch (err) {
-          log.warn(`Could not switch back to ${defaultBranch}: ${log.formatErrorChain(err)}`);
+        if (useWorktrees && worktreePath) {
+          // Remove worktree (cleanup handler is also registered for crash safety)
+          try {
+            await removeWorktree(cwd, file);
+          } catch (err) {
+            log.warn(`Could not remove worktree for issue #${details.number}: ${log.formatErrorChain(err)}`);
+          }
+        } else if (!useWorktrees) {
+          try {
+            await datasource.switchBranch(defaultBranch, lifecycleOpts);
+            log.debug(`Switched back to ${defaultBranch}`);
+          } catch (err) {
+            log.warn(`Could not switch back to ${defaultBranch}: ${log.formatErrorChain(err)}`);
+          }
         }
+      }
+    };
+
+    // Execute issues: parallel via worktrees, or serial fallback
+    if (useWorktrees) {
+      await Promise.all(
+        Array.from(tasksByFile).map(([file, fileTasks]) =>
+          processIssueFile(file, fileTasks)
+        )
+      );
+    } else {
+      for (const [file, fileTasks] of tasksByFile) {
+        await processIssueFile(file, fileTasks);
       }
     }
 
@@ -402,6 +493,7 @@ export async function runDispatchPipeline(
     await closeCompletedSpecIssues(taskFiles, results, cwd, source, org, project, workItemType);
 
     // ── 7. Cleanup ──────────────────────────────────────────────
+    await commitAgent.cleanup();
     await executor.cleanup();
     await planner?.cleanup();
     await instance.cleanup();
