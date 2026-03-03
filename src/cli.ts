@@ -19,6 +19,8 @@ import { PROVIDER_NAMES } from "./providers/index.js";
 import { DATASOURCE_NAMES } from "./datasources/index.js";
 import { handleConfigCommand } from "./config.js";
 
+export const MAX_CONCURRENCY = 64;
+
 const HELP = `
   dispatch — AI agent orchestration CLI
 
@@ -36,7 +38,7 @@ const HELP = `
     --dry-run              List tasks without dispatching
     --no-plan              Skip the planner agent, dispatch directly
     --no-branch            Skip branch creation, push, and PR lifecycle
-    --concurrency <n>      Max parallel dispatches (default: min(cpus, freeMB/500))
+    --concurrency <n>      Max parallel dispatches (default: min(cpus, freeMB/500), max: 64)
     --provider <name>      Agent backend: ${PROVIDER_NAMES.join(", ")} (default: opencode)
     --server-url <url>     URL of a running provider server
     --plan-timeout <min>   Planning timeout in minutes (default: 10)
@@ -175,6 +177,10 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
       const val = parseInt(argv[i], 10);
       if (isNaN(val) || val < 1) {
         log.error("--concurrency must be a positive integer");
+        process.exit(1);
+      }
+      if (val > MAX_CONCURRENCY) {
+        log.error(`--concurrency must not exceed ${MAX_CONCURRENCY}`);
         process.exit(1);
       }
       args.concurrency = val;
