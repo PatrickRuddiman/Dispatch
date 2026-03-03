@@ -9,7 +9,7 @@
 
 import { join } from "node:path";
 import { log } from "../helpers/logger.js";
-import { loadConfig, type DispatchConfig } from "../config.js";
+import { loadConfig, CONFIG_KEYS, type DispatchConfig, type ConfigKey } from "../config.js";
 import type { RawCliArgs } from "./runner.js";
 import { detectDatasource, DATASOURCE_NAMES } from "../datasources/index.js";
 
@@ -20,7 +20,7 @@ import { detectDatasource, DATASOURCE_NAMES } from "../datasources/index.js";
  * corresponding field names on `RawCliArgs`. Used during the merge step
  * to fill in CLI flag defaults from the config file.
  */
-const CONFIG_TO_CLI: Record<string, keyof RawCliArgs> = {
+const CONFIG_TO_CLI: Record<ConfigKey, keyof RawCliArgs> = {
   provider: "provider",
   model: "model",
   concurrency: "concurrency",
@@ -33,6 +33,15 @@ const CONFIG_TO_CLI: Record<string, keyof RawCliArgs> = {
   planRetries: "planRetries",
   retries: "retries",
 };
+
+/** Type-safe indexed write into a RawCliArgs object. */
+function setCliField<K extends keyof RawCliArgs>(
+  target: RawCliArgs,
+  key: K,
+  value: RawCliArgs[K],
+): void {
+  target[key] = value;
+}
 
 /**
  * Resolve raw CLI arguments into a fully-merged and validated options
@@ -58,10 +67,11 @@ export async function resolveCliConfig(args: RawCliArgs): Promise<RawCliArgs> {
   const config = await loadConfig(configDir);
 
   const merged = { ...args };
-  for (const [configKey, cliField] of Object.entries(CONFIG_TO_CLI)) {
-    const configValue = config[configKey as keyof DispatchConfig];
+  for (const configKey of CONFIG_KEYS) {
+    const cliField = CONFIG_TO_CLI[configKey];
+    const configValue = config[configKey];
     if (configValue !== undefined && !explicitFlags.has(cliField)) {
-      (merged as unknown as Record<string, unknown>)[cliField] = configValue;
+      setCliField(merged, cliField, configValue);
     }
   }
 
