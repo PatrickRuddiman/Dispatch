@@ -932,6 +932,10 @@ describe("worktree dispatch pipeline", () => {
         dispatchResult: { task: TASK_FIXTURE, success: true },
         elapsedMs: 100,
       });
+      // Reset datasource branch mocks to prevent leftover rejections from earlier tests
+      const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+      vi.mocked(ds.createAndSwitchBranch).mockReset().mockResolvedValue(undefined);
+      vi.mocked(ds.switchBranch).mockReset().mockResolvedValue(undefined);
     });
 
     it("uses serial mode for single-issue runs even without --no-worktree", async () => {
