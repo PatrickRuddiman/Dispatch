@@ -184,6 +184,9 @@ import { createWorktree, removeWorktree, worktreeName } from "../helpers/worktre
 import { registerCleanup } from "../helpers/cleanup.js";
 import { parseTaskFile } from "../parser.js";
 import { fetchItemsById, writeItemsToTempDir, parseIssueFilename } from "../orchestrator/datasource-helpers.js";
+import { bootProvider } from "../providers/index.js";
+import { boot as bootPlannerBoot } from "../agents/planner.js";
+import { boot as bootExecutorBoot } from "../agents/executor.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
@@ -783,8 +786,8 @@ describe("worktree dispatch pipeline", () => {
     it("registers cleanup handlers for worktrees", async () => {
       await runDispatchPipeline(multiIssueOpts(), "/tmp/test");
 
-      // registerCleanup called for: provider instance + 2 worktrees = 3
-      expect(vi.mocked(registerCleanup)).toHaveBeenCalledTimes(3);
+      // registerCleanup called for: 2 per-worktree providers + 2 worktrees = 4
+      expect(vi.mocked(registerCleanup)).toHaveBeenCalledTimes(4);
     });
 
     it("tags TUI tasks with worktree name", async () => {
@@ -825,6 +828,55 @@ describe("worktree dispatch pipeline", () => {
       expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
         expect.stringContaining("Could not create branch"),
       );
+    });
+
+    it("boots a separate provider instance for each worktree", async () => {
+      await runDispatchPipeline(multiIssueOpts(), "/tmp/test");
+
+      expect(vi.mocked(bootProvider)).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(bootProvider)).toHaveBeenCalledWith(
+        "opencode",
+        expect.objectContaining({ cwd: "/tmp/test/.dispatch/worktrees/1-test" }),
+      );
+      expect(vi.mocked(bootProvider)).toHaveBeenCalledWith(
+        "opencode",
+        expect.objectContaining({ cwd: "/tmp/test/.dispatch/worktrees/2-bugfix" }),
+      );
+    });
+
+    it("boots per-worktree planner and executor agents", async () => {
+      await runDispatchPipeline(multiIssueOpts({ noPlan: false }), "/tmp/test");
+
+      // 2 providers, 2 planners, 2 executors (one per worktree)
+      expect(vi.mocked(bootProvider)).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(bootPlannerBoot)).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(bootExecutorBoot)).toHaveBeenCalledTimes(2);
+
+      expect(vi.mocked(bootPlannerBoot)).toHaveBeenCalledWith(
+        expect.objectContaining({ cwd: "/tmp/test/.dispatch/worktrees/1-test" }),
+      );
+      expect(vi.mocked(bootPlannerBoot)).toHaveBeenCalledWith(
+        expect.objectContaining({ cwd: "/tmp/test/.dispatch/worktrees/2-bugfix" }),
+      );
+      expect(vi.mocked(bootExecutorBoot)).toHaveBeenCalledWith(
+        expect.objectContaining({ cwd: "/tmp/test/.dispatch/worktrees/1-test" }),
+      );
+      expect(vi.mocked(bootExecutorBoot)).toHaveBeenCalledWith(
+        expect.objectContaining({ cwd: "/tmp/test/.dispatch/worktrees/2-bugfix" }),
+      );
+    });
+
+    it("passes issueCwd to planner.plan() call", async () => {
+      mocks.mockPlan.mockResolvedValue({ prompt: "Execute step 1", success: true });
+
+      await runDispatchPipeline(multiIssueOpts({ noPlan: false }), "/tmp/test");
+
+      // Verify plan() was called with the worktree cwd as third argument
+      const planCalls = mocks.mockPlan.mock.calls;
+      const planCwds = planCalls.map((call: any[]) => call[2]);
+
+      expect(planCwds).toContain("/tmp/test/.dispatch/worktrees/1-test");
+      expect(planCwds).toContain("/tmp/test/.dispatch/worktrees/2-bugfix");
     });
   });
 
@@ -878,6 +930,36 @@ describe("worktree dispatch pipeline", () => {
       const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
       expect(ds.createAndSwitchBranch).toHaveBeenCalledTimes(2);
       expect(ds.switchBranch).toHaveBeenCalledTimes(2);
+    });
+
+    it("boots a single shared provider when useWorktrees is false", async () => {
+      await runDispatchPipeline(
+        baseOpts({ noBranch: false, noPlan: true }),
+        "/tmp/test",
+      );
+
+      expect(vi.mocked(bootProvider)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(bootProvider)).toHaveBeenCalledWith(
+        "opencode",
+        expect.objectContaining({ cwd: "/tmp/test" }),
+      );
+    });
+
+    it("boots planner and executor once with shared provider", async () => {
+      mocks.mockPlan.mockResolvedValue({ prompt: "Execute step 1", success: true });
+
+      await runDispatchPipeline(
+        baseOpts({ noBranch: false, noPlan: false }),
+        "/tmp/test",
+      );
+
+      expect(vi.mocked(bootProvider)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(bootPlannerBoot)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(bootExecutorBoot)).toHaveBeenCalledTimes(1);
+
+      expect(vi.mocked(bootPlannerBoot)).toHaveBeenCalledWith(
+        expect.objectContaining({ cwd: "/tmp/test" }),
+      );
     });
   });
 });
