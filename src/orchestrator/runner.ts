@@ -60,6 +60,7 @@ export interface RawCliArgs {
   workItemType?: string;
   planTimeout?: number;
   planRetries?: number;
+  testTimeout?: number;
   outputDir?: string;
   explicitFlags: Set<string>;
 }
@@ -91,6 +92,7 @@ export interface SpecRunOptions extends Omit<SpecOptions, "cwd"> {
 /** Fix-tests-mode run options with explicit mode discriminator. */
 export interface FixTestsRunOptions {
   mode: "fix-tests";
+  testTimeout?: number;
 }
 
 /** Discriminated union of all runner run options. */
@@ -123,7 +125,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
       }
       if (opts.mode === "fix-tests") {
         const { runFixTestsPipeline } = await import("./fix-tests-pipeline.js");
-        return runFixTestsPipeline({ cwd, provider: "opencode", serverUrl: undefined, verbose: false });
+        return runFixTestsPipeline({ cwd, provider: "opencode", serverUrl: undefined, verbose: false, testTimeout: opts.testTimeout });
       }
       const { mode: _, ...rest } = opts;
       return runner.orchestrate(rest);
@@ -164,7 +166,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
 
       if (m.fixTests) {
         const { runFixTestsPipeline } = await import("./fix-tests-pipeline.js");
-        return runFixTestsPipeline({ cwd: m.cwd, provider: m.provider, serverUrl: m.serverUrl, verbose: m.verbose });
+        return runFixTestsPipeline({ cwd: m.cwd, provider: m.provider, serverUrl: m.serverUrl, verbose: m.verbose, testTimeout: m.testTimeout });
       }
 
       if (m.spec) {

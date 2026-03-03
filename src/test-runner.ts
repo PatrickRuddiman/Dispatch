@@ -11,6 +11,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { log } from "./helpers/logger.js";
+import { withTimeout, TimeoutError } from "./helpers/timeout.js";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -60,14 +61,14 @@ export async function detectTestCommand(cwd: string): Promise<string> {
  * NOT cause a rejection. Only spawn-level errors (e.g., missing npm)
  * will reject the returned promise.
  */
-export async function runTests(cwd: string): Promise<TestRunResult> {
+export async function runTests(cwd: string, timeoutMs = 300_000): Promise<TestRunResult> {
   const command = await detectTestCommand(cwd);
 
   log.debug(`Running test command: ${command} in ${cwd}`);
 
-  return new Promise<TestRunResult>((resolve, reject) => {
-    const child = spawn("npm", ["test"], { cwd, shell: true });
+  const child = spawn("npm", ["test"], { cwd, shell: true });
 
+  const spawnPromise = new Promise<TestRunResult>((resolve, reject) => {
     let stdout = "";
     let stderr = "";
 
@@ -92,4 +93,13 @@ export async function runTests(cwd: string): Promise<TestRunResult> {
       });
     });
   });
+
+  try {
+    return await withTimeout(spawnPromise, timeoutMs, "test runner");
+  } catch (err) {
+    if (err instanceof TimeoutError) {
+      child.kill();
+    }
+    throw err;
+  }
 }

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 
 vi.mock("../helpers/logger.js", () => ({
@@ -27,6 +27,7 @@ vi.mock("node:child_process", () => ({
 import { detectTestCommand, runTests } from "../test-runner.js";
 import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { TimeoutError } from "../helpers/timeout.js";
 
 function createMockChildProcess() {
   const child = new EventEmitter();
@@ -251,5 +252,93 @@ describe("runTests", () => {
       cwd: "/project",
       shell: true,
     });
+  });
+});
+
+// ── runTests timeout ──────────────────────────────────────────────
+
+describe("runTests timeout", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("throws TimeoutError when child process does not close in time", async () => {
+    vi.mocked(readFile).mockResolvedValue(
+      JSON.stringify({ scripts: { test: "vitest run" } }),
+    );
+
+    const child = createMockChildProcess();
+    (child as any).kill = vi.fn();
+    vi.mocked(spawn).mockReturnValue(child as any);
+
+    const promise = runTests("/project", 5000);
+
+    await vi.advanceTimersByTimeAsync(5000);
+
+    await expect(promise).rejects.toThrow(TimeoutError);
+    await expect(promise).rejects.toThrow(/test runner/);
+  });
+
+  it("kills the child process on timeout", async () => {
+    vi.mocked(readFile).mockResolvedValue(
+      JSON.stringify({ scripts: { test: "vitest run" } }),
+    );
+
+    const child = createMockChildProcess();
+    const killFn = vi.fn();
+    (child as any).kill = killFn;
+    vi.mocked(spawn).mockReturnValue(child as any);
+
+    const promise = runTests("/project", 5000);
+
+    await vi.advanceTimersByTimeAsync(5000);
+
+    await promise.catch(() => {}); // consume rejection
+    expect(killFn).toHaveBeenCalled();
+  });
+
+  it("resolves normally when child closes before timeout", async () => {
+    vi.mocked(readFile).mockResolvedValue(
+      JSON.stringify({ scripts: { test: "vitest run" } }),
+    );
+
+    const child = createMockChildProcess();
+    (child as any).kill = vi.fn();
+    vi.mocked(spawn).mockReturnValue(child as any);
+
+    const promise = runTests("/project", 10_000);
+
+    // Child closes before timeout
+    await vi.advanceTimersByTimeAsync(100);
+    (child as any).stdout.emit("data", "ok\n");
+    child.emit("close", 0);
+
+    const result = await promise;
+    expect(result.exitCode).toBe(0);
+    expect((child as any).kill).not.toHaveBeenCalled();
+  });
+
+  it("uses default timeout of 300000ms when not specified", async () => {
+    vi.mocked(readFile).mockResolvedValue(
+      JSON.stringify({ scripts: { test: "vitest run" } }),
+    );
+
+    const child = createMockChildProcess();
+    (child as any).kill = vi.fn();
+    vi.mocked(spawn).mockReturnValue(child as any);
+
+    const promise = runTests("/project");
+
+    // Advance to just before default timeout — should not throw
+    await vi.advanceTimersByTimeAsync(299_999);
+
+    // Advance past default timeout — should throw
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(promise).rejects.toThrow(TimeoutError);
   });
 });

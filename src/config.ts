@@ -33,6 +33,7 @@ export interface DispatchConfig {
   serverUrl?: string;
   planTimeout?: number;
   planRetries?: number;
+  testTimeout?: number;
 }
 
 /** Valid configuration key names. */
@@ -47,6 +48,7 @@ export const CONFIG_KEYS = [
   "serverUrl",
   "planTimeout",
   "planRetries",
+  "testTimeout",
 ] as const;
 
 /** A valid configuration key name. */
@@ -143,6 +145,14 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
       const num = Number(value);
       if (!Number.isInteger(num) || num < 0) {
         return `Invalid planRetries "${value}". Must be a non-negative integer`;
+      }
+      return null;
+    }
+
+    case "testTimeout": {
+      const num = Number(value);
+      if (!Number.isFinite(num) || num <= 0) {
+        return `Invalid testTimeout "${value}". Must be a positive number (minutes)`;
       }
       return null;
     }
