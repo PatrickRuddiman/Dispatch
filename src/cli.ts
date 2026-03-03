@@ -35,10 +35,11 @@ const HELP = `
     dispatch --fix-tests             Run tests and fix failures via AI agent
 
   Dispatch options:
-    --dry-run              List tasks without dispatching
+    --dry-run              List tasks without dispatching (also works with --spec)
     --no-plan              Skip the planner agent, dispatch directly
     --no-branch            Skip branch creation, push, and PR lifecycle
     --no-worktree          Skip git worktree isolation for parallel issues
+    --force              Ignore prior run state and re-run all tasks
     --concurrency <n>      Max parallel dispatches (default: min(cpus, freeMB/500), max: 64)
     --provider <name>      Agent backend: ${PROVIDER_NAMES.join(", ")} (default: opencode)
     --server-url <url>     URL of a running provider server
@@ -99,6 +100,7 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
     noPlan: false,
     noBranch: false,
     noWorktree: false,
+    force: false,
     provider: "opencode",
     cwd: process.cwd(),
     help: false,
@@ -130,6 +132,9 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
     } else if (arg === "--no-worktree") {
       args.noWorktree = true;
       explicitFlags.add("noWorktree");
+    } else if (arg === "--force") {
+      args.force = true;
+      explicitFlags.add("force");
     } else if (arg === "--verbose") {
       args.verbose = true;
       explicitFlags.add("verbose");

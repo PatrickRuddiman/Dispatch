@@ -25,16 +25,8 @@ import { detectDatasource, DATASOURCE_NAMES } from "../datasources/index.js";
 const CONFIG_TO_CLI: Record<ConfigKey, keyof RawCliArgs> = {
   provider: "provider",
   model: "model",
-  concurrency: "concurrency",
   source: "issueSource",
-  org: "org",
-  project: "project",
-  workItemType: "workItemType",
-  serverUrl: "serverUrl",
-  planTimeout: "planTimeout",
-  planRetries: "planRetries",
   testTimeout: "testTimeout",
-  retries: "retries",
 };
 
 /** Type-safe indexed write into a RawCliArgs object. */

@@ -33,6 +33,7 @@ export async function listModels(_opts?: ProviderBootOptions): Promise<string[]>
  */
 export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance> {
   const model = opts?.model ?? "claude-sonnet-4";
+  const cwd = opts?.cwd;
   log.debug(`Booting Claude provider with model ${model}`);
 
   const sessions = new Map<string, SDKSession>();
@@ -44,7 +45,8 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
     async createSession(): Promise<string> {
       log.debug("Creating Claude session...");
       try {
-        const session = unstable_v2_createSession({ model, permissionMode: 'acceptEdits' });
+        const sessionOpts = { model, permissionMode: 'acceptEdits' as const, ...(cwd ? { cwd } : {}) };
+        const session = unstable_v2_createSession(sessionOpts);
         const sessionId = randomUUID();
         sessions.set(sessionId, session);
         log.debug(`Session created: ${sessionId}`);
