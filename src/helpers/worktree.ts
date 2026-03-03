@@ -2,8 +2,8 @@
  * Git worktree lifecycle manager.
  *
  * Creates, removes, and lists git worktrees in `.dispatch/worktrees/`.
- * Worktree directory names are derived from issue filenames using the
- * `slugify` utility (e.g., `123-fix-auth-bug.md` → `123-fix-auth-bug`).
+ * Worktree directory names are derived from the leading numeric ID of the
+ * issue filename (e.g., `123-fix-auth-bug.md` → `issue-123`).
  */
 
 import { join, basename } from "node:path";
@@ -26,16 +26,17 @@ async function git(args: string[], cwd: string): Promise<string> {
 /**
  * Derive a worktree directory name from an issue filename.
  *
- * Strips the `.md` extension and slugifies the result.
- * Example: `123-fix-auth-bug.md` → `123-fix-auth-bug`
+ * Extracts the leading numeric ID and returns `issue-{id}`.
+ * Example: `123-fix-auth-bug.md` → `issue-123`
  *
  * @param issueFilename - The issue filename (basename or full path)
- * @returns A slugified directory name suitable for a worktree
+ * @returns A directory name suitable for a worktree
  */
 export function worktreeName(issueFilename: string): string {
   const base = basename(issueFilename);
   const withoutExt = base.replace(/\.md$/i, "");
-  return slugify(withoutExt);
+  const match = withoutExt.match(/^(\d+)/);
+  return match ? `issue-${match[1]}` : slugify(withoutExt);
 }
 
 /**
