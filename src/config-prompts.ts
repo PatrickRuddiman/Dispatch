@@ -157,6 +157,7 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
   let serverUrl: string | undefined = existing.serverUrl;
   let planTimeout: number | undefined = existing.planTimeout;
   let planRetries: number | undefined = existing.planRetries;
+  let retries: number | undefined = existing.retries;
 
   console.log();
   const configureAdvanced = await confirm({
@@ -195,6 +196,17 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
     });
     planTimeout = planTimeoutResult;
 
+    const retriesResult = await number({
+      message: "Retries (retry attempts for all agents):",
+      default: existing.retries,
+      validate: (value) => {
+        if (value === undefined) return true;
+        const error = validateConfigValue("retries", String(value));
+        return error ?? true;
+      },
+    });
+    retries = retriesResult;
+
     const planRetriesResult = await number({
       message: "Plan retries:",
       default: existing.planRetries,
@@ -226,6 +238,7 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
   if (concurrency !== undefined) newConfig.concurrency = concurrency;
   if (serverUrl !== undefined) newConfig.serverUrl = serverUrl;
   if (planTimeout !== undefined) newConfig.planTimeout = planTimeout;
+  if (retries !== undefined) newConfig.retries = retries;
   if (planRetries !== undefined) newConfig.planRetries = planRetries;
 
   // ── Summary ────────────────────────────────────────────────

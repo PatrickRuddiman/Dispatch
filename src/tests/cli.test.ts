@@ -323,6 +323,17 @@ describe("parseArgs value flags", () => {
     expect(args.planRetries).toBe(0);
   });
 
+  it("parses --retries <n>", () => {
+    const [args, flags] = parseArgs(["--retries", "3"]);
+    expect(args.retries).toBe(3);
+    expect(flags.has("retries")).toBe(true);
+  });
+
+  it("parses --retries 0", () => {
+    const [args] = parseArgs(["--retries", "0"]);
+    expect(args.retries).toBe(0);
+  });
+
   it("parses --cwd <dir>", () => {
     const [args, flags] = parseArgs(["--cwd", "/tmp/work"]);
     expect(args.cwd).toContain("tmp/work");
@@ -381,6 +392,15 @@ describe("parseArgs error cases", () => {
 
   it("exits for non-numeric --plan-retries", () => {
     expect(() => parseArgs(["--plan-retries", "abc"])).toThrow("process.exit called");
+  });
+
+  it("exits for negative --retries", () => {
+    expect(() => parseArgs(["--retries", "-1"])).toThrow("process.exit called");
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
+
+  it("exits for non-numeric --retries", () => {
+    expect(() => parseArgs(["--retries", "abc"])).toThrow("process.exit called");
   });
 
   it("exits for unknown flag", () => {
