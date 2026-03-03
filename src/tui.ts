@@ -14,6 +14,8 @@ export interface TaskState {
   status: TaskStatus;
   elapsed?: number;
   error?: string;
+  /** Worktree directory name when running in a worktree (e.g. "123-fix-auth-bug") */
+  worktree?: string;
 }
 
 export interface TuiState {
@@ -139,6 +141,12 @@ function render(state: TuiState): string {
     lines.push("");
 
     // ── Task list ───────────────────────────────────────────
+    // Determine if multiple worktrees are active (show indicator only when >1)
+    const activeWorktrees = new Set(
+      state.tasks.map((t) => t.worktree).filter(Boolean)
+    );
+    const showWorktree = activeWorktrees.size > 1;
+
     const cols = process.stdout.columns || 80;
     const maxTextLen = cols - 30;
 
@@ -177,7 +185,11 @@ function render(state: TuiState): string {
 
       const label = statusLabel(ts.status);
 
-      lines.push(`  ${icon} ${idx} ${text} ${label}${elapsedStr}`);
+      const wtTag = showWorktree && ts.worktree
+        ? chalk.dim(` [wt:${ts.worktree}]`)
+        : "";
+
+      lines.push(`  ${icon} ${idx} ${text} ${label}${elapsedStr}${wtTag}`);
 
       if (ts.error) {
         lines.push(chalk.red(`       └─ ${ts.error}`));

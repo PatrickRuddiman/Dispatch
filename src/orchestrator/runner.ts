@@ -12,6 +12,7 @@ import { getDatasource } from "../datasources/index.js";
 import { log } from "../helpers/logger.js";
 import { confirmLargeBatch } from "../helpers/confirm-large-batch.js";
 import { checkPrereqs } from "../helpers/prereqs.js";
+import { ensureGitignoreEntry } from "../helpers/gitignore.js";
 import { resolveCliConfig } from "./cli-config.js";
 import { runSpecPipeline } from "./spec-pipeline.js";
 import { runDispatchPipeline } from "./dispatch-pipeline.js";
@@ -23,6 +24,7 @@ export interface OrchestrateRunOptions {
   dryRun: boolean;
   noPlan?: boolean;
   noBranch?: boolean;
+  noWorktree?: boolean;
   provider?: ProviderName;
   /** Model override to pass to the provider (provider-specific format). */
   model?: string;
@@ -41,6 +43,7 @@ export interface RawCliArgs {
   dryRun: boolean;
   noPlan: boolean;
   noBranch: boolean;
+  noWorktree: boolean;
   concurrency?: number;
   provider: ProviderName;
   /** Model override from config or CLI (provider-specific format). */
@@ -138,6 +141,9 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
         process.exit(1);
       }
 
+      // Ensure .dispatch/worktrees/ is gitignored in the main repo
+      await ensureGitignoreEntry(m.cwd, ".dispatch/worktrees/");
+
       // ── Mutual exclusion: --spec, --respec, --fix-tests ────
       const modeFlags = [
         m.spec !== undefined && "--spec",
@@ -208,7 +214,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
 
       return this.orchestrate({
         issueIds: m.issueIds, concurrency: m.concurrency ?? defaultConcurrency(),
-        dryRun: m.dryRun, noPlan: m.noPlan, noBranch: m.noBranch, provider: m.provider,
+        dryRun: m.dryRun, noPlan: m.noPlan, noBranch: m.noBranch, noWorktree: m.noWorktree, provider: m.provider,
         model: m.model, serverUrl: m.serverUrl, source: m.issueSource, org: m.org, project: m.project,
         workItemType: m.workItemType, planTimeout: m.planTimeout, planRetries: m.planRetries,
       });

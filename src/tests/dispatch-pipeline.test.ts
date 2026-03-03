@@ -6,7 +6,7 @@ import type { Datasource, IssueDetails } from "../datasources/interface.js";
 
 // ─── Hoisted mock references and fixtures ───────────────────────────
 
-const { mocks, TASK_FIXTURE, TASK_FILE_FIXTURE } = vi.hoisted(() => {
+const { mocks, TASK_FIXTURE, TASK_FILE_FIXTURE, TASK_FIXTURE_2, TASK_FILE_FIXTURE_2 } = vi.hoisted(() => {
   const TASK_FIXTURE: Task = {
     index: 0,
     text: "Implement the feature",
@@ -21,6 +21,20 @@ const { mocks, TASK_FIXTURE, TASK_FILE_FIXTURE } = vi.hoisted(() => {
     content: "# Test\n\n- [ ] Implement the feature",
   };
 
+  const TASK_FIXTURE_2: Task = {
+    index: 0,
+    text: "Fix the bug",
+    line: 3,
+    raw: "- [ ] Fix the bug",
+    file: "/tmp/dispatch-test/2-bugfix.md",
+  };
+
+  const TASK_FILE_FIXTURE_2: TaskFile = {
+    path: "/tmp/dispatch-test/2-bugfix.md",
+    tasks: [TASK_FIXTURE_2],
+    content: "# Bugfix\n\n- [ ] Fix the bug",
+  };
+
   const mockPlan = vi.fn<PlannerAgent["plan"]>();
   const mockExecute = vi.fn();
   const mockCreateSession = vi.fn<ProviderInstance["createSession"]>().mockResolvedValue("sess-1");
@@ -31,6 +45,8 @@ const { mocks, TASK_FIXTURE, TASK_FILE_FIXTURE } = vi.hoisted(() => {
     mocks: { mockPlan, mockExecute, mockCreateSession, mockPrompt, mockCleanup },
     TASK_FIXTURE,
     TASK_FILE_FIXTURE,
+    TASK_FIXTURE_2,
+    TASK_FILE_FIXTURE_2,
   };
 });
 
@@ -97,6 +113,12 @@ vi.mock("../helpers/cleanup.js", () => ({
   registerCleanup: vi.fn(),
 }));
 
+vi.mock("../helpers/worktree.js", () => ({
+  createWorktree: vi.fn().mockResolvedValue("/tmp/test/.dispatch/worktrees/1-test"),
+  removeWorktree: vi.fn().mockResolvedValue(undefined),
+  worktreeName: vi.fn().mockReturnValue("1-test"),
+}));
+
 vi.mock("../helpers/logger.js", () => ({
   log: {
     verbose: false,
@@ -144,6 +166,8 @@ vi.mock("../orchestrator/datasource-helpers.js", () => ({
   }),
   closeCompletedSpecIssues: vi.fn().mockResolvedValue(undefined),
   parseIssueFilename: vi.fn().mockReturnValue({ issueId: "1", slug: "test" }),
+  buildPrBody: vi.fn().mockResolvedValue("PR body"),
+  buildPrTitle: vi.fn().mockResolvedValue("PR title"),
 }));
 
 vi.mock("node:fs/promises", () => ({
@@ -156,6 +180,10 @@ import { runDispatchPipeline, dryRunMode } from "../orchestrator/dispatch-pipeli
 import { getDatasource } from "../datasources/index.js";
 import { log } from "../helpers/logger.js";
 import { createTui } from "../tui.js";
+import { createWorktree, removeWorktree, worktreeName } from "../helpers/worktree.js";
+import { registerCleanup } from "../helpers/cleanup.js";
+import { parseTaskFile } from "../parser.js";
+import { fetchItemsById, writeItemsToTempDir, parseIssueFilename } from "../orchestrator/datasource-helpers.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
@@ -633,5 +661,223 @@ describe("commitAllChanges safety-net", () => {
     expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
       expect.stringContaining("commit"),
     );
+  });
+});
+
+// ─── Worktree dispatch pipeline ─────────────────────────────────
+
+const ISSUE_1: IssueDetails = {
+  number: "1",
+  title: "Test",
+  body: "# Test\n\n- [ ] Implement the feature",
+  labels: [],
+  state: "open",
+  url: "https://example.com/1",
+  comments: [],
+  acceptanceCriteria: "",
+};
+
+const ISSUE_2: IssueDetails = {
+  number: "2",
+  title: "Bugfix",
+  body: "# Bugfix\n\n- [ ] Fix the bug",
+  labels: [],
+  state: "open",
+  url: "https://example.com/2",
+  comments: [],
+  acceptanceCriteria: "",
+};
+
+function multiIssueOpts(overrides?: Partial<Parameters<typeof runDispatchPipeline>[0]>) {
+  return baseOpts({
+    issueIds: ["1", "2"],
+    noBranch: false,
+    noPlan: true,
+    ...overrides,
+  });
+}
+
+function setupMultiIssueScenario() {
+  vi.mocked(fetchItemsById).mockResolvedValue([ISSUE_1, ISSUE_2]);
+  vi.mocked(writeItemsToTempDir).mockResolvedValue({
+    files: ["/tmp/dispatch-test/1-test.md", "/tmp/dispatch-test/2-bugfix.md"],
+    issueDetailsByFile: new Map([
+      ["/tmp/dispatch-test/1-test.md", ISSUE_1],
+      ["/tmp/dispatch-test/2-bugfix.md", ISSUE_2],
+    ]),
+  });
+
+  vi.mocked(parseTaskFile).mockImplementation(async (file: string) => {
+    if (file.includes("2-bugfix")) return TASK_FILE_FIXTURE_2;
+    return TASK_FILE_FIXTURE;
+  });
+
+  vi.mocked(parseIssueFilename).mockImplementation((file: string) => {
+    if (file.includes("2-bugfix")) return { issueId: "2", slug: "bugfix" };
+    return { issueId: "1", slug: "test" };
+  });
+
+  vi.mocked(createWorktree).mockImplementation(async (_root: string, file: string) => {
+    if (file.includes("2-bugfix")) return "/tmp/test/.dispatch/worktrees/2-bugfix";
+    return "/tmp/test/.dispatch/worktrees/1-test";
+  });
+
+  vi.mocked(worktreeName).mockImplementation((file: string) => {
+    if (file.includes("2-bugfix")) return "2-bugfix";
+    return "1-test";
+  });
+
+  const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+  vi.mocked(ds.buildBranchName).mockImplementation((num: string, title: string, user?: string) => {
+    return `${user}/dispatch/${num}-${title.toLowerCase().replace(/\s+/g, "-")}`;
+  });
+}
+
+describe("worktree dispatch pipeline", () => {
+  describe("multi-issue worktree mode", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      mocks.mockExecute.mockImplementation(async ({ task }: any) => ({
+        success: true,
+        dispatchResult: { task, success: true },
+        elapsedMs: 100,
+      }));
+      setupMultiIssueScenario();
+    });
+
+    it("creates a worktree for each issue file", async () => {
+      const result = await runDispatchPipeline(multiIssueOpts(), "/tmp/test");
+
+      expect(result.completed).toBe(2);
+      expect(vi.mocked(createWorktree)).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(createWorktree)).toHaveBeenCalledWith(
+        "/tmp/test",
+        "/tmp/dispatch-test/1-test.md",
+        expect.stringContaining("1"),
+      );
+      expect(vi.mocked(createWorktree)).toHaveBeenCalledWith(
+        "/tmp/test",
+        "/tmp/dispatch-test/2-bugfix.md",
+        expect.stringContaining("2"),
+      );
+    });
+
+    it("passes worktree path as cwd to executor", async () => {
+      await runDispatchPipeline(multiIssueOpts(), "/tmp/test");
+
+      const executeCalls = mocks.mockExecute.mock.calls;
+      const cwds = executeCalls.map((call: any[]) => call[0].cwd);
+
+      expect(cwds).toContain("/tmp/test/.dispatch/worktrees/1-test");
+      expect(cwds).toContain("/tmp/test/.dispatch/worktrees/2-bugfix");
+    });
+
+    it("calls removeWorktree for each issue after completion", async () => {
+      await runDispatchPipeline(multiIssueOpts(), "/tmp/test");
+
+      expect(vi.mocked(removeWorktree)).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(removeWorktree)).toHaveBeenCalledWith("/tmp/test", "/tmp/dispatch-test/1-test.md");
+      expect(vi.mocked(removeWorktree)).toHaveBeenCalledWith("/tmp/test", "/tmp/dispatch-test/2-bugfix.md");
+    });
+
+    it("registers cleanup handlers for worktrees", async () => {
+      await runDispatchPipeline(multiIssueOpts(), "/tmp/test");
+
+      // registerCleanup called for: provider instance + 2 worktrees = 3
+      expect(vi.mocked(registerCleanup)).toHaveBeenCalledTimes(3);
+    });
+
+    it("tags TUI tasks with worktree name", async () => {
+      await runDispatchPipeline(multiIssueOpts(), "/tmp/test");
+
+      const tuiState = vi.mocked(createTui).mock.results[0].value.state;
+      const worktreeNames = tuiState.tasks.map((t: any) => t.worktree);
+
+      expect(worktreeNames).toContain("1-test");
+      expect(worktreeNames).toContain("2-bugfix");
+    });
+
+    it("does not call switchBranch or createAndSwitchBranch in worktree mode", async () => {
+      await runDispatchPipeline(multiIssueOpts(), "/tmp/test");
+
+      const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+      expect(ds.createAndSwitchBranch).not.toHaveBeenCalled();
+      expect(ds.switchBranch).not.toHaveBeenCalled();
+    });
+
+    it("passes worktree cwd to commitAllChanges", async () => {
+      await runDispatchPipeline(multiIssueOpts(), "/tmp/test");
+
+      const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+      const commitCalls = vi.mocked(ds.commitAllChanges).mock.calls;
+      const commitCwds = commitCalls.map((call: any[]) => call[1]?.cwd);
+
+      expect(commitCwds).toContain("/tmp/test/.dispatch/worktrees/1-test");
+      expect(commitCwds).toContain("/tmp/test/.dispatch/worktrees/2-bugfix");
+    });
+
+    it("continues without branching when worktree creation fails", async () => {
+      vi.mocked(createWorktree).mockRejectedValue(new Error("worktree creation failed"));
+
+      const result = await runDispatchPipeline(multiIssueOpts(), "/tmp/test");
+
+      expect(result.completed).toBe(2);
+      expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
+        expect.stringContaining("Could not create branch"),
+      );
+    });
+  });
+
+  describe("serial fallback", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      // Restore single-issue defaults overridden by setupMultiIssueScenario()
+      vi.mocked(fetchItemsById).mockResolvedValue([ISSUE_1]);
+      vi.mocked(writeItemsToTempDir).mockResolvedValue({
+        files: ["/tmp/dispatch-test/1-test.md"],
+        issueDetailsByFile: new Map([["/tmp/dispatch-test/1-test.md", ISSUE_1]]),
+      });
+      vi.mocked(parseTaskFile).mockResolvedValue(TASK_FILE_FIXTURE);
+      vi.mocked(parseIssueFilename).mockReturnValue({ issueId: "1", slug: "test" });
+      mocks.mockExecute.mockResolvedValue({
+        success: true,
+        dispatchResult: { task: TASK_FIXTURE, success: true },
+        elapsedMs: 100,
+      });
+    });
+
+    it("uses serial mode for single-issue runs even without --no-worktree", async () => {
+      const result = await runDispatchPipeline(
+        baseOpts({ noBranch: false, noPlan: true }),
+        "/tmp/test",
+      );
+
+      expect(result.completed).toBe(1);
+      expect(vi.mocked(createWorktree)).not.toHaveBeenCalled();
+
+      const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+      expect(ds.createAndSwitchBranch).toHaveBeenCalledOnce();
+    });
+
+    it("falls back to serial branch mode with --no-worktree", async () => {
+      setupMultiIssueScenario();
+      mocks.mockExecute.mockImplementation(async ({ task }: any) => ({
+        success: true,
+        dispatchResult: { task, success: true },
+        elapsedMs: 100,
+      }));
+
+      const result = await runDispatchPipeline(
+        multiIssueOpts({ noWorktree: true }),
+        "/tmp/test",
+      );
+
+      expect(result.completed).toBe(2);
+      expect(vi.mocked(createWorktree)).not.toHaveBeenCalled();
+
+      const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+      expect(ds.createAndSwitchBranch).toHaveBeenCalledTimes(2);
+      expect(ds.switchBranch).toHaveBeenCalledTimes(2);
+    });
   });
 });

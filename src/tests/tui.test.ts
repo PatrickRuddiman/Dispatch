@@ -279,6 +279,48 @@ describe("task list truncation", () => {
   });
 });
 
+describe("worktree indicator rendering", () => {
+  it("shows worktree tag when multiple worktrees are active", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    addTask("running", "Task in wt1", 0, { worktree: "123-fix-auth" });
+    addTask("running", "Task in wt2", 1, { worktree: "456-add-feature" });
+    tui.update();
+    const output = lastOutput();
+    expect(output).toContain("[wt:123-fix-auth]");
+    expect(output).toContain("[wt:456-add-feature]");
+  });
+
+  it("hides worktree tag when only one worktree is active", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    addTask("running", "Task in wt1", 0, { worktree: "123-fix-auth" });
+    addTask("running", "Task in wt1", 1, { worktree: "123-fix-auth" });
+    tui.update();
+    expect(lastOutput()).not.toContain("[wt:");
+  });
+
+  it("hides worktree tag when no worktrees are set", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    addTask("running", "A regular task", 0);
+    tui.update();
+    expect(lastOutput()).not.toContain("[wt:");
+  });
+
+  it("shows worktree tag only for tasks that have a worktree", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    addTask("running", "Task with wt", 0, { worktree: "123-fix-auth" });
+    addTask("running", "Task without wt", 1);
+    addTask("running", "Task with wt2", 2, { worktree: "456-add-feature" });
+    tui.update();
+    const output = lastOutput();
+    expect(output).toContain("[wt:123-fix-auth]");
+    expect(output).toContain("[wt:456-add-feature]");
+  });
+});
+
 describe("header and issue rendering", () => {
   it("renders header with dispatch branding", async () => {
     await setup();
