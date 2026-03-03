@@ -24,12 +24,13 @@ export async function dispatchTask(
   instance: ProviderInstance,
   task: Task,
   cwd: string,
-  plan?: string
+  plan?: string,
+  worktreeRoot?: string,
 ): Promise<DispatchResult> {
   try {
     log.debug(`Dispatching task: ${task.file}:${task.line} — ${task.text.slice(0, 80)}`);
     const sessionId = await instance.createSession();
-    const prompt = plan ? buildPlannedPrompt(task, cwd, plan) : buildPrompt(task, cwd);
+    const prompt = plan ? buildPlannedPrompt(task, cwd, plan, worktreeRoot) : buildPrompt(task, cwd, worktreeRoot);
     log.debug(`Prompt built (${prompt.length} chars, ${plan ? "with plan" : "no plan"})`);
 
     const response = await instance.prompt(sessionId, prompt);
@@ -52,7 +53,7 @@ export async function dispatchTask(
  * Build a focused prompt for a single task. Includes context about the
  * project but scopes the work to just this one unit.
  */
-function buildPrompt(task: Task, cwd: string): string {
+function buildPrompt(task: Task, cwd: string, worktreeRoot?: string): string {
   return [
     `You are completing a task from a markdown task file.`,
     ``,
@@ -64,6 +65,7 @@ function buildPrompt(task: Task, cwd: string): string {
     `- Complete ONLY this specific task — do not work on other tasks.`,
     `- Make the minimal, correct changes needed.`,
     buildCommitInstruction(task.text),
+    ...buildWorktreeIsolation(worktreeRoot),
     `- When finished, confirm by saying "Task complete."`,
   ].join("\n");
 }
@@ -72,7 +74,7 @@ function buildPrompt(task: Task, cwd: string): string {
  * Build a prompt for the executor when a planner has already explored
  * the codebase and produced a detailed execution plan.
  */
-function buildPlannedPrompt(task: Task, cwd: string, plan: string): string {
+function buildPlannedPrompt(task: Task, cwd: string, plan: string, worktreeRoot?: string): string {
   return [
     `You are an **executor agent** completing a task that has been pre-planned by a planner agent.`,
     `The planner has already explored the codebase and produced detailed instructions below.`,
@@ -97,6 +99,7 @@ function buildPlannedPrompt(task: Task, cwd: string, plan: string): string {
     `- Do NOT re-plan, question, or revise the plan. Trust it as given and execute it faithfully.`,
     `- Do NOT search for additional context using grep, find, or similar tools unless the plan explicitly instructs you to.`,
     buildCommitInstruction(task.text),
+    ...buildWorktreeIsolation(worktreeRoot),
     `- When finished, confirm by saying "Task complete."`,
   ].join("\n");
 }
@@ -120,4 +123,17 @@ function buildCommitInstruction(taskText: string): string {
     );
   }
   return `- Do NOT commit changes — the orchestrator handles commits.`;
+}
+
+/**
+ * Build worktree isolation instructions when operating inside a git worktree.
+ * Returns an empty array when no worktreeRoot is provided (non-worktree mode).
+ */
+function buildWorktreeIsolation(worktreeRoot?: string): string[] {
+  if (!worktreeRoot) return [];
+  return [
+    `- **Worktree isolation:** You are operating inside a git worktree at \`${worktreeRoot}\`. ` +
+      `You MUST NOT read, write, or execute commands that access files outside this directory. ` +
+      `All file paths must resolve within \`${worktreeRoot}\`.`,
+  ];
 }

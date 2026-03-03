@@ -10,6 +10,7 @@ declare module "@openai/codex" {
     model: string;
     config: { model: string; instructions: string };
     approvalPolicy: "full-auto" | "suggest" | "ask-every-time";
+    rootDir?: string;
     additionalWritableRoots?: string[];
     getCommandConfirmation: (
       command: unknown,

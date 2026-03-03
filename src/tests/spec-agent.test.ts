@@ -321,6 +321,25 @@ describe("generate", () => {
     expect(result.error).toBe("raw string error");
   });
 
+  it("returns failure when outputPath escapes the working directory", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("AI response"),
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/etc/malicious/output.md",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("escapes the working directory");
+    expect(result.valid).toBe(false);
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(provider.createSession).not.toHaveBeenCalled();
+  });
+
   it("does not throw when temp file cleanup fails", async () => {
     const provider = createMockProvider({
       prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("AI response"),
