@@ -923,4 +923,98 @@ describe("worktree dispatch pipeline", () => {
       expect(ds.switchBranch).toHaveBeenCalledTimes(2);
     });
   });
+
+  // ─── Executor retry ─────────────────────────────────────────────────
+
+  describe("executor retry", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.clearAllMocks();
+      // Restore single-issue defaults (may have been overridden by setupMultiIssueScenario)
+      vi.mocked(fetchItemsById).mockResolvedValue([ISSUE_1]);
+      vi.mocked(writeItemsToTempDir).mockResolvedValue({
+        files: ["/tmp/dispatch-test/1-test.md"],
+        issueDetailsByFile: new Map([["/tmp/dispatch-test/1-test.md", ISSUE_1]]),
+      });
+      vi.mocked(parseTaskFile).mockResolvedValue(TASK_FILE_FIXTURE);
+      vi.mocked(parseIssueFilename).mockReturnValue({ issueId: "1", slug: "test" });
+      mocks.mockPlan.mockImplementation(() =>
+        new Promise<PlanResult>((resolve) => {
+          setTimeout(() => resolve({ prompt: "Execute step 1", success: true }), 100);
+        }),
+      );
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("retries executor on failure and succeeds on retry", async () => {
+      let callCount = 0;
+      mocks.mockExecute.mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            success: false,
+            dispatchResult: { task: TASK_FIXTURE, success: false, error: "transient error" },
+            error: "transient error",
+            elapsedMs: 50,
+          };
+        }
+        return {
+          success: true,
+          dispatchResult: { task: TASK_FIXTURE, success: true },
+          elapsedMs: 100,
+        };
+      });
+
+      const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.runAllTimersAsync();
+
+      const result = await resultPromise;
+
+      expect(result.completed).toBe(1);
+      expect(result.failed).toBe(0);
+      expect(mocks.mockExecute).toHaveBeenCalledTimes(2);
+    });
+
+    it("fails the task when all executor attempts are exhausted", async () => {
+      mocks.mockExecute.mockResolvedValue({
+        success: false,
+        dispatchResult: { task: TASK_FIXTURE, success: false, error: "persistent error" },
+        error: "persistent error",
+        elapsedMs: 50,
+      });
+
+      const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.runAllTimersAsync();
+
+      const result = await resultPromise;
+
+      expect(result.completed).toBe(0);
+      expect(result.failed).toBe(1);
+      // 2 retries + 1 initial = 3 total attempts
+      expect(mocks.mockExecute).toHaveBeenCalledTimes(3);
+    });
+
+    it("does not retry when executor succeeds on first attempt", async () => {
+      mocks.mockExecute.mockResolvedValue({
+        success: true,
+        dispatchResult: { task: TASK_FIXTURE, success: true },
+        elapsedMs: 100,
+      });
+
+      const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.runAllTimersAsync();
+
+      const result = await resultPromise;
+
+      expect(result.completed).toBe(1);
+      expect(result.failed).toBe(0);
+      expect(mocks.mockExecute).toHaveBeenCalledOnce();
+    });
+  });
 });

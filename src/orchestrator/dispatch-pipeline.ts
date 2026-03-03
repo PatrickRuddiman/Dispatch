@@ -9,7 +9,7 @@ import { readFile } from "node:fs/promises";
 import { parseTaskFile, buildTaskContext, groupTasksByMode, type TaskFile } from "../parser.js";
 import type { DispatchResult } from "../dispatcher.js";
 import { boot as bootPlanner, type PlanResult } from "../agents/planner.js";
-import { boot as bootExecutor } from "../agents/executor.js";
+import { boot as bootExecutor, type ExecuteResult } from "../agents/executor.js";
 import { log } from "../helpers/logger.js";
 import { registerCleanup } from "../helpers/cleanup.js";
 import { createWorktree, removeWorktree, worktreeName } from "../helpers/worktree.js";
@@ -310,11 +310,27 @@ export async function runDispatchPipeline(
               // ── Phase B: Execute via executor agent ──────────────
               tuiTask.status = "running";
               if (verbose) log.info(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: executing — "${task.text}"`);
-              const execResult = await executor.execute({
-                task,
-                cwd: issueCwd,
-                plan: plan ?? null,
-              });
+              const execRetries = 2;
+              const execResult = await withRetry(
+                async () => {
+                  const result = await executor.execute({
+                    task,
+                    cwd: issueCwd,
+                    plan: plan ?? null,
+                  });
+                  if (!result.success) {
+                    throw new Error(result.error ?? "Execution failed");
+                  }
+                  return result;
+                },
+                execRetries,
+                { label: `executor "${task.text}"` },
+              ).catch((err): ExecuteResult => ({
+                dispatchResult: { task, success: false, error: log.extractMessage(err) },
+                success: false,
+                error: log.extractMessage(err),
+                elapsedMs: 0,
+              }));
 
               if (execResult.success) {
                 // Sync checked-off state back to the datasource
