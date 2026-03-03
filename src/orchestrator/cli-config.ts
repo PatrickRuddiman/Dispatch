@@ -13,7 +13,7 @@ import { constants } from "node:fs";
 import { log } from "../helpers/logger.js";
 import { loadConfig, type DispatchConfig } from "../config.js";
 import type { RawCliArgs } from "./runner.js";
-import { detectDatasource } from "../datasources/index.js";
+import { detectDatasource, DATASOURCE_NAMES } from "../datasources/index.js";
 
 /**
  * Config key → RawCliArgs field mapping.
@@ -100,8 +100,11 @@ export async function resolveCliConfig(args: RawCliArgs): Promise<RawCliArgs> {
       log.info(`Auto-detected datasource from git remote: ${detected}`);
       merged.issueSource = detected;
     } else {
-      log.info("Could not detect datasource from git remote, falling back to: md");
-      merged.issueSource = "md";
+      log.error("Datasource auto-detection failed — could not determine issue source from git remote.");
+      log.dim(`  Available datasources: ${DATASOURCE_NAMES.join(", ")}`);
+      log.dim("  Run 'dispatch config' to configure defaults interactively.");
+      log.dim("  Or pass it as a CLI flag: --issue-source <name>");
+      process.exit(1);
     }
   }
 

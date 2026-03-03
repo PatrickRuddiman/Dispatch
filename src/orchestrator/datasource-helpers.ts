@@ -163,6 +163,66 @@ async function getCommitSummaries(defaultBranch: string, cwd: string): Promise<s
 }
 
 /**
+ * Retrieve the full diff of the current branch relative to the default branch.
+ *
+ * @param defaultBranch - The base branch to compare against (e.g. "main")
+ * @param cwd - Working directory (git repo root)
+ * @returns The diff output as a string, or an empty string on failure
+ */
+export async function getBranchDiff(defaultBranch: string, cwd: string): Promise<string> {
+  try {
+    const { stdout } = await exec(
+      "git",
+      ["diff", `${defaultBranch}..HEAD`],
+      { cwd, maxBuffer: 10 * 1024 * 1024 },
+    );
+    return stdout;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Amend the most recent commit's message without changing its content.
+ *
+ * @param message - The new commit message
+ * @param cwd - Working directory (git repo root)
+ */
+export async function amendCommitMessage(message: string, cwd: string): Promise<void> {
+  await exec(
+    "git",
+    ["commit", "--amend", "-m", message],
+    { cwd },
+  );
+}
+
+/**
+ * Squash all commits on the current branch (relative to the default branch)
+ * into a single commit with the given message.
+ *
+ * Uses a soft reset to the merge-base followed by a fresh commit, which
+ * avoids interactive rebase complexity.
+ *
+ * @param defaultBranch - The base branch to compare against (e.g. "main")
+ * @param message - The commit message for the squashed commit
+ * @param cwd - Working directory (git repo root)
+ */
+export async function squashBranchCommits(
+  defaultBranch: string,
+  message: string,
+  cwd: string,
+): Promise<void> {
+  const { stdout } = await exec(
+    "git",
+    ["merge-base", defaultBranch, "HEAD"],
+    { cwd },
+  );
+  const mergeBase = stdout.trim();
+  await exec("git", ["reset", "--soft", mergeBase], { cwd });
+  await exec("git", ["commit", "-m", message], { cwd });
+}
+
+/**
  * Assemble a descriptive pull request body from pipeline data.
  *
  * Includes:
