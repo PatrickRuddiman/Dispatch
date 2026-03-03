@@ -189,8 +189,8 @@ export async function runFixTestsPipeline(
     );
     return { mode: "fix-tests", success: false, error: "Tests still failing after fix attempt" };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    log.error(`Fix-tests pipeline failed: ${message}`);
+    const message = log.extractMessage(err);
+    log.error(`Fix-tests pipeline failed: ${log.formatErrorChain(err)}`);
     log.debug(log.formatErrorChain(err));
     return { mode: "fix-tests", success: false, error: message };
   }
