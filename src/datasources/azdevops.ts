@@ -253,8 +253,9 @@ export const datasource: Datasource = {
     }
   },
 
-  buildBranchName(issueNumber: string, username?: string): string {
-    return `${(username ?? "unknown")}/dispatch/${issueNumber}`;
+  buildBranchName(issueNumber: string, title: string, username: string): string {
+    const slug = slugify(title, 50);
+    return `${username}/dispatch/${issueNumber}-${slug}`;
   },
 
   async createAndSwitchBranch(branchName: string, opts: DispatchLifecycleOptions): Promise<void> {

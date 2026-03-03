@@ -8,14 +8,14 @@
 import { readFile } from "node:fs/promises";
 import { parseTaskFile, buildTaskContext, groupTasksByMode, type TaskFile } from "../parser.js";
 import type { DispatchResult } from "../dispatcher.js";
-import { boot as bootPlanner, type PlanResult } from "../agents/planner.js";
-import { boot as bootExecutor, type ExecuteResult } from "../agents/executor.js";
-import { boot as bootCommit } from "../agents/commit.js";
+import { boot as bootPlanner, type PlanResult, type PlannerAgent } from "../agents/planner.js";
+import { boot as bootExecutor, type ExecutorAgent, type ExecuteResult } from "../agents/executor.js";
+import { boot as bootCommit, type CommitAgent } from "../agents/commit.js";
 import { log } from "../helpers/logger.js";
 import { registerCleanup } from "../helpers/cleanup.js";
 import { createWorktree, removeWorktree, worktreeName } from "../helpers/worktree.js";
 import { createTui, type TuiState } from "../tui.js";
-import type { ProviderName } from "../providers/interface.js";
+import type { ProviderName, ProviderInstance } from "../providers/interface.js";
 import { bootProvider } from "../providers/index.js";
 import { getDatasource } from "../datasources/index.js";
 import type { DatasourceName, DispatchLifecycleOptions, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
@@ -30,7 +30,7 @@ import {
   getBranchDiff,
   squashBranchCommits,
 } from "./datasource-helpers.js";
-import { withTimeout } from "../helpers/timeout.js";
+import { withTimeout, TimeoutError } from "../helpers/timeout.js";
 import { withRetry } from "../helpers/retry.js";
 import chalk from "chalk";
 import { elapsed, renderHeaderLines } from "../helpers/format.js";
@@ -65,9 +65,8 @@ export async function runDispatchPipeline(
 
   // Planning timeout/retry defaults
   const planTimeoutMs = (planTimeout ?? 10) * 60_000; // default 10 minutes → ms
-  const effectivePlanRetries = planRetries ?? retries ?? 2;
+  const maxPlanAttempts = (planRetries ?? retries ?? 1) + 1; // retries + initial attempt
 
-  const maxPlanAttempts = effectivePlanRetries + 1;
   log.debug(`Plan timeout: ${planTimeout ?? 10}m (${planTimeoutMs}ms), max attempts: ${maxPlanAttempts}`);
 
   // Dry-run mode uses simple log output
@@ -166,24 +165,48 @@ export async function runDispatchPipeline(
       status: "pending" as const,
     }));
 
+    // Group tasks by their source file (each file = one issue)
+    const tasksByFile = new Map<string, typeof allTasks>();
+    for (const task of allTasks) {
+      const list = tasksByFile.get(task.file) ?? [];
+      list.push(task);
+      tasksByFile.set(task.file, list);
+    }
+
+    // Determine whether to use worktree-based parallel execution.
+    // Worktrees are used when: not opted out, branching is enabled, and
+    // there are multiple issues to process (single-issue runs use serial
+    // mode to avoid unnecessary worktree overhead).
+    const useWorktrees = !noWorktree && !noBranch && tasksByFile.size > 1;
+
     // ── 3. Boot provider ────────────────────────────────────────
     tui.state.phase = "booting";
     if (verbose) log.info(`Booting ${provider} provider...`);
-    const instance = await bootProvider(provider, { url: serverUrl, cwd, model });
-    registerCleanup(() => instance.cleanup());
     if (serverUrl) {
       tui.state.serverUrl = serverUrl;
     }
     if (verbose && serverUrl) log.debug(`Server URL: ${serverUrl}`);
-    if (instance.model) {
-      tui.state.model = instance.model;
-    }
-    if (verbose && instance.model) log.debug(`Model: ${instance.model}`);
 
-    // ── 4. Boot planner agent (unless --no-plan) ────────────────
-    const planner = noPlan ? null : await bootPlanner({ provider: instance, cwd });
-    const executor = await bootExecutor({ provider: instance, cwd });
-    const commitAgent = await bootCommit({ provider: instance, cwd });
+    // When using worktrees, providers are booted per-worktree inside
+    // processIssueFile. Otherwise, boot a single shared provider.
+    let instance: ProviderInstance | undefined;
+    let planner: PlannerAgent | null = null;
+    let executor: ExecutorAgent | undefined;
+    let commitAgent: CommitAgent | undefined;
+
+    if (!useWorktrees) {
+      instance = await bootProvider(provider, { url: serverUrl, cwd, model });
+      registerCleanup(() => instance!.cleanup());
+      if (instance.model) {
+        tui.state.model = instance.model;
+      }
+      if (verbose && instance.model) log.debug(`Model: ${instance.model}`);
+
+      // ── 4. Boot planner agent (unless --no-plan) ────────────────
+      planner = noPlan ? null : await bootPlanner({ provider: instance, cwd });
+      executor = await bootExecutor({ provider: instance, cwd });
+      commitAgent = await bootCommit({ provider: instance, cwd });
+    }
 
     // ── 5. Dispatch tasks ───────────────────────────────────────
     tui.state.phase = "dispatching";
@@ -202,20 +225,6 @@ export async function runDispatchPipeline(
       log.warn(`Could not resolve git username for branch naming: ${log.formatErrorChain(err)}`);
     }
 
-    // Group tasks by their source file (each file = one issue)
-    const tasksByFile = new Map<string, typeof allTasks>();
-    for (const task of allTasks) {
-      const list = tasksByFile.get(task.file) ?? [];
-      list.push(task);
-      tasksByFile.set(task.file, list);
-    }
-
-    // Determine whether to use worktree-based parallel execution.
-    // Worktrees are used when: not opted out, branching is enabled, and
-    // there are multiple issues to process (single-issue runs use serial
-    // mode to avoid unnecessary worktree overhead).
-    const useWorktrees = !noWorktree && !noBranch && tasksByFile.size > 1;
-
     // Process a single issue file's tasks — handles both worktree and
     // serial branch modes, parameterised by useWorktrees.
     const processIssueFile = async (file: string, fileTasks: typeof allTasks) => {
@@ -229,7 +238,7 @@ export async function runDispatchPipeline(
       if (!noBranch && details) {
         try {
           defaultBranch = await datasource.getDefaultBranch(lifecycleOpts);
-          branchName = datasource.buildBranchName(details.number, username);
+          branchName = datasource.buildBranchName(details.number, details.title, username);
 
           if (useWorktrees) {
             worktreePath = await createWorktree(cwd, file, branchName);
@@ -259,6 +268,29 @@ export async function runDispatchPipeline(
 
       const issueLifecycleOpts: DispatchLifecycleOptions = { cwd: issueCwd };
 
+      // ── Boot per-worktree provider and agents (or use shared ones) ──
+      let localInstance: ProviderInstance;
+      let localPlanner: PlannerAgent | null;
+      let localExecutor: ExecutorAgent;
+      let localCommitAgent: CommitAgent;
+
+      if (useWorktrees) {
+        localInstance = await bootProvider(provider, { url: serverUrl, cwd: issueCwd, model });
+        registerCleanup(() => localInstance.cleanup());
+        if (localInstance.model && !tui.state.model) {
+          tui.state.model = localInstance.model;
+        }
+        if (verbose && localInstance.model) log.debug(`Model: ${localInstance.model}`);
+        localPlanner = noPlan ? null : await bootPlanner({ provider: localInstance, cwd: issueCwd });
+        localExecutor = await bootExecutor({ provider: localInstance, cwd: issueCwd });
+        localCommitAgent = await bootCommit({ provider: localInstance, cwd: issueCwd });
+      } else {
+        localInstance = instance!;
+        localPlanner = planner;
+        localExecutor = executor!;
+        localCommitAgent = commitAgent!;
+      }
+
       // ── Dispatch file's tasks ─────────────────────────────────
       const groups = groupTasksByMode(fileTasks);
       const issueResults: DispatchResult[] = [];
@@ -276,7 +308,7 @@ export async function runDispatchPipeline(
 
               // ── Phase A: Plan (unless --no-plan) ─────────────────
               let plan: string | undefined;
-              if (planner) {
+              if (localPlanner) {
                 tuiTask.status = "planning";
               if (verbose) log.info(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: planning — "${task.text}"`);
                 const rawContent = fileContentMap.get(task.file);
@@ -284,21 +316,41 @@ export async function runDispatchPipeline(
 
                 let planResult: PlanResult | undefined;
 
-                try {
-                  planResult = await withRetry(
-                    () => withTimeout(
-                      planner.plan(task, fileContext),
+                for (let attempt = 1; attempt <= maxPlanAttempts; attempt++) {
+                  try {
+                    planResult = await withTimeout(
+                      localPlanner.plan(task, fileContext, issueCwd),
                       planTimeoutMs,
                       "planner.plan()",
-                    ),
-                    effectivePlanRetries,
-                    { label: "planner.plan()" },
-                  );
-                } catch (err) {
+                    );
+                    break; // success — exit retry loop
+                  } catch (err) {
+                    if (err instanceof TimeoutError) {
+                      log.warn(
+                        `Planning timed out for task "${task.text}" (attempt ${attempt}/${maxPlanAttempts})`,
+                      );
+                      if (attempt < maxPlanAttempts) {
+                        log.debug(`Retrying planning (attempt ${attempt + 1}/${maxPlanAttempts})`);
+                      }
+                    } else {
+                      // Non-timeout error — do not retry, surface immediately
+                      planResult = {
+                        prompt: "",
+                        success: false,
+                        error: log.extractMessage(err),
+                      };
+                      break;
+                    }
+                  }
+                }
+
+                // All attempts exhausted with timeout — produce failure result
+                if (!planResult) {
+                  const timeoutMin = planTimeout ?? 10;
                   planResult = {
                     prompt: "",
                     success: false,
-                    error: log.extractMessage(err),
+                    error: `Planning timed out after ${timeoutMin}m (${maxPlanAttempts} attempts)`,
                   };
                 }
 
@@ -320,7 +372,7 @@ export async function runDispatchPipeline(
               const execRetries = 2;
               const execResult = await withRetry(
                 async () => {
-                  const result = await executor.execute({
+                  const result = await localExecutor.execute({
                     task,
                     cwd: issueCwd,
                     plan: plan ?? null,
@@ -373,8 +425,8 @@ export async function runDispatchPipeline(
           issueResults.push(...batchResults);
 
           // Update TUI once the provider detects the actual model (lazy detection)
-          if (!tui.state.model && instance.model) {
-            tui.state.model = instance.model;
+          if (!tui.state.model && localInstance.model) {
+            tui.state.model = localInstance.model;
           }
         }
       }
@@ -400,7 +452,7 @@ export async function runDispatchPipeline(
         try {
           const branchDiff = await getBranchDiff(defaultBranch, issueCwd);
           if (branchDiff) {
-            const result = await commitAgent.generate({
+            const result = await localCommitAgent.generate({
               branchDiff,
               issue: details,
               taskResults: issueResults,
@@ -475,6 +527,13 @@ export async function runDispatchPipeline(
           }
         }
       }
+
+      // ── Per-worktree resource cleanup ───────────────────────────
+      if (useWorktrees) {
+        await localExecutor.cleanup();
+        await localPlanner?.cleanup();
+        await localInstance.cleanup();
+      }
     };
 
     // Execute issues: parallel via worktrees, or serial fallback
@@ -494,10 +553,12 @@ export async function runDispatchPipeline(
     await closeCompletedSpecIssues(taskFiles, results, cwd, source, org, project, workItemType);
 
     // ── 7. Cleanup ──────────────────────────────────────────────
-    await commitAgent.cleanup();
-    await executor.cleanup();
+    // Per-worktree resources are cleaned up inside processIssueFile.
+    // Shared resources (when !useWorktrees) are cleaned up here.
+    await commitAgent?.cleanup();
+    await executor?.cleanup();
     await planner?.cleanup();
-    await instance.cleanup();
+    await instance?.cleanup();
 
     tui.state.phase = "done";
     tui.stop();
@@ -570,7 +631,7 @@ export async function dryRunMode(
     const parsed = parseIssueFilename(task.file);
     const details = parsed ? items.find((item) => item.number === parsed.issueId) : undefined;
     const branchInfo = details
-      ? ` [branch: ${datasource.buildBranchName(details.number, username)}]`
+      ? ` [branch: ${datasource.buildBranchName(details.number, details.title, username)}]`
       : "";
     log.task(allTasks.indexOf(task), allTasks.length, `${task.file}:${task.line} — ${task.text}${branchInfo}`);
   }

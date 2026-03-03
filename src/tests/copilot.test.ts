@@ -84,6 +84,21 @@ describe("boot", () => {
     expect(mockClient.start).toHaveBeenCalledOnce();
   });
 
+  it("passes cwd to CopilotClient when opts.cwd provided", async () => {
+    await boot({ cwd: "/tmp/worktree" });
+    expect(CopilotClient).toHaveBeenCalledWith({
+      cwd: "/tmp/worktree",
+    });
+  });
+
+  it("passes both cliUrl and cwd to CopilotClient when both provided", async () => {
+    await boot({ url: "http://localhost:3000", cwd: "/tmp/worktree" });
+    expect(CopilotClient).toHaveBeenCalledWith({
+      cliUrl: "http://localhost:3000",
+      cwd: "/tmp/worktree",
+    });
+  });
+
   it("throws when client.start() fails", async () => {
     mockClient.start.mockRejectedValueOnce(new Error("start failed"));
     await expect(boot()).rejects.toThrow("start failed");
@@ -105,6 +120,15 @@ describe("createSession", () => {
     const sessionId = await instance.createSession();
     expect(sessionId).toBe("test-session-1");
     expect(mockClient.createSession).toHaveBeenCalledWith({
+      onPermissionRequest: expect.any(Function),
+    });
+  });
+
+  it("passes workingDirectory to createSession when opts.cwd provided", async () => {
+    const instance = await boot({ cwd: "/tmp/worktree" });
+    await instance.createSession();
+    expect(mockClient.createSession).toHaveBeenCalledWith({
+      workingDirectory: "/tmp/worktree",
       onPermissionRequest: expect.any(Function),
     });
   });

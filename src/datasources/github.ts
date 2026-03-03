@@ -27,14 +27,16 @@ async function gh(args: string[], cwd: string): Promise<string> {
 }
 
 /**
- * Build a branch name from an issue number and username.
- * Produces: `<username>/dispatch/<number>`
+ * Build a branch name from an issue number, title, and username.
+ * Produces: `<username>/dispatch/<number>-<slugified-title>`
  *
  * @param issueNumber - The issue number/ID
+ * @param title       - The issue title (will be slugified)
  * @param username    - The slugified git username to namespace the branch
  */
-function buildBranchName(issueNumber: string, username: string = "unknown"): string {
-  return `${username}/dispatch/${issueNumber}`;
+function buildBranchName(issueNumber: string, title: string, username: string = "unknown"): string {
+  const slug = slugify(title, 50);
+  return `${username}/dispatch/${issueNumber}-${slug}`;
 }
 
 /**
@@ -220,8 +222,8 @@ export const datasource: Datasource = {
     return getDefaultBranch(opts.cwd);
   },
 
-  buildBranchName(issueNumber: string, username?: string): string {
-    return buildBranchName(issueNumber, username ?? "unknown");
+  buildBranchName(issueNumber: string, title: string, username?: string): string {
+    return buildBranchName(issueNumber, title, username ?? "unknown");
   },
 
   async createAndSwitchBranch(branchName, opts) {
