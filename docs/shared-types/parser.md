@@ -42,10 +42,11 @@ Represents a single unchecked markdown checkbox item:
 | Field | Type | Description |
 |-------|------|-------------|
 | `index` | `number` | Zero-based index within the file's unchecked tasks |
-| `text` | `string` | The raw text content after `- [ ] ` (trimmed) |
+| `text` | `string` | The raw text content after `- [ ] ` (trimmed, with any `(P)`/`(S)`/`(I)` prefix stripped) |
 | `line` | `number` | 1-based line number in the source file |
 | `raw` | `string` | Full original line content including indentation |
 | `file` | `string` | Absolute path to the source file |
+| `mode` | `"parallel" \| "serial" \| "isolated"` | Execution mode parsed from an optional `(P)`, `(S)`, or `(I)` prefix. Defaults to `"serial"` when no prefix is present. See [Mode Prefixes](../task-parsing/markdown-syntax.md#parallel-serial-and-isolated-mode-prefixes). |
 
 ### TaskFile
 
@@ -65,10 +66,11 @@ Represents a parsed markdown file:
 | `parseTaskFile` | `(filePath: string) → Promise<TaskFile>` | Reads file from disk, delegates to `parseTaskContent` |
 | `buildTaskContext` | `(content: string, task: Task) → string` | Filters sibling unchecked tasks for planner context |
 | `markTaskComplete` | `(task: Task) → Promise<void>` | Read-modify-write cycle to replace `[ ]` with `[x]` |
+| `groupTasksByMode` | `(tasks: Task[]) → Task[][]` | Groups tasks into ordered execution batches by mode. See [API Reference](../task-parsing/api-reference.md#grouptasksbymode). |
 
 ## Source references
 
-- `src/parser.ts` — Full parser implementation (171 lines)
+- `src/parser.ts` — Full parser implementation (187 lines)
 - `src/tests/parser.test.ts` — Comprehensive test suite (995 lines, 62 tests);
   see [Parser Tests](../testing/parser-tests.md) for the detailed breakdown
 
@@ -102,3 +104,7 @@ concurrency analysis, and testing:
   breakdown of all 62 parser tests including mode extraction and grouping
 - [CLI & Orchestration](../cli-orchestration/overview.md) -- How the orchestrator
   uses `parseTaskFile`, `buildTaskContext`, and `markTaskComplete`
+- [Spec Generation](../spec-generation/overview.md) -- The `--spec` pipeline
+  that produces the markdown task files consumed by the parser
+- [Git Worktree Helpers](../git-and-worktree/overview.md) -- Worktree
+  isolation model; `markTaskComplete` writes within isolated worktrees

@@ -50,36 +50,40 @@ afterEach(() => {
 // ─── worktreeName ──────────────────────────────────────────────────────
 
 describe("worktreeName", () => {
-  it("strips .md extension and slugifies", () => {
-    expect(worktreeName("123-fix-auth-bug.md")).toBe("123-fix-auth-bug");
+  it("extracts leading numeric ID and prefixes with issue-", () => {
+    expect(worktreeName("123-fix-auth-bug.md")).toBe("issue-123");
   });
 
   it("handles full file paths", () => {
-    expect(worktreeName("/tmp/dispatch-abc/123-fix-auth-bug.md")).toBe("123-fix-auth-bug");
+    expect(worktreeName("/tmp/dispatch-abc/123-fix-auth-bug.md")).toBe("issue-123");
   });
 
   it("handles filenames without .md extension", () => {
-    expect(worktreeName("123-some-title")).toBe("123-some-title");
+    expect(worktreeName("123-some-title")).toBe("issue-123");
   });
 
-  it("slugifies special characters", () => {
-    expect(worktreeName("123-Fix Auth Bug!.md")).toBe("123-fix-auth-bug");
+  it("handles filenames with special characters", () => {
+    expect(worktreeName("123-Fix Auth Bug!.md")).toBe("issue-123");
   });
 
   it("handles .MD extension (case-insensitive)", () => {
-    expect(worktreeName("456-test.MD")).toBe("456-test");
+    expect(worktreeName("456-test.MD")).toBe("issue-456");
   });
 
-  it("lowercases uppercase characters", () => {
-    expect(worktreeName("10-Hello-WORLD.md")).toBe("10-hello-world");
+  it("handles uppercase filenames", () => {
+    expect(worktreeName("10-Hello-WORLD.md")).toBe("issue-10");
   });
 
-  it("collapses runs of non-alphanumeric characters into single hyphens", () => {
-    expect(worktreeName("3-foo___bar!!!baz.md")).toBe("3-foo-bar-baz");
+  it("handles filenames with non-alphanumeric characters", () => {
+    expect(worktreeName("3-foo___bar!!!baz.md")).toBe("issue-3");
   });
 
   it("handles a deeply nested path", () => {
-    expect(worktreeName("/a/b/c/d/7-my-feature.md")).toBe("7-my-feature");
+    expect(worktreeName("/a/b/c/d/7-my-feature.md")).toBe("issue-7");
+  });
+
+  it("falls back to slugified name when no leading digits", () => {
+    expect(worktreeName("no-number-here.md")).toBe("no-number-here");
   });
 });
 
@@ -93,10 +97,10 @@ describe("createWorktree", () => {
 
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
-      ["worktree", "add", "/repo/.dispatch/worktrees/42-my-feature", "-b", "user/dispatch/42-my-feature"],
+      ["worktree", "add", "/repo/.dispatch/worktrees/issue-42", "-b", "user/dispatch/42-my-feature"],
       { cwd: "/repo" },
     );
-    expect(result).toBe("/repo/.dispatch/worktrees/42-my-feature");
+    expect(result).toBe("/repo/.dispatch/worktrees/issue-42");
   });
 
   it("returns the absolute worktree path", async () => {
@@ -104,7 +108,7 @@ describe("createWorktree", () => {
 
     const result = await createWorktree("/custom/path", "10-bug.md", "branch-name");
 
-    expect(result).toBe("/custom/path/.dispatch/worktrees/10-bug");
+    expect(result).toBe("/custom/path/.dispatch/worktrees/issue-10");
   });
 
   it("retries without -b when branch already exists", async () => {
@@ -117,10 +121,10 @@ describe("createWorktree", () => {
     expect(mockExecFile).toHaveBeenCalledTimes(2);
     expect(mockExecFile).toHaveBeenLastCalledWith(
       "git",
-      ["worktree", "add", "/repo/.dispatch/worktrees/42-my-feature", "user/dispatch/42-my-feature"],
+      ["worktree", "add", "/repo/.dispatch/worktrees/issue-42", "user/dispatch/42-my-feature"],
       { cwd: "/repo" },
     );
-    expect(result).toBe("/repo/.dispatch/worktrees/42-my-feature");
+    expect(result).toBe("/repo/.dispatch/worktrees/issue-42");
   });
 
   it("throws on non-branch-exists errors", async () => {
@@ -168,7 +172,7 @@ describe("removeWorktree", () => {
     expect(mockExecFile).toHaveBeenNthCalledWith(
       1,
       "git",
-      ["worktree", "remove", "/repo/.dispatch/worktrees/42-my-feature"],
+      ["worktree", "remove", "/repo/.dispatch/worktrees/issue-42"],
       { cwd: "/repo" },
     );
     expect(mockExecFile).toHaveBeenNthCalledWith(
@@ -191,7 +195,7 @@ describe("removeWorktree", () => {
     expect(mockExecFile).toHaveBeenNthCalledWith(
       2,
       "git",
-      ["worktree", "remove", "--force", "/repo/.dispatch/worktrees/42-my-feature"],
+      ["worktree", "remove", "--force", "/repo/.dispatch/worktrees/issue-42"],
       { cwd: "/repo" },
     );
     expect(mockExecFile).toHaveBeenNthCalledWith(
@@ -211,7 +215,7 @@ describe("removeWorktree", () => {
     await expect(removeWorktree("/repo", "42-my-feature.md")).resolves.toBeUndefined();
 
     expect(log.warn).toHaveBeenCalledWith(
-      expect.stringContaining("42-my-feature"),
+      expect.stringContaining("issue-42"),
     );
   });
 
@@ -260,7 +264,7 @@ describe("removeWorktree", () => {
 
 describe("listWorktrees", () => {
   it("returns git worktree list output", async () => {
-    const output = "/repo  abc1234 [main]\n/repo/.dispatch/worktrees/42-feat  def5678 [feat]\n";
+    const output = "/repo  abc1234 [main]\n/repo/.dispatch/worktrees/issue-42  def5678 [feat]\n";
     mockExecFile.mockResolvedValueOnce({ stdout: output });
 
     const result = await listWorktrees("/repo");

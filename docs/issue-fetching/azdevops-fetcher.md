@@ -38,3 +38,5 @@ documentation.
   uses datasources to fetch Azure DevOps work items for spec generation
 - [Spec Generation Integrations](../spec-generation/integrations.md) -- Azure
   DevOps work item fetching in the context of spec generation
+- [Testing Overview](../testing/overview.md) -- Project-wide test suite
+  (note: deprecated fetcher shims have no unit tests)

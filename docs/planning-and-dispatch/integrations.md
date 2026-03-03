@@ -265,5 +265,12 @@ teardown runs even if the process exits via signal or unhandled error.
   fs/promises, and process signal details
 - [Testing Overview](../testing/overview.md) -- Test coverage (note: the
   orchestrator, planner, dispatcher, and git modules are not unit tested)
+- [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) --
+  Read-modify-write patterns and concurrent file I/O race conditions
+- [Worktree Management](../git-and-worktree/worktree-management.md) -- Git
+  worktree lifecycle used for parallel task execution isolation
 - [Datasource Integrations](../datasource-system/integrations.md) -- Similar
   subprocess patterns used by the datasource layer
+- [Prereqs & Safety Integrations](../prereqs-and-safety/integrations.md) --
+  Similar `execFile`/`child_process` patterns used for prerequisite binary
+  detection
