@@ -114,9 +114,10 @@ import { runSpecPipeline } from "../orchestrator/spec-pipeline.js";
 import { log } from "../helpers/logger.js";
 import { isIssueNumbers, isGlobOrFilePath, resolveSource } from "../spec-generator.js";
 import { getDatasource } from "../datasources/index.js";
-import { readFile, rename, unlink } from "node:fs/promises";
+import { readFile, mkdir, rename, unlink } from "node:fs/promises";
 import { extractTitle } from "../datasources/md.js";
 import { confirmLargeBatch } from "../helpers/confirm-large-batch.js";
+import { bootProvider } from "../providers/index.js";
 import type { SpecOptions } from "../spec-generator.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -451,6 +452,63 @@ describe("runSpecPipeline", () => {
     });
   });
 
+  // ── Defensive guard ───────────────────────────────────────────────
+
+  describe("defensive guard for null details", () => {
+    it("logs error and skips item when details is unexpectedly null in generation loop", async () => {
+      // One issue fetches OK, the other fails (producing null details)
+      mocks.mockFetch
+        .mockResolvedValueOnce({
+          number: "1",
+          title: "Test Issue",
+          body: "Issue body",
+          labels: [],
+          state: "open",
+          url: "https://example.com/1",
+          comments: [],
+          acceptanceCriteria: "",
+        })
+        .mockRejectedValueOnce(new Error("Not found"));
+
+      // Patch Array.prototype.filter so the validItems filter lets the
+      // null-details item through, simulating a future refactor that
+      // might bypass the type-predicate filter.
+      const origFilter = Array.prototype.filter;
+      let detailsFilterHit = 0;
+      vi.spyOn(Array.prototype, "filter").mockImplementation(function (
+        this: unknown[],
+        cb: any,
+        thisArg?: any,
+      ) {
+        // Identify calls on the items array by checking for `details` key
+        if (
+          this.length > 0 &&
+          typeof this[0] === "object" &&
+          this[0] !== null &&
+          "details" in this[0]
+        ) {
+          detailsFilterHit++;
+          if (detailsFilterHit === 1) {
+            // validItems filter: let ALL items through (including null details)
+            return origFilter.call(this, () => true);
+          }
+        }
+        return origFilter.call(this, cb, thisArg);
+      });
+
+      const result = await runSpecPipeline(baseOpts({ issues: "1,2", concurrency: 2 }));
+
+      // Restore filter before assertions (so test cleanup runs cleanly)
+      vi.mocked(Array.prototype.filter).mockRestore();
+
+      expect(vi.mocked(log.error)).toHaveBeenCalledWith(
+        "Skipping item 2: missing issue details",
+      );
+      // The null-details item should be counted as failed
+      expect(result.failed).toBeGreaterThanOrEqual(1);
+    });
+  });
+
   // ── Summary output ──────────────────────────────────────────────
 
   describe("summary output", () => {
@@ -545,6 +603,83 @@ describe("runSpecPipeline", () => {
       expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
         expect.stringContaining("Provider cleanup failed"),
       );
+    });
+  });
+
+  // ── Dry-run mode ──────────────────────────────────────────────
+
+  describe("dry-run mode", () => {
+    it("returns summary with generated: 0 and does not boot provider", async () => {
+      const result = await runSpecPipeline(baseOpts({ dryRun: true, concurrency: 1 }));
+
+      expect(result.generated).toBe(0);
+      expect(result.total).toBe(2);
+      expect(result.files).toEqual([]);
+      expect(result.issueNumbers).toEqual([]);
+      expect(vi.mocked(bootProvider)).not.toHaveBeenCalled();
+    });
+
+    it("does not call confirmLargeBatch", async () => {
+      await runSpecPipeline(baseOpts({ dryRun: true, concurrency: 1 }));
+
+      expect(confirmLargeBatch).not.toHaveBeenCalled();
+    });
+
+    it("does not write any files or generate specs", async () => {
+      await runSpecPipeline(baseOpts({ dryRun: true, concurrency: 1 }));
+
+      expect(mkdir).not.toHaveBeenCalled();
+      expect(mocks.mockGenerate).not.toHaveBeenCalled();
+    });
+
+    it("logs a structured preview for each valid item", async () => {
+      await runSpecPipeline(baseOpts({ dryRun: true, issues: "1,2", concurrency: 1 }));
+
+      expect(vi.mocked(log.info)).toHaveBeenCalledWith(
+        expect.stringContaining("[DRY RUN]"),
+      );
+      expect(vi.mocked(log.info)).toHaveBeenCalledWith(
+        expect.stringContaining("Would generate spec for #1"),
+      );
+      expect(vi.mocked(log.info)).toHaveBeenCalledWith(
+        expect.stringContaining("Would generate spec for #2"),
+      );
+    });
+
+    it("returns failed count for items that could not be loaded", async () => {
+      mocks.mockFetch
+        .mockRejectedValueOnce(new Error("Not found"))
+        .mockResolvedValueOnce({
+          number: "2",
+          title: "Test Issue 2",
+          body: "Issue body 2",
+          labels: [],
+          state: "open",
+          url: "https://example.com/2",
+          comments: [],
+          acceptanceCriteria: "",
+        });
+
+      const result = await runSpecPipeline(baseOpts({ dryRun: true, issues: "1,2", concurrency: 1 }));
+
+      expect(result.total).toBe(2);
+      expect(result.generated).toBe(0);
+      expect(result.failed).toBe(1);
+      expect(vi.mocked(bootProvider)).not.toHaveBeenCalled();
+    });
+
+    it("works in file/glob mode", async () => {
+      vi.mocked(isIssueNumbers).mockReturnValue(false);
+      vi.mocked(isGlobOrFilePath).mockReturnValue(true);
+      mocks.mockGlob.mockResolvedValue(["/tmp/test-cwd/spec1.md"]);
+      vi.mocked(readFile).mockResolvedValue("# File Content\n\nBody");
+
+      const result = await runSpecPipeline(baseOpts({ dryRun: true, issues: "*.md" }));
+
+      expect(result.generated).toBe(0);
+      expect(result.total).toBe(1);
+      expect(vi.mocked(bootProvider)).not.toHaveBeenCalled();
+      expect(mocks.mockGenerate).not.toHaveBeenCalled();
     });
   });
 

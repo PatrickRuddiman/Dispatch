@@ -44,14 +44,14 @@ describe("getUsername", () => {
 });
 
 describe("buildBranchName", () => {
-  it("builds branch name with username/dispatch/issueNumber pattern", () => {
-    const result = datasource.buildBranchName("42", "john-doe");
-    expect(result).toBe("john-doe/dispatch/42");
+  it("builds branch name with username/dispatch/issueNumber-slug pattern", () => {
+    const result = datasource.buildBranchName("42", "My Feature", "john-doe");
+    expect(result).toBe("john-doe/dispatch/42-my-feature");
   });
 
-  it("builds branch name with default username when not provided", () => {
-    const result = datasource.buildBranchName("99");
-    expect(result).toBe("local/dispatch/99");
+  it("builds branch name with provided username", () => {
+    const result = datasource.buildBranchName("99", "Some Task", "local");
+    expect(result).toBe("local/dispatch/99-some-task");
   });
 });
 

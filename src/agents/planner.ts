@@ -37,8 +37,11 @@ export interface PlannerAgent extends Agent {
    * When `fileContext` is provided (filtered markdown from the task file),
    * it is included so the planner can use non-task prose (headings, notes,
    * implementation details) as additional guidance.
+   *
+   * When `cwd` is provided, it overrides the boot-time working directory
+   * in the planning prompt — use this for worktree tasks.
    */
-  plan(task: Task, fileContext?: string): Promise<PlanResult>;
+  plan(task: Task, fileContext?: string, cwd?: string): Promise<PlanResult>;
 }
 
 /**
@@ -57,10 +60,10 @@ export async function boot(opts: AgentBootOptions): Promise<PlannerAgent> {
   return {
     name: "planner",
 
-    async plan(task: Task, fileContext?: string): Promise<PlanResult> {
+    async plan(task: Task, fileContext?: string, cwdOverride?: string): Promise<PlanResult> {
       try {
         const sessionId = await provider.createSession();
-        const prompt = buildPlannerPrompt(task, cwd, fileContext);
+        const prompt = buildPlannerPrompt(task, cwdOverride ?? cwd, fileContext);
 
         const plan = await provider.prompt(sessionId, prompt);
 

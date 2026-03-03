@@ -37,10 +37,10 @@ describe("loadConfig", () => {
 
   it("loads a valid config file", async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
-    const config = { provider: "copilot", concurrency: 3 };
+    const config = { provider: "copilot", model: "gpt-4o" };
     await writeFile(join(tmpDir, "config.json"), JSON.stringify(config), "utf-8");
     const result = await loadConfig(tmpDir);
-    expect(result).toEqual({ provider: "copilot", concurrency: 3 });
+    expect(result).toEqual({ provider: "copilot", model: "gpt-4o" });
   });
 
   it("returns empty object for corrupt JSON", async () => {
@@ -54,11 +54,8 @@ describe("loadConfig", () => {
     tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
     const config: DispatchConfig = {
       provider: "copilot",
-      concurrency: 5,
       source: "azdevops",
-      org: "my-org",
-      project: "my-project",
-      serverUrl: "http://localhost:3000",
+      model: "claude-sonnet-4-5",
     };
     await writeFile(join(tmpDir, "config.json"), JSON.stringify(config), "utf-8");
     const result = await loadConfig(tmpDir);
@@ -81,11 +78,8 @@ describe("saveConfig", () => {
     tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
     const config: DispatchConfig = {
       provider: "copilot",
-      concurrency: 4,
       source: "github",
-      org: "test-org",
-      project: "test-project",
-      serverUrl: "http://localhost:8080",
+      model: "gpt-4o",
     };
     await saveConfig(config, tmpDir);
     const loaded = await loadConfig(tmpDir);
@@ -111,7 +105,7 @@ describe("saveConfig", () => {
 
   it("overwrites existing config", async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
-    await saveConfig({ provider: "opencode", concurrency: 2 }, tmpDir);
+    await saveConfig({ provider: "opencode", model: "some-model" }, tmpDir);
     await saveConfig({ provider: "copilot" }, tmpDir);
     const loaded = await loadConfig(tmpDir);
     expect(loaded).toEqual({ provider: "copilot" });
@@ -156,122 +150,6 @@ describe("validateConfigValue", () => {
     expect(result).not.toBe(null);
     expect(result).toContain("Invalid source");
   });
-
-  it("accepts valid concurrency (positive integer)", () => {
-    expect(validateConfigValue("concurrency", "1")).toBe(null);
-    expect(validateConfigValue("concurrency", "5")).toBe(null);
-    expect(validateConfigValue("concurrency", "100")).toBe(null);
-  });
-
-  it("rejects non-positive concurrency", () => {
-    const zero = validateConfigValue("concurrency", "0");
-    expect(zero).not.toBe(null);
-    expect(zero).toContain("positive integer");
-
-    const negative = validateConfigValue("concurrency", "-1");
-    expect(negative).not.toBe(null);
-    expect(negative).toContain("positive integer");
-  });
-
-  it("rejects non-integer concurrency", () => {
-    const decimal = validateConfigValue("concurrency", "1.5");
-    expect(decimal).not.toBe(null);
-
-    const text = validateConfigValue("concurrency", "abc");
-    expect(text).not.toBe(null);
-  });
-
-  it("accepts non-empty string for org, project, workItemType, serverUrl", () => {
-    for (const key of ["org", "project", "workItemType", "serverUrl"] as const) {
-      expect(validateConfigValue(key, "some-value")).toBe(null);
-    }
-  });
-
-  it("rejects empty string for org, project, workItemType, serverUrl", () => {
-    for (const key of ["org", "project", "workItemType", "serverUrl"] as const) {
-      const result = validateConfigValue(key, "");
-      expect(result).not.toBe(null);
-      expect(result).toContain("must not be empty");
-    }
-  });
-
-  it("rejects whitespace-only for org, project, workItemType, serverUrl", () => {
-    for (const key of ["org", "project", "workItemType", "serverUrl"] as const) {
-      const result = validateConfigValue(key, "   ");
-      expect(result).not.toBe(null);
-      expect(result).toContain("must not be empty");
-    }
-  });
-
-  it("accepts valid planTimeout (positive number)", () => {
-    expect(validateConfigValue("planTimeout", "1")).toBe(null);
-    expect(validateConfigValue("planTimeout", "10")).toBe(null);
-    expect(validateConfigValue("planTimeout", "1.5")).toBe(null);
-    expect(validateConfigValue("planTimeout", "0.5")).toBe(null);
-  });
-
-  it("rejects non-positive planTimeout", () => {
-    const zero = validateConfigValue("planTimeout", "0");
-    expect(zero).not.toBe(null);
-    expect(zero).toContain("positive number");
-
-    const negative = validateConfigValue("planTimeout", "-5");
-    expect(negative).not.toBe(null);
-    expect(negative).toContain("positive number");
-  });
-
-  it("rejects non-numeric planTimeout", () => {
-    const text = validateConfigValue("planTimeout", "abc");
-    expect(text).not.toBe(null);
-    expect(text).toContain("positive number");
-
-    const empty = validateConfigValue("planTimeout", "");
-    expect(empty).not.toBe(null);
-  });
-
-  it("accepts valid retries (non-negative integer)", () => {
-    expect(validateConfigValue("retries", "0")).toBe(null);
-    expect(validateConfigValue("retries", "1")).toBe(null);
-    expect(validateConfigValue("retries", "5")).toBe(null);
-  });
-
-  it("rejects negative retries", () => {
-    const negative = validateConfigValue("retries", "-1");
-    expect(negative).not.toBe(null);
-    expect(negative).toContain("non-negative integer");
-  });
-
-  it("rejects non-integer retries", () => {
-    const decimal = validateConfigValue("retries", "1.5");
-    expect(decimal).not.toBe(null);
-    expect(decimal).toContain("non-negative integer");
-
-    const text = validateConfigValue("retries", "abc");
-    expect(text).not.toBe(null);
-    expect(text).toContain("non-negative integer");
-  });
-
-  it("accepts valid planRetries (non-negative integer)", () => {
-    expect(validateConfigValue("planRetries", "0")).toBe(null);
-    expect(validateConfigValue("planRetries", "1")).toBe(null);
-    expect(validateConfigValue("planRetries", "5")).toBe(null);
-  });
-
-  it("rejects negative planRetries", () => {
-    const negative = validateConfigValue("planRetries", "-1");
-    expect(negative).not.toBe(null);
-    expect(negative).toContain("non-negative integer");
-  });
-
-  it("rejects non-integer planRetries", () => {
-    const decimal = validateConfigValue("planRetries", "1.5");
-    expect(decimal).not.toBe(null);
-    expect(decimal).toContain("non-negative integer");
-
-    const text = validateConfigValue("planRetries", "abc");
-    expect(text).not.toBe(null);
-    expect(text).toContain("non-negative integer");
-  });
 });
 
 // ─── Merge precedence (CLI > config > default) ─────────────────────
@@ -283,11 +161,8 @@ describe("merge precedence", () => {
    */
   const CONFIG_TO_CLI: Record<string, string> = {
     provider: "provider",
-    concurrency: "concurrency",
+    model: "model",
     source: "issueSource",
-    org: "org",
-    project: "project",
-    serverUrl: "serverUrl",
   };
 
   /** Applies the merge logic: config fills in where CLI flag is not explicit. */
@@ -331,40 +206,31 @@ describe("merge precedence", () => {
   it("merge applies to each configurable field", () => {
     const args: Record<string, unknown> = {
       provider: "opencode",
-      concurrency: 1,
+      model: "",
       issueSource: "github",
-      org: "",
-      project: "",
-      serverUrl: "",
     };
     const config: DispatchConfig = {
-      concurrency: 3,
+      model: "claude-sonnet-4-5",
       source: "azdevops",
-      org: "myorg",
-      project: "myproject",
-      serverUrl: "http://localhost",
     };
     const explicitFlags = new Set<string>();
     applyMerge(args, config, explicitFlags);
-    expect(args.concurrency).toBe(3);
+    expect(args.model).toBe("claude-sonnet-4-5");
     expect(args.issueSource).toBe("azdevops");
-    expect(args.org).toBe("myorg");
-    expect(args.project).toBe("myproject");
-    expect(args.serverUrl).toBe("http://localhost");
   });
 
   it("partially explicit flags still allow config for other fields", () => {
     const args: Record<string, unknown> = {
       provider: "opencode",
-      concurrency: 1,
+      model: "",
     };
     const config: DispatchConfig = {
       provider: "copilot",
-      concurrency: 8,
+      model: "gpt-4o",
     };
     const explicitFlags = new Set<string>(["provider"]);
     applyMerge(args, config, explicitFlags);
     expect(args.provider).toBe("opencode");
-    expect(args.concurrency).toBe(8);
+    expect(args.model).toBe("gpt-4o");
   });
 });
