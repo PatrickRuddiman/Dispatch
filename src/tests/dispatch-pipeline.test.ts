@@ -154,7 +154,6 @@ import { runDispatchPipeline, dryRunMode } from "../orchestrator/dispatch-pipeli
 import { getDatasource } from "../datasources/index.js";
 import { log } from "../helpers/logger.js";
 import { createTui } from "../tui.js";
-import { getDatasource } from "../datasources/index.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
@@ -595,7 +594,7 @@ describe("commitAllChanges safety-net", () => {
     const result = await resultPromise;
 
     expect(result.completed).toBe(1);
-    const ds = vi.mocked(getDatasource)() as unknown as Datasource;
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
     expect(ds.commitAllChanges).toHaveBeenCalledOnce();
   });
 
@@ -610,12 +609,12 @@ describe("commitAllChanges safety-net", () => {
     const result = await resultPromise;
 
     expect(result.completed).toBe(1);
-    const ds = vi.mocked(getDatasource)() as unknown as Datasource;
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
     expect(ds.commitAllChanges).not.toHaveBeenCalled();
   });
 
   it("continues gracefully if commitAllChanges throws", async () => {
-    const ds = vi.mocked(getDatasource)() as unknown as Datasource;
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
     vi.mocked(ds.commitAllChanges).mockRejectedValueOnce(new Error("git add failed"));
 
     const resultPromise = runDispatchPipeline(
