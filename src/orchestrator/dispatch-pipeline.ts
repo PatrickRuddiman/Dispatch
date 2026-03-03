@@ -10,6 +10,7 @@ import { parseTaskFile, buildTaskContext, groupTasksByMode, type TaskFile } from
 import type { DispatchResult } from "../dispatcher.js";
 import { boot as bootPlanner, type PlanResult } from "../agents/planner.js";
 import { boot as bootExecutor } from "../agents/executor.js";
+import { boot as bootCommit, type CommitAgent } from "../agents/commit.js";
 import { log } from "../helpers/logger.js";
 import { registerCleanup } from "../helpers/cleanup.js";
 import { createWorktree, removeWorktree, worktreeName } from "../helpers/worktree.js";
@@ -26,6 +27,9 @@ import {
   parseIssueFilename,
   buildPrBody,
   buildPrTitle,
+  getBranchDiff,
+  amendCommitMessage,
+  squashBranchCommits,
 } from "./datasource-helpers.js";
 import { withTimeout, TimeoutError } from "../helpers/timeout.js";
 import chalk from "chalk";
@@ -175,6 +179,7 @@ export async function runDispatchPipeline(
     // ── 4. Boot planner agent (unless --no-plan) ────────────────
     const planner = noPlan ? null : await bootPlanner({ provider: instance, cwd });
     const executor = await bootExecutor({ provider: instance, cwd });
+    const commitAgent = await bootCommit({ provider: instance, cwd });
 
     // ── 5. Dispatch tasks ───────────────────────────────────────
     tui.state.phase = "dispatching";
@@ -389,6 +394,41 @@ export async function runDispatchPipeline(
         }
       }
 
+      // ── Commit agent: rewrite commit messages + generate PR content ──
+      let commitPrTitle: string | undefined;
+      let commitPrBody: string | undefined;
+      if (!noBranch && branchName && defaultBranch && details) {
+        try {
+          const branchDiff = await getBranchDiff(defaultBranch, issueCwd);
+          if (branchDiff) {
+            const commitResult = await commitAgent.generate({
+              branchDiff,
+              issue: details,
+              taskResults: issueResults,
+              cwd: issueCwd,
+            });
+
+            if (commitResult.success && commitResult.commitMessage) {
+              try {
+                await squashBranchCommits(defaultBranch, commitResult.commitMessage, issueCwd);
+                log.debug(`Rewrote commit message for issue #${details.number}`);
+              } catch (err) {
+                log.warn(`Could not amend commit message for issue #${details.number}: ${log.formatErrorChain(err)}`);
+              }
+            }
+
+            if (commitResult.success && commitResult.prTitle) {
+              commitPrTitle = commitResult.prTitle;
+            }
+            if (commitResult.success && commitResult.prDescription) {
+              commitPrBody = commitResult.prDescription;
+            }
+          }
+        } catch (err) {
+          log.warn(`Commit agent failed for issue #${details.number}: ${log.formatErrorChain(err)}`);
+        }
+      }
+
       // ── Branch teardown (push, PR, cleanup) ──────────────────
       if (!noBranch && branchName && defaultBranch && details) {
         try {
@@ -399,8 +439,8 @@ export async function runDispatchPipeline(
         }
 
         try {
-          const prTitle = await buildPrTitle(details.title, defaultBranch, issueLifecycleOpts.cwd);
-          const prBody = await buildPrBody(
+          const prTitle = commitPrTitle ?? await buildPrTitle(details.title, defaultBranch, issueLifecycleOpts.cwd);
+          const prBody = commitPrBody ?? await buildPrBody(
             details,
             fileTasks,
             issueResults,
@@ -458,6 +498,7 @@ export async function runDispatchPipeline(
 
     // ── 7. Cleanup ──────────────────────────────────────────────
     await executor.cleanup();
+    await commitAgent.cleanup();
     await planner?.cleanup();
     await instance.cleanup();
 
