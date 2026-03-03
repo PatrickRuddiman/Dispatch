@@ -40,7 +40,15 @@ export interface TestRunResult {
 export async function detectTestCommand(cwd: string): Promise<string | null> {
   try {
     const raw = await readFile(join(cwd, "package.json"), "utf-8");
-    const pkg = JSON.parse(raw);
+    let pkg: any;
+    try {
+      pkg = JSON.parse(raw);
+    } catch {
+      log.debug(
+        `Failed to parse package.json: ${raw.slice(0, 200)}`,
+      );
+      return null;
+    }
     const testScript: unknown = pkg?.scripts?.test;
     if (
       typeof testScript === "string" &&
