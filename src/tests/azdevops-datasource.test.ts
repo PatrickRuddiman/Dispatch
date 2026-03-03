@@ -61,6 +61,14 @@ describe("azdevops datasource — list", () => {
     expect(args).toContain("--project");
     expect(args).toContain("MyProj");
   });
+
+  it("throws descriptive error when az returns non-JSON output", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: "Not Found\n" });
+
+    await expect(datasource.list({ cwd: "/tmp" })).rejects.toThrow(
+      "Failed to parse Azure CLI output"
+    );
+  });
 });
 
 describe("azdevops datasource — fetch", () => {
@@ -118,6 +126,14 @@ describe("azdevops datasource — fetch", () => {
     const result = await datasource.fetch("1", { cwd: "/tmp" });
 
     expect(result.comments).toEqual([]);
+  });
+
+  it("throws descriptive error when az returns non-JSON output", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: "ERROR: auth required\n" });
+
+    await expect(datasource.fetch("42", { cwd: "/tmp" })).rejects.toThrow(
+      "Failed to parse Azure CLI output"
+    );
   });
 });
 
@@ -223,6 +239,19 @@ describe("azdevops datasource — create", () => {
     await expect(
       datasource.create("Title", "Body", { cwd: "/tmp" }),
     ).rejects.toThrow("Could not determine work item type");
+  });
+
+  it("throws descriptive error when az returns non-JSON output", async () => {
+    // First call: detectWorkItemType succeeds
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([{ name: "User Story" }]),
+    });
+    // Second call: az boards work-item create returns non-JSON
+    mockExecFile.mockResolvedValueOnce({ stdout: "ERROR: not authorized\n" });
+
+    await expect(
+      datasource.create("Title", "Body", { cwd: "/tmp" })
+    ).rejects.toThrow("Failed to parse Azure CLI output");
   });
 });
 
@@ -464,5 +493,24 @@ describe("azdevops datasource — createPullRequest", () => {
     await expect(
       datasource.createPullRequest("b", "1", "T", "B", { cwd: "/tmp" }),
     ).rejects.toThrow("auth required");
+  });
+
+  it("throws descriptive error when pr create returns non-JSON output", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: "ERROR: server error\n" });
+
+    await expect(
+      datasource.createPullRequest("b", "1", "T", "B", { cwd: "/tmp" })
+    ).rejects.toThrow("Failed to parse Azure CLI output");
+  });
+
+  it("throws descriptive error when pr list returns non-JSON output in catch branch", async () => {
+    // First call: pr create rejects with "already exists" to trigger catch path
+    mockExecFile.mockRejectedValueOnce(new Error("already exists"));
+    // Second call: pr list returns non-JSON
+    mockExecFile.mockResolvedValueOnce({ stdout: "unexpected output\n" });
+
+    await expect(
+      datasource.createPullRequest("b", "1", "T", "B", { cwd: "/tmp" })
+    ).rejects.toThrow("Failed to parse Azure CLI output");
   });
 });
