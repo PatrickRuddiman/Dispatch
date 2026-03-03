@@ -112,7 +112,7 @@ function createMockDatasource(overrides?: Partial<Datasource>): Datasource {
     create: vi.fn<Datasource["create"]>().mockResolvedValue({} as IssueDetails),
     getDefaultBranch: vi.fn<Datasource["getDefaultBranch"]>().mockResolvedValue("main"),
     getUsername: vi.fn<Datasource["getUsername"]>().mockResolvedValue("testuser"),
-    buildBranchName: vi.fn<Datasource["buildBranchName"]>().mockReturnValue("testuser/dispatch/1-test"),
+    buildBranchName: vi.fn<Datasource["buildBranchName"]>().mockReturnValue("testuser/dispatch/1"),
     createAndSwitchBranch: vi.fn<Datasource["createAndSwitchBranch"]>().mockResolvedValue(undefined),
     switchBranch: vi.fn<Datasource["switchBranch"]>().mockResolvedValue(undefined),
     pushBranch: vi.fn<Datasource["pushBranch"]>().mockResolvedValue(undefined),
