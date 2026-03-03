@@ -13,10 +13,12 @@ const { mocks } = vi.hoisted(() => {
 
 vi.mock("../providers/opencode.js", () => ({
   boot: mocks.mockBootOpencode,
+  listModels: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("../providers/copilot.js", () => ({
   boot: mocks.mockBootCopilot,
+  listModels: vi.fn().mockResolvedValue([]),
 }));
 
 // ─── Imports (after mocks) ──────────────────────────────────────────
