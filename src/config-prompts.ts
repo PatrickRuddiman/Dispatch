@@ -1,31 +1,28 @@
 /**
  * Interactive configuration wizard for Dispatch.
  *
- * Guides users through provider, datasource, and advanced settings
- * configuration via an interactive terminal flow.
+ * Guides users through provider, datasource, and model selection
+ * via an interactive terminal flow.
  */
 
-import { select, input, confirm, number } from "@inquirer/prompts";
+import { select, confirm } from "@inquirer/prompts";
 import chalk from "chalk";
 import { log } from "./helpers/logger.js";
 import {
   loadConfig,
   saveConfig,
-  validateConfigValue,
   type DispatchConfig,
 } from "./config.js";
 import { PROVIDER_NAMES, listProviderModels } from "./providers/index.js";
 import type { ProviderName } from "./providers/interface.js";
 import { DATASOURCE_NAMES, detectDatasource } from "./datasources/index.js";
 import type { DatasourceName } from "./datasources/interface.js";
-import { detectWorkItemType } from "./datasources/azdevops.js";
 
 /**
  * Run the interactive configuration wizard.
  *
- * Loads existing config, walks the user through provider and datasource
- * selection, conditionally prompts for Azure DevOps fields, offers
- * advanced settings, displays a summary, and saves on confirmation.
+ * Loads existing config, walks the user through provider, model, and
+ * datasource selection, displays a summary, and saves on confirmation.
  */
 export async function runInteractiveConfigWizard(configDir?: string): Promise<void> {
   console.log();
@@ -68,11 +65,7 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
   let selectedModel: string | undefined = existing.model;
   try {
     log.dim("Fetching available models...");
-    const serverUrl = existing.serverUrl;
-    const models = await listProviderModels(
-      provider,
-      serverUrl ? { url: serverUrl } : undefined,
-    );
+    const models = await listProviderModels(provider);
     if (models.length > 0) {
       const modelChoice = await select<string>({
         message: "Select a model:",
@@ -117,116 +110,15 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
   const source: DatasourceName | undefined =
     selectedSource === "auto" ? undefined : selectedSource;
 
-  // ── Azure DevOps-specific fields ───────────────────────────
-  let org: string | undefined;
-  let project: string | undefined;
-  let workItemType: string | undefined;
-
-  if (source === "azdevops") {
-    org = await input({
-      message: "Azure DevOps organization URL:",
-      default: existing.org,
-      validate: (value) => {
-        const error = validateConfigValue("org", value);
-        return error ?? true;
-      },
-    });
-
-    project = await input({
-      message: "Azure DevOps project name:",
-      default: existing.project,
-      validate: (value) => {
-        const error = validateConfigValue("project", value);
-        return error ?? true;
-      },
-    });
-
-    const detectedType = await detectWorkItemType({ org, project });
-    workItemType = await input({
-      message: "Work item type:",
-      default: existing.workItemType ?? detectedType ?? undefined,
-      validate: (value) => {
-        const error = validateConfigValue("workItemType", value);
-        return error ?? true;
-      },
-    });
-  }
-
-  // ── Advanced settings ──────────────────────────────────────
-  let concurrency: number | undefined = existing.concurrency;
-  let serverUrl: string | undefined = existing.serverUrl;
-  let planTimeout: number | undefined = existing.planTimeout;
-  let planRetries: number | undefined = existing.planRetries;
-
-  console.log();
-  const configureAdvanced = await confirm({
-    message: "Configure advanced settings?",
-    default: false,
-  });
-
-  if (configureAdvanced) {
-    const concurrencyResult = await number({
-      message: "Concurrency (max parallel dispatches):",
-      default: existing.concurrency,
-      validate: (value) => {
-        if (value === undefined) return true;
-        const error = validateConfigValue("concurrency", String(value));
-        return error ?? true;
-      },
-    });
-    concurrency = concurrencyResult;
-
-    serverUrl = await input({
-      message: "Server URL (leave empty to skip):",
-      default: existing.serverUrl ?? "",
-    });
-    if (serverUrl.trim() === "") {
-      serverUrl = undefined;
-    }
-
-    const planTimeoutResult = await number({
-      message: "Plan timeout in minutes:",
-      default: existing.planTimeout,
-      validate: (value) => {
-        if (value === undefined) return true;
-        const error = validateConfigValue("planTimeout", String(value));
-        return error ?? true;
-      },
-    });
-    planTimeout = planTimeoutResult;
-
-    const planRetriesResult = await number({
-      message: "Plan retries:",
-      default: existing.planRetries,
-      validate: (value) => {
-        if (value === undefined) return true;
-        const error = validateConfigValue("planRetries", String(value));
-        return error ?? true;
-      },
-    });
-    planRetries = planRetriesResult;
-  }
-
   // ── Build new config ───────────────────────────────────────
   const newConfig: DispatchConfig = {
-    ...existing,
     provider,
     source,
   };
 
   if (selectedModel !== undefined) {
     newConfig.model = selectedModel;
-  } else {
-    delete newConfig.model;
   }
-
-  if (org !== undefined) newConfig.org = org;
-  if (project !== undefined) newConfig.project = project;
-  if (workItemType !== undefined) newConfig.workItemType = workItemType;
-  if (concurrency !== undefined) newConfig.concurrency = concurrency;
-  if (serverUrl !== undefined) newConfig.serverUrl = serverUrl;
-  if (planTimeout !== undefined) newConfig.planTimeout = planTimeout;
-  if (planRetries !== undefined) newConfig.planRetries = planRetries;
 
   // ── Summary ────────────────────────────────────────────────
   console.log();
