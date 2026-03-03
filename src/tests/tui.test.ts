@@ -62,6 +62,8 @@ describe("createTui", () => {
   it("renders immediately on creation", async () => {
     await setup();
     expect(writeSpy).toHaveBeenCalled();
+    expect(lastOutput()).toContain("dispatch");
+    expect(lastOutput()).toContain("Discovering");
   });
 
   it("update() triggers a re-render", async () => {
@@ -69,6 +71,8 @@ describe("createTui", () => {
     writeSpy.mockClear();
     tui.update();
     expect(writeSpy).toHaveBeenCalled();
+    expect(lastOutput()).toContain("dispatch");
+    expect(lastOutput()).toContain("Discovering");
   });
 
   it("stop() clears the animation interval", async () => {
@@ -85,6 +89,8 @@ describe("createTui", () => {
     tui.stop();
     // draw is called once inside stop
     expect(writeSpy).toHaveBeenCalled();
+    expect(lastOutput()).toContain("dispatch");
+    expect(lastOutput()).toContain("Discovering");
   });
 
   it("spinner animates on interval ticks", async () => {
@@ -92,6 +98,8 @@ describe("createTui", () => {
     const callsBefore = writeSpy.mock.calls.length;
     vi.advanceTimersByTime(80);
     expect(writeSpy.mock.calls.length).toBeGreaterThan(callsBefore);
+    expect(lastOutput()).toContain("dispatch");
+    expect(lastOutput()).toContain("Discovering");
   });
 });
 
