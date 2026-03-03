@@ -51,6 +51,7 @@ vi.mock("../helpers/slugify.js", () => ({
       .replace(/^-|-$/g, "");
     return maxLen != null ? slug.slice(0, maxLen) : slug;
   }),
+  MAX_SLUG_LENGTH: 60,
 }));
 
 vi.mock("../spec-generator.js", () => ({
