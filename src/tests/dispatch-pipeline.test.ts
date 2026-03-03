@@ -183,7 +183,7 @@ import { createTui } from "../tui.js";
 import { createWorktree, removeWorktree, worktreeName } from "../helpers/worktree.js";
 import { registerCleanup } from "../helpers/cleanup.js";
 import { parseTaskFile } from "../parser.js";
-import { fetchItemsById, writeItemsToTempDir, parseIssueFilename } from "../orchestrator/datasource-helpers.js";
+import { fetchItemsById, writeItemsToTempDir, parseIssueFilename, closeCompletedSpecIssues } from "../orchestrator/datasource-helpers.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
@@ -879,5 +879,59 @@ describe("worktree dispatch pipeline", () => {
       expect(ds.createAndSwitchBranch).toHaveBeenCalledTimes(2);
       expect(ds.switchBranch).toHaveBeenCalledTimes(2);
     });
+  });
+});
+
+// ─── Error-path handling ────────────────────────────────────────
+
+describe("error-path handling", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.mockExecute.mockResolvedValue({
+      success: true,
+      dispatchResult: { task: TASK_FIXTURE, success: true },
+      elapsedMs: 100,
+    });
+  });
+
+  it("propagates error when fetchItemsById rejects during item discovery", async () => {
+    vi.mocked(fetchItemsById).mockRejectedValueOnce(new Error("network failure"));
+
+    await expect(
+      runDispatchPipeline(baseOpts({ noPlan: true }), "/tmp/test"),
+    ).rejects.toThrow("network failure");
+  });
+
+  it("continues and logs warning when closeCompletedSpecIssues rejects", async () => {
+    vi.mocked(closeCompletedSpecIssues).mockRejectedValueOnce(
+      new Error("close failed"),
+    );
+
+    const result = await runDispatchPipeline(
+      baseOpts({ noPlan: true }),
+      "/tmp/test",
+    );
+
+    expect(result.completed).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
+      expect.stringContaining("close completed spec issues"),
+    );
+  });
+
+  it("logs warning and continues when datasource.update() fails in post-execution sync", async () => {
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    vi.mocked(ds.update).mockRejectedValueOnce(new Error("sync failed"));
+
+    const result = await runDispatchPipeline(
+      baseOpts({ noPlan: true }),
+      "/tmp/test",
+    );
+
+    expect(result.completed).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
+      expect.stringContaining("Could not sync task completion"),
+    );
   });
 });

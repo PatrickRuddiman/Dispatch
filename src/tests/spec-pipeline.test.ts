@@ -503,4 +503,35 @@ describe("runSpecPipeline", () => {
       expect(mocks.mockGenerate).not.toHaveBeenCalled();
     });
   });
+
+  // ── Error paths ────────────────────────────────────────────
+
+  describe("error paths", () => {
+    it("counts generate() exception as failed (not just { success: false })", async () => {
+      mocks.mockGenerate.mockRejectedValueOnce(new Error("agent crashed"));
+
+      const result = await runSpecPipeline(baseOpts({ issues: "1", concurrency: 1 }));
+
+      expect(result.total).toBe(1);
+      expect(result.generated).toBe(0);
+      expect(result.failed).toBe(1);
+      expect(vi.mocked(log.error)).toHaveBeenCalledWith(
+        expect.stringContaining("Failed to generate spec"),
+      );
+    });
+
+    it("completes and returns results when provider cleanup() throws", async () => {
+      mocks.mockProviderCleanup.mockRejectedValueOnce(new Error("cleanup boom"));
+
+      const result = await runSpecPipeline(baseOpts({ issues: "1", concurrency: 1 }));
+
+      expect(result.total).toBe(1);
+      expect(result.generated).toBe(1);
+      expect(result.failed).toBe(0);
+      expect(result.files.length).toBe(1);
+      expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
+        expect.stringContaining("Provider cleanup failed"),
+      );
+    });
+  });
 });
