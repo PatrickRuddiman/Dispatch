@@ -37,6 +37,7 @@
     "node": ">=20.12.0"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.63",
     "@github/copilot-sdk": "^0.1.0",
     "@inquirer/prompts": "^8.3.0",
     "@opencode-ai/sdk": "^1.2.10",
