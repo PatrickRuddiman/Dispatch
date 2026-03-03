@@ -10,7 +10,7 @@
  */
 
 import { mkdir, readFile, writeFile, unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Agent, AgentBootOptions } from "./interface.js";
 import type { IssueDetails } from "../datasources/interface.js";
@@ -34,6 +34,8 @@ export interface SpecGenerateOptions {
   cwd: string;
   /** Final output path where the spec should be written */
   outputPath: string;
+  /** Worktree root directory for isolation, if operating in a worktree */
+  worktreeRoot?: string;
 }
 
 /**
@@ -84,8 +86,23 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
       const { issue, filePath, fileContent, inlineText, cwd: workingDir, outputPath } = genOpts;
 
       try {
+        // 0. Normalize cwd and validate outputPath stays within it
+        const resolvedCwd = resolve(workingDir);
+        const resolvedOutput = resolve(outputPath);
+        if (
+          resolvedOutput !== resolvedCwd &&
+          !resolvedOutput.startsWith(resolvedCwd + sep)
+        ) {
+          return {
+            content: "",
+            success: false,
+            error: `Output path "${outputPath}" escapes the working directory "${workingDir}"`,
+            valid: false,
+          };
+        }
+
         // 1. Create .dispatch/tmp/ on demand
-        const tmpDir = join(workingDir, ".dispatch", "tmp");
+        const tmpDir = join(resolvedCwd, ".dispatch", "tmp");
         await mkdir(tmpDir, { recursive: true });
 
         // 2. Generate a unique temp file path
@@ -149,8 +166,8 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
         }
 
         // 8. Write the cleaned content to the final output path
-        await writeFile(outputPath, cleanedContent, "utf-8");
-        log.debug(`Wrote cleaned spec to ${outputPath}`);
+        await writeFile(resolvedOutput, cleanedContent, "utf-8");
+        log.debug(`Wrote cleaned spec to ${resolvedOutput}`);
 
         // 9. Clean up the temp file
         try {

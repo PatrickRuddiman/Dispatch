@@ -272,6 +272,7 @@ export async function runDispatchPipeline(
         }
       }
 
+      const worktreeRoot = useWorktrees ? worktreePath : undefined;
       const issueLifecycleOpts: DispatchLifecycleOptions = { cwd: issueCwd };
 
       // ── Boot per-worktree provider and agents (or use shared ones) ──
@@ -325,7 +326,7 @@ export async function runDispatchPipeline(
                 for (let attempt = 1; attempt <= maxPlanAttempts; attempt++) {
                   try {
                     planResult = await withTimeout(
-                      localPlanner.plan(task, fileContext, issueCwd),
+                      localPlanner.plan(task, fileContext, issueCwd, worktreeRoot),
                       planTimeoutMs,
                       "planner.plan()",
                     );
@@ -382,6 +383,7 @@ export async function runDispatchPipeline(
                     task,
                     cwd: issueCwd,
                     plan: plan ?? null,
+                    worktreeRoot,
                   });
                   if (!result.success) {
                     throw new Error(result.error ?? "Execution failed");
@@ -463,6 +465,7 @@ export async function runDispatchPipeline(
               issue: details,
               taskResults: issueResults,
               cwd: issueCwd,
+              worktreeRoot,
             });
             if (result.success) {
               commitAgentResult = result;

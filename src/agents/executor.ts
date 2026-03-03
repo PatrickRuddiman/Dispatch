@@ -27,6 +27,8 @@ export interface ExecuteInput {
   cwd: string;
   /** Planner output prompt, or null if planning was skipped */
   plan: string | null;
+  /** Worktree root directory for isolation, if operating in a worktree */
+  worktreeRoot?: string;
 }
 
 /**
@@ -74,13 +76,13 @@ export async function boot(opts: AgentBootOptions): Promise<ExecutorAgent> {
     name: "executor",
 
     async execute(input: ExecuteInput): Promise<ExecuteResult> {
-      const { task, cwd, plan } = input;
+      const { task, cwd, plan, worktreeRoot } = input;
       const startTime = Date.now();
 
       try {
         // Dispatch the task — plan being non-null triggers the planned prompt path
         // in dispatchTask, otherwise the generic prompt is used
-        const result = await dispatchTask(provider, task, cwd, plan ?? undefined);
+        const result = await dispatchTask(provider, task, cwd, plan ?? undefined, worktreeRoot);
 
         if (result.success) {
           await markTaskComplete(task);

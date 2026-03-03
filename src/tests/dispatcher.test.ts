@@ -137,4 +137,36 @@ describe("dispatchTask", () => {
     const prompt = vi.mocked(provider.prompt).mock.calls[0][1];
     expect(prompt).toContain("Do NOT commit changes");
   });
+
+  it("includes worktree isolation instructions when worktreeRoot is provided", async () => {
+    const provider = createMockProvider();
+    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test", undefined, "/tmp/worktree");
+
+    expect(result.success).toBe(true);
+    const prompt = vi.mocked(provider.prompt).mock.calls[0][1];
+    expect(prompt).toContain("Worktree isolation");
+    expect(prompt).toContain("/tmp/worktree");
+    expect(prompt).toContain("MUST NOT read, write, or execute commands that access files outside");
+  });
+
+  it("excludes worktree isolation instructions when worktreeRoot is not provided", async () => {
+    const provider = createMockProvider();
+    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test");
+
+    expect(result.success).toBe(true);
+    const prompt = vi.mocked(provider.prompt).mock.calls[0][1];
+    expect(prompt).not.toContain("Worktree isolation");
+  });
+
+  it("includes worktree isolation in planned prompt when worktreeRoot is provided", async () => {
+    const provider = createMockProvider();
+    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test", "Step 1: do X", "/tmp/worktree");
+
+    expect(result.success).toBe(true);
+    const prompt = vi.mocked(provider.prompt).mock.calls[0][1];
+    expect(prompt).toContain("Execution Plan");
+    expect(prompt).toContain("Step 1: do X");
+    expect(prompt).toContain("Worktree isolation");
+    expect(prompt).toContain("/tmp/worktree");
+  });
 });

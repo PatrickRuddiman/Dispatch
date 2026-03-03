@@ -10,7 +10,7 @@
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Agent, AgentBootOptions } from "./interface.js";
 import type { IssueDetails } from "../datasources/interface.js";
@@ -27,6 +27,8 @@ export interface CommitGenerateOptions {
   taskResults: DispatchResult[];
   /** Working directory */
   cwd: string;
+  /** Worktree root directory for isolation, if operating in a worktree */
+  worktreeRoot?: string;
 }
 
 /** Structured result returned by the commit agent. */
@@ -73,7 +75,8 @@ export async function boot(opts: AgentBootOptions): Promise<CommitAgent> {
 
     async generate(genOpts: CommitGenerateOptions): Promise<CommitResult> {
       try {
-        const tmpDir = join(genOpts.cwd, ".dispatch", "tmp");
+        const resolvedCwd = resolve(genOpts.cwd);
+        const tmpDir = join(resolvedCwd, ".dispatch", "tmp");
         await mkdir(tmpDir, { recursive: true });
 
         const tmpFilename = `commit-${randomUUID()}.md`;

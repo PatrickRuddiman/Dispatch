@@ -197,6 +197,102 @@ describe("plan", () => {
     const promptArg = vi.mocked(provider.prompt).mock.calls[0][1];
     expect(promptArg).toContain("/boot-cwd");
   });
+
+  it("includes worktree isolation instructions when worktreeRoot is provided", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("plan output"),
+    });
+
+    const agent = await boot({ cwd: "/tmp/test", provider });
+    await agent.plan(TASK_FIXTURE, undefined, "/worktree/path", "/worktree/path");
+
+    const promptArg = vi.mocked(provider.prompt).mock.calls[0][1];
+    expect(promptArg).toContain("Worktree Isolation");
+    expect(promptArg).toContain("/worktree/path");
+    expect(promptArg).toContain("MUST be confined");
+  });
+
+  it("does not include worktree isolation instructions when worktreeRoot is not provided", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("plan output"),
+    });
+
+    const agent = await boot({ cwd: "/tmp/test", provider });
+    await agent.plan(TASK_FIXTURE);
+
+    const promptArg = vi.mocked(provider.prompt).mock.calls[0][1];
+    expect(promptArg).not.toContain("Worktree Isolation");
+  });
+
+  it("includes all worktree restriction instructions in the prompt", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("plan output"),
+    });
+
+    const agent = await boot({ cwd: "/tmp/test", provider });
+    await agent.plan(TASK_FIXTURE, undefined, "/wt/issue-1", "/wt/issue-1");
+
+    const promptArg = vi.mocked(provider.prompt).mock.calls[0][1];
+    expect(promptArg).toContain("Do NOT read, write, or execute commands that access files outside this directory.");
+    expect(promptArg).toContain("Do NOT reference or modify files in the main repository working tree or other worktrees.");
+    expect(promptArg).toContain("All relative paths must resolve within the worktree root above.");
+  });
+
+  it("includes both file context and worktree isolation when both are provided", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("plan output"),
+    });
+
+    const agent = await boot({ cwd: "/tmp/test", provider });
+    await agent.plan(TASK_FIXTURE, "# Design\nSome notes", "/wt/issue-1", "/wt/issue-1");
+
+    const promptArg = vi.mocked(provider.prompt).mock.calls[0][1];
+    expect(promptArg).toContain("Task File Contents");
+    expect(promptArg).toContain("# Design\nSome notes");
+    expect(promptArg).toContain("Worktree Isolation");
+    expect(promptArg).toContain("/wt/issue-1");
+  });
+
+  it("places worktreeRoot in isolation section and cwd in task section independently", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("plan output"),
+    });
+
+    const agent = await boot({ cwd: "/tmp/test", provider });
+    await agent.plan(TASK_FIXTURE, undefined, "/workspace/repo", "/workspace/repo/.dispatch/worktrees/slug");
+
+    const promptArg = vi.mocked(provider.prompt).mock.calls[0][1];
+    expect(promptArg).toContain("**Working directory:** /workspace/repo");
+    expect(promptArg).toContain("/workspace/repo/.dispatch/worktrees/slug");
+    expect(promptArg).toContain("Worktree Isolation");
+  });
+
+  it("does not include worktree isolation when worktreeRoot is empty string", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("plan output"),
+    });
+
+    const agent = await boot({ cwd: "/tmp/test", provider });
+    await agent.plan(TASK_FIXTURE, undefined, undefined, "");
+
+    const promptArg = vi.mocked(provider.prompt).mock.calls[0][1];
+    expect(promptArg).not.toContain("Worktree Isolation");
+  });
+
+  it("includes worktree isolation with boot-time cwd when no cwd override is given", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("plan output"),
+    });
+
+    const agent = await boot({ cwd: "/boot-dir", provider });
+    await agent.plan(TASK_FIXTURE, undefined, undefined, "/boot-dir");
+
+    const promptArg = vi.mocked(provider.prompt).mock.calls[0][1];
+    expect(promptArg).toContain("**Working directory:** /boot-dir");
+    expect(promptArg).toContain("Worktree Isolation");
+    expect(promptArg).toContain("MUST be confined");
+    expect(promptArg).toContain("/boot-dir");
+  });
 });
 
 describe("cleanup", () => {

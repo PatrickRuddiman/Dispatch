@@ -91,6 +91,7 @@ describe("execute", () => {
       TASK_FIXTURE,
       "/tmp/test",
       "Step 1: do X\nStep 2: do Y",
+      undefined,
     );
 
     // markTaskComplete called on success
@@ -178,6 +179,7 @@ describe("execute", () => {
       TASK_FIXTURE,
       "/tmp/test",
       undefined,
+      undefined,
     );
 
     expect(mockMarkComplete).toHaveBeenCalledOnce();
@@ -221,5 +223,35 @@ describe("execute", () => {
 
     expect(result.elapsedMs).toBeGreaterThanOrEqual(10);
     expect(result.elapsedMs).toBeLessThan(2000);
+  });
+
+  it("passes worktreeRoot to dispatchTask when provided in input", async () => {
+    const provider = createMockProvider();
+    const mockDispatch = vi.mocked(dispatchTask);
+    const mockMarkComplete = vi.mocked(markTaskComplete);
+
+    const dispatchResult: DispatchResult = {
+      task: TASK_FIXTURE,
+      success: true,
+    };
+    mockDispatch.mockResolvedValue(dispatchResult);
+    mockMarkComplete.mockResolvedValue(undefined);
+
+    const agent = await boot({ cwd: "/tmp/test", provider });
+    const result = await agent.execute({
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
+      plan: "Step 1: do X",
+      worktreeRoot: "/tmp/worktree",
+    });
+
+    expect(result.success).toBe(true);
+    expect(mockDispatch).toHaveBeenCalledWith(
+      provider,
+      TASK_FIXTURE,
+      "/tmp/test",
+      "Step 1: do X",
+      "/tmp/worktree",
+    );
   });
 });

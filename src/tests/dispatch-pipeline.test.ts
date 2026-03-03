@@ -1210,6 +1210,47 @@ describe("worktree dispatch pipeline", () => {
       expect(planCwds).toContain("/tmp/test/.dispatch/worktrees/1-test");
       expect(planCwds).toContain("/tmp/test/.dispatch/worktrees/2-bugfix");
     });
+
+    it("passes worktreeRoot to planner.plan() call in worktree mode", async () => {
+      mocks.mockPlan.mockResolvedValue({ prompt: "Execute step 1", success: true });
+
+      await runDispatchPipeline(multiIssueOpts({ noPlan: false }), "/tmp/test");
+
+      // Verify plan() was called with worktreeRoot as fourth argument
+      const planCalls = mocks.mockPlan.mock.calls;
+      const planWorktreeRoots = planCalls.map((call: any[]) => call[3]);
+
+      expect(planWorktreeRoots).toContain("/tmp/test/.dispatch/worktrees/1-test");
+      expect(planWorktreeRoots).toContain("/tmp/test/.dispatch/worktrees/2-bugfix");
+    });
+
+    it("passes worktreeRoot to executor.execute() in worktree mode", async () => {
+      await runDispatchPipeline(multiIssueOpts({ noPlan: true }), "/tmp/test");
+
+      const executeCalls = mocks.mockExecute.mock.calls;
+      const worktreeRoots = executeCalls.map((call: any[]) => call[0].worktreeRoot);
+
+      expect(worktreeRoots).toContain("/tmp/test/.dispatch/worktrees/1-test");
+      expect(worktreeRoots).toContain("/tmp/test/.dispatch/worktrees/2-bugfix");
+    });
+
+    it("passes worktreeRoot to commitAgent.generate() in worktree mode", async () => {
+      vi.mocked(getBranchDiff).mockResolvedValue("diff --git a/file.ts b/file.ts\n+added line");
+      mocks.mockGenerate.mockResolvedValue({
+        commitMessage: "feat: test",
+        prTitle: "feat: test",
+        prDescription: "description",
+        success: true,
+      });
+
+      await runDispatchPipeline(multiIssueOpts({ noPlan: true }), "/tmp/test");
+
+      const generateCalls = mocks.mockGenerate.mock.calls;
+      const worktreeRoots = generateCalls.map((call: any[]) => call[0].worktreeRoot);
+
+      expect(worktreeRoots).toContain("/tmp/test/.dispatch/worktrees/1-test");
+      expect(worktreeRoots).toContain("/tmp/test/.dispatch/worktrees/2-bugfix");
+    });
   });
 
   describe("serial fallback", () => {
@@ -1275,6 +1316,38 @@ describe("worktree dispatch pipeline", () => {
       expect(ds.switchBranch).toHaveBeenCalledTimes(2);
     });
 
+    it("does not pass worktreeRoot when --no-worktree is set", async () => {
+      setupMultiIssueScenario();
+      vi.mocked(getBranchDiff).mockResolvedValue("diff --git a/file.ts b/file.ts\n+added line");
+      mocks.mockExecute.mockImplementation(async ({ task }: any) => ({
+        success: true,
+        dispatchResult: { task, success: true },
+        elapsedMs: 100,
+      }));
+      mocks.mockGenerate.mockResolvedValue({
+        commitMessage: "feat: test",
+        prTitle: "feat: test",
+        prDescription: "description",
+        success: true,
+      });
+
+      await runDispatchPipeline(
+        multiIssueOpts({ noWorktree: true }),
+        "/tmp/test",
+      );
+
+      // With --no-worktree, worktreeRoot should be undefined for all agents
+      const executeCalls = mocks.mockExecute.mock.calls;
+      for (const call of executeCalls) {
+        expect(call[0].worktreeRoot).toBeUndefined();
+      }
+
+      const generateCalls = mocks.mockGenerate.mock.calls;
+      for (const call of generateCalls) {
+        expect(call[0].worktreeRoot).toBeUndefined();
+      }
+    });
+
     it("boots a single shared provider when useWorktrees is false", async () => {
       await runDispatchPipeline(
         baseOpts({ noBranch: false, noPlan: true }),
@@ -1303,6 +1376,32 @@ describe("worktree dispatch pipeline", () => {
       expect(vi.mocked(bootPlannerBoot)).toHaveBeenCalledWith(
         expect.objectContaining({ cwd: "/tmp/test" }),
       );
+    });
+
+    it("does not pass worktreeRoot in serial mode", async () => {
+      mocks.mockPlan.mockResolvedValue({ prompt: "Execute step 1", success: true });
+      vi.mocked(getBranchDiff).mockResolvedValue("diff --git a/file.ts b/file.ts\n+added line");
+      mocks.mockGenerate.mockResolvedValue({
+        commitMessage: "feat: test",
+        prTitle: "feat: test",
+        prDescription: "description",
+        success: true,
+      });
+
+      await runDispatchPipeline(
+        baseOpts({ noBranch: false, noPlan: false }),
+        "/tmp/test",
+      );
+
+      // In serial mode, worktreeRoot should be undefined
+      const planCalls = mocks.mockPlan.mock.calls;
+      expect(planCalls[0][3]).toBeUndefined();
+
+      const executeCalls = mocks.mockExecute.mock.calls;
+      expect(executeCalls[0][0].worktreeRoot).toBeUndefined();
+
+      const generateCalls = mocks.mockGenerate.mock.calls;
+      expect(generateCalls[0][0].worktreeRoot).toBeUndefined();
     });
   });
 

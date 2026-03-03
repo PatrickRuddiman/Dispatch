@@ -40,8 +40,11 @@ export interface PlannerAgent extends Agent {
    *
    * When `cwd` is provided, it overrides the boot-time working directory
    * in the planning prompt — use this for worktree tasks.
+   *
+   * When `worktreeRoot` is provided, the prompt includes directory-restriction
+   * instructions that confine the agent to that worktree directory.
    */
-  plan(task: Task, fileContext?: string, cwd?: string): Promise<PlanResult>;
+  plan(task: Task, fileContext?: string, cwd?: string, worktreeRoot?: string): Promise<PlanResult>;
 }
 
 /**
@@ -60,10 +63,10 @@ export async function boot(opts: AgentBootOptions): Promise<PlannerAgent> {
   return {
     name: "planner",
 
-    async plan(task: Task, fileContext?: string, cwdOverride?: string): Promise<PlanResult> {
+    async plan(task: Task, fileContext?: string, cwdOverride?: string, worktreeRoot?: string): Promise<PlanResult> {
       try {
         const sessionId = await provider.createSession();
-        const prompt = buildPlannerPrompt(task, cwdOverride ?? cwd, fileContext);
+        const prompt = buildPlannerPrompt(task, cwdOverride ?? cwd, fileContext, worktreeRoot);
 
         const plan = await provider.prompt(sessionId, prompt);
 
@@ -91,8 +94,11 @@ export async function boot(opts: AgentBootOptions): Promise<PlannerAgent> {
  * When file context is provided, it is included as a "Task File Contents"
  * section so the planner can use headings, prose, and notes from the
  * markdown file as implementation guidance.
+ *
+ * When `worktreeRoot` is provided, directory-restriction instructions are
+ * appended to confine all agent operations within the worktree boundary.
  */
-function buildPlannerPrompt(task: Task, cwd: string, fileContext?: string): string {
+function buildPlannerPrompt(task: Task, cwd: string, fileContext?: string, worktreeRoot?: string): string {
   const sections: string[] = [
     `You are a **planning agent**. Your job is to explore the codebase, understand the task below, and produce a detailed execution prompt that another agent will follow to implement the changes.`,
     ``,
@@ -115,6 +121,22 @@ function buildPlannerPrompt(task: Task, cwd: string, fileContext?: string): stri
       `\`\`\`markdown`,
       fileContext,
       `\`\`\``,
+    );
+  }
+
+  if (worktreeRoot) {
+    sections.push(
+      ``,
+      `## Worktree Isolation`,
+      ``,
+      `You are operating inside a git worktree. All file operations MUST be confined`,
+      `to the following directory tree:`,
+      ``,
+      `    ${worktreeRoot}`,
+      ``,
+      `- Do NOT read, write, or execute commands that access files outside this directory.`,
+      `- Do NOT reference or modify files in the main repository working tree or other worktrees.`,
+      `- All relative paths must resolve within the worktree root above.`,
     );
   }
 
