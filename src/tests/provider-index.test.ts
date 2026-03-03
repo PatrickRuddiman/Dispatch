@@ -7,7 +7,8 @@ const { mocks } = vi.hoisted(() => {
   const mockBootOpencode = vi.fn<(opts?: ProviderBootOptions) => Promise<ProviderInstance>>();
   const mockBootCopilot = vi.fn<(opts?: ProviderBootOptions) => Promise<ProviderInstance>>();
   const mockBootClaude = vi.fn<(opts?: ProviderBootOptions) => Promise<ProviderInstance>>();
-  return { mocks: { mockBootOpencode, mockBootCopilot, mockBootClaude } };
+  const mockBootCodex = vi.fn<(opts?: ProviderBootOptions) => Promise<ProviderInstance>>();
+  return { mocks: { mockBootOpencode, mockBootCopilot, mockBootClaude, mockBootCodex } };
 });
 
 // ─── Module mocks ───────────────────────────────────────────────────
@@ -24,6 +25,11 @@ vi.mock("../providers/copilot.js", () => ({
 
 vi.mock("../providers/claude.js", () => ({
   boot: mocks.mockBootClaude,
+  listModels: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("../providers/codex.js", () => ({
+  boot: mocks.mockBootCodex,
   listModels: vi.fn().mockResolvedValue([]),
 }));
 
@@ -47,14 +53,15 @@ beforeEach(() => {
 });
 
 describe("PROVIDER_NAMES", () => {
-  it("includes 'opencode', 'copilot', and 'claude'", () => {
+  it("includes 'opencode', 'copilot', 'claude', and 'codex'", () => {
     expect(PROVIDER_NAMES).toContain("opencode");
     expect(PROVIDER_NAMES).toContain("copilot");
     expect(PROVIDER_NAMES).toContain("claude");
+    expect(PROVIDER_NAMES).toContain("codex");
   });
 
-  it("has exactly three entries", () => {
-    expect(PROVIDER_NAMES).toHaveLength(3);
+  it("has exactly four entries", () => {
+    expect(PROVIDER_NAMES).toHaveLength(4);
   });
 
   it("is an array of strings", () => {
@@ -94,6 +101,16 @@ describe("bootProvider", () => {
 
     expect(instance.name).toBe("claude");
     expect(mocks.mockBootClaude).toHaveBeenCalledOnce();
+  });
+
+  it("boots the codex provider", async () => {
+    const mock = createMockProvider("codex");
+    mocks.mockBootCodex.mockResolvedValue(mock);
+
+    const instance = await bootProvider("codex");
+
+    expect(instance.name).toBe("codex");
+    expect(mocks.mockBootCodex).toHaveBeenCalledOnce();
   });
 
   it("passes options to the boot function", async () => {
