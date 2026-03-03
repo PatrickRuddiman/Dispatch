@@ -1,16 +1,13 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { select, input, confirm, number } from "@inquirer/prompts";
+import { select, confirm } from "@inquirer/prompts";
 import { runInteractiveConfigWizard } from "../config-prompts.js";
 import { loadConfig, saveConfig } from "../config.js";
 import { detectDatasource } from "../datasources/index.js";
-import { detectWorkItemType } from "../datasources/azdevops.js";
 import { listProviderModels } from "../providers/index.js";
 
 vi.mock("@inquirer/prompts", () => ({
   select: vi.fn(),
-  input: vi.fn(),
   confirm: vi.fn(),
-  number: vi.fn(),
 }));
 
 vi.mock("../config.js", async (importOriginal) => {
@@ -27,14 +24,6 @@ vi.mock("../datasources/index.js", async (importOriginal) => {
   return {
     ...actual,
     detectDatasource: vi.fn().mockResolvedValue(null),
-  };
-});
-
-vi.mock("../datasources/azdevops.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../datasources/azdevops.js")>();
-  return {
-    ...actual,
-    detectWorkItemType: vi.fn().mockResolvedValue(null),
   };
 });
 
@@ -61,9 +50,7 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("github");
-    vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // advanced settings
-      .mockResolvedValueOnce(true); // save
+    vi.mocked(confirm).mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({ provider: "copilot", source: "github" }),
@@ -82,9 +69,7 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("copilot")   // provider
       .mockResolvedValueOnce("model-a")   // model
       .mockResolvedValueOnce("github");   // datasource
-    vi.mocked(confirm)
-      .mockResolvedValueOnce(false)  // advanced settings
-      .mockResolvedValueOnce(true);  // save
+    vi.mocked(confirm).mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -103,52 +88,12 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("copilot")   // provider
       .mockResolvedValueOnce("")          // model — "default (provider decides)"
       .mockResolvedValueOnce("github");   // datasource
-    vi.mocked(confirm)
-      .mockResolvedValueOnce(false)  // advanced settings
-      .mockResolvedValueOnce(true);  // save
+    vi.mocked(confirm).mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     const savedConfig = vi.mocked(saveConfig).mock.calls[0][0];
     expect(savedConfig.provider).toBe("copilot");
     expect(savedConfig.source).toBe("github");
     expect(savedConfig.model).toBeUndefined();
-  });
-
-  it("conditional Azure DevOps prompts for org and project", async () => {
-    vi.mocked(loadConfig).mockResolvedValueOnce({});
-    vi.mocked(select)
-      .mockResolvedValueOnce("opencode")
-      .mockResolvedValueOnce("azdevops");
-    vi.mocked(input)
-      .mockResolvedValueOnce("https://dev.azure.com/myorg")
-      .mockResolvedValueOnce("my-project")
-      .mockResolvedValueOnce("User Story");
-    vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // advanced settings
-      .mockResolvedValueOnce(true); // save
-    await runInteractiveConfigWizard();
-    expect(input).toHaveBeenCalledTimes(3);
-    expect(saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: "opencode",
-        source: "azdevops",
-        org: "https://dev.azure.com/myorg",
-        project: "my-project",
-        workItemType: "User Story",
-      }),
-      undefined,
-    );
-  });
-
-  it("non-azdevops datasource does NOT prompt for org/project", async () => {
-    vi.mocked(loadConfig).mockResolvedValueOnce({});
-    vi.mocked(select)
-      .mockResolvedValueOnce("copilot")
-      .mockResolvedValueOnce("github");
-    vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // advanced settings
-      .mockResolvedValueOnce(true); // save
-    await runInteractiveConfigWizard();
-    expect(input).not.toHaveBeenCalled();
   });
 
   it("existing config — user declines reconfiguration", async () => {
@@ -167,38 +112,9 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("github");
-    vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // advanced settings
-      .mockResolvedValueOnce(false); // save — declined
+    vi.mocked(confirm).mockResolvedValueOnce(false); // save — declined
     await runInteractiveConfigWizard();
     expect(saveConfig).not.toHaveBeenCalled();
-  });
-
-  it("advanced settings flow prompts for all advanced fields", async () => {
-    vi.mocked(loadConfig).mockResolvedValueOnce({});
-    vi.mocked(select)
-      .mockResolvedValueOnce("copilot")
-      .mockResolvedValueOnce("github");
-    vi.mocked(confirm)
-      .mockResolvedValueOnce(true) // advanced settings
-      .mockResolvedValueOnce(true); // save
-    vi.mocked(number)
-      .mockResolvedValueOnce(4) // concurrency
-      .mockResolvedValueOnce(10) // planTimeout
-      .mockResolvedValueOnce(2); // planRetries
-    vi.mocked(input).mockResolvedValueOnce("http://localhost:3000"); // serverUrl
-    await runInteractiveConfigWizard();
-    expect(saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: "copilot",
-        source: "github",
-        concurrency: 4,
-        serverUrl: "http://localhost:3000",
-        planTimeout: 10,
-        planRetries: 2,
-      }),
-      undefined,
-    );
   });
 
   it("existing config — user accepts reconfiguration", async () => {
@@ -208,7 +124,6 @@ describe("runInteractiveConfigWizard", () => {
     });
     vi.mocked(confirm)
       .mockResolvedValueOnce(true) // reconfigure
-      .mockResolvedValueOnce(false) // advanced settings
       .mockResolvedValueOnce(true); // save
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
@@ -226,9 +141,7 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("github");
-    vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // advanced settings
-      .mockResolvedValueOnce(true); // save
+    vi.mocked(confirm).mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(select).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -243,15 +156,10 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(loadConfig).mockResolvedValueOnce({ source: "azdevops" });
     vi.mocked(confirm)
       .mockResolvedValueOnce(true) // reconfigure
-      .mockResolvedValueOnce(false) // advanced settings
       .mockResolvedValueOnce(true); // save
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("azdevops");
-    vi.mocked(input)
-      .mockResolvedValueOnce("https://dev.azure.com/org")
-      .mockResolvedValueOnce("proj")
-      .mockResolvedValueOnce("User Story");
     await runInteractiveConfigWizard();
     expect(select).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -267,9 +175,7 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("md");
-    vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // advanced settings
-      .mockResolvedValueOnce(true); // save
+    vi.mocked(confirm).mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(select).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -284,66 +190,11 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("auto");
-    vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // advanced settings
-      .mockResolvedValueOnce(true); // save
+    vi.mocked(confirm).mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     const savedConfig = vi.mocked(saveConfig).mock.calls[0][0];
     expect(savedConfig.source).toBeUndefined();
     expect(savedConfig.provider).toBe("copilot");
-  });
-
-  it("azdevops flow uses detected work item type as default", async () => {
-    vi.mocked(loadConfig).mockResolvedValueOnce({});
-    vi.mocked(detectWorkItemType).mockResolvedValueOnce("Product Backlog Item");
-    vi.mocked(select)
-      .mockResolvedValueOnce("copilot")
-      .mockResolvedValueOnce("azdevops");
-    vi.mocked(input)
-      .mockResolvedValueOnce("https://dev.azure.com/myorg")
-      .mockResolvedValueOnce("my-project")
-      .mockResolvedValueOnce("Product Backlog Item");
-    vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // advanced settings
-      .mockResolvedValueOnce(true); // save
-    await runInteractiveConfigWizard();
-    expect(detectWorkItemType).toHaveBeenCalledWith({
-      org: "https://dev.azure.com/myorg",
-      project: "my-project",
-    });
-    expect(input).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: "Work item type:",
-        default: "Product Backlog Item",
-      }),
-    );
-    expect(saveConfig).toHaveBeenCalledWith(
-      expect.objectContaining({ workItemType: "Product Backlog Item" }),
-      undefined,
-    );
-  });
-
-  it("azdevops flow falls back to existing config workItemType when detection fails", async () => {
-    vi.mocked(loadConfig).mockResolvedValueOnce({ workItemType: "Requirement" });
-    vi.mocked(detectWorkItemType).mockResolvedValueOnce(null);
-    vi.mocked(confirm)
-      .mockResolvedValueOnce(true) // reconfigure
-      .mockResolvedValueOnce(false) // advanced settings
-      .mockResolvedValueOnce(true); // save
-    vi.mocked(select)
-      .mockResolvedValueOnce("copilot")
-      .mockResolvedValueOnce("azdevops");
-    vi.mocked(input)
-      .mockResolvedValueOnce("https://dev.azure.com/myorg")
-      .mockResolvedValueOnce("my-project")
-      .mockResolvedValueOnce("Requirement");
-    await runInteractiveConfigWizard();
-    expect(input).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: "Work item type:",
-        default: "Requirement",
-      }),
-    );
   });
 
   it("datasource choices include auto as first option", async () => {
@@ -351,9 +202,7 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("github");
-    vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // advanced settings
-      .mockResolvedValueOnce(true); // save
+    vi.mocked(confirm).mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     const datasourceCall = vi.mocked(select).mock.calls[1][0];
     expect(datasourceCall.choices[0]).toMatchObject({ name: "auto", value: "auto" });

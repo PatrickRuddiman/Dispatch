@@ -72,36 +72,39 @@ describe("resolveCliConfig()", () => {
 
     it("merges config defaults for fields not in explicitFlags", async () => {
       vi.mocked(loadConfig).mockResolvedValue({
-        concurrency: 5,
-        org: "my-org",
-        planTimeout: 10,
+        provider: "opencode",
+        model: "anthropic/claude-sonnet-4",
+        source: "github",
       });
 
       const args = createRawCliArgs({
-        explicitFlags: new Set(["provider", "issueSource"]),
+        explicitFlags: new Set(),
       });
       const result = await resolveCliConfig(args);
 
-      expect(result.concurrency).toBe(5);
-      expect(result.org).toBe("my-org");
-      expect(result.planTimeout).toBe(10);
+      expect(result.provider).toBe("opencode");
+      expect(result.model).toBe("anthropic/claude-sonnet-4");
+      expect(result.issueSource).toBe("github");
     });
 
     it("CLI flags take precedence over config values when in explicitFlags", async () => {
       vi.mocked(loadConfig).mockResolvedValue({
         provider: "opencode",
-        concurrency: 8,
+        model: "anthropic/claude-sonnet-4",
+        source: "github",
       });
 
       const args = createRawCliArgs({
-        explicitFlags: new Set(["provider", "concurrency", "issueSource"]),
+        explicitFlags: new Set(["provider", "model", "issueSource"]),
         provider: "copilot",
-        concurrency: 3,
+        model: "custom-model",
+        issueSource: "md",
       });
       const result = await resolveCliConfig(args);
 
       expect(result.provider).toBe("copilot");
-      expect(result.concurrency).toBe(3);
+      expect(result.model).toBe("custom-model");
+      expect(result.issueSource).toBe("md");
     });
 
     it("merges source config key to issueSource CLI field", async () => {
@@ -130,14 +133,8 @@ describe("resolveCliConfig()", () => {
     it("merges all CONFIG_TO_CLI fields from config", async () => {
       vi.mocked(loadConfig).mockResolvedValue({
         provider: "opencode",
-        concurrency: 4,
+        model: "anthropic/claude-sonnet-4",
         source: "azdevops",
-        org: "test-org",
-        project: "test-proj",
-        workItemType: "User Story",
-        serverUrl: "https://example.com",
-        planTimeout: 15,
-        planRetries: 3,
       });
 
       const args = createRawCliArgs({
@@ -146,14 +143,8 @@ describe("resolveCliConfig()", () => {
       const result = await resolveCliConfig(args);
 
       expect(result.provider).toBe("opencode");
-      expect(result.concurrency).toBe(4);
+      expect(result.model).toBe("anthropic/claude-sonnet-4");
       expect(result.issueSource).toBe("azdevops");
-      expect(result.org).toBe("test-org");
-      expect(result.project).toBe("test-proj");
-      expect(result.workItemType).toBe("User Story");
-      expect(result.serverUrl).toBe("https://example.com");
-      expect(result.planTimeout).toBe(15);
-      expect(result.planRetries).toBe(3);
     });
   });
 

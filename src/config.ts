@@ -25,29 +25,11 @@ export interface DispatchConfig {
    * When omitted the provider uses its auto-detected default.
    */
   model?: string;
-  concurrency?: number;
   source?: DatasourceName;
-  org?: string;
-  project?: string;
-  workItemType?: string;
-  serverUrl?: string;
-  planTimeout?: number;
-  planRetries?: number;
 }
 
 /** Valid configuration key names. */
-export const CONFIG_KEYS = [
-  "provider",
-  "model",
-  "concurrency",
-  "source",
-  "org",
-  "project",
-  "workItemType",
-  "serverUrl",
-  "planTimeout",
-  "planRetries",
-] as const;
+export const CONFIG_KEYS = ["provider", "model", "source"] as const;
 
 /** A valid configuration key name. */
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -113,39 +95,6 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
         return `Invalid source "${value}". Available: ${DATASOURCE_NAMES.join(", ")}`;
       }
       return null;
-
-    case "concurrency": {
-      const num = Number(value);
-      if (!Number.isInteger(num) || num < 1) {
-        return `Invalid concurrency "${value}". Must be a positive integer`;
-      }
-      return null;
-    }
-
-    case "org":
-    case "project":
-    case "workItemType":
-    case "serverUrl":
-      if (!value || value.trim() === "") {
-        return `Invalid ${key}: value must not be empty`;
-      }
-      return null;
-
-    case "planTimeout": {
-      const num = Number(value);
-      if (!Number.isFinite(num) || num <= 0) {
-        return `Invalid planTimeout "${value}". Must be a positive number (minutes)`;
-      }
-      return null;
-    }
-
-    case "planRetries": {
-      const num = Number(value);
-      if (!Number.isInteger(num) || num < 0) {
-        return `Invalid planRetries "${value}". Must be a non-negative integer`;
-      }
-      return null;
-    }
 
     default:
       return `Unknown config key "${key}"`;
