@@ -42,7 +42,8 @@ describe("AGENT_NAMES", () => {
     expect(AGENT_NAMES).toContain("planner");
     expect(AGENT_NAMES).toContain("executor");
     expect(AGENT_NAMES).toContain("spec");
-    expect(AGENT_NAMES).toHaveLength(3);
+    expect(AGENT_NAMES).toContain("commit");
+    expect(AGENT_NAMES).toHaveLength(4);
   });
 
   it("is an array of strings", () => {
