@@ -1,5 +1,22 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+
+vi.mock("../helpers/logger.js", () => ({
+  log: {
+    info: vi.fn(),
+    success: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    dim: vi.fn(),
+    task: vi.fn(),
+    verbose: false,
+    formatErrorChain: vi.fn().mockReturnValue(""),
+    extractMessage: vi.fn((e: unknown) => e instanceof Error ? e.message : String(e)),
+  },
+}));
+
 import { registerCleanup, runCleanup } from "../helpers/cleanup.js";
+import { log } from "../helpers/logger.js";
 
 // ─── cleanup registry ─────────────────────────────────────────────────
 
@@ -123,5 +140,31 @@ describe("registerCleanup / runCleanup", () => {
     expect(fn).toHaveBeenCalledOnce();
 
     processOnSpy.mockRestore();
+  });
+
+  // ─── Cleanup failure logging (depends on error-handling-improvements) ─
+
+  // TODO: Currently cleanup.ts has a bare `catch {}` that swallows errors
+  // silently. Once the error-handling-improvements spec adds `log.warn()`
+  // to the catch block, remove the `.skip` and this test will verify the
+  // warn log is emitted for cleanup failures.
+  it.skip("logs a warning when a cleanup function rejects", async () => {
+    const succeed = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    const fail = vi.fn<() => Promise<void>>().mockRejectedValue(new Error("cleanup boom"));
+
+    registerCleanup(succeed);
+    registerCleanup(fail);
+
+    await runCleanup();
+
+    // Both functions must have been called
+    expect(succeed).toHaveBeenCalledOnce();
+    expect(fail).toHaveBeenCalledOnce();
+
+    // The rejection should be swallowed (runCleanup must not throw)
+    // — already covered by existing tests, but confirmed here too.
+
+    // Once error-handling-improvements lands, a warn log should be emitted
+    expect(log.warn).toHaveBeenCalledOnce();
   });
 });

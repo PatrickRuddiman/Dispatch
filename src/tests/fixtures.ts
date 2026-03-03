@@ -1,6 +1,9 @@
 import { vi } from "vitest";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+import type { ChildProcess } from "node:child_process";
 import type { ProviderInstance } from "../providers/interface.js";
-import type { Datasource, IssueDetails } from "../datasources/interface.js";
+import type { Datasource, DatasourceName, IssueDetails } from "../datasources/interface.js";
 import type { Task } from "../parser.js";
 
 export function createMockProvider(overrides?: Partial<ProviderInstance>): ProviderInstance {
@@ -14,14 +17,32 @@ export function createMockProvider(overrides?: Partial<ProviderInstance>): Provi
   };
 }
 
-export function createMockDatasource(overrides?: Partial<Datasource>): Datasource {
+export function createMockDatasource(name?: DatasourceName, overrides?: Partial<Datasource>): Datasource {
   return {
-    name: "github",
+    name: name ?? "github",
     list: vi.fn<Datasource["list"]>().mockResolvedValue([]),
-    fetch: vi.fn<Datasource["fetch"]>().mockResolvedValue({} as IssueDetails),
+    fetch: vi.fn<Datasource["fetch"]>().mockResolvedValue({
+      number: "42",
+      title: "My Feature",
+      body: "Feature body",
+      labels: [],
+      state: "open",
+      url: "https://github.com/org/repo/issues/42",
+      comments: [],
+      acceptanceCriteria: "",
+    }),
     update: vi.fn<Datasource["update"]>().mockResolvedValue(undefined),
     close: vi.fn<Datasource["close"]>().mockResolvedValue(undefined),
-    create: vi.fn<Datasource["create"]>().mockResolvedValue({} as IssueDetails),
+    create: vi.fn<Datasource["create"]>().mockResolvedValue({
+      number: "99",
+      title: "My Feature",
+      body: "Spec content",
+      labels: [],
+      state: "open",
+      url: "https://github.com/org/repo/issues/99",
+      comments: [],
+      acceptanceCriteria: "",
+    }),
     getDefaultBranch: vi.fn<Datasource["getDefaultBranch"]>().mockResolvedValue("main"),
     getUsername: vi.fn<Datasource["getUsername"]>().mockResolvedValue("testuser"),
     buildBranchName: vi.fn<Datasource["buildBranchName"]>().mockReturnValue("testuser/dispatch/1-test"),
@@ -57,4 +78,33 @@ export function createMockIssueDetails(overrides?: Partial<IssueDetails>): Issue
     acceptanceCriteria: "",
     ...overrides,
   };
+}
+
+export function createMockChildProcess(overrides?: Partial<Pick<ChildProcess, "pid" | "exitCode" | "killed" | "signalCode">>): ChildProcess {
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  const stdin = new PassThrough();
+
+  const child = Object.assign(new EventEmitter(), {
+    stdin,
+    stdout,
+    stderr,
+    stdio: [stdin, stdout, stderr, null, null] as ChildProcess["stdio"],
+    killed: false,
+    pid: 1234,
+    connected: false,
+    exitCode: null as number | null,
+    signalCode: null as NodeJS.Signals | null,
+    spawnargs: [] as string[],
+    spawnfile: "",
+    kill: vi.fn<ChildProcess["kill"]>().mockReturnValue(true),
+    send: vi.fn().mockReturnValue(true),
+    disconnect: vi.fn(),
+    ref: vi.fn(),
+    unref: vi.fn(),
+    [Symbol.dispose]: vi.fn(),
+    ...overrides,
+  });
+
+  return child as unknown as ChildProcess;
 }
