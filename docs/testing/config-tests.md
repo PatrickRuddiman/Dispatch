@@ -213,6 +213,10 @@ unique `/tmp/dispatch-test-*` directory and removes it in `afterEach`.
 - [Provider interface](../shared-types/provider.md) -- `ProviderName` type used in config validation
 - [Issue fetching overview](../issue-fetching/overview.md) -- issue source names validated by config
 - [Timeout utility](../shared-utilities/timeout.md) -- `planTimeout` and `planRetries` consumed by timeout wrapping
+- [Shared Utilities Overview](../shared-utilities/overview.md) -- Slugify and
+  timeout utilities referenced by config validation (planTimeout, planRetries)
+- [Batch Confirmation](../prereqs-and-safety/confirm-large-batch.md) -- Safety
+  prompt with threshold logic related to config-validated parameters
 - [Spec generator tests](spec-generator-tests.md) -- adjacent test documentation
 - [Parser tests](parser-tests.md) -- another test file using real filesystem I/O pattern
 - [Format utility tests](format-tests.md) -- adjacent test documentation
