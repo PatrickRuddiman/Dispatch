@@ -46,6 +46,7 @@ vi.mock("../helpers/logger.js", () => ({
 
 import { boot } from "../providers/copilot.js";
 import { CopilotClient } from "@github/copilot-sdk";
+import { log } from "../helpers/logger.js";
 
 // ─── Reset mocks between tests ─────────────────────────────────────
 
@@ -223,11 +224,17 @@ describe("cleanup", () => {
     const instance = await boot();
     await instance.createSession();
     await expect(instance.cleanup()).resolves.not.toThrow();
+    expect(log.debug).toHaveBeenCalledWith(
+      "Failed to destroy Copilot session: mock error chain",
+    );
   });
 
   it("handles stop errors gracefully", async () => {
     mockClient.stop.mockRejectedValueOnce(new Error("stop fail"));
     const instance = await boot();
     await expect(instance.cleanup()).resolves.not.toThrow();
+    expect(log.debug).toHaveBeenCalledWith(
+      "Failed to stop Copilot client: mock error chain",
+    );
   });
 });

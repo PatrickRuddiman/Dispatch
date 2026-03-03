@@ -31,43 +31,15 @@ beforeEach(() => {
 // ─── Section A: GitHub — buildBranchName ────────────────────────────────────────
 
 describe("GitHub datasource — buildBranchName", () => {
-  it("builds a branch name from issue number, title, and username", () => {
-    expect(github.buildBranchName("42", "Add User Auth", "jdoe")).toBe(
-      "jdoe/dispatch/42-add-user-auth",
-    );
-  });
-
-  it("strips non-alphanumeric characters and converts to lowercase", () => {
-    expect(github.buildBranchName("10", "Fix Bug #123 (Urgent!)", "jdoe")).toBe(
-      "jdoe/dispatch/10-fix-bug-123-urgent",
-    );
-  });
-
-  it("strips leading and trailing hyphens from slug", () => {
-    expect(github.buildBranchName("5", "---Special---", "jdoe")).toBe(
-      "jdoe/dispatch/5-special",
-    );
-  });
-
-  it("truncates slug to 50 characters", () => {
-    expect(github.buildBranchName("1", "a".repeat(100), "jdoe")).toBe(
-      "jdoe/dispatch/1-" + "a".repeat(50),
-    );
-  });
-
-  it("handles empty title", () => {
-    expect(github.buildBranchName("1", "", "jdoe")).toBe("jdoe/dispatch/1-");
-  });
-
-  it("handles mixed case and special characters", () => {
-    expect(github.buildBranchName("7", "Hello WORLD! @#$ Test", "jdoe")).toBe(
-      "jdoe/dispatch/7-hello-world-test",
+  it("builds a branch name from issue number and username", () => {
+    expect(github.buildBranchName("42", "jdoe")).toBe(
+      "jdoe/dispatch/42",
     );
   });
 
   it("falls back to 'unknown' when username is omitted", () => {
-    expect(github.buildBranchName("42", "Add User Auth")).toBe(
-      "unknown/dispatch/42-add-user-auth",
+    expect(github.buildBranchName("42")).toBe(
+      "unknown/dispatch/42",
     );
   });
 });
@@ -729,8 +701,8 @@ describe("Azure DevOps datasource — createPullRequest", () => {
 
 describe("Azure DevOps datasource — buildBranchName", () => {
   it("builds a branch name with the same format as GitHub", () => {
-    expect(azdevops.buildBranchName("42", "Add User Auth", "testuser")).toBe(
-      "testuser/dispatch/42-add-user-auth",
+    expect(azdevops.buildBranchName("42", "testuser")).toBe(
+      "testuser/dispatch/42",
     );
   });
 });
@@ -758,8 +730,8 @@ describe("MD datasource — no-op dispatch lifecycle methods", () => {
   });
 
   it("buildBranchName returns the new username-prefixed format", () => {
-    expect(md.buildBranchName("42", "My Feature", "local")).toBe(
-      "local/dispatch/42-my-feature",
+    expect(md.buildBranchName("42", "local")).toBe(
+      "local/dispatch/42",
     );
     expect(mockExecFile).not.toHaveBeenCalled();
   });

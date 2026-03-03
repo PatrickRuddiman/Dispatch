@@ -97,7 +97,7 @@ vi.mock("../datasources/index.js", () => ({
     create: vi.fn().mockResolvedValue({} as IssueDetails),
     getDefaultBranch: vi.fn().mockResolvedValue("main"),
     getUsername: vi.fn().mockResolvedValue("testuser"),
-    buildBranchName: vi.fn().mockReturnValue("testuser/dispatch/1-test"),
+    buildBranchName: vi.fn().mockReturnValue("testuser/dispatch/1"),
     createAndSwitchBranch: vi.fn().mockResolvedValue(undefined),
     switchBranch: vi.fn().mockResolvedValue(undefined),
     pushBranch: vi.fn().mockResolvedValue(undefined),
@@ -225,6 +225,13 @@ describe("planning timeout and retry", () => {
       dispatchResult: { task: TASK_FIXTURE, success: true },
       elapsedMs: 100,
     });
+    mocks.mockGenerate.mockResolvedValue({
+      commitMessage: "",
+      prTitle: "",
+      prDescription: "",
+      success: false,
+      error: "mock: not configured",
+    });
   });
 
   afterEach(() => {
@@ -281,7 +288,7 @@ describe("planning timeout and retry", () => {
     expect(result.failed).toBe(0);
     expect(mocks.mockPlan).toHaveBeenCalledTimes(2);
     expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
-      expect.stringContaining("Planning timed out"),
+      expect.stringContaining("Attempt 1/2 failed"),
     );
     expect(mocks.mockExecute).toHaveBeenCalledOnce();
   });
@@ -309,11 +316,11 @@ describe("planning timeout and retry", () => {
     // Executor should NOT have been called since planning failed
     expect(mocks.mockExecute).not.toHaveBeenCalled();
     expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
-      expect.stringContaining("Planning timed out"),
+      expect.stringContaining("Attempt 1/2 failed"),
     );
   });
 
-  it("does not retry when planning fails with a non-timeout error", async () => {
+  it("retries on non-timeout errors and fails when all attempts exhausted", async () => {
     mocks.mockPlan.mockRejectedValue(new Error("Provider connection refused"));
 
     const resultPromise = runDispatchPipeline(baseOpts({ planRetries: 2 }), "/tmp/test");
@@ -323,8 +330,8 @@ describe("planning timeout and retry", () => {
 
     expect(result.completed).toBe(0);
     expect(result.failed).toBe(1);
-    // Should only be called once — no retry for non-timeout errors
-    expect(mocks.mockPlan).toHaveBeenCalledOnce();
+    // Should be called 3 times (2 retries + 1 initial = 3 attempts)
+    expect(mocks.mockPlan).toHaveBeenCalledTimes(3);
     expect(mocks.mockExecute).not.toHaveBeenCalled();
   });
 
@@ -358,7 +365,7 @@ describe("planning timeout and retry", () => {
     expect(mocks.mockExecute).not.toHaveBeenCalled();
   });
 
-  it("uses default timeout (10 min) and retries (1) when not configured", async () => {
+  it("uses default timeout (10 min) and retries (2) when not configured", async () => {
     mocks.mockPlan.mockImplementation(
       () => new Promise<PlanResult>(() => {}), // never resolves
     );
@@ -368,15 +375,58 @@ describe("planning timeout and retry", () => {
       "/tmp/test",
     );
 
-    // Default is 10 minutes = 600_000ms; advance past two attempts
+    // Default is 10 minutes = 600_000ms; advance past three attempts (default retries=2)
     await vi.advanceTimersByTimeAsync(600_000); // first attempt timeout
     await vi.advanceTimersByTimeAsync(600_000); // second attempt timeout
+    await vi.advanceTimersByTimeAsync(600_000); // third attempt timeout
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result.failed).toBe(1);
+    expect(mocks.mockPlan).toHaveBeenCalledTimes(3); // 2 retries = 3 attempts
+  });
+
+  it("falls back to general retries when planRetries is not set", async () => {
+    mocks.mockPlan.mockImplementation(
+      () => new Promise<PlanResult>(() => {}), // never resolves
+    );
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ planTimeout: 1, planRetries: undefined, retries: 1 }),
+      "/tmp/test",
+    );
+
+    // retries=1 → 2 total attempts at 1 min each
+    await vi.advanceTimersByTimeAsync(60_000); // first attempt timeout
+    await vi.advanceTimersByTimeAsync(60_000); // second attempt timeout
     await vi.runAllTimersAsync();
 
     const result = await resultPromise;
 
     expect(result.failed).toBe(1);
     expect(mocks.mockPlan).toHaveBeenCalledTimes(2); // 1 retry = 2 attempts
+  });
+
+  it("retries on non-timeout error and succeeds on second attempt", async () => {
+    let callCount = 0;
+    mocks.mockPlan.mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.reject(new Error("Transient API failure"));
+      }
+      return Promise.resolve({ prompt: "Execute step 1", success: true });
+    });
+
+    const resultPromise = runDispatchPipeline(baseOpts({ planRetries: 1 }), "/tmp/test");
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result.completed).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(mocks.mockPlan).toHaveBeenCalledTimes(2);
+    expect(mocks.mockExecute).toHaveBeenCalledOnce();
   });
 });
 
@@ -388,6 +438,13 @@ describe("verbose mode", () => {
       success: true,
       dispatchResult: { task: TASK_FIXTURE, success: true },
       elapsedMs: 100,
+    });
+    mocks.mockGenerate.mockResolvedValue({
+      commitMessage: "",
+      prTitle: "",
+      prDescription: "",
+      success: false,
+      error: "mock: not configured",
     });
     mocks.mockPlan.mockImplementation(() =>
       new Promise<PlanResult>((resolve) => {
@@ -510,6 +567,13 @@ describe("runDispatchPipeline edge cases", () => {
       dispatchResult: { task: TASK_FIXTURE, success: true },
       elapsedMs: 100,
     });
+    mocks.mockGenerate.mockResolvedValue({
+      commitMessage: "",
+      prTitle: "",
+      prDescription: "",
+      success: false,
+      error: "mock: not configured",
+    });
     mocks.mockPlan.mockImplementation(() =>
       new Promise<PlanResult>((resolve) => {
         setTimeout(() => resolve({ prompt: "Execute step 1", success: true }), 100);
@@ -613,6 +677,13 @@ describe("commitAllChanges safety-net", () => {
       dispatchResult: { task: TASK_FIXTURE, success: true },
       elapsedMs: 100,
     });
+    mocks.mockGenerate.mockResolvedValue({
+      commitMessage: "",
+      prTitle: "",
+      prDescription: "",
+      success: false,
+      error: "mock: not configured",
+    });
     mocks.mockPlan.mockImplementation(() =>
       new Promise<PlanResult>((resolve) => {
         setTimeout(() => resolve({ prompt: "Execute step 1", success: true }), 50);
@@ -672,6 +743,173 @@ describe("commitAllChanges safety-net", () => {
     expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
       expect.stringContaining("commit"),
     );
+  });
+});
+
+describe("commit agent integration", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    mocks.mockExecute.mockResolvedValue({
+      success: true,
+      dispatchResult: { task: TASK_FIXTURE, success: true },
+      elapsedMs: 100,
+    });
+    mocks.mockPlan.mockImplementation(() =>
+      new Promise<PlanResult>((resolve) => {
+        setTimeout(() => resolve({ prompt: "Execute step 1", success: true }), 50);
+      }),
+    );
+    mocks.mockGenerate.mockResolvedValue({
+      commitMessage: "",
+      prTitle: "",
+      prDescription: "",
+      success: false,
+      error: "mock: not configured",
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("uses commit agent output for PR title and body when successful", async () => {
+    mocks.mockGenerate.mockResolvedValue({
+      commitMessage: "feat: add new feature",
+      prTitle: "feat: add new feature for issue",
+      prDescription: "This PR adds a new feature",
+      success: true,
+    });
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ noBranch: false }),
+      "/tmp/test",
+    );
+    await vi.advanceTimersByTimeAsync(50);
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result.completed).toBe(1);
+    expect(mocks.mockGenerate).toHaveBeenCalledOnce();
+
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    expect(ds.createPullRequest).toHaveBeenCalledWith(
+      expect.any(String),
+      "1",
+      "feat: add new feature for issue",
+      "This PR adds a new feature",
+      expect.any(Object),
+    );
+  });
+
+  it("falls back to buildPrTitle/buildPrBody when commit agent fails", async () => {
+    mocks.mockGenerate.mockResolvedValue({
+      commitMessage: "",
+      prTitle: "",
+      prDescription: "",
+      success: false,
+      error: "provider error",
+    });
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ noBranch: false }),
+      "/tmp/test",
+    );
+    await vi.advanceTimersByTimeAsync(50);
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result.completed).toBe(1);
+
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    expect(ds.createPullRequest).toHaveBeenCalledWith(
+      expect.any(String),
+      "1",
+      "PR title",
+      "PR body",
+      expect.any(Object),
+    );
+  });
+
+  it("squashes commits when commit agent provides a commit message", async () => {
+    mocks.mockGenerate.mockResolvedValue({
+      commitMessage: "feat: implement the feature",
+      prTitle: "feat: implement the feature",
+      prDescription: "Description",
+      success: true,
+    });
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ noBranch: false }),
+      "/tmp/test",
+    );
+    await vi.advanceTimersByTimeAsync(50);
+    await vi.runAllTimersAsync();
+
+    await resultPromise;
+
+    expect(vi.mocked(squashBranchCommits)).toHaveBeenCalledWith(
+      "main",
+      "feat: implement the feature",
+      expect.any(String),
+    );
+  });
+
+  it("continues gracefully when commit agent throws", async () => {
+    mocks.mockGenerate.mockRejectedValue(new Error("agent crashed"));
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ noBranch: false }),
+      "/tmp/test",
+    );
+    await vi.advanceTimersByTimeAsync(50);
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result.completed).toBe(1);
+    expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
+      expect.stringContaining("Commit agent error"),
+    );
+
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    expect(ds.createPullRequest).toHaveBeenCalledWith(
+      expect.any(String),
+      "1",
+      "PR title",
+      "PR body",
+      expect.any(Object),
+    );
+  });
+
+  it("skips commit agent when branch diff is empty", async () => {
+    vi.mocked(getBranchDiff).mockResolvedValue("");
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ noBranch: false }),
+      "/tmp/test",
+    );
+    await vi.advanceTimersByTimeAsync(50);
+    await vi.runAllTimersAsync();
+
+    await resultPromise;
+
+    expect(mocks.mockGenerate).not.toHaveBeenCalled();
+  });
+
+  it("does not invoke commit agent when branching is disabled", async () => {
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ noBranch: true }),
+      "/tmp/test",
+    );
+    await vi.advanceTimersByTimeAsync(50);
+    await vi.runAllTimersAsync();
+
+    await resultPromise;
+
+    expect(mocks.mockGenerate).not.toHaveBeenCalled();
   });
 });
 
@@ -739,8 +977,8 @@ function setupMultiIssueScenario() {
   });
 
   const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
-  vi.mocked(ds.buildBranchName).mockImplementation((num: string, title: string, user?: string) => {
-    return `${user}/dispatch/${num}-${title.toLowerCase().replace(/\s+/g, "-")}`;
+  vi.mocked(ds.buildBranchName).mockImplementation((num: string, user?: string) => {
+    return `${user}/dispatch/${num}`;
   });
 }
 
@@ -753,6 +991,13 @@ describe("worktree dispatch pipeline", () => {
         dispatchResult: { task, success: true },
         elapsedMs: 100,
       }));
+      mocks.mockGenerate.mockResolvedValue({
+        commitMessage: "",
+        prTitle: "",
+        prDescription: "",
+        success: false,
+        error: "mock: not configured",
+      });
       setupMultiIssueScenario();
     });
 
@@ -855,6 +1100,13 @@ describe("worktree dispatch pipeline", () => {
         dispatchResult: { task: TASK_FIXTURE, success: true },
         elapsedMs: 100,
       });
+      mocks.mockGenerate.mockResolvedValue({
+        commitMessage: "",
+        prTitle: "",
+        prDescription: "",
+        success: false,
+        error: "mock: not configured",
+      });
     });
 
     it("uses serial mode for single-issue runs even without --no-worktree", async () => {
@@ -889,6 +1141,100 @@ describe("worktree dispatch pipeline", () => {
       const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
       expect(ds.createAndSwitchBranch).toHaveBeenCalledTimes(2);
       expect(ds.switchBranch).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // ─── Executor retry ─────────────────────────────────────────────────
+
+  describe("executor retry", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.clearAllMocks();
+      // Restore single-issue defaults (may have been overridden by setupMultiIssueScenario)
+      vi.mocked(fetchItemsById).mockResolvedValue([ISSUE_1]);
+      vi.mocked(writeItemsToTempDir).mockResolvedValue({
+        files: ["/tmp/dispatch-test/1-test.md"],
+        issueDetailsByFile: new Map([["/tmp/dispatch-test/1-test.md", ISSUE_1]]),
+      });
+      vi.mocked(parseTaskFile).mockResolvedValue(TASK_FILE_FIXTURE);
+      vi.mocked(parseIssueFilename).mockReturnValue({ issueId: "1", slug: "test" });
+      mocks.mockPlan.mockImplementation(() =>
+        new Promise<PlanResult>((resolve) => {
+          setTimeout(() => resolve({ prompt: "Execute step 1", success: true }), 100);
+        }),
+      );
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("retries executor on failure and succeeds on retry", async () => {
+      let callCount = 0;
+      mocks.mockExecute.mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            success: false,
+            dispatchResult: { task: TASK_FIXTURE, success: false, error: "transient error" },
+            error: "transient error",
+            elapsedMs: 50,
+          };
+        }
+        return {
+          success: true,
+          dispatchResult: { task: TASK_FIXTURE, success: true },
+          elapsedMs: 100,
+        };
+      });
+
+      const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.runAllTimersAsync();
+
+      const result = await resultPromise;
+
+      expect(result.completed).toBe(1);
+      expect(result.failed).toBe(0);
+      expect(mocks.mockExecute).toHaveBeenCalledTimes(2);
+    });
+
+    it("fails the task when all executor attempts are exhausted", async () => {
+      mocks.mockExecute.mockResolvedValue({
+        success: false,
+        dispatchResult: { task: TASK_FIXTURE, success: false, error: "persistent error" },
+        error: "persistent error",
+        elapsedMs: 50,
+      });
+
+      const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.runAllTimersAsync();
+
+      const result = await resultPromise;
+
+      expect(result.completed).toBe(0);
+      expect(result.failed).toBe(1);
+      // 2 retries + 1 initial = 3 total attempts
+      expect(mocks.mockExecute).toHaveBeenCalledTimes(3);
+    });
+
+    it("does not retry when executor succeeds on first attempt", async () => {
+      mocks.mockExecute.mockResolvedValue({
+        success: true,
+        dispatchResult: { task: TASK_FIXTURE, success: true },
+        elapsedMs: 100,
+      });
+
+      const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.runAllTimersAsync();
+
+      const result = await resultPromise;
+
+      expect(result.completed).toBe(1);
+      expect(result.failed).toBe(0);
+      expect(mocks.mockExecute).toHaveBeenCalledOnce();
     });
   });
 });
@@ -973,243 +1319,3 @@ describe("error-path handling", () => {
   });
 });
 
-describe("commit agent integration", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.clearAllMocks();
-    // Restore single-issue mock defaults (worktree tests may have overridden)
-    vi.mocked(fetchItemsById).mockResolvedValue([{
-      number: "1",
-      title: "Test",
-      body: "# Test\n\n- [ ] Implement the feature",
-      labels: [],
-      state: "open",
-      url: "https://example.com/1",
-      comments: [],
-      acceptanceCriteria: "",
-    }]);
-    vi.mocked(writeItemsToTempDir).mockResolvedValue({
-      files: ["/tmp/dispatch-test/1-test.md"],
-      issueDetailsByFile: new Map([["/tmp/dispatch-test/1-test.md", {
-        number: "1",
-        title: "Test",
-        body: "# Test\n\n- [ ] Implement the feature",
-        labels: [],
-        state: "open",
-        url: "https://example.com/1",
-        comments: [],
-        acceptanceCriteria: "",
-      }]]),
-    });
-    vi.mocked(parseTaskFile).mockResolvedValue(TASK_FILE_FIXTURE);
-    vi.mocked(parseIssueFilename).mockReturnValue({ issueId: "1", slug: "test" });
-    mocks.mockExecute.mockResolvedValue({
-      success: true,
-      dispatchResult: { task: TASK_FIXTURE, success: true },
-      elapsedMs: 100,
-    });
-    mocks.mockPlan.mockImplementation(() =>
-      new Promise<PlanResult>((resolve) => {
-        setTimeout(() => resolve({ prompt: "Execute step 1", success: true }), 50);
-      }),
-    );
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("uses commit agent output for PR title and body when it succeeds", async () => {
-    mocks.mockGenerate.mockResolvedValue({
-      commitMessage: "feat: add user authentication",
-      prTitle: "Add user authentication module",
-      prDescription: "This PR implements JWT-based auth.",
-      success: true,
-      outputPath: "/tmp/commit-output.md",
-    });
-
-    const resultPromise = runDispatchPipeline(
-      baseOpts({ noBranch: false }),
-      "/tmp/test",
-    );
-    await vi.advanceTimersByTimeAsync(50);
-    await vi.runAllTimersAsync();
-
-    const result = await resultPromise;
-
-    expect(result.completed).toBe(1);
-    expect(mocks.mockGenerate).toHaveBeenCalledOnce();
-
-    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
-    // PR should use the commit agent's output
-    expect(ds.createPullRequest).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.any(String),
-      "Add user authentication module",
-      "This PR implements JWT-based auth.",
-      expect.any(Object),
-    );
-  });
-
-  it("squashes commits with the generated message when commit agent succeeds", async () => {
-    mocks.mockGenerate.mockResolvedValue({
-      commitMessage: "feat: add user authentication",
-      prTitle: "Add user authentication module",
-      prDescription: "This PR implements JWT-based auth.",
-      success: true,
-      outputPath: "/tmp/commit-output.md",
-    });
-
-    const resultPromise = runDispatchPipeline(
-      baseOpts({ noBranch: false }),
-      "/tmp/test",
-    );
-    await vi.advanceTimersByTimeAsync(50);
-    await vi.runAllTimersAsync();
-
-    await resultPromise;
-
-    expect(vi.mocked(squashBranchCommits)).toHaveBeenCalledWith(
-      "main",
-      "feat: add user authentication",
-      expect.any(String),
-    );
-  });
-
-  it("falls back to buildPrTitle and buildPrBody when commit agent fails", async () => {
-    mocks.mockGenerate.mockResolvedValue({
-      commitMessage: "",
-      prTitle: "",
-      prDescription: "",
-      success: false,
-      error: "Empty response from provider",
-    });
-
-    const resultPromise = runDispatchPipeline(
-      baseOpts({ noBranch: false }),
-      "/tmp/test",
-    );
-    await vi.advanceTimersByTimeAsync(50);
-    await vi.runAllTimersAsync();
-
-    const result = await resultPromise;
-
-    expect(result.completed).toBe(1);
-
-    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
-    // PR should fall back to the traditional builders
-    expect(ds.createPullRequest).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.any(String),
-      "PR title",
-      "PR body",
-      expect.any(Object),
-    );
-    // Commit history should NOT be rewritten
-    expect(vi.mocked(squashBranchCommits)).not.toHaveBeenCalled();
-  });
-
-  it("falls back gracefully when commit agent throws", async () => {
-    mocks.mockGenerate.mockRejectedValue(new Error("Provider timeout"));
-
-    const resultPromise = runDispatchPipeline(
-      baseOpts({ noBranch: false }),
-      "/tmp/test",
-    );
-    await vi.advanceTimersByTimeAsync(50);
-    await vi.runAllTimersAsync();
-
-    const result = await resultPromise;
-
-    expect(result.completed).toBe(1);
-
-    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
-    expect(ds.createPullRequest).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.any(String),
-      "PR title",
-      "PR body",
-      expect.any(Object),
-    );
-    expect(vi.mocked(squashBranchCommits)).not.toHaveBeenCalled();
-    expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
-      expect.stringContaining("Commit agent"),
-    );
-  });
-
-  it("skips commit agent when there is no branch diff", async () => {
-    vi.mocked(getBranchDiff).mockResolvedValueOnce("");
-    mocks.mockGenerate.mockResolvedValue({
-      commitMessage: "feat: should not be used",
-      prTitle: "Should not be used",
-      prDescription: "Should not be used",
-      success: true,
-    });
-
-    const resultPromise = runDispatchPipeline(
-      baseOpts({ noBranch: false }),
-      "/tmp/test",
-    );
-    await vi.advanceTimersByTimeAsync(50);
-    await vi.runAllTimersAsync();
-
-    await resultPromise;
-
-    expect(mocks.mockGenerate).not.toHaveBeenCalled();
-  });
-
-  it("does not invoke commit agent when branching is disabled", async () => {
-    mocks.mockGenerate.mockResolvedValue({
-      commitMessage: "feat: should not be called",
-      prTitle: "Should not be called",
-      prDescription: "Should not be called",
-      success: true,
-    });
-
-    const resultPromise = runDispatchPipeline(
-      baseOpts({ noBranch: true }),
-      "/tmp/test",
-    );
-    await vi.advanceTimersByTimeAsync(50);
-    await vi.runAllTimersAsync();
-
-    await resultPromise;
-
-    expect(mocks.mockGenerate).not.toHaveBeenCalled();
-    expect(vi.mocked(squashBranchCommits)).not.toHaveBeenCalled();
-  });
-
-  it("continues with PR creation even if squashBranchCommits fails", async () => {
-    mocks.mockGenerate.mockResolvedValue({
-      commitMessage: "feat: add feature",
-      prTitle: "Add feature",
-      prDescription: "Feature description",
-      success: true,
-      outputPath: "/tmp/commit-output.md",
-    });
-    vi.mocked(squashBranchCommits).mockRejectedValueOnce(new Error("rebase failed"));
-
-    const resultPromise = runDispatchPipeline(
-      baseOpts({ noBranch: false }),
-      "/tmp/test",
-    );
-    await vi.advanceTimersByTimeAsync(50);
-    await vi.runAllTimersAsync();
-
-    const result = await resultPromise;
-
-    expect(result.completed).toBe(1);
-    // Even though squash failed, PR should still use commit agent output
-    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
-    expect(ds.createPullRequest).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.any(String),
-      "Add feature",
-      "Feature description",
-      expect.any(Object),
-    );
-    expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
-      expect.stringContaining("commit message"),
-    );
-  });
-});

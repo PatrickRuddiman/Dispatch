@@ -15,19 +15,29 @@ vi.mock("../helpers/logger.js", () => ({
   },
 }));
 
-vi.mock("../config.js", () => ({
-  loadConfig: vi.fn().mockResolvedValue({}),
-}));
+vi.mock("../config.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../config.js")>();
+  return {
+    ...actual,
+    loadConfig: vi.fn().mockResolvedValue({}),
+  };
+});
 
 vi.mock("../datasources/index.js", () => ({
   detectDatasource: vi.fn().mockResolvedValue(null),
   DATASOURCE_NAMES: ["github", "azdevops", "md"],
 }));
 
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...actual, access: vi.fn() };
+});
+
 import { resolveCliConfig } from "../orchestrator/cli-config.js";
 import { log } from "../helpers/logger.js";
 import { loadConfig } from "../config.js";
 import { detectDatasource, DATASOURCE_NAMES } from "../datasources/index.js";
+import { access } from "node:fs/promises";
 import type { RawCliArgs } from "../orchestrator/runner.js";
 
 function createRawCliArgs(overrides?: Partial<RawCliArgs>): RawCliArgs {
@@ -139,6 +149,7 @@ describe("resolveCliConfig()", () => {
         serverUrl: "https://example.com",
         planTimeout: 15,
         planRetries: 3,
+        retries: 2,
       });
 
       const args = createRawCliArgs({
@@ -155,6 +166,7 @@ describe("resolveCliConfig()", () => {
       expect(result.serverUrl).toBe("https://example.com");
       expect(result.planTimeout).toBe(15);
       expect(result.planRetries).toBe(3);
+      expect(result.retries).toBe(2);
     });
   });
 
@@ -236,6 +248,58 @@ describe("resolveCliConfig()", () => {
       expect(log.error).toHaveBeenCalledWith(
         expect.stringContaining("provider"),
       );
+    });
+  });
+
+  describe("output-dir validation", () => {
+    it("exits with error when output directory does not exist", async () => {
+      vi.mocked(access).mockRejectedValueOnce(
+        Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+      );
+
+      const args = createRawCliArgs({ outputDir: "/nonexistent/path" });
+
+      await expect(resolveCliConfig(args)).rejects.toThrow(
+        "process.exit called",
+      );
+      expect(log.error).toHaveBeenCalledWith(
+        expect.stringContaining("--output-dir"),
+      );
+    });
+
+    it("exits with error when output directory is not writable", async () => {
+      vi.mocked(access).mockRejectedValueOnce(
+        Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }),
+      );
+
+      const args = createRawCliArgs({ outputDir: "/readonly/path" });
+
+      await expect(resolveCliConfig(args)).rejects.toThrow(
+        "process.exit called",
+      );
+      expect(log.error).toHaveBeenCalledWith(
+        expect.stringContaining("--output-dir"),
+      );
+    });
+
+    it("passes validation when output directory exists and is writable", async () => {
+      vi.mocked(access).mockResolvedValueOnce(undefined);
+
+      const args = createRawCliArgs({ outputDir: "/valid/writable/path" });
+
+      const result = await resolveCliConfig(args);
+      expect(log.error).not.toHaveBeenCalled();
+      expect(process.exit).not.toHaveBeenCalled();
+      expect(result.outputDir).toBe("/valid/writable/path");
+    });
+
+    it("skips validation when outputDir is not set", async () => {
+      const args = createRawCliArgs();
+
+      await resolveCliConfig(args);
+      expect(access).not.toHaveBeenCalled();
+      expect(log.error).not.toHaveBeenCalled();
+      expect(process.exit).not.toHaveBeenCalled();
     });
   });
 
