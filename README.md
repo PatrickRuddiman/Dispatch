@@ -169,6 +169,11 @@ dispatch --output-dir ./my-specs --spec 42  # Custom output directory for specs
 dispatch --verbose "tasks.md"          # Show detailed debug output
 ```
 
+> **Concurrency auto-scaling:** When `--concurrency` is not specified, dispatch
+> automatically computes a safe default using `min(cpuCount, freeMemMB / 500)`,
+> with a minimum of 1. Each concurrent agent process is assumed to consume ~500 MB
+> of memory.
+
 ## Configuration
 
 dispatch uses a three-tier configuration system: CLI flags > project-local config file (`.dispatch/config.json`) > defaults.
@@ -213,6 +218,83 @@ Additional commands:
 npm run dev          # Watch mode build
 npm run test:watch   # Watch mode tests
 ```
+
+## Troubleshooting
+
+### "Could not detect datasource from git remote"
+
+dispatch auto-detects whether to use GitHub or Azure DevOps by inspecting your git remote URL. If the remote does not match a known pattern (e.g., no remote configured, or a self-hosted URL), detection falls back to local markdown mode.
+
+**Fix:** pass `--source` explicitly:
+
+```sh
+dispatch --source github "tasks.md"
+dispatch --source azdevops "tasks.md"
+```
+
+### Provider binary not found
+
+dispatch requires a provider runtime (`opencode` or `copilot`) to be installed and on your `PATH`. If the binary is missing, the provider will fail to start.
+
+**Verify installation:**
+
+```sh
+opencode --version
+copilot --version
+```
+
+If not installed, see [OpenCode setup](./docs/provider-system/opencode-backend.md) or [Copilot setup](./docs/provider-system/copilot-backend.md).
+
+### Planning timeout exceeded
+
+The planner phase has a default timeout of **10 minutes** per attempt. If the planner does not finish in time, dispatch retries up to `maxPlanAttempts` times (default: 1 retry) before failing the task.
+
+**Fix:** increase the timeout or retries:
+
+```sh
+dispatch --plan-timeout 20 "tasks.md"   # 20-minute timeout
+dispatch --plan-retries 3 "tasks.md"    # Retry planning up to 3 times
+```
+
+Both values can also be set in `.dispatch/config.json` via the `planTimeout` and `planRetries` keys.
+
+### Branch creation failed
+
+dispatch creates a git branch per issue. This can fail if:
+
+- You lack write permissions to the repository.
+- A branch with the computed name already exists locally or on the remote.
+
+**Fix:** delete the conflicting branch or use `--no-branch` to skip branch creation entirely:
+
+```sh
+dispatch --no-branch "tasks.md"
+```
+
+### "No unchecked tasks found"
+
+dispatch looks for unchecked markdown checkboxes in the `## Tasks` section. Tasks must use the exact format `- [ ]` (hyphen, space, open bracket, space, close bracket) with a space inside the brackets.
+
+**Common mistakes:**
+
+```md
+- [] task     # wrong — missing space inside brackets
+- [x] task    # already checked — dispatch skips these
+* [ ] task    # wrong — use - not *
+```
+
+**Correct format:**
+
+```md
+- [ ] task description
+- [ ] (P) parallel task description
+```
+
+## Error Handling & Recovery
+
+- **Batch failure isolation** — when a task fails, other tasks in the same batch continue executing. Failed tasks are tracked and reported in the final summary (e.g., `Done — 5 completed, 1 failed`).
+- **No run resumption** — runs cannot currently be resumed after interruption. Re-running will re-process all unchecked (`- [ ]`) tasks; tasks already marked complete (`- [x]`) in the source file are skipped.
+- **`--dry-run` scope** — `--dry-run` covers task discovery and parsing only. It does not trigger spec generation, planning, or execution.
 
 ## License
 

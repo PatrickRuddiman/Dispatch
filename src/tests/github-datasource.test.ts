@@ -28,6 +28,14 @@ describe("github datasource — list", () => {
     expect(result[0].labels).toEqual(["bug"]);
     expect(result[1].number).toBe("2");
   });
+
+  it("throws descriptive error when gh returns non-json output", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "Not Found\n" });
+
+    await expect(datasource.list({ cwd: "/tmp" })).rejects.toThrow(
+      "Failed to parse GitHub CLI output:",
+    );
+  });
 });
 
 describe("github datasource — fetch", () => {
@@ -58,6 +66,14 @@ describe("github datasource — fetch", () => {
 
     const result = await datasource.fetch("1", { cwd: "/tmp" });
     expect(result.comments).toEqual([]);
+  });
+
+  it("throws descriptive error when gh returns non-json output", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "ERROR: auth required\n" });
+
+    await expect(datasource.fetch("42", { cwd: "/tmp" })).rejects.toThrow(
+      "Failed to parse GitHub CLI output:",
+    );
   });
 });
 
@@ -138,14 +154,14 @@ describe("github datasource — getDefaultBranch", () => {
 });
 
 describe("github datasource — buildBranchName", () => {
-  it("builds <username>/dispatch/<number>-<slug>", () => {
-    const result = datasource.buildBranchName("42", "Add User Auth", "jdoe");
-    expect(result).toBe("jdoe/dispatch/42-add-user-auth");
+  it("builds <username>/dispatch/<number>", () => {
+    const result = datasource.buildBranchName("42", "jdoe");
+    expect(result).toBe("jdoe/dispatch/42");
   });
 
   it("falls back to 'unknown' when username is omitted", () => {
-    const result = datasource.buildBranchName("42", "Add User Auth");
-    expect(result).toBe("unknown/dispatch/42-add-user-auth");
+    const result = datasource.buildBranchName("42");
+    expect(result).toBe("unknown/dispatch/42");
   });
 });
 
