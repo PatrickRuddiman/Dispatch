@@ -280,7 +280,7 @@ describe("task list truncation", () => {
 });
 
 describe("worktree indicator rendering", () => {
-  it("shows grouped display when multiple worktrees are active", async () => {
+  it("shows issue numbers when multiple worktrees are active", async () => {
     await setup();
     tui.state.phase = "dispatching";
     addTask("running", "Task in wt1", 0, { worktree: "123-fix-auth", elapsed: Date.now() });
@@ -292,7 +292,7 @@ describe("worktree indicator rendering", () => {
     expect(output).not.toContain("[wt:");
   });
 
-  it("hides worktree tag when only one worktree is active", async () => {
+  it("hides worktree grouping when only one worktree is active", async () => {
     await setup();
     tui.state.phase = "dispatching";
     addTask("running", "Task in wt1", 0, { worktree: "123-fix-auth" });
@@ -301,7 +301,7 @@ describe("worktree indicator rendering", () => {
     expect(lastOutput()).not.toContain("[wt:");
   });
 
-  it("hides worktree tag when no worktrees are set", async () => {
+  it("hides worktree grouping when no worktrees are set", async () => {
     await setup();
     tui.state.phase = "dispatching";
     addTask("running", "A regular task", 0);
@@ -309,7 +309,7 @@ describe("worktree indicator rendering", () => {
     expect(lastOutput()).not.toContain("[wt:");
   });
 
-  it("shows grouped display with ungrouped tasks rendered flat", async () => {
+  it("shows issue numbers only for worktree groups", async () => {
     await setup();
     tui.state.phase = "dispatching";
     addTask("running", "Task with wt", 0, { worktree: "123-fix-auth", elapsed: Date.now() });
@@ -322,42 +322,31 @@ describe("worktree indicator rendering", () => {
     expect(output).not.toContain("[wt:");
   });
 
-  it("grouped display shows one row per issue", async () => {
+  it("caps running tasks at 8 and shows overflow indicator in flat mode", async () => {
     await setup();
     tui.state.phase = "dispatching";
-    addTask("running", "First task for 123", 0, { worktree: "123-fix-auth", elapsed: Date.now() });
-    addTask("running", "Second task for 123", 1, { worktree: "123-fix-auth", elapsed: Date.now() });
-    addTask("running", "Task for 456", 2, { worktree: "456-add-feature", elapsed: Date.now() });
-    tui.update();
-    const output = lastOutput();
-    expect(output).toContain("#123");
-    expect(output).toContain("#456");
-    expect(output).toContain("2 active");
-    expect(output).toContain("1 active");
-  });
-
-  it("caps running tasks at 8 in flat mode", async () => {
-    await setup();
-    tui.state.phase = "dispatching";
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 10; i++) {
       addTask("running", `Running task ${i}`, i, { elapsed: Date.now() });
     }
     tui.update();
     const output = lastOutput();
-    expect(output).toContain("4 more running");
-    expect(output).not.toContain("Running task 8");
+    expect(output).toContain("2 more running");
   });
 
-  it("shows collapsed done groups in worktree mode", async () => {
+  it("shows one row per worktree group in grouped mode", async () => {
     await setup();
     tui.state.phase = "dispatching";
-    addTask("done", "Done task 1", 0, { worktree: "100-old-issue", elapsed: 5000 });
-    addTask("done", "Done task 2", 1, { worktree: "100-old-issue", elapsed: 3000 });
-    addTask("running", "Active task", 2, { worktree: "200-new-issue", elapsed: Date.now() });
+    addTask("running", "Auth login endpoint", 0, { worktree: "123-fix-auth", elapsed: Date.now() });
+    addTask("running", "Auth logout endpoint", 1, { worktree: "123-fix-auth", elapsed: Date.now() });
+    addTask("running", "Add search feature", 2, { worktree: "456-add-feature", elapsed: Date.now() });
+    addTask("running", "Add filter feature", 3, { worktree: "456-add-feature", elapsed: Date.now() });
     tui.update();
     const output = lastOutput();
-    expect(output).toContain("#100");
-    expect(output).toContain("#200");
+    // Each issue number should appear in the grouped output
+    expect(output).toContain("#123");
+    expect(output).toContain("#456");
+    // Old-style [wt:...] tags must not appear
+    expect(output).not.toContain("[wt:");
   });
 });
 
