@@ -12,8 +12,8 @@ The parser module (`src/parser.ts`) provides five core capabilities
 (see [API Reference](./api-reference.md) for detailed function signatures):
 
 1. **Parse markdown content** into structured `Task` and `TaskFile` objects
-2. **Extract execution mode** from optional `(P)`/`(S)` prefixes on task text,
-   enabling parallel and serial execution control
+2. **Extract execution mode** from optional `(P)`/`(S)`/`(I)` prefixes on task
+   text, enabling parallel, serial, and isolated execution control
 3. **Group tasks by mode** into ordered execution batches via `groupTasksByMode`
 4. **Build filtered context** for the planner agent, stripping sibling tasks
 5. **Mark tasks complete** by performing targeted line-level mutation of the

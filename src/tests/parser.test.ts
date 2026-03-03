@@ -540,6 +540,40 @@ describe("parseTaskContent — mode extraction", () => {
       mode: "parallel",
     });
   });
+
+  it("extracts (I) prefix as isolated mode and strips it from text", () => {
+    const md = "- [ ] (I) Run the full test suite after changes";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0]).toMatchObject({
+      text: "Run the full test suite after changes",
+      mode: "isolated",
+    });
+  });
+
+  it("preserves raw line with (I) prefix intact", () => {
+    const md = "- [ ] (I) Isolated task";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0].raw).toBe("- [ ] (I) Isolated task");
+  });
+
+  it("handles (I) on indented tasks", () => {
+    const md = [
+      "  - [ ] (I) Indented isolated task",
+      "    - [ ] (I) Deeply indented isolated task",
+    ].join("\n");
+
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({ text: "Indented isolated task", mode: "isolated" });
+    expect(result.tasks[1]).toMatchObject({ text: "Deeply indented isolated task", mode: "isolated" });
+  });
+
+  it("handles (I) with CRLF line endings", () => {
+    const md = "- [ ] (I) CRLF isolated task\r\n- [ ] (P) CRLF parallel task\r\n";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks[0]).toMatchObject({ text: "CRLF isolated task", mode: "isolated" });
+    expect(result.tasks[1]).toMatchObject({ text: "CRLF parallel task", mode: "parallel" });
+  });
 });
 
 // ─── parseTaskFile (with file I/O) ───────────────────────────────────
@@ -854,7 +888,7 @@ describe("buildTaskContext", () => {
 
 describe("groupTasksByMode", () => {
   /** Helper to create a minimal Task with the given mode */
-  function makeTask(mode?: "parallel" | "serial", index = 0): Task {
+  function makeTask(mode?: "parallel" | "serial" | "isolated", index = 0): Task {
     return {
       index,
       text: `Task ${index}`,
@@ -991,5 +1025,92 @@ describe("groupTasksByMode", () => {
     const tasks = [makeTask("serial", 0)];
     const groups = groupTasksByMode(tasks);
     expect(groups).toEqual([[tasks[0]]]);
+  });
+
+  it("groups a lone isolated task as a solo group", () => {
+    const tasks = [makeTask("isolated", 0)];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toHaveLength(1);
+    expect(groups[0][0].mode).toBe("isolated");
+  });
+
+  it("isolated task at start flushes into solo group before remaining tasks", () => {
+    const tasks = [
+      makeTask("isolated", 0),
+      makeTask("parallel", 1),
+      makeTask("parallel", 2),
+    ];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toHaveLength(2);
+    expect(groups[0]).toHaveLength(1); // [I]
+    expect(groups[0][0].mode).toBe("isolated");
+    expect(groups[1]).toHaveLength(2); // [P, P]
+  });
+
+  it("isolated task in middle produces three groups (P P I P P)", () => {
+    const tasks = [
+      makeTask("parallel", 0),
+      makeTask("parallel", 1),
+      makeTask("isolated", 2),
+      makeTask("parallel", 3),
+      makeTask("parallel", 4),
+    ];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toHaveLength(3);
+    expect(groups[0]).toHaveLength(2); // [P, P]
+    expect(groups[1]).toHaveLength(1); // [I]
+    expect(groups[1][0].mode).toBe("isolated");
+    expect(groups[2]).toHaveLength(2); // [P, P]
+  });
+
+  it("isolated task at end flushes preceding group first", () => {
+    const tasks = [
+      makeTask("parallel", 0),
+      makeTask("parallel", 1),
+      makeTask("isolated", 2),
+    ];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toHaveLength(2);
+    expect(groups[0]).toHaveLength(2); // [P, P]
+    expect(groups[1]).toHaveLength(1); // [I]
+    expect(groups[1][0].mode).toBe("isolated");
+  });
+
+  it("consecutive isolated tasks each get their own solo group", () => {
+    const tasks = [
+      makeTask("isolated", 0),
+      makeTask("isolated", 1),
+      makeTask("isolated", 2),
+    ];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toHaveLength(3);
+    expect(groups[0]).toHaveLength(1);
+    expect(groups[1]).toHaveLength(1);
+    expect(groups[2]).toHaveLength(1);
+    expect(groups[0][0].mode).toBe("isolated");
+    expect(groups[1][0].mode).toBe("isolated");
+    expect(groups[2][0].mode).toBe("isolated");
+  });
+
+  it("handles mixed P/S/I sequences", () => {
+    const tasks = [
+      makeTask("parallel", 0),
+      makeTask("serial", 1),
+      makeTask("isolated", 2),
+      makeTask("parallel", 3),
+      makeTask("parallel", 4),
+      makeTask("isolated", 5),
+      makeTask("serial", 6),
+    ];
+    const groups = groupTasksByMode(tasks);
+    expect(groups).toHaveLength(5);
+    expect(groups[0]).toHaveLength(2); // [P, S]
+    expect(groups[1]).toHaveLength(1); // [I]
+    expect(groups[1][0].mode).toBe("isolated");
+    expect(groups[2]).toHaveLength(2); // [P, P]
+    expect(groups[3]).toHaveLength(1); // [I]
+    expect(groups[3][0].mode).toBe("isolated");
+    expect(groups[4]).toHaveLength(1); // [S]
   });
 });

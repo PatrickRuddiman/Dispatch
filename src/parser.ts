@@ -19,8 +19,8 @@ export interface Task {
   raw: string;
   /** The source file path */
   file: string;
-  /** Execution mode — "parallel" or "serial". Defaults to "serial" when unspecified. */
-  mode?: "parallel" | "serial";
+  /** Execution mode — "parallel", "serial", or "isolated". Defaults to "serial" when unspecified. */
+  mode?: "parallel" | "serial" | "isolated";
 }
 
 export interface TaskFile {
@@ -33,7 +33,7 @@ export interface TaskFile {
 const UNCHECKED_RE = /^(\s*[-*]\s)\[ \]\s+(.+)$/;
 const CHECKED_RE = /^(\s*[-*]\s)\[[xX]\]\s+/;
 const CHECKED_SUB = "$1[x] $2";
-const MODE_PREFIX_RE = /^\(([PS])\)\s+/;
+const MODE_PREFIX_RE = /^\(([PSI])\)\s+/;
 
 /**
  * Build a filtered view of the file content for a single task's planner context.
@@ -76,11 +76,16 @@ export function parseTaskContent(content: string, filePath: string): TaskFile {
     const match = lines[i].match(UNCHECKED_RE);
     if (match) {
       let text = match[2].trim();
-      let mode: "parallel" | "serial" = "serial";
+      let mode: "parallel" | "serial" | "isolated" = "serial";
 
       const modeMatch = text.match(MODE_PREFIX_RE);
       if (modeMatch) {
-        mode = modeMatch[1] === "P" ? "parallel" : "serial";
+        const modeMap: Record<string, "parallel" | "serial" | "isolated"> = {
+          P: "parallel",
+          S: "serial",
+          I: "isolated",
+        };
+        mode = modeMap[modeMatch[1]] ?? "serial";
         text = text.slice(modeMatch[0].length);
       }
 
@@ -139,6 +144,9 @@ export async function markTaskComplete(task: Task): Promise<void> {
  * - Consecutive parallel tasks accumulate into the current group.
  * - A serial task caps the current group (is appended to it), then a new group begins.
  * - A lone serial task (no preceding parallel tasks) forms a solo group.
+ * - An isolated task flushes the current group (if non-empty) as its own group,
+ *   then creates a solo group containing only the isolated task, then resets
+ *   the accumulator. This guarantees the isolated task runs alone.
  *
  * The orchestrator runs each group concurrently, waiting for the group to
  * complete before starting the next one.
@@ -154,6 +162,14 @@ export function groupTasksByMode(tasks: Task[]): Task[][] {
 
     if (mode === "parallel") {
       current.push(task);
+    } else if (mode === "isolated") {
+      // Flush accumulated tasks as their own group
+      if (current.length > 0) {
+        groups.push(current);
+        current = [];
+      }
+      // Push a solo group for the isolated task
+      groups.push([task]);
     } else {
       // Serial task caps the current group
       current.push(task);

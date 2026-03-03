@@ -16,7 +16,7 @@ interface Task {
   line: number;                       // Line number in the file (1-based)
   raw: string;                        // Full original line content, including indentation
   file: string;                       // The source file path
-  mode?: "parallel" | "serial";       // Execution mode (defaults to "serial" when unspecified)
+  mode?: "parallel" | "serial" | "isolated"; // Execution mode (defaults to "serial" when unspecified)
 }
 ```
 
@@ -25,11 +25,11 @@ interface Task {
 | Field | Description |
 |---|---|
 | `index` | Sequential zero-based counter of unchecked tasks in the file. The first unchecked task is `0`, the second is `1`, etc. Checked tasks and non-task lines do not affect the index. |
-| `text` | The task description extracted from after `[ ] `. Leading/trailing whitespace is trimmed via `.trim()`. If the text starts with a `(P)` or `(S)` mode prefix, the prefix is stripped before storing. Inline markdown formatting (bold, code, links) is preserved as-is. |
+| `text` | The task description extracted from after `[ ] `. Leading/trailing whitespace is trimmed via `.trim()`. If the text starts with a `(P)`, `(S)`, or `(I)` mode prefix, the prefix is stripped before storing. Inline markdown formatting (bold, code, links) is preserved as-is. |
 | `line` | 1-based line number in the file. Accounts for blank lines, headings, and other non-task content. Used by `markTaskComplete` to locate the line for mutation. |
 | `raw` | The complete original line including leading whitespace and the checkbox prefix. Example: `"  - [ ] Nested task"`. |
 | `file` | The file path as passed to `parseTaskContent` or `parseTaskFile`. For `parseTaskFile`, this is the absolute path resolved by the caller. |
-| `mode` | Execution mode parsed from an optional `(P)` or `(S)` prefix in the task text. `"parallel"` means the task can run concurrently with adjacent parallel tasks; `"serial"` means the task caps its group and forces sequential execution. Defaults to `"serial"` when no prefix is present. See [Markdown Syntax Reference — Mode Prefixes](./markdown-syntax.md#parallel-and-serial-mode-prefixes) for the full specification. |
+| `mode` | Execution mode parsed from an optional `(P)`, `(S)`, or `(I)` prefix in the task text. `"parallel"` means the task can run concurrently with adjacent parallel tasks; `"serial"` means the task caps its group and forces sequential execution; `"isolated"` means the task flushes any preceding group and runs alone in its own group. Defaults to `"serial"` when no prefix is present. See [Markdown Syntax Reference — Mode Prefixes](./markdown-syntax.md#parallel-serial-and-isolated-mode-prefixes) for the full specification. |
 
 Defined at `src/parser.ts:11-24`.
 
@@ -234,7 +234,10 @@ The algorithm iterates through tasks in order, accumulating them into groups:
 1. A task with `mode === "parallel"` is appended to the current group.
 2. A task with `mode === "serial"` (or no mode) is appended to the current
    group, then the group is closed. A new empty group begins.
-3. If tasks remain after the loop (trailing parallel tasks not capped by a
+3. A task with `mode === "isolated"` flushes the current group (if non-empty),
+   then creates a solo group containing only the isolated task. A new empty
+   group begins.
+4. If tasks remain after the loop (trailing parallel tasks not capped by a
    serial task), they form the final group.
 
 **Examples:**
@@ -246,6 +249,8 @@ The algorithm iterates through tasks in order, accumulating them into groups:
 | `[S, S, S]` | `[[S], [S], [S]]` | Each serial task forms its own group (fully sequential) |
 | `[P, P, P]` | `[[P, P, P]]` | Trailing parallel tasks without a serial cap form one group |
 | `[P, S, P]` | `[[P, S], [P]]` | First serial caps the first group; trailing parallel starts a new one |
+| `[P, P, I, P]` | `[[P, P], [I], [P]]` | Isolated task flushes parallel group, runs alone, then new parallel group |
+| `[I, I, I]` | `[[I], [I], [I]]` | Each isolated task forms its own group |
 | `[]` | `[]` | Empty input produces empty output |
 
 See [Parser Tests — groupTasksByMode](../testing/parser-tests.md#grouptasksbymode-10-tests)
@@ -272,13 +277,13 @@ behavior:
 | `UNCHECKED_RE` | `/^(\s*[-*]\s)\[ \]\s+(.+)$/` | Matches an unchecked task line. Group 1 captures the prefix (whitespace + marker), group 2 captures the task text. |
 | `CHECKED_RE` | `/^(\s*[-*]\s)\[[xX]\]\s+/` | Matches a checked task line. Used by test expectations but not by the core parse logic. |
 | `CHECKED_SUB` | `"$1[x] $2"` | Replacement template that converts unchecked to checked using backreferences from `UNCHECKED_RE`. |
-| `MODE_PREFIX_RE` | `/^\(([PS])\)\s+/` | Matches a `(P)` or `(S)` prefix at the start of extracted task text. Group 1 captures the mode letter. `P` maps to `"parallel"`, `S` maps to `"serial"`. The matched prefix is stripped from the `text` field. |
+| `MODE_PREFIX_RE` | `/^\(([PSI])\)\s+/` | Matches a `(P)`, `(S)`, or `(I)` prefix at the start of extracted task text. Group 1 captures the mode letter. `P` maps to `"parallel"`, `S` maps to `"serial"`, `I` maps to `"isolated"`. The matched prefix is stripped from the `text` field. |
 
 Defined at `src/parser.ts:33-36`. See
 [Markdown Syntax Reference](./markdown-syntax.md#how-the-checked_sub-replacement-works)
 for a detailed explanation of the replacement pattern and
-[Mode Prefixes](./markdown-syntax.md#parallel-and-serial-mode-prefixes) for the
-`(P)`/`(S)` prefix specification.
+[Mode Prefixes](./markdown-syntax.md#parallel-serial-and-isolated-mode-prefixes) for the
+`(P)`/`(S)`/`(I)` prefix specification.
 
 ## Integration: Node.js File System (fs/promises)
 

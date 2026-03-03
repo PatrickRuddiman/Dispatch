@@ -429,8 +429,8 @@ Two core interfaces flow through the entire pipeline:
   `title`, `body`, `labels`, `state`, `url`, `comments`, and
   `acceptanceCriteria`. See [datasource overview](datasource-system/overview.md#the-issuedetails-interface).
 
-The `(P)`/`(S)` prefix syntax on task text controls parallel vs. serial
-execution grouping via `groupTasksByMode()`. See
+The `(P)`/`(S)`/`(I)` prefix syntax on task text controls parallel, serial, and
+isolated execution grouping via `groupTasksByMode()`. See
 [markdown syntax](task-parsing/markdown-syntax.md).
 
 ## Key design decisions

@@ -16,7 +16,7 @@ The tool is backend-agnostic: it supports multiple issue trackers via a datasour
 
 - **Backend-agnostic** provider and datasource abstractions — no vendor lock-in
 - **Two-phase planner-executor pipeline** — optional read-only planner explores the codebase before the executor makes changes (`--no-plan` skips planning)
-- **Markdown as source of truth** — task files use `- [ ]` checkbox syntax with `(P)`arallel and `(S)`erial execution mode prefixes
+- **Markdown as source of truth** — task files use `- [ ]` checkbox syntax with `(P)`arallel, `(S)`erial, and `(I)`solated execution mode prefixes
 - **Automatic conventional commits** — commit type (feat, fix, docs, refactor, etc.) is inferred from task text
 - **Real-time TUI dashboard** — terminal UI with spinner, progress bar, and per-task status tracking
 - **Three-tier configuration** — CLI flags > persistent config file (`~/.dispatch/config.json`) > defaults
