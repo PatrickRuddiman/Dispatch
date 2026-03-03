@@ -49,7 +49,18 @@ export interface SpecOptions {
   concurrency?: number;
 }
 
-/** Returns a safe default concurrency: min(cpuCount, freeMB/500), at least 1. */
+/**
+ * Returns a safe default concurrency: min(cpuCount, freeMB/500), at least 1.
+ *
+ * Each concurrent agent process (provider runtime) is estimated to consume
+ * roughly 500 MB of resident memory. The formula caps parallelism at the
+ * lesser of the available CPU count and the number of 500 MB slots that fit
+ * in current free memory, ensuring the host is not over-committed. The
+ * result is floored to at least 1 so that the pipeline always makes progress.
+ *
+ * Users can override this computed value via the `--concurrency` CLI flag
+ * or the `concurrency` key in `.dispatch/config.json`.
+ */
 export function defaultConcurrency(): number {
   return Math.max(1, Math.min(cpus().length, Math.floor(freemem() / 1024 / 1024 / 500)));
 }
