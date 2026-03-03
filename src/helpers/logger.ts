@@ -7,6 +7,9 @@
 
 import chalk from "chalk";
 
+/** Maximum depth to traverse when unwinding nested error `.cause` chains. */
+const MAX_CAUSE_CHAIN_DEPTH = 5;
+
 export const log = {
   /** When true, `debug()` messages are printed. Set by `--verbose`. */
   verbose: false,
@@ -50,7 +53,7 @@ export const log = {
     let current: unknown = err;
     let depth = 0;
 
-    while (current && depth < 5) {
+    while (current && depth < MAX_CAUSE_CHAIN_DEPTH) {
       if (current instanceof Error) {
         const prefix = depth === 0 ? "Error" : "Cause";
         parts.push(`${prefix}: ${current.message}`);

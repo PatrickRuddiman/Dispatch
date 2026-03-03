@@ -9,6 +9,9 @@
  * across datasource and orchestrator modules.
  */
 
+/** Default max slug length for filenames. */
+export const MAX_SLUG_LENGTH = 60;
+
 /**
  * Convert a string into a lowercase, hyphen-separated slug.
  *
