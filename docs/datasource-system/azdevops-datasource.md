@@ -9,9 +9,9 @@ the datasource registry.
 
 The Azure DevOps datasource translates the [`Datasource`](./overview.md#the-datasource-interface) interface operations
 into `az boards` and `az repos` CLI commands, plus `git` commands for lifecycle
-operations. It provides five CRUD operations for work item management and seven
-git lifecycle operations for branching, committing, pushing, and pull request
-creation.
+operations. It provides five CRUD operations for work item management, one
+identity method (`getUsername`), and seven git lifecycle operations for
+branching, committing, pushing, and pull request creation.
 
 ### CRUD operations
 
@@ -21,19 +21,20 @@ creation.
 | `fetch()` | `az boards work-item show --id <id>` + comment fetch | Yes |
 | `update()` | `az boards work-item update --id <id> --title <t> --description <b>` | No |
 | `close()` | `az boards work-item update --id <id> --state Closed` | No |
-| `create()` | `az boards work-item create --type "User Story" --title <t> --description <b>` | Yes |
+| `create()` | `az boards work-item create --type <detected-or-specified> --title <t> --description <b>` | Yes |
 
 ### Git lifecycle operations
 
 | Operation | Command(s) | Purpose |
 |-----------|-----------|---------|
 | `getDefaultBranch()` | `git symbolic-ref refs/remotes/origin/HEAD`, fallback chain | Detect `main` or `master` |
-| `buildBranchName()` | _(pure function)_ | Returns `dispatch/<number>-<slug>` |
+| `getUsername()` | `git config user.name`, slugified | Resolve branch-safe username; falls back to `"unknown"` |
+| `buildBranchName()` | _(pure function)_ | Returns `<username>/dispatch/<number>-<slug>` |
 | `createAndSwitchBranch()` | `git checkout -b <branch>`, fallback to `git checkout <branch>` | Create or switch to branch |
 | `switchBranch()` | `git checkout <branch>` | Switch to existing branch |
 | `pushBranch()` | `git push --set-upstream origin <branch>` | Push branch to remote |
 | `commitAllChanges()` | `git add -A` + `git diff --cached --stat` + `git commit -m <msg>` | Stage and commit; no-ops if nothing staged |
-| `createPullRequest()` | `az repos pr create --title <t> --description "Resolves AB#<n>" --source-branch <branch> --work-items <n>` | Create PR with work item link |
+| `createPullRequest()` | `az repos pr create --title <t> --description <body> --source-branch <branch> --work-items <n>` | Create PR; uses `"Resolves AB#<n>"` as description when `body` param is empty |
 
 All commands are executed via `execFile("az", [...args], { cwd })` with no
 shell interpolation. The `--org` and `--project` flags are appended when the
@@ -209,12 +210,35 @@ fail with a state transition error.
 
 Creates a new work item and returns the created `IssueDetails`.
 
-**Hardcoded work item type:** The `create()` method always creates a "User
-Story" work item (`--type "User Story"` at `src/datasources/azdevops.ts:145`).
-This is not configurable through the datasource interface. If your project uses
-a different process template where "User Story" is not a valid work item type
-(e.g., Scrum uses "Product Backlog Item", CMMI uses "Requirement"), the create
-operation will fail.
+**Work item type resolution:** The `create()` method determines the work item
+type using a two-step resolution:
+
+1. **Explicit option:** If `opts.workItemType` is provided (via the
+   `IssueFetchOptions.workItemType` field, mapped from the dispatch config or
+   CLI), that type is used directly.
+2. **Auto-detection:** If no explicit type is provided, `create()` calls the
+   exported `detectWorkItemType()` function (`src/datasources/azdevops.ts:19-43`),
+   which queries the Azure DevOps project for available work item types using
+   `az boards work-item type list`. It then selects from a priority list:
+
+   | Priority | Work item type | Process template |
+   |----------|---------------|-----------------|
+   | 1st | User Story | Agile |
+   | 2nd | Product Backlog Item | Scrum |
+   | 3rd | Requirement | CMMI |
+   | 4th | Issue | Basic |
+
+   If none of the preferred types are available, it falls back to the first
+   type returned by the API. If no types are available at all (or the API call
+   fails), `detectWorkItemType()` returns `null`.
+
+3. **Error on failure:** If neither the explicit option nor auto-detection
+   yields a type, `create()` throws an error:
+   `"Could not determine work item type. Set workItemType in your config."`
+
+This replaces the previous behavior of hardcoding `"User Story"`, making
+`create()` work across all Azure DevOps process templates without manual
+configuration.
 
 **Return value:** Unlike GitHub's `create()`, the Azure DevOps `create()`
 fetches the response JSON and extracts fields from the created work item,
@@ -235,9 +259,16 @@ Uses the same detection strategy as the GitHub datasource:
 2. Fallback: `git rev-parse --verify main` -- check if `main` exists.
 3. Final fallback: returns `"master"`.
 
+### `getUsername()`
+
+Resolves the current developer's git username for branch namespacing
+(`src/datasources/azdevops.ts:245-254`). Reads `git config user.name`,
+slugifies the result, and falls back to `"unknown"` if the name is empty or
+the git command fails. Identical behavior to the GitHub datasource.
+
 ### `buildBranchName()`
 
-Same convention as all datasources: `dispatch/<number>-<slug>`. See the
+Same convention as all datasources: `<username>/dispatch/<number>-<slug>`. See the
 [branch naming convention](./overview.md#branch-naming-convention) in the
 overview.
 
@@ -266,12 +297,14 @@ Three-step process identical to the GitHub implementation:
 ### `createPullRequest()`
 
 Creates a pull request using `az repos pr create`
-(`src/datasources/azdevops.ts:232`) with:
+(`src/datasources/azdevops.ts:291`) with:
 
 - `--title <title>` -- PR title.
-- `--description "Resolves AB#<issueNumber>"` -- PR description with the Azure
-  DevOps work item linking keyword. `AB#` is the Azure Boards integration
-  prefix that triggers automatic work item resolution when the PR is completed.
+- `--description <body>` -- PR description. When the caller provides a
+  non-empty `body` parameter, it is used as-is. When `body` is empty or falsy,
+  it defaults to `"Resolves AB#<issueNumber>"`, which is the Azure Boards
+  integration prefix that triggers automatic work item resolution when the PR
+  is completed.
 - `--source-branch <branchName>` -- the feature branch.
 - `--work-items <issueNumber>` -- creates a formal link between the PR and the
   work item in Azure DevOps, independent of the description keyword. This
@@ -310,11 +343,14 @@ logic.
 | Missing org/project | Non-zero exit code | `--organization is required` |
 | Work item not found | Non-zero exit code | `TF401232: Work item does not exist` |
 | Invalid state transition | Non-zero exit code | `The field 'System.State' contains value 'Closed' that is not in the list of supported values` |
-| Malformed JSON output | `SyntaxError` from `JSON.parse` | `Unexpected token` |
+| Malformed JSON output | `Error` with truncated context | `Failed to parse Azure CLI output: <first 200 chars>` |
 
-There is no `try/catch` around the `JSON.parse(stdout)` calls in `list()`,
-`fetch()`, and `create()`. If the `az` CLI produces non-JSON output, the
-`SyntaxError` propagates to the caller.
+The `JSON.parse(stdout)` calls in `list()`, `fetch()`, `create()`, and
+`createPullRequest()` are wrapped in `try/catch` blocks
+(`src/datasources/azdevops.ts:61-64`, `:107-110`, `:207-210`, `:319-322`).
+If the `az` CLI produces non-JSON output, the catch block throws a descriptive
+`Error` that includes the first 200 characters of the unexpected output for
+debugging context.
 
 Comment fetch failures are the one exception -- they are caught silently (see
 [comments behavior](#fetch) above).
@@ -357,14 +393,18 @@ active work items. For projects with many open work items, consider:
 
 ### Work item type error on `create()`
 
-The `create()` method hardcodes `--type "User Story"`. If your project uses a
-different process template:
-- **Scrum:** Expects "Product Backlog Item"
-- **CMMI:** Expects "Requirement"
-- **Basic:** Expects "Issue"
+The `create()` method auto-detects the work item type by querying available
+types from the Azure DevOps project and selecting from a priority list (User
+Story, Product Backlog Item, Requirement, Issue). If auto-detection fails
+(e.g., due to permissions or network issues), `create()` throws an error. To
+resolve this, set `workItemType` explicitly in your dispatch config:
 
-This is a known limitation. The work item type is not configurable through the
-datasource interface.
+```sh
+dispatch config --workItemType "Product Backlog Item"
+```
+
+Alternatively, ensure the authenticated user has permission to list work item
+types in the project (`az boards work-item type list`).
 
 ### visualstudio.com vs dev.azure.com
 
@@ -385,8 +425,12 @@ remain functional.
   consumes datasource operations for temp file writing and auto-close
 - [Integrations & Troubleshooting](./integrations.md) -- Cross-cutting
   subprocess and error-handling concerns
+- [Issue Fetching Overview](../issue-fetching/overview.md) -- Deprecated
+  fetching layer that delegates to this datasource
 - [Azure DevOps Fetcher (Deprecated)](../issue-fetching/azdevops-fetcher.md) --
   Legacy shim that delegates to this datasource
 - [Spec Generation](../spec-generation/overview.md) -- Pipeline that consumes
   datasource output for spec file generation
 - [Slugify Utility](../shared-utilities/slugify.md) -- Used by `buildBranchName()` for slug generation
+- [Prerequisites](../prereqs-and-safety/prereqs.md) -- Prereq validation
+  checks for `az` CLI dependency availability

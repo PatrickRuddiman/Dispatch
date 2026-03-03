@@ -102,19 +102,25 @@ both produce `my-feature.md`, and the second call would overwrite the first.
 
 ## Title extraction
 
-The `extractTitle()` helper function (`src/datasources/md.ts:32`, exported)
-extracts the title from markdown content:
+The `extractTitle()` helper function (`src/datasources/md.ts:40`, exported)
+extracts the title from markdown content using a three-tier fallback:
 
-1. Looks for the first `# Heading` line (ATX heading level 1) using the regex
-   `/^#\s+(.+)$/m`.
-2. If found, returns the heading text (trimmed).
-3. If no H1 heading exists, falls back to the filename stem (without `.md`
-   extension).
+1. **H1 heading:** Looks for the first `# Heading` line (ATX heading level 1)
+   using the regex `/^#\s+(.+)$/m`. If found, returns the heading text
+   (trimmed).
+2. **First meaningful content line:** If no H1 heading exists, scans lines for
+   the first non-empty line, strips leading markdown prefixes (`#`, `>`, `*`,
+   `-`, or combinations), and truncates to approximately 80 characters at a
+   word boundary.
+3. **Filename stem:** If the content has no usable text (empty file or only
+   whitespace/markdown prefixes), falls back to the filename without the `.md`
+   extension.
 
 This means the `IssueDetails.title` may differ from the original title passed
 to `create()`. The `create()` method writes the `body` parameter as-is to the
 file. If the body does not contain an H1 heading, the title in subsequent
-`list()` or `fetch()` calls will be the filename stem, not the original title.
+`list()` or `fetch()` calls will be extracted from the first meaningful line,
+or will fall back to the filename stem.
 
 ## Operation details
 
@@ -207,17 +213,18 @@ passed to `create()`. For example, `create("My Feature", "no heading here")`
 returns `title: "my-feature"` (the filename stem) because the body has no H1
 heading.
 
-## Git lifecycle operations (no-ops)
+## Git lifecycle operations (mostly no-ops)
 
-The markdown datasource implements all seven git lifecycle methods from the
-`Datasource` interface, but most are intentional no-ops. This is because the
-markdown datasource is designed for local-first, offline workflows where git
-branching, pushing, and PR creation do not apply.
+The markdown datasource implements all git lifecycle methods from the
+`Datasource` interface (including `getUsername`), but most are intentional
+no-ops. This is because the markdown datasource is designed for local-first,
+offline workflows where git branching, pushing, and PR creation do not apply.
 
 | Method | Implementation | Return value |
 |--------|---------------|-------------|
 | `getDefaultBranch()` | Returns `"main"` without checking git | `"main"` |
-| `buildBranchName()` | Same slug logic as GitHub/Azure DevOps | `dispatch/<number>-<slug>` |
+| `getUsername()` | `git config user.name`, slugified; falls back to `"local"` | Branch-safe username or `"local"` |
+| `buildBranchName()` | Same slug logic as GitHub/Azure DevOps | `<username>/dispatch/<number>-<slug>` |
 | `createAndSwitchBranch()` | No-op (empty function body) | `void` |
 | `switchBranch()` | No-op (empty function body) | `void` |
 | `pushBranch()` | No-op (empty function body) | `void` |
@@ -236,10 +243,17 @@ git workflow (if any) outside of dispatch.
 ### `buildBranchName()` is not a no-op
 
 Note that `buildBranchName()` is fully implemented (not a no-op) even in the
-markdown datasource. It produces `dispatch/<number>-<slug>` using the same
-slugification logic as the other datasources. This is because `buildBranchName`
-may be called for informational purposes (e.g., logging) even when the
-branching operations themselves are no-ops.
+markdown datasource. It produces `<username>/dispatch/<number>-<slug>` using
+the same slugification logic as the other datasources. This is because
+`buildBranchName` may be called for informational purposes (e.g., logging) even
+when the branching operations themselves are no-ops.
+
+### `getUsername()` differs from other datasources
+
+Unlike the GitHub and Azure DevOps datasources which fall back to `"unknown"`,
+the markdown datasource falls back to `"local"` when `git config user.name`
+is empty or unavailable (`src/datasources/md.ts:143-152`). This reflects the
+local-first nature of the markdown datasource.
 
 ### `getDefaultBranch()` hardcodes `"main"`
 
@@ -297,8 +311,10 @@ The specified spec file does not exist. Verify the filename and that it is in
 ### Title not matching what was passed to `create()`
 
 The title is extracted from the file content, not stored separately. If the
-body does not contain an H1 heading (`# Title`), the title falls back to the
-filename stem. Include an H1 heading in the body for consistent titles.
+body does not contain an H1 heading (`# Title`), the title is extracted from
+the first meaningful content line (stripped of markdown prefixes, truncated to
+~80 characters). If the file has no usable text at all, the title falls back
+to the filename stem. Include an H1 heading in the body for consistent titles.
 
 ### File overwritten on `create()`
 
@@ -322,6 +338,8 @@ datasource, always pass [`--source md`](../cli-orchestration/cli.md) explicitly.
   consumes datasource operations, including `close()` for auto-archiving
 - [Integrations & Troubleshooting](./integrations.md) -- Cross-cutting
   error-handling concerns
+- [Issue Fetching Overview](../issue-fetching/overview.md) -- Deprecated
+  fetching layer overview; this datasource is its offline replacement
 - [Spec Generation](../spec-generation/overview.md) -- Pipeline that may write
   spec files consumed by this datasource
 - [Slugify Utility](../shared-utilities/slugify.md) -- General slug generation

@@ -8,8 +8,8 @@ implemented in `src/datasources/github.ts` and registered under the name
 
 The GitHub datasource translates the [`Datasource` interface](./overview.md#the-datasource-interface) operations
 into `gh` CLI and `git` commands. It provides five CRUD operations for issue
-management and seven git lifecycle operations for branching, committing,
-pushing, and pull request creation.
+management, one identity method (`getUsername`), and seven git lifecycle
+operations for branching, committing, pushing, and pull request creation.
 
 ### CRUD operations
 
@@ -26,12 +26,13 @@ pushing, and pull request creation.
 | Operation | Command(s) | Purpose |
 |-----------|-----------|---------|
 | `getDefaultBranch()` | `git symbolic-ref refs/remotes/origin/HEAD`, fallback to `git rev-parse --verify main` | Detect `main` or `master` |
-| `buildBranchName()` | _(pure function)_ | Returns `dispatch/<number>-<slug>` |
+| `getUsername()` | `git config user.name`, slugified | Resolve branch-safe username; falls back to `"unknown"` |
+| `buildBranchName()` | _(pure function)_ | Returns `<username>/dispatch/<number>-<slug>` |
 | `createAndSwitchBranch()` | `git checkout -b <branch>`, fallback to `git checkout <branch>` | Create or switch to branch |
 | `switchBranch()` | `git checkout <branch>` | Switch to existing branch |
 | `pushBranch()` | `git push --set-upstream origin <branch>` | Push branch to remote |
 | `commitAllChanges()` | `git add -A` + `git diff --cached --stat` + `git commit -m <msg>` | Stage and commit; no-ops if nothing staged |
-| `createPullRequest()` | `gh pr create --title <t> --body "Closes #<n>" --head <branch>` | Create PR with issue auto-close link |
+| `createPullRequest()` | `gh pr create --title <t> --body <body> --head <branch>` | Create PR; uses `"Closes #<n>"` as body when `body` param is empty |
 
 All commands are executed via `execFile("gh", [...args], { cwd })` with no
 shell interpolation. The `cwd` option is set from `opts.cwd` or defaults to
@@ -123,7 +124,7 @@ datasource interface.
 **Fields requested:** `number`, `title`, `body`, `labels`, `state`, `url`.
 
 **Comments behavior:** The `list()` operation does **not** fetch comments. The
-returned [`IssueDetails`](../shared-types/parser.md#issuedetails) objects always have an empty `comments: []` array. This
+returned [`IssueDetails`](./overview.md#the-issuedetails-interface) objects always have an empty `comments: []` array. This
 is a deliberate choice to avoid N+1 requests when listing issues -- fetching
 comments for each issue in a list would require individual `gh issue view`
 calls.
@@ -192,7 +193,9 @@ acceptanceCriteria are empty.
 
 The GitHub datasource implements all seven git lifecycle methods using the `git`
 and `gh` CLI tools. These operations are used by the [dispatch pipeline](../planning-and-dispatch/overview.md) to manage
-the branching, committing, and PR workflow after task completion. See also the
+the branching, committing, and PR workflow after task completion. When worktree
+isolation is enabled, each issue runs in its own
+[git worktree](../git-and-worktree/overview.md). See also the
 [`--no-branch` flag](../cli-orchestration/cli.md#the---no-branch-flag) for
 skipping the branch lifecycle.
 
@@ -212,9 +215,23 @@ Detects the repository's default branch name using a two-step fallback:
 `git remote set-head origin --auto` to set `origin/HEAD` from the remote,
 which makes step 1 work reliably.
 
+### `getUsername()`
+
+Resolves the current developer's git username for branch namespacing
+(`src/datasources/github.ts:211-219`).
+
+1. Reads `git config user.name` in the repository working directory.
+2. Slugifies the result (lowercased, non-alphanumeric runs replaced with
+   hyphens, trimmed).
+3. If the result is empty or the git command fails, falls back to `"unknown"`.
+
+The username is used by `buildBranchName()` to prefix branch names, preventing
+collisions when multiple developers run dispatch on the same repository.
+
 ### `buildBranchName()`
 
-Pure synchronous function that produces `dispatch/<number>-<slug>`. The title
+Pure synchronous function that produces `<username>/dispatch/<number>-<slug>`.
+The `username` parameter defaults to `"unknown"` if not provided. The title
 is slugified (lowercased, non-alphanumeric runs replaced with hyphens, trimmed,
 truncated to 50 characters) using the [`slugify()`](../shared-utilities/slugify.md) utility. See the
 [branch naming convention](./overview.md#branch-naming-convention) in the
@@ -252,8 +269,11 @@ This prevents empty commits when tasks produce no file changes.
 Creates a pull request using `gh pr create` with:
 
 - `--title <title>` -- PR title (typically the issue title).
-- `--body "Closes #<issueNumber>"` -- PR body with GitHub's auto-close keyword.
-  When this PR is merged, GitHub automatically closes the linked issue.
+- `--body <body>` -- PR body/description. When the caller provides a non-empty
+  `body` parameter, it is used as-is. When `body` is empty or falsy, it
+  defaults to `"Closes #<issueNumber>"`, which triggers GitHub's auto-close
+  behavior: when this PR is merged, GitHub automatically closes the linked
+  issue.
 - `--head <branchName>` -- the source branch.
 
 If the `gh pr create` command fails with an "already exists" error (a PR
@@ -286,13 +306,15 @@ All errors from the `gh` CLI propagate as-is:
 | `gh` not installed | `ENOENT` from `execFile` | `Error: spawn gh ENOENT` |
 | Not authenticated | Non-zero exit code | `gh: Not logged in` |
 | Issue not found | Non-zero exit code | `issue not found` |
-| Malformed JSON output | `SyntaxError` from `JSON.parse` | `Unexpected token` |
+| Malformed JSON output | `Error` with truncated context | `Failed to parse GitHub CLI output: <first 200 chars>` |
 | Network failure | Non-zero exit code | Connection timeout |
 
-There is no `try/catch` around the `JSON.parse(stdout)` calls in `list()` and
-`fetch()` (`src/datasources/github.ts:34` and `src/datasources/github.ts:72`).
-If the `gh` CLI produces non-JSON output (e.g., an HTML error page or a
-warning message), the `SyntaxError` will propagate to the caller.
+The `JSON.parse(stdout)` calls in `list()` and `fetch()`
+(`src/datasources/github.ts:105-108` and `src/datasources/github.ts:148-151`)
+are wrapped in `try/catch` blocks. If the `gh` CLI produces non-JSON output
+(e.g., an HTML error page or a warning message), the catch block throws a
+descriptive `Error` that includes the first 200 characters of the unexpected
+output for debugging context.
 
 There is no subprocess timeout on any `gh` command. A hung `gh` process will
 block the pipeline indefinitely.
@@ -351,3 +373,10 @@ uses only the `origin` remote. Use `--source github` to force GitHub.
   pipeline that consumes datasource git lifecycle operations
 - [Spec Generation](../spec-generation/overview.md) -- The `--spec` pipeline
   that fetches issues via datasources
+- [Testing Overview](../testing/overview.md) -- Project-wide test suite
+  (note: the GitHub datasource has no unit tests)
+- [Prerequisites & Safety Checks](../prereqs-and-safety/overview.md) -- The
+  `checkPrereqs()` function that validates `gh` CLI availability
+- [Prerequisite Checker Details](../prereqs-and-safety/prereqs.md) --
+  Detailed validation logic for the `gh` binary check that gates GitHub
+  datasource operations
