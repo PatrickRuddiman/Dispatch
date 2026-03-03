@@ -16,7 +16,12 @@ import {
 } from "./config.js";
 import { PROVIDER_NAMES, listProviderModels, checkProviderInstalled } from "./providers/index.js";
 import type { ProviderName } from "./providers/interface.js";
-import { DATASOURCE_NAMES, detectDatasource } from "./datasources/index.js";
+import {
+  DATASOURCE_NAMES,
+  detectDatasource,
+  getGitRemoteUrl,
+  parseAzDevOpsRemoteUrl,
+} from "./datasources/index.js";
 import type { DatasourceName } from "./datasources/interface.js";
 import { detectWorkItemType } from "./datasources/azdevops.js";
 
@@ -130,33 +135,42 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
   let workItemType: string | undefined;
 
   if (source === "azdevops") {
-    org = await input({
-      message: "Azure DevOps organization URL:",
-      default: existing.org,
-      validate: (value) => {
-        const error = validateConfigValue("org", value);
-        return error ?? true;
-      },
-    });
+    const remoteUrl = await getGitRemoteUrl(process.cwd());
+    const parsed = remoteUrl ? parseAzDevOpsRemoteUrl(remoteUrl) : null;
 
-    project = await input({
-      message: "Azure DevOps project name:",
-      default: existing.project,
-      validate: (value) => {
-        const error = validateConfigValue("project", value);
-        return error ?? true;
-      },
-    });
+    if (parsed) {
+      org = parsed.orgUrl;
+      project = parsed.project;
+      log.info(
+        `Detected org ${chalk.cyan(org)} and project ${chalk.cyan(project)} from git remote`,
+      );
+    } else {
+      org = await input({
+        message: "Azure DevOps organization URL:",
+        default: existing.org,
+        validate: (value) => {
+          const error = validateConfigValue("org", value);
+          return error ?? true;
+        },
+      });
+
+      project = await input({
+        message: "Azure DevOps project name:",
+        default: existing.project,
+        validate: (value) => {
+          const error = validateConfigValue("project", value);
+          return error ?? true;
+        },
+      });
+    }
 
     const detectedType = await detectWorkItemType({ org, project });
-    workItemType = await input({
-      message: "Work item type:",
-      default: existing.workItemType ?? detectedType ?? undefined,
-      validate: (value) => {
-        const error = validateConfigValue("workItemType", value);
-        return error ?? true;
-      },
-    });
+    if (detectedType) {
+      workItemType = detectedType;
+      log.info(`Detected work item type ${chalk.cyan(detectedType)}`);
+    } else {
+      log.dim("Work item type will be detected at runtime");
+    }
   }
 
   // ── Advanced settings ──────────────────────────────────────
