@@ -396,6 +396,15 @@ describe("runSpecPipeline", () => {
         expect.any(Object),
       );
       expect(result.issueNumbers).toContain("1");
+      expect(unlink).toHaveBeenCalledWith("/tmp/test-cwd/.dispatch/specs/1-mock-title.md");
+    });
+
+    it("logs success message after deleting local spec in tracker mode", async () => {
+      await runSpecPipeline(baseOpts({ issues: "1", concurrency: 1 }));
+
+      expect(vi.mocked(log.success)).toHaveBeenCalledWith(
+        expect.stringContaining("Deleted local spec"),
+      );
     });
 
     it("warns when datasource sync fails in tracker mode", async () => {
@@ -407,6 +416,7 @@ describe("runSpecPipeline", () => {
         expect.stringContaining("Could not sync"),
       );
       expect(result.generated).toBe(1);
+      expect(unlink).not.toHaveBeenCalled();
     });
 
     it("creates new issue in file mode with tracker datasource", async () => {

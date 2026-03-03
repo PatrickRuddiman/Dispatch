@@ -265,6 +265,8 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
               // Tracker mode: update the existing issue with the generated spec
               await datasource.update(id, details!.title, result.content, fetchOpts);
               log.success(`Updated issue #${id} with spec content`);
+              await unlink(filepath);
+              log.success(`Deleted local spec ${filepath} (now tracked as issue #${id})`);
               identifier = id;
               issueNumbers.push(id);
             } else if (datasource.name !== "md") {
