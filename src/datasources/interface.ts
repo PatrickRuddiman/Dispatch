@@ -140,7 +140,7 @@ export interface Datasource {
    * @param username - The branch-safe username prefix
    * @returns A sanitized branch name
    */
-  buildBranchName(issueNumber: string, title: string, username: string): string;
+  buildBranchName(issueNumber: string, title: string, username?: string): string;
 
   /**
    * Create and switch to a feature branch for an issue.
