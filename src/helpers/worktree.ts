@@ -9,6 +9,7 @@
 import { join, basename } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { randomUUID } from "node:crypto";
 import { slugify } from "./slugify.js";
 import { log } from "./logger.js";
 
@@ -54,12 +55,15 @@ export async function createWorktree(
   repoRoot: string,
   issueFilename: string,
   branchName: string,
+  startPoint?: string,
 ): Promise<string> {
   const name = worktreeName(issueFilename);
   const worktreePath = join(repoRoot, WORKTREE_DIR, name);
 
   try {
-    await git(["worktree", "add", worktreePath, "-b", branchName], repoRoot);
+    const args = ["worktree", "add", worktreePath, "-b", branchName];
+    if (startPoint) args.push(startPoint);
+    await git(args, repoRoot);
     log.debug(`Created worktree at ${worktreePath} on branch ${branchName}`);
   } catch (err) {
     const message = log.extractMessage(err);
@@ -127,4 +131,18 @@ export async function listWorktrees(repoRoot: string): Promise<string> {
     log.warn(`Could not list worktrees: ${log.formatErrorChain(err)}`);
     return "";
   }
+}
+
+/**
+ * Generate a unique feature branch name.
+ *
+ * Produces a name in the format `dispatch/feature-{octet}`, where `{octet}`
+ * is the first 8 hex characters of a random UUID.
+ *
+ * @returns A feature branch name like `dispatch/feature-a1b2c3d4`
+ */
+export function generateFeatureBranchName(): string {
+  const uuid = randomUUID();
+  const octet = uuid.split("-")[0];
+  return `dispatch/feature-${octet}`;
 }
