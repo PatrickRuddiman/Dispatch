@@ -233,6 +233,12 @@ describe("parseArgs basic flags", () => {
     expect(flags.has("noBranch")).toBe(true);
   });
 
+  it("parses --no-worktree", () => {
+    const [args, flags] = parseArgs(["--no-worktree"]);
+    expect(args.noWorktree).toBe(true);
+    expect(flags.has("noWorktree")).toBe(true);
+  });
+
   it("parses --verbose", () => {
     const [args, flags] = parseArgs(["--verbose"]);
     expect(args.verbose).toBe(true);

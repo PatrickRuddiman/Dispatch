@@ -175,7 +175,7 @@ describe("runTests", () => {
       return child;
     }) as any);
 
-    const err = await runTests("/project").catch((err: Error) => err);
+    const err = await runTests("/project").catch((err: Error) => err) as Error;
 
     expect(err.message).toContain("spawn ENOENT");
     expect(err.cause).toBe(spawnError);
@@ -198,7 +198,7 @@ describe("runTests", () => {
       return child;
     }) as any);
 
-    const err = await runTests("/project").catch((err: Error) => err);
+    const err = await runTests("/project").catch((err: Error) => err) as Error;
 
     expect(err.message).toContain("spawn npm ENOENT");
     expect(err.cause).toBe(spawnError);

@@ -16,7 +16,7 @@
 
 import type { ProviderInstance } from "../providers/interface.js";
 
-export type AgentName = "planner" | "executor" | "spec";
+export type AgentName = "planner" | "executor" | "spec" | "commit";
 
 /**
  * Options passed when booting any agent.
