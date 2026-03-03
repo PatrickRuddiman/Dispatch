@@ -9,7 +9,7 @@ import { readFile } from "node:fs/promises";
 import { parseTaskFile, buildTaskContext, groupTasksByMode, type TaskFile } from "../parser.js";
 import type { DispatchResult } from "../dispatcher.js";
 import { boot as bootPlanner, type PlanResult, type PlannerAgent } from "../agents/planner.js";
-import { boot as bootExecutor, type ExecutorAgent } from "../agents/executor.js";
+import { boot as bootExecutor, type ExecutorAgent, type ExecuteResult } from "../agents/executor.js";
 import { boot as bootCommit, type CommitAgent } from "../agents/commit.js";
 import { log } from "../helpers/logger.js";
 import { registerCleanup } from "../helpers/cleanup.js";
@@ -31,6 +31,7 @@ import {
   squashBranchCommits,
 } from "./datasource-helpers.js";
 import { withTimeout, TimeoutError } from "../helpers/timeout.js";
+import { withRetry } from "../helpers/retry.js";
 import chalk from "chalk";
 import { elapsed, renderHeaderLines } from "../helpers/format.js";
 
@@ -59,11 +60,14 @@ export async function runDispatchPipeline(
     workItemType,
     planTimeout,
     planRetries,
+    retries,
   } = opts;
 
   // Planning timeout/retry defaults
   const planTimeoutMs = (planTimeout ?? 10) * 60_000; // default 10 minutes → ms
-  const maxPlanAttempts = (planRetries ?? 1) + 1;     // retries + initial attempt
+  const maxPlanAttempts = (planRetries ?? retries ?? 1) + 1; // retries + initial attempt
+
+  log.debug(`Plan timeout: ${planTimeout ?? 10}m (${planTimeoutMs}ms), max attempts: ${maxPlanAttempts}`);
 
   // Dry-run mode uses simple log output
   if (dryRun) {
@@ -365,11 +369,27 @@ export async function runDispatchPipeline(
               // ── Phase B: Execute via executor agent ──────────────
               tuiTask.status = "running";
               if (verbose) log.info(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: executing — "${task.text}"`);
-              const execResult = await localExecutor.execute({
-                task,
-                cwd: issueCwd,
-                plan: plan ?? null,
-              });
+              const execRetries = 2;
+              const execResult = await withRetry(
+                async () => {
+                  const result = await localExecutor.execute({
+                    task,
+                    cwd: issueCwd,
+                    plan: plan ?? null,
+                  });
+                  if (!result.success) {
+                    throw new Error(result.error ?? "Execution failed");
+                  }
+                  return result;
+                },
+                execRetries,
+                { label: `executor "${task.text}"` },
+              ).catch((err): ExecuteResult => ({
+                dispatchResult: { task, success: false, error: log.extractMessage(err) },
+                success: false,
+                error: log.extractMessage(err),
+                elapsedMs: 0,
+              }));
 
               if (execResult.success) {
                 // Sync checked-off state back to the datasource

@@ -145,12 +145,16 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
       log.debug("Cleaning up Copilot provider...");
       // Destroy all active sessions before stopping the server
       const destroyOps = [...sessions.values()].map((s) =>
-        s.destroy().catch(() => {})
+        s.destroy().catch((err) => {
+          log.debug(`Failed to destroy Copilot session: ${log.formatErrorChain(err)}`);
+        })
       );
       await Promise.all(destroyOps);
       sessions.clear();
 
-      await client.stop().catch(() => {});
+      await client.stop().catch((err) => {
+        log.debug(`Failed to stop Copilot client: ${log.formatErrorChain(err)}`);
+      });
     },
   };
 }

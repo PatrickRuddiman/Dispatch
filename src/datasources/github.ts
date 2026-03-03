@@ -101,7 +101,12 @@ export const datasource: Datasource = {
       { cwd }
     );
 
-    const issues = JSON.parse(stdout);
+    let issues;
+    try {
+      issues = JSON.parse(stdout);
+    } catch {
+      throw new Error(`Failed to parse GitHub CLI output: ${stdout.slice(0, 200)}`);
+    }
 
     return issues.map(
       (issue: {
@@ -139,7 +144,12 @@ export const datasource: Datasource = {
       { cwd }
     );
 
-    const issue = JSON.parse(stdout);
+    let issue;
+    try {
+      issue = JSON.parse(stdout);
+    } catch {
+      throw new Error(`Failed to parse GitHub CLI output: ${stdout.slice(0, 200)}`);
+    }
 
     const comments: string[] = [];
     if (issue.comments && Array.isArray(issue.comments)) {

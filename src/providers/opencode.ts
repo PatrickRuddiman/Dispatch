@@ -249,7 +249,11 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
       if (cleaned) return;
       cleaned = true;
       log.debug("Cleaning up OpenCode provider...");
-      stopServer?.();
+      try {
+        stopServer?.();
+      } catch (err) {
+        log.debug(`Failed to stop OpenCode server: ${log.formatErrorChain(err)}`);
+      }
     },
   };
 }

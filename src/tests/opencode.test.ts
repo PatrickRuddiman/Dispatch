@@ -48,6 +48,7 @@ vi.mock("../helpers/logger.js", () => ({
 
 // ── Import under test ──────────────────────────────────────────────
 import { boot } from "../providers/opencode.js";
+import { log } from "../helpers/logger.js";
 
 // ── Helpers ────────────────────────────────────────────────────────
 function createMockClient() {
@@ -463,6 +464,17 @@ describe("opencode provider", () => {
       const instance = await boot({ url: "http://localhost:1234" });
       await instance.cleanup();
       expect(mocks.mockServerClose).not.toHaveBeenCalled();
+    });
+
+    it("logs error at debug level when stopServer throws", async () => {
+      mocks.mockServerClose.mockImplementation(() => {
+        throw new Error("close failed");
+      });
+      const instance = await boot();
+      await expect(instance.cleanup()).resolves.not.toThrow();
+      expect(log.debug).toHaveBeenCalledWith(
+        expect.stringContaining("close failed"),
+      );
     });
   });
 });
