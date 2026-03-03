@@ -94,7 +94,6 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
           } catch (err) {
             const message = log.extractMessage(err);
             log.error(`Failed to fetch #${id}: ${log.formatErrorChain(err)}`);
-            log.debug(log.formatErrorChain(err));
             return { id, details: null, error: message };
           }
         })
@@ -333,7 +332,6 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
           return { filepath, identifier };
         } catch (err) {
           log.error(`Failed to generate spec for ${isTrackerMode ? `#${id}` : filepath}: ${log.formatErrorChain(err)}`);
-          log.debug(log.formatErrorChain(err));
           return null;
         }
       })

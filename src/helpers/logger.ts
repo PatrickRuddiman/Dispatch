@@ -1,45 +1,90 @@
 /**
  * Minimal structured logger for CLI output.
  *
- * Set `log.verbose = true` to enable `log.debug()` output. The `--verbose`
- * CLI flag controls this at startup.
+ * Log verbosity is controlled by (in priority order):
+ *   1. `LOG_LEVEL` env var — one of `"debug"`, `"info"`, `"warn"`, `"error"`
+ *   2. `DEBUG` env var — any truthy value sets the level to `"debug"`
+ *   3. `log.verbose = true` / the `--verbose` CLI flag (maps to `"debug"`)
+ *   4. Default: `"info"`
  */
 
 import chalk from "chalk";
+
+/** Supported log levels, ordered from most to least verbose. */
+export type LogLevel = "debug" | "info" | "warn" | "error";
+
+const LOG_LEVEL_SEVERITY: Record<LogLevel, number> = {
+  debug: 0,
+  info: 1,
+  warn: 2,
+  error: 3,
+};
+
+/**
+ * Resolve the effective log level from environment variables.
+ * Priority: LOG_LEVEL > DEBUG > default ("info").
+ */
+function resolveLogLevel(): LogLevel {
+  const envLevel = process.env.LOG_LEVEL?.toLowerCase();
+  if (envLevel && envLevel in LOG_LEVEL_SEVERITY) {
+    return envLevel as LogLevel;
+  }
+  if (process.env.DEBUG) {
+    return "debug";
+  }
+  return "info";
+}
+
+/** Current effective log level. */
+let currentLevel: LogLevel = resolveLogLevel();
+
+/** Returns the current effective log level. */
+export function getLogLevel(): LogLevel {
+  return currentLevel;
+}
+
+function shouldLog(level: LogLevel): boolean {
+  return LOG_LEVEL_SEVERITY[level] >= LOG_LEVEL_SEVERITY[currentLevel];
+}
 
 /** Maximum depth to traverse when unwinding nested error `.cause` chains. */
 const MAX_CAUSE_CHAIN_DEPTH = 5;
 
 export const log = {
-  /** When true, `debug()` messages are printed. Set by `--verbose`. */
-  verbose: false,
+  verbose: false as boolean,
 
   info(msg: string) {
+    if (!shouldLog("info")) return;
     console.log(chalk.blue("ℹ"), msg);
   },
   success(msg: string) {
+    if (!shouldLog("info")) return;
     console.log(chalk.green("✔"), msg);
   },
   warn(msg: string) {
-    console.log(chalk.yellow("⚠"), msg);
+    if (!shouldLog("warn")) return;
+    console.error(chalk.yellow("⚠"), msg);
   },
   error(msg: string) {
+    if (!shouldLog("error")) return;
     console.error(chalk.red("✖"), msg);
   },
   task(index: number, total: number, msg: string) {
+    if (!shouldLog("info")) return;
     console.log(chalk.cyan(`[${index + 1}/${total}]`), msg);
   },
   dim(msg: string) {
+    if (!shouldLog("info")) return;
     console.log(chalk.dim(msg));
   },
 
   /**
-   * Print a debug/verbose message. Only visible when `log.verbose` is true.
-   * Messages are prefixed with a dim arrow to visually nest them under the
-   * preceding info/error line.
+   * Print a debug/verbose message. Only visible when the log level is
+   * `"debug"`. Messages are prefixed with a dim arrow to visually nest
+   * them under the preceding info/error line.
    */
   debug(msg: string) {
-    if (!this.verbose) return;
+    if (!shouldLog("debug")) return;
     console.log(chalk.dim(`  ⤷ ${msg}`));
   },
 
@@ -83,3 +128,14 @@ export const log = {
     return "";
   },
 };
+
+Object.defineProperty(log, "verbose", {
+  get(): boolean {
+    return currentLevel === "debug";
+  },
+  set(value: boolean) {
+    currentLevel = value ? "debug" : "info";
+  },
+  enumerable: true,
+  configurable: true,
+});
