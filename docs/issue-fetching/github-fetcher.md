@@ -17,6 +17,10 @@ interface.
 
 ## Prerequisites
 
+> **Note:** The [prerequisite checker](../prereqs-and-safety/prereqs.md)
+> validates `gh` availability at startup when the datasource is `github`,
+> but does not enforce a minimum version.
+
 ### Install the `gh` CLI
 
 The `gh` CLI must be installed and available on `PATH`:
@@ -259,6 +263,8 @@ git repository with a GitHub remote, the `gh` command fails.
   GitHub fetcher has no unit tests; see [Datasource Testing](../datasource-system/testing.md))
 - [CLI argument parser](../cli-orchestration/cli.md) -- `--spec` and `--source`
   flag documentation
+- [Configuration System](../cli-orchestration/configuration.md) -- Persistent
+  `--source` defaults and three-tier merge logic
 - [Spec Generation](../spec-generation/overview.md) -- The `--spec` pipeline
   that invokes issue fetchers
 - [Datasource Testing](../datasource-system/testing.md) -- Test coverage

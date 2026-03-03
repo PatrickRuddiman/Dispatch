@@ -7,7 +7,9 @@ for the executor agent.
 
 ## What it does
 
-The planner receives a [`Task`](../task-parsing/api-reference.md#task) and optional filtered file context, creates an
+The planner receives a [`Task`](../task-parsing/api-reference.md#task), optional filtered file context, an optional
+working directory override, and an optional `worktreeRoot` path for
+[worktree isolation](#worktree-isolation). It creates an
 isolated [provider session](../provider-system/provider-overview.md#session-isolation-model), sends a planning prompt, and returns the agent's
 response as a `PlanResult`. The plan text becomes the executor agent's primary
 instructions.
@@ -171,6 +173,33 @@ Neither condition is detected or handled.
 - Consider configuring the planner prompt to set explicit length constraints
   (e.g., "limit your response to 2000 words")
 
+### Worktree isolation
+
+When the optional `worktreeRoot` parameter is passed to `plan()`
+(`src/agents/planner.ts:47`), the `buildPlannerPrompt()` function appends a
+"Worktree Isolation" section (`src/agents/planner.ts:127-141`) that instructs
+the planner agent to confine all file operations within the specified worktree
+directory.
+
+The isolation instructions tell the agent:
+
+- It is operating inside a git worktree
+- It must **not** read, write, or execute commands outside the worktree root
+- It must **not** reference or modify files in the main repository or other
+  worktrees
+- All relative paths must resolve within the worktree root
+
+**When is `worktreeRoot` provided?** The [orchestrator](../cli-orchestration/orchestrator.md)
+passes `worktreeRoot` when tasks are dispatched into isolated git worktrees
+(created for `(I)` mode tasks). The `cwdOverride` parameter
+(`src/agents/planner.ts:66`) is also used in conjunction to set the working
+directory to the worktree path instead of the boot-time `cwd`.
+
+**Enforcement is prompt-only**, consistent with the
+[read-only enforcement](#read-only-enforcement) and the
+[dispatcher's worktree isolation](./dispatcher.md#worktree-isolation). The
+provider backends do not support filesystem sandboxing.
+
 ## Interfaces
 
 ### `PlanResult`
@@ -214,3 +243,9 @@ or fallback to unplanned execution.
   File I/O safety and concurrency analysis relevant to context filtering
 - [Timeout Utility](../shared-utilities/timeout.md) -- Plan timeout mechanism
   wrapping `planTask()` calls in the orchestrator
+- [Git Worktree Helpers](../git-and-worktree/overview.md) -- Worktree
+  isolation model that determines when `worktreeRoot` is passed
+- [Spec Agent](../spec-generation/spec-agent.md) -- The spec generation agent
+  that shares the two-phase (read-only exploration then write) architecture
+- [Testing Overview](../testing/overview.md) -- Project-wide test suite
+  (note: the planner agent has no unit tests)

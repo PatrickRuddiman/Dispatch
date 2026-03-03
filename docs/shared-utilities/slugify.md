@@ -24,7 +24,7 @@ context.
 
 Dispatch generates two kinds of identifiers from user-supplied issue titles:
 
-- **Git branch names** in the pattern `dispatch/<number>-<slug>`, used by
+- **Git branch names** in the pattern `<username>/dispatch/<number>-<slug>`, used by
   the [GitHub](../datasource-system/github-datasource.md), [Azure DevOps](../datasource-system/azdevops-datasource.md), and [markdown](../datasource-system/markdown-datasource.md) datasources.
 - **Spec filenames** in the pattern `<id>-<slug>.md`, used by the [spec
   pipeline](../spec-generation/overview.md) and [datasource helpers](../datasource-system/datasource-helpers.md).
@@ -110,6 +110,8 @@ See [Testing](./testing.md) for instructions on running these tests.
   `slugify(title, 50)` for branch name generation
 - [Datasource System](../datasource-system/overview.md) -- Datasources that
   consume slugify for branch names
+- [Datasource Helpers](../datasource-system/datasource-helpers.md) -- Uses
+  `slugify(title, 60)` for temp file naming in `writeItemsToTempDir()`
 - [Spec Generation](../spec-generation/overview.md) -- Spec pipelines that
   consume slugify for filenames
 - [Testing Overview](../testing/overview.md) -- Project-wide test suite

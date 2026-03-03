@@ -11,15 +11,76 @@ documentation on chalk color detection, FORCE_COLOR, non-TTY behavior, and
 level overrides.
 
 Chalk is used in the [logger](../shared-types/logger.md) and [TUI](tui.md)
-for terminal string styling.
+for terminal string styling, and in the
+[configuration wizard](configuration.md#config-wizard-flow) for colored
+output (bold headings, cyan key names, green/red provider install indicators).
+
+---
+
+## @inquirer/prompts
+
+**Package**: `@inquirer/prompts`
+**Used in**: `src/config-prompts.ts:8`
+**Official docs**: [npmjs.com/package/@inquirer/prompts](https://www.npmjs.com/package/@inquirer/prompts)
+
+The `@inquirer/prompts` package provides the interactive terminal prompts used
+by the [configuration wizard](configuration.md#config-wizard-flow). It is the
+modern ESM-native rewrite of Inquirer.js, offering standalone prompt functions
+rather than a monolithic prompt runner.
+
+### Functions used
+
+| Function | Usage | Location |
+|----------|-------|----------|
+| `select` | Provider selection (with install indicators), model selection, datasource selection | `src/config-prompts.ts:65`, `src/config-prompts.ts:80`, `src/config-prompts.ts:108` |
+| `confirm` | "Reconfigure?" prompt, "Save?" confirmation | `src/config-prompts.ts:48`, `src/config-prompts.ts:149` |
+
+### Prompt behavior
+
+- **`select`** renders a list of choices with arrow-key navigation. The user
+  presses Enter to select. It supports a `default` option to pre-select a
+  value (used to pre-select the existing config value when reconfiguring).
+- **`confirm`** renders a yes/no prompt. Returns a boolean. The `default`
+  option controls which value is selected when the user just presses Enter.
+
+### Non-TTY behavior
+
+When stdin is not a TTY (e.g., running in a non-interactive CI environment),
+`@inquirer/prompts` throws an error because it cannot render interactive
+prompts. The `dispatch config` command is inherently interactive and is not
+designed for non-TTY use. In CI, configuration should be set via CLI flags
+directly (e.g., `--provider copilot --source github`).
+
+### Ctrl+C handling (ExitPromptError)
+
+When the user presses Ctrl+C during any `@inquirer/prompts` prompt, the
+library throws an `ExitPromptError`. Because the `dispatch config` subcommand
+runs before `parseArgs()` and before signal handlers are installed
+(`src/cli.ts:270-281`), this error propagates to the top-level `.catch()`
+handler (`src/cli.ts:321-324`), which logs the error and exits with code `1`.
+
+This means pressing Ctrl+C during the config wizard:
+1. Does **not** trigger `runCleanup()` via the SIGINT handler (handlers not
+   yet installed).
+2. Does trigger `runCleanup()` via the `.catch()` error handler.
+3. No provider resources need cleanup at this point since no provider has
+   been booted.
+
+### Why @inquirer/prompts instead of alternatives
+
+The `@inquirer/prompts` package was chosen for its:
+- **ESM-native design**: Compatible with the project's `"type": "module"` setup.
+- **Standalone functions**: Each prompt type is imported independently, avoiding
+  unused code.
+- **Minimal API surface**: Only `select` and `confirm` are needed; the package
+  provides exactly these without framework overhead.
 
 ---
 
 ## Glob (npm package)
 
 **Package**: `glob` v11.0.1
-**Used in**: `src/orchestrator.ts:11`, `src/orchestrator.ts:56`,
-`src/orchestrator.ts:181`
+**Used in**: `src/orchestrator.ts`
 **Official docs**: [github.com/isaacs/node-glob](https://github.com/isaacs/node-glob)
 
 The glob package is used by the [orchestrator](orchestrator.md) to discover markdown task files
@@ -32,9 +93,9 @@ const files = await glob(pattern, { cwd, absolute: true });
 ```
 
 The orchestrator passes:
-- `pattern` — the user's [glob pattern](cli.md#options-reference) (e.g., `"tasks/**/*.md"`)
-- `cwd` — the working directory (from `--cwd` option or `process.cwd()`)
-- `absolute: true` — returns fully resolved file paths
+- `pattern` -- the user's [glob pattern](cli.md#options-reference) (e.g., `"tasks/**/*.md"`)
+- `cwd` -- the working directory (from `--cwd` option or `process.cwd()`)
+- `absolute: true` -- returns fully resolved file paths
 
 ### Supported glob syntax
 
@@ -59,11 +120,11 @@ Glob patterns must be quoted when passed through the shell to prevent the
 shell from expanding them before dispatch receives them:
 
 ```bash
-# Correct — shell passes the literal pattern to dispatch
+# Correct -- shell passes the literal pattern to dispatch
 dispatch "tasks/**/*.md"
 dispatch 'tasks/**/*.md'
 
-# Wrong — shell expands the glob, dispatch receives individual filenames
+# Wrong -- shell expands the glob, dispatch receives individual filenames
 dispatch tasks/**/*.md
 ```
 
@@ -88,9 +149,8 @@ dispatch tasks/**/*.md
 
 ## OpenCode AI Agent SDK
 
-**Package**: `@opencode-ai/sdk` v1.2.10
-**Used in**: `src/providers/opencode.ts`, `src/providers/index.ts:11`,
-`src/orchestrator.ts:100`
+**Package**: `@opencode-ai/sdk`
+**Used in**: `src/providers/opencode.ts`, `src/providers/index.ts:11`
 **Official docs**: [opencode.ai/docs](https://opencode.ai/docs)
 
 The OpenCode SDK provides the default AI agent backend for dispatch. For full
@@ -100,28 +160,20 @@ setup instructions and troubleshooting, see [OpenCode Backend](../provider-syste
 
 There are two modes:
 
-1. **Automatic server** (default): `createOpencode()` starts a local OpenCode
-   server process. No configuration required — the SDK handles server
+1. **Automatic server** (default): The provider starts a local OpenCode
+   server process. No configuration required -- the SDK handles server
    lifecycle. The server is stopped when `cleanup()` is called.
 
-2. **External server** (`--server-url`): `createOpencodeClient({ baseUrl: url })`
-   connects to an already-running server. Useful for development or shared
-   server setups.
+2. **External server** (`--server-url`): Connects to an already-running
+   server. Useful for development or shared server setups.
 
 ```bash
-# Automatic — SDK starts its own server
+# Automatic -- SDK starts its own server
 dispatch "tasks/**/*.md"
 
-# External — connect to running server
+# External -- connect to running server
 dispatch "tasks/**/*.md" --server-url http://localhost:4096
 ```
-
-### Credentials and environment variables
-
-The OpenCode SDK handles authentication internally. Refer to the
-[OpenCode documentation](https://opencode.ai/docs) for details on
-configuration. When using an external server, authentication is handled by
-the server itself — the client simply sends HTTP requests.
 
 ### Troubleshooting connection failures
 
@@ -144,9 +196,8 @@ OpenCode documentation for specific rate limit and pricing details.
 
 ## GitHub Copilot SDK
 
-**Package**: `@github/copilot-sdk` v0.1.0
-**Used in**: `src/providers/copilot.ts`, `src/providers/index.ts:12`,
-`src/orchestrator.ts:100`
+**Package**: `@github/copilot-sdk`
+**Used in**: `src/providers/copilot.ts`, `src/providers/index.ts:12`
 **Official docs**: [github.com/github/copilot-sdk](https://github.com/github/copilot-sdk)
 
 The Copilot SDK provides an alternative AI agent backend. For full setup,
@@ -154,8 +205,7 @@ authentication, and troubleshooting, see [Copilot Backend](../provider-system/co
 
 ### Authentication
 
-The Copilot provider supports multiple authentication methods
-(`src/providers/copilot.ts:6-11`):
+The Copilot provider supports multiple authentication methods:
 
 1. **Logged-in Copilot CLI user** (default): If the `copilot` CLI is
    installed and the user has authenticated via `copilot auth`, no additional
@@ -176,21 +226,6 @@ GITHUB_TOKEN=ghp_xxxx dispatch "tasks/**/*.md" --provider copilot
 dispatch "tasks/**/*.md" --provider copilot --server-url http://localhost:3000
 ```
 
-### Monitoring and debugging sessions
-
-The Copilot provider creates one session per task and tracks them in an
-internal `Map<string, CopilotSession>` (`src/providers/copilot.ts:27`).
-See [Copilot session management](../provider-system/copilot-backend.md#session-management)
-for details.
-
-To debug session issues:
-
-- Check that the `copilot` CLI is available on PATH (or set `COPILOT_CLI_PATH`).
-- Verify authentication: Run `copilot auth status` or check the environment
-  variable is set.
-- For connection failures when using `--server-url`, verify the Copilot CLI
-  server is running and accessible at the specified URL.
-
 ### Rate limits and throttling
 
 Copilot SDK rate limits depend on the user's Copilot subscription tier and
@@ -199,11 +234,10 @@ sessions send prompts simultaneously. If throttled:
 
 - Individual task prompts may time out or return errors.
 - The task is marked as failed in the [TUI](tui.md); other tasks continue.
-- The `Promise.all` [batch model](orchestrator.md#concurrency-model) means throttled tasks do not block the overall
-  pipeline, they just fail individually.
+- Throttled tasks do not block the overall pipeline; they just fail
+  individually.
 
-Consider using `--concurrency 1` if you encounter rate limiting, or add delays
-between batches (not currently supported — would require a code change).
+Consider using `--concurrency 1` if you encounter rate limiting.
 
 ---
 
@@ -218,9 +252,14 @@ JavaScript bundle.
 
 ### Configuration
 
-The tsup config is in `tsup.config.ts` (not inferred from `package.json`):
+The tsup config is in `tsup.config.ts`:
 
 ```typescript
+import { defineConfig } from "tsup";
+import { readFileSync } from "node:fs";
+
+const { version } = JSON.parse(readFileSync("package.json", "utf-8"));
+
 export default defineConfig({
   entry: ["src/cli.ts"],
   format: ["esm"],
@@ -233,12 +272,15 @@ export default defineConfig({
   banner: {
     js: "#!/usr/bin/env node",
   },
+  define: {
+    __VERSION__: JSON.stringify(version),
+  },
 });
 ```
 
 Key settings:
 
-- **Single entry point**: `src/cli.ts` — all other modules are bundled
+- **Single entry point**: `src/cli.ts` -- all other modules are bundled
   transitively.
 - **ESM format**: Output is ES modules (matching `"type": "module"` in
   `package.json`).
@@ -247,39 +289,28 @@ Key settings:
   directly executable.
 - **No code splitting**: All code is in a single `dist/cli.js` file.
 - **Source maps**: Enabled for debugging.
-- **No type declarations**: `dts: false` — this is a CLI tool, not a library.
+- **No type declarations**: `dts: false` -- this is a CLI tool, not a library.
 
-### The `define` feature and version injection
+### Build-time version injection via `define`
 
-The comment at `src/cli.ts:127` references tsup's `define` feature for
-injecting the version string at build time. However, **this is not currently
-wired up**. The tsup config has no `define` block, and the version string is
-hardcoded.
+The `define` block reads the version from `package.json` at build time and
+replaces every occurrence of the `__VERSION__` identifier in the source with
+the JSON-stringified version string. The global constant is declared in
+`src/globals.d.ts` as `declare const __VERSION__: string`.
 
-To implement build-time version injection:
+At `src/cli.ts:307`, the version is displayed as:
 
-```typescript
-// tsup.config.ts
-import { readFileSync } from "fs";
-const pkg = JSON.parse(readFileSync("./package.json", "utf-8"));
-
-export default defineConfig({
-  // ... existing config ...
-  define: {
-    __VERSION__: JSON.stringify(pkg.version),
-  },
-});
 ```
-
-```typescript
-// src/cli.ts
-declare const __VERSION__: string;
 console.log(`dispatch v${__VERSION__}`);
 ```
 
-tsup's `define` feature works like esbuild's `define` — it performs global
-string replacement at build time, replacing every occurrence of the identifier
-with the specified value.
+After tsup builds the project, this becomes a literal string in `dist/cli.js`
+(e.g., `dispatch v0.0.1`). No runtime file reads are needed.
+
+tsup's `define` feature works like esbuild's `define` -- it performs global
+string replacement at build time. The replacement value must be a valid
+JavaScript expression (hence `JSON.stringify()` to produce a quoted string
+literal).
 
 ### Build commands
 
@@ -290,29 +321,31 @@ npm run dev        # Watch mode for development
 
 ---
 
-## Node.js fs/promises (config file I/O)
+## Node.js fs/promises (config file I/O and validation)
 
 **Module**: `node:fs/promises`
-**Used in**: `src/config.ts:7` (`readFile`, `writeFile`, `mkdir`, `rm`)
+**Used in**: `src/config.ts:7` (`readFile`, `writeFile`, `mkdir`),
+`src/orchestrator/cli-config.ts:11` (`access`)
 **Official docs**: [nodejs.org/api/fs.html#promises-api](https://nodejs.org/api/fs.html#promises-api)
 
 The `fs/promises` module provides asynchronous filesystem operations for the
-[configuration system](configuration.md). It is used to read, write, create,
-and delete the persistent config file at `~/.dispatch/config.json`.
+[configuration system](configuration.md). It is used to read, write, and
+create the persistent config file at `{CWD}/.dispatch/config.json`, and to
+validate output directory writability.
 
 ### Functions used
 
 | Function | Usage | Location |
 |----------|-------|----------|
-| `readFile` | Load config file contents as UTF-8 string | `src/config.ts:63` |
-| `writeFile` | Write pretty-printed JSON config to disk | `src/config.ts:81` |
-| `mkdir` | Create `~/.dispatch/` directory if it doesn't exist | `src/config.ts:80` |
-| `rm` | Delete config file during config reset (via interactive wizard) | `src/config.ts:228` |
+| `readFile` | Load config file contents as UTF-8 string | `src/config.ts:55` |
+| `writeFile` | Write pretty-printed JSON config to disk | `src/config.ts:73` |
+| `mkdir` | Create `.dispatch/` directory if it doesn't exist | `src/config.ts:72` |
+| `access` | Validate `--output-dir` exists and is writable (`constants.W_OK`) | `src/orchestrator/cli-config.ts:87` |
 
 ### Config file location and permissions
 
-The config file path is `~/.dispatch/config.json`, computed via
-`join(homedir(), ".dispatch", "config.json")`. The `~/.dispatch/` directory is
+The config file path is `{CWD}/.dispatch/config.json`, computed via
+`join(process.cwd(), ".dispatch", "config.json")`. The `.dispatch/` directory is
 created with `{ recursive: true }`, which:
 
 - Creates all missing parent directories in the path.
@@ -324,6 +357,22 @@ The config file itself is written with `writeFile` using the default mode,
 which on Unix systems is typically `0644` (owner read-write, group and others
 read-only). No explicit `mode` option is passed.
 
+### Output directory validation
+
+The `access()` function with `constants.W_OK` (`src/orchestrator/cli-config.ts:87`)
+is used to validate that `--output-dir` exists and is writable before
+starting the spec pipeline. This is a check-then-act pattern -- it verifies
+the directory is accessible at validation time, but does not guarantee it
+remains accessible when the pipeline writes to it later.
+
+The `access()` function:
+- Returns a resolved promise if the path exists and has the requested
+  permissions.
+- Rejects with an error if the path does not exist, is not accessible, or
+  lacks the requested permissions.
+- Does **not** create the directory. Unlike `mkdir`, this is a read-only
+  check.
+
 ### Error handling strategy
 
 The config system uses a **silent-fallback** strategy for read errors and an
@@ -331,19 +380,20 @@ The config system uses a **silent-fallback** strategy for read errors and an
 
 | Operation | Error behavior | Rationale |
 |-----------|---------------|-----------|
-| `readFile` (load config) | `catch` returns `{}` — no error shown | Missing or corrupted config is common and non-fatal |
+| `readFile` (load config) | `catch` returns `{}` -- no error shown | Missing or corrupted config is common and non-fatal |
 | `writeFile` (save config) | Error propagates to caller | Write failures need user attention (permissions, disk space) |
 | `mkdir` (create dir) | Error propagates to caller | Directory creation failures block config persistence |
-| `rm` (reset config) | `{ force: true }` + `catch` returns success | File may already be deleted; either way, reset succeeds |
+| `access` (validate dir) | `catch` triggers `process.exit(1)` with error message | Invalid output-dir should be caught before pipeline starts |
 
 ### Troubleshooting fs/promises issues
 
 | Symptom | Likely cause | Resolution |
 |---------|-------------|------------|
-| `EACCES` on `saveConfig` | No write permission on `~/.dispatch/` | `chmod u+w ~/.dispatch/` or run as a user with home directory access |
-| `ENOSPC` on `writeFile` | Disk full | Free disk space in the home directory partition |
-| Config silently ignored | Corrupted JSON in config file | Run `dispatch config` to reconfigure, or manually edit `~/.dispatch/config.json` |
-| `EROFS` on `mkdir` | Read-only filesystem (e.g., some container images) | Mount a writable volume at `$HOME` or use CLI flags exclusively |
+| `EACCES` on `saveConfig` | No write permission on `.dispatch/` | `chmod u+w .dispatch/` or check project directory permissions |
+| `ENOSPC` on `writeFile` | Disk full | Free disk space |
+| Config silently ignored | Corrupted JSON in config file | Run `dispatch config` to reconfigure, or manually edit `.dispatch/config.json` |
+| `EROFS` on `mkdir` | Read-only filesystem (e.g., some container images) | Mount a writable volume or use CLI flags exclusively |
+| `--output-dir` validation fails | Directory does not exist or is read-only | Create the directory first, or check mount permissions |
 
 ### Concurrent access
 
@@ -357,8 +407,7 @@ locking (e.g., `flock`) would be needed.
 
 ## Node.js process (stdout, argv, exit)
 
-**Used in**: `src/cli.ts:234`, `src/cli.ts:240`, `src/tui.ts:130`,
-`src/tui.ts:201-204`
+**Used in**: `src/cli.ts:267`, `src/cli.ts:283`, `src/tui.ts`
 **Official docs**: [nodejs.org/api/process.html](https://nodejs.org/api/process.html)
 
 ### process.argv
@@ -370,10 +419,10 @@ The CLI reads `process.argv.slice(2)` to get user-provided arguments
 
 The TUI writes directly to `process.stdout` using:
 
-- `process.stdout.write(output)` — for rendering frames (avoids the trailing
+- `process.stdout.write(output)` -- for rendering frames (avoids the trailing
   newline that `console.log` adds).
-- `process.stdout.columns` — to determine terminal width for text truncation
-  (`src/tui.ts:130`). Falls back to 80 columns if not available.
+- `process.stdout.columns` -- to determine terminal width for text truncation.
+  Falls back to 80 columns if not available.
 
 ### process.exit
 
@@ -381,15 +430,19 @@ The CLI calls `process.exit()` at several points:
 
 | Location | Exit code | Reason |
 |----------|-----------|--------|
-| `src/cli.ts:264` | `0` | `--help` displayed |
-| `src/cli.ts:268` | `0` | `--version` displayed |
-| `src/cli.ts:278` | `0` or `1` | Normal completion (`1` if any task failed) |
-| `src/cli.ts:284` | `1` | Unhandled exception in `main()` |
-| `src/cli.ts:183` | `1` | Invalid `--concurrency` value |
-| `src/cli.ts:192` | `1` | Unknown `--provider` value |
-| `src/cli.ts:205` | `1` | Invalid `--plan-timeout` value |
-| `src/cli.ts:213` | `1` | Invalid `--plan-retries` value |
-| `src/cli.ts:225` | `1` | Unknown CLI option |
+| `src/cli.ts:280` | `0` | `config` subcommand completed |
+| `src/cli.ts:303` | `0` | `--help` displayed |
+| `src/cli.ts:308` | `0` | `--version` displayed |
+| `src/cli.ts:318` | `0` or `1` | Normal completion (`1` if any task failed or fix-tests unsuccessful) |
+| `src/cli.ts:324` | `1` | Unhandled exception in `main()` |
+| `src/cli.ts:191` | `1` | Invalid `--concurrency` value |
+| `src/cli.ts:196` | `1` | `--concurrency` exceeds `MAX_CONCURRENCY` (64) |
+| `src/cli.ts:204` | `1` | Unknown `--provider` value |
+| `src/cli.ts:216` | `1` | Invalid `--plan-timeout` value |
+| `src/cli.ts:227` | `1` | Invalid `--retries` value |
+| `src/cli.ts:235` | `1` | Invalid `--plan-retries` value |
+| `src/cli.ts:245` | `1` | Invalid `--test-timeout` value |
+| `src/cli.ts:257` | `1` | Unknown CLI option |
 
 ### Raw ANSI escape codes in non-TTY environments
 
@@ -403,12 +456,12 @@ The TUI's cursor control uses these ANSI sequences:
 These are written directly via `process.stdout.write()` and are **not**
 filtered by chalk's color detection. In non-TTY environments, they appear
 as literal escape characters in the output. See
-[TUI — TTY compatibility](tui.md#tty-compatibility-and-non-tty-environments)
+[TUI -- TTY compatibility](tui.md#tty-compatibility-and-non-tty-environments)
 for the full impact assessment.
 
 ### Signal handling
 
-Dispatch installs `SIGINT` and `SIGTERM` handlers at `src/cli.ts:249-258`
+Dispatch installs `SIGINT` and `SIGTERM` handlers at `src/cli.ts:289-299`
 that call `runCleanup()` from the [cleanup registry](../shared-types/cleanup.md)
 before exiting. This ensures provider server processes are stopped on Ctrl+C
 or container shutdown.
@@ -419,7 +472,7 @@ or container shutdown.
 | SIGTERM | 143 | `kill <pid>`, container stop, process manager |
 
 Additionally, the `.catch()` handler on the `main()` promise
-(`src/cli.ts:281-284`) calls `runCleanup()` before `process.exit(1)` to
+(`src/cli.ts:321-324`) calls `runCleanup()` before `process.exit(1)` to
 handle unhandled exceptions.
 
 For full details on exit codes, double-signal behavior, hung shutdown
@@ -428,11 +481,37 @@ troubleshooting, and unhandleable signals, see
 
 ---
 
+## Node.js child_process (provider detection)
+
+**Module**: `node:child_process`
+**Used in**: `src/providers/detect.ts:6`
+**Official docs**: [nodejs.org/api/child_process.html](https://nodejs.org/api/child_process.html)
+
+The `execFile` function (promisified) is used by [`checkProviderInstalled()`](../prereqs-and-safety/provider-detection.md)
+(`src/providers/detect.ts:29-37`) to detect whether a provider's CLI binary
+is available on PATH. It executes `<binary> --version` and returns `true` if
+the process exits successfully, `false` otherwise.
+
+The four provider binaries checked are:
+
+| Provider | Binary |
+|----------|--------|
+| `opencode` | `opencode` |
+| `copilot` | `copilot` |
+| `claude` | `claude` |
+| `codex` | `codex` |
+
+This detection is used in the [configuration wizard](configuration.md#wizard-step-details)
+to display green (installed) or red (not found) indicators next to each
+provider name in the selection prompt.
+
+---
+
 ## Process cleanup registry
 
-**Module**: `src/cleanup.ts` (35 lines)
-**Used in**: `src/agents/orchestrator.ts:17,151`, `src/cli.ts` (signal and
-error handlers)
+**Module**: `src/helpers/cleanup.ts`
+**Used in**: `src/orchestrator/runner.ts`, `src/cli.ts` (signal and error
+handlers)
 
 The cleanup registry is a simple module that allows sub-modules (orchestrator,
 spec-generator) to register their provider's [`cleanup()`](../shared-types/provider.md#cleanup-promisevoid) function at boot time.
@@ -457,17 +536,12 @@ path doesn't call `instance.cleanup()`.
   silently swallowed to prevent cleanup failures from masking the original
   error or blocking process exit.
 - **Idempotent**: Because `splice(0)` empties the array, calling `runCleanup()`
-  multiple times is harmless — the second call finds an empty array and returns
+  multiple times is harmless -- the second call finds an empty array and returns
   immediately.
 
 ### Usage in the orchestrator
 
-```
-const instance = await bootProvider(provider, { url: serverUrl, cwd });
-registerCleanup(() => instance.cleanup());
-```
-
-This registration happens at `src/agents/orchestrator.ts:151`, immediately after
+The cleanup registration happens at provider boot time, immediately after
 the provider is booted. It ensures that even if an unhandled error propagates
 past the orchestrator's `try/catch`, the CLI's top-level error handler can still
 clean up the provider by calling `runCleanup()`.
@@ -487,7 +561,7 @@ for how this interacts with the orchestrator's own error recovery.
 - [OpenCode Backend](../provider-system/opencode-backend.md) -- OpenCode-specific setup and troubleshooting
 - [Copilot Backend](../provider-system/copilot-backend.md) -- Copilot-specific setup and authentication
 - [Cleanup Registry](../shared-types/cleanup.md) -- Process-level cleanup mechanism
+- [Provider Detection](../prereqs-and-safety/provider-detection.md) -- Binary detection used by config wizard
 - [Shared Integrations](../shared-types/integrations.md) -- Chalk, fs/promises, and signal handling reference
 - [Planner Agent](../planning-and-dispatch/planner.md) -- Planning phase referenced by rate limits discussion
 - [Dispatcher](../planning-and-dispatch/dispatcher.md) -- Execution phase that consumes provider sessions
-- [Timeout Utility](../shared-utilities/timeout.md) -- Plan timeout mechanism used by the orchestrator
