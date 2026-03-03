@@ -8,6 +8,7 @@
  * include the Disposable lib required for `await using`).
  */
 
+import { randomUUID } from "node:crypto";
 import { unstable_v2_createSession, type SDKSession, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ProviderInstance, ProviderBootOptions } from "./interface.js";
 import { log } from "../helpers/logger.js";
@@ -44,7 +45,7 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
       log.debug("Creating Claude session...");
       try {
         const session = unstable_v2_createSession({ model });
-        const sessionId = session.sessionId;
+        const sessionId = randomUUID();
         sessions.set(sessionId, session);
         log.debug(`Session created: ${sessionId}`);
         return sessionId;

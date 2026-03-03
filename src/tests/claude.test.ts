@@ -4,7 +4,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { mockCreateSession, mockSession } = vi.hoisted(() => {
   const mockSession = {
-    sessionId: "test-session-1",
     send: vi.fn().mockResolvedValue(undefined),
     stream: vi.fn().mockReturnValue((async function* () {})()),
     close: vi.fn(),
@@ -15,10 +14,23 @@ const { mockCreateSession, mockSession } = vi.hoisted(() => {
   return { mockCreateSession, mockSession };
 });
 
+const { mockRandomUUID } = vi.hoisted(() => {
+  const mockRandomUUID = vi.fn().mockReturnValue("test-uuid-1234");
+  return { mockRandomUUID };
+});
+
 // ─── Module mocks ───────────────────────────────────────────────────
+
+vi.mock("node:crypto", () => ({
+  randomUUID: mockRandomUUID,
+}));
 
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
   unstable_v2_createSession: mockCreateSession,
+}));
+
+vi.mock("node:crypto", () => ({
+  randomUUID: vi.fn().mockReturnValue("test-uuid-1234"),
 }));
 
 vi.mock("../helpers/logger.js", () => ({
@@ -29,11 +41,13 @@ vi.mock("../helpers/logger.js", () => ({
 }));
 
 import { boot } from "../providers/claude.js";
+import { randomUUID } from "node:crypto";
 
 // ─── Reset mocks between tests ─────────────────────────────────────
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockRandomUUID.mockReturnValue("test-uuid-1234");
   mockCreateSession.mockReturnValue(mockSession);
   mockSession.send.mockResolvedValue(undefined);
   mockSession.stream.mockReturnValue((async function* () {})());
@@ -67,7 +81,7 @@ describe("createSession", () => {
   it("creates a session and returns sessionId", async () => {
     const instance = await boot();
     const sessionId = await instance.createSession();
-    expect(sessionId).toBe("test-session-1");
+    expect(sessionId).toBe("test-uuid-1234");
     expect(mockCreateSession).toHaveBeenCalledWith({ model: "claude-sonnet-4" });
   });
 
