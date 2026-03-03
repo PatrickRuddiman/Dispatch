@@ -151,6 +151,7 @@ vi.mock("node:fs/promises", () => ({
 // ─── Import function under test (after mocks) ──────────────────────
 
 import { runDispatchPipeline, dryRunMode } from "../orchestrator/dispatch-pipeline.js";
+import { getDatasource } from "../datasources/index.js";
 import { log } from "../helpers/logger.js";
 import { createTui } from "../tui.js";
 
@@ -558,5 +559,77 @@ describe("runDispatchPipeline edge cases", () => {
 
     expect(result.failed).toBe(1);
     expect(result.completed).toBe(0);
+  });
+
+});
+
+describe("commitAllChanges safety-net", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    mocks.mockExecute.mockResolvedValue({
+      success: true,
+      dispatchResult: { task: TASK_FIXTURE, success: true },
+      elapsedMs: 100,
+    });
+    mocks.mockPlan.mockImplementation(() =>
+      new Promise<PlanResult>((resolve) => {
+        setTimeout(() => resolve({ prompt: "Execute step 1", success: true }), 50);
+      }),
+    );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("calls commitAllChanges after task execution when branching is enabled", async () => {
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ noBranch: false }),
+      "/tmp/test",
+    );
+    await vi.advanceTimersByTimeAsync(50);
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result.completed).toBe(1);
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    expect(ds.commitAllChanges).toHaveBeenCalledOnce();
+  });
+
+  it("does not call commitAllChanges when branching is disabled", async () => {
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ noBranch: true }),
+      "/tmp/test",
+    );
+    await vi.advanceTimersByTimeAsync(50);
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result.completed).toBe(1);
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    expect(ds.commitAllChanges).not.toHaveBeenCalled();
+  });
+
+  it("continues gracefully if commitAllChanges throws", async () => {
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    vi.mocked(ds.commitAllChanges).mockRejectedValueOnce(new Error("git add failed"));
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ noBranch: false }),
+      "/tmp/test",
+    );
+    await vi.advanceTimersByTimeAsync(50);
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result.completed).toBe(1);
+    expect(ds.commitAllChanges).toHaveBeenCalledOnce();
+    expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
+      expect.stringContaining("commit"),
+    );
   });
 });
