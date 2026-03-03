@@ -6,6 +6,7 @@ vi.mock("../helpers/logger.js", () => ({
   log: {
     debug: vi.fn(),
     formatErrorChain: vi.fn().mockReturnValue("mock error chain"),
+    extractMessage: vi.fn((e: unknown) => e instanceof Error ? e.message : String(e)),
   },
 }));
 

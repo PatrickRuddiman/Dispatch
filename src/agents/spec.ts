@@ -166,7 +166,7 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
           validationReason: validation.reason,
         };
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = log.extractMessage(err);
         return {
           content: "",
           success: false,

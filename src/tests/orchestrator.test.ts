@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { parseIssueFilename } from "../orchestrator/runner.js";
 import { markTaskComplete, type Task } from "../parser.js";
 import type { Datasource, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
+import { log } from "../helpers/logger.js";
 
 // ─── parseIssueFilename re-export ───────────────────────────────────
 
@@ -209,7 +210,7 @@ describe("datasource sync on task completion", () => {
     try {
       await mockDatasource.update(parsed!.issueId, "Fix Bug", updatedContent, fetchOpts);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = log.extractMessage(err);
       syncError = message;
     }
 
@@ -249,7 +250,7 @@ describe("datasource sync on task completion", () => {
     try {
       await mockDatasource.update(parsed!.issueId, parsed!.slug, updatedContent);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = log.extractMessage(err);
       syncError = message;
     }
 

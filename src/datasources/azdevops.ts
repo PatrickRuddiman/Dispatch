@@ -12,6 +12,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Datasource, IssueDetails, IssueFetchOptions, DispatchLifecycleOptions } from "./interface.js";
 import { slugify } from "../helpers/slugify.js";
+import { log } from "../helpers/logger.js";
 
 const exec = promisify(execFile);
 
@@ -246,7 +247,7 @@ export const datasource: Datasource = {
     try {
       await exec("git", ["checkout", "-b", branchName], { cwd: opts.cwd });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = log.extractMessage(err);
       if (message.includes("already exists")) {
         await exec("git", ["checkout", branchName], { cwd: opts.cwd });
       } else {
@@ -303,7 +304,7 @@ export const datasource: Datasource = {
       return pr.url ?? "";
     } catch (err) {
       // If a PR already exists for this branch, retrieve its URL
-      const message = err instanceof Error ? err.message : String(err);
+      const message = log.extractMessage(err);
       if (message.includes("already exists")) {
         const { stdout } = await exec(
           "az",
