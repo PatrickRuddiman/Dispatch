@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { select, input, confirm, number } from "@inquirer/prompts";
 import { runInteractiveConfigWizard } from "../config-prompts.js";
 import { loadConfig, saveConfig } from "../config.js";
@@ -56,7 +56,20 @@ vi.spyOn(console, "log").mockImplementation(() => {});
 vi.spyOn(console, "error").mockImplementation(() => {});
 
 afterEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
+});
+
+// Re-establish default mock implementations after each reset
+beforeEach(() => {
+  vi.mocked(loadConfig).mockResolvedValue({});
+  vi.mocked(saveConfig).mockResolvedValue(undefined);
+  vi.mocked(detectDatasource).mockResolvedValue(null);
+  vi.mocked(getGitRemoteUrl).mockResolvedValue(null);
+  vi.mocked(parseAzDevOpsRemoteUrl).mockReturnValue(null);
+  vi.mocked(detectWorkItemType).mockResolvedValue(null);
+  vi.mocked(listProviderModels).mockResolvedValue([]);
+  vi.spyOn(console, "log").mockImplementation(() => {});
+  vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
 // ─── runInteractiveConfigWizard ──────────────────────────────────────
