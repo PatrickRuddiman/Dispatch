@@ -64,7 +64,7 @@ the [planning](../planning-and-dispatch/planner.md) and [execution](../planning-
 
 ## Module-level mutable state and singleton safety
 
-The TUI uses three module-level mutable variables (`src/tui.ts:31-33`):
+The TUI uses three module-level mutable variables (`src/tui.ts:40-42`):
 
 ```typescript
 let spinnerIndex = 0;
@@ -96,7 +96,7 @@ though it could be encapsulated in a class or closure for safety.
 
 ### The 80ms render interval
 
-The TUI re-renders the entire display every 80ms (`src/tui.ts:224`):
+The TUI re-renders the entire display every 80ms (`src/tui.ts:329-332`):
 
 ```typescript
 interval = setInterval(() => {
@@ -115,7 +115,7 @@ This interval:
 
 ### Full re-render with ANSI cursor control
 
-The `draw()` function (`src/tui.ts:198-206`) uses raw ANSI escape codes to
+The `draw()` function (`src/tui.ts:302-311`) uses raw ANSI escape codes to
 clear the previous output and write a new frame:
 
 ```typescript
@@ -125,13 +125,36 @@ function draw(state: TuiState): void {
   }
   const output = render(state);
   process.stdout.write(output);
-  lastLineCount = output.split("\n").length;
+  const cols = process.stdout.columns || 80;
+  lastLineCount = countVisualRows(output, cols);
 }
 ```
 
 The escape sequence `\x1B[${n}A` moves the cursor up `n` lines, and `\x1B[0J`
 clears from the cursor to the end of the screen. This produces the visual
 effect of in-place updates without terminal flickering.
+
+#### `countVisualRows` and ANSI stripping
+
+The `draw()` function uses `countVisualRows()` (`src/tui.ts:107-113`) rather
+than a simple `output.split("\n").length` to compute how many terminal rows the
+output occupied. This is necessary because long lines wrap in the terminal,
+consuming more than one row.
+
+`countVisualRows` works by:
+
+1. Stripping all ANSI escape sequences via a manual regex
+   (`/\x1B\[[0-9;]*m/g`) so that invisible formatting codes are not counted
+   toward line length.
+2. Splitting on newlines.
+3. For each line, computing `Math.ceil(line.length / cols)` to account for
+   terminal wrapping (with a minimum of 1 row per line).
+
+The ANSI-stripping regex handles SGR sequences (colors, bold, dim) which are
+the only ANSI codes produced by chalk. It does not strip cursor movement or
+other CSI sequences, but those are not present in the `render()` output —
+cursor control happens only in `draw()` itself, before and after the rendered
+content.
 
 ### Performance under high concurrency
 
@@ -146,19 +169,26 @@ tasks:
 
 - The `render()` function filters `state.tasks` three times (running,
   completed, pending) — O(n) per filter.
-- The visible task window is capped at ~9 tasks (3 completed + active + 3
-  pending), so the actual rendering cost is constant regardless of total task
-  count.
+- The visible task window is capped at 14 tasks in flat mode (3 completed +
+  8 running + 3 pending), so the actual rendering cost is constant regardless
+  of total task count.
 - The dominant cost is the three array filters, which remain cheap even for
   1000+ tasks at 80ms intervals.
 
 **Verdict**: The 80ms interval is not a performance concern. The windowing
 logic ensures constant rendering cost per frame.
 
-## Task windowing
+## Task windowing and display modes
 
-The TUI displays a windowed view of tasks (`src/tui.ts:133-146`) to keep the
-display compact:
+The TUI has two display modes, selected automatically at render time
+(`src/tui.ts:156`): when more than one distinct `worktree` value is present
+among the tasks, the **worktree-grouped** display is used; otherwise the
+**flat** display is used.
+
+### Flat display mode
+
+The flat display (`src/tui.ts:238-281`) shows a windowed view of tasks to keep
+the display compact:
 
 ```
   ··· 5 earlier task(s) completed
@@ -176,9 +206,41 @@ display compact:
 The window shows:
 
 - Last 3 completed/failed tasks
-- All currently running/planning tasks
+- Up to 8 currently running/planning tasks (capped at `src/tui.ts:239`)
 - First 3 pending tasks
 - Ellipsis indicators for overflow in both directions
+- An additional overflow line when more than 8 tasks are running
+  (`src/tui.ts:274-276`)
+
+### Worktree-grouped display mode
+
+When multiple worktrees are active (`activeWorktrees.size > 1`), the TUI
+switches to a grouped layout (`src/tui.ts:167-236`) that organizes tasks by
+worktree rather than showing them individually:
+
+```
+  ··· 2 earlier issue(s) completed
+  ● #45  3/3 tasks  18s
+  ● #67  2/2 tasks  12s
+  ⠹ #89  2 active  Refactor auth module  4s
+  ⠹ #102  1 active  Update API schema  1s
+```
+
+Each worktree is displayed as a single row:
+
+- **Completed groups** are collapsed to one line showing the issue number,
+  task count, and the maximum elapsed time across the group's tasks. The last
+  3 completed groups are visible.
+- **Active groups** show the issue number, count of active tasks, the text of
+  the first active task, and elapsed time since the earliest active task
+  started.
+- **Issue numbers** are extracted from the worktree name using the regex
+  `/^(\d+)/` (`src/tui.ts:197`, `src/tui.ts:207`). This matches the worktree
+  naming convention from `src/helpers/worktree.ts`, where issue filenames like
+  `123-fix-auth-bug.md` become worktree names like `123-fix-auth-bug`. The
+  regex extracts `123` as the issue number for display.
+- **Ungrouped tasks** (those without a `worktree` field) are rendered in flat
+  mode below the grouped entries.
 
 ### Behavior with hundreds of tasks
 
@@ -188,8 +250,8 @@ With 500 tasks where 200 are complete, 3 are running, and 297 are pending:
   3 pending, `··· 294 more task(s) pending`.
 - Total visible lines remain constant (~15 lines including headers and
   summary).
-- The `completed.slice(-3)` and `pending.slice(0, 3)` operations are O(1)
-  after the O(n) filter.
+- The `completed.slice(-3)`, `running.slice(0, 8)`, and `pending.slice(0, 3)`
+  operations are O(1) after the O(n) filter.
 
 The windowing logic works correctly with any task count. The display does not
 grow unbounded.
@@ -197,7 +259,7 @@ grow unbounded.
 ## TTY compatibility and non-TTY environments
 
 The TUI uses raw ANSI escape codes for cursor manipulation
-(`src/tui.ts:198-206`) and chalk for color formatting. These depend on terminal
+(`src/tui.ts:302-311`) and chalk for color formatting. These depend on terminal
 capabilities.
 
 ### How chalk handles non-TTY environments
@@ -232,21 +294,25 @@ chalk's color detection**. These escape sequences are written directly via
 | CI pipelines (GitHub Actions, etc.) | Depends on CI runner. Most CI environments do not support cursor movement but may render some ANSI codes |
 | Windows cmd.exe | ANSI escapes may not be supported. Windows Terminal supports them. |
 
-**Current mitigation**: The orchestrator uses [`--dry-run`](cli.md#the---dry-run-flag) mode for non-TUI
-contexts, which uses the [logger](../shared-types/logger.md) instead of the TUI. However,
-there is no automatic detection — users must explicitly pass `--dry-run` when
-running in non-interactive environments. See the
-[Configuration System](configuration.md) for how CLI flags like `--dry-run`
-are resolved.
+### `process.stdout.columns` and terminal width
 
-**Recommendation**: Check `process.stdout.isTTY` before creating the TUI,
-and fall back to logger-based output in non-TTY environments:
+The TUI reads `process.stdout.columns` at `src/tui.ts:158` (during rendering)
+and `src/tui.ts:309` (in `draw()`) with a fallback to 80 if the value is
+undefined. `process.stdout.columns` is `undefined` when stdout is not a TTY.
 
-```typescript
-if (!process.stdout.isTTY) {
-  // Use logger output instead of TUI
-}
-```
+**Resize behavior:** When a TTY terminal is resized, Node.js updates
+`process.stdout.columns` automatically and emits a `'resize'` event on
+`process.stdout`. The TUI does **not** listen for the `'resize'` event — it
+simply re-reads `process.stdout.columns` on each 80ms render tick. This means
+the TUI adapts to terminal resizes within one render frame (80ms), which is
+effectively instantaneous from the user's perspective. There is no need for an
+explicit resize handler.
+
+**Current mitigation**: The orchestrator uses [`--verbose`](cli.md) mode as
+the non-TUI alternative, which uses the [logger](../shared-types/logger.md)
+instead of the TUI. Additionally, the `--dry-run` flag produces static output.
+However, there is no automatic `isTTY` detection — the TUI is created
+unconditionally unless `--verbose` or `--dry-run` is passed.
 
 ## Signal handling
 
@@ -282,19 +348,104 @@ Union type for per-task states: `"pending" | "planning" | "running" | "done" | "
 |-------|------|-------------|
 | `task` | [`Task`](../task-parsing/api-reference.md#task) | The parsed task object |
 | `status` | `TaskStatus` | Current task state |
-| `elapsed` | `number?` | Start timestamp (for running) or total ms (for done) |
+| `elapsed` | `number?` | Dual-semantics timing field (see below) |
 | `error` | `string?` | Error message if failed |
+| `worktree` | `string?` | Worktree directory name (e.g. `"123-fix-auth-bug"`) when task runs in a worktree |
+
+#### `elapsed` field dual-semantics
+
+The `elapsed` field on `TaskState` changes meaning depending on the task's
+status. This is an intentional design choice that avoids adding a separate
+`startTime` field, but it requires understanding the semantics:
+
+| Task status | `elapsed` contains | Set at |
+|-------------|-------------------|--------|
+| `running` or `planning` | Absolute `Date.now()` timestamp of when the task started | `dispatch-pipeline.ts` task-start callback |
+| `done` or `failed` | Relative duration in milliseconds (`Date.now() - startTime`) | `dispatch-pipeline.ts` task-done/fail callback |
+
+The TUI rendering code handles this correctly at `src/tui.ts:258-263`:
+
+- For running/planning tasks: computes `now - ts.elapsed` to get the live
+  elapsed time (works because `elapsed` is a start timestamp).
+- For done tasks: uses `ts.elapsed` directly as a duration passed to
+  `elapsed()` (works because `elapsed` is already a millisecond delta).
+
+This pattern means the `elapsed` field should never be interpreted without
+checking `status` first. A value like `1709136000000` could be either a
+timestamp (task started at that epoch ms) or an implausibly large duration,
+depending on whether the task is still running or has completed.
 
 ### TuiState
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `tasks` | `TaskState[]` | All tasks with their current states |
-| `phase` | `string` | Current pipeline phase |
+| `phase` | `"discovering" \| "parsing" \| "booting" \| "dispatching" \| "done"` | Current pipeline phase (union type) |
 | `startTime` | `number` | Timestamp when TUI was created |
 | `filesFound` | `number` | Count of discovered files |
 | `serverUrl` | `string?` | Provider server URL if connecting to existing server |
 | `provider` | `string?` | Active provider name for display |
+| `model` | `string?` | Model identifier reported by the provider (e.g. `"gpt-4o"`) |
+| `source` | `string?` | Datasource name (e.g. `"github"`, `"azdevops"`, `"md"`) |
+| `currentIssue` | `{ number: string; title: string }?` | Currently-processing issue context, shown as a header line |
+
+The `model`, `source`, and `currentIssue` fields were added to give operators
+visibility into which AI model and datasource are active, and which issue is
+being processed. These are rendered in the TUI header via
+[`renderHeaderLines()`](../shared-types/format.md#renderheaderlinesinfo-headerinfo-string)
+(`src/tui.ts:127-131`) and a conditional issue line (`src/tui.ts:134-138`).
+
+## Verbose mode TUI bypass
+
+When `--verbose` is active, the orchestrator does **not** call `createTui()`.
+Instead, `dispatch-pipeline.ts` creates a no-op TUI object:
+
+```typescript
+{ state, update: () => {}, stop: () => {} }
+```
+
+This silent TUI has the same `state` structure but its `update` and `stop`
+methods are no-ops, so no animated rendering occurs. The verbose mode path
+uses `renderHeaderLines()` (`dispatch-pipeline.ts:89`) to print a one-time
+inline header to the logger rather than the animated TUI display.
+
+This means the TUI state machine still progresses through phases (the `state`
+object is still mutated), but no terminal output is produced from the TUI
+module itself. All output in verbose mode goes through the
+[logger](../shared-types/logger.md) instead.
+
+## Data flow
+
+The following diagram shows how data flows between the TUI, format helpers,
+and the pipeline modules that drive TUI state:
+
+```mermaid
+flowchart TD
+    subgraph "Pipeline Drivers"
+        DP["dispatch-pipeline.ts"]
+        SP["spec-pipeline.ts"]
+    end
+
+    subgraph "TUI Module (src/tui.ts)"
+        CT["createTui()"] --> TS["TuiState"]
+        TS --> R["render()"]
+        R --> D["draw()"]
+        D --> CVR["countVisualRows()"]
+        D --> STDOUT["process.stdout.write()"]
+    end
+
+    subgraph "Format Helpers (src/helpers/format.ts)"
+        EL["elapsed()"]
+        RHL["renderHeaderLines()"]
+    end
+
+    DP -- "mutates state.phase,\nstate.tasks[].status,\nstate.tasks[].elapsed" --> TS
+    DP -- "verbose mode only" --> RHL
+    SP -- "spec banner" --> RHL
+    R -- "task durations" --> EL
+    R -- "header lines" --> RHL
+    CVR -- "ANSI strip +\nwrap calculation" --> D
+```
 
 ## Related documentation
 
@@ -304,11 +455,14 @@ Union type for per-task states: `"pending" | "planning" | "running" | "done" | "
 - [Configuration System](configuration.md) -- persistent defaults that affect
   concurrency and `--dry-run` behavior
 - [Logger](../shared-types/logger.md) -- alternative output for non-TUI contexts
-- [Format Utilities](../shared-types/format.md) -- `elapsed()` function used
-  for per-task duration display
+- [Format Utilities](../shared-types/format.md) -- `elapsed()` and
+  `renderHeaderLines()` functions used for per-task duration display and
+  header rendering
 - [Integrations](integrations.md) -- chalk color detection and ANSI behavior
 - [Task Parsing Overview](../task-parsing/overview.md) -- the `Task` type displayed by the TUI
 - [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) --
   pipeline stages that drive TUI phase transitions
-- [Cleanup Registry](../shared-types/cleanup.md) -- signal handling and
-  graceful shutdown behavior
+- [Worktree Management](../git-and-worktree/worktree-management.md) -- how
+  worktree names are constructed, affecting the grouped display mode
+- [Configuration System](configuration.md) -- `--concurrency` and `--dry-run`
+  settings that affect TUI behavior

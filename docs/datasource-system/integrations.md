@@ -36,8 +36,9 @@ details.
 
 ### No subprocess timeout
 
-None of the datasource `execFile` calls configure a `timeout` option. This
-means:
+None of the datasource `execFile` calls configure a `timeout` option (see the
+[timeout utility](../shared-utilities/timeout.md) for how timeouts are applied
+at the orchestrator level, though not to subprocess calls). This means:
 
 - A hung `gh` process (e.g., waiting for browser authentication in a headless
   environment) will block the pipeline indefinitely.
@@ -58,24 +59,27 @@ possible with very large Azure DevOps queries.
 ## JSON parsing
 
 Both the GitHub and Azure DevOps datasources parse `stdout` from CLI commands
-using `JSON.parse(stdout)`. There is no `try/catch` around these calls:
+using `JSON.parse(stdout)`. All `JSON.parse` calls are wrapped in `try/catch`
+blocks that throw descriptive errors with truncated output context:
 
-| Datasource | Unguarded `JSON.parse` locations |
+| Datasource | Guarded `JSON.parse` locations |
 |------------|-------------------------------|
-| GitHub | `src/datasources/github.ts:34` (`list`), `src/datasources/github.ts:72` (`fetch`) |
-| Azure DevOps | `src/datasources/azdevops.ts:33` (`list`), `src/datasources/azdevops.ts:74` (`fetch`), `src/datasources/azdevops.ts:160` (`create`) |
+| GitHub | `src/datasources/github.ts:105-108` (`list`), `src/datasources/github.ts:148-151` (`fetch`) |
+| Azure DevOps | `src/datasources/azdevops.ts:61-64` (`list`), `src/datasources/azdevops.ts:107-110` (`fetch`), `src/datasources/azdevops.ts:207-210` (`create`), `src/datasources/azdevops.ts:319-322` (`createPullRequest`) |
 
 If the CLI tool produces non-JSON output (e.g., an HTML error page, a warning
-message, or partial output from a crash), a `SyntaxError` will propagate to the
-caller. The error message will be something like:
+message, or partial output from a crash), the `catch` block throws an `Error`
+with a message that includes the first 200 characters of the unexpected output
+for debugging context. For example:
 
 ```
-SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
+Error: Failed to parse GitHub CLI output: <!DOCTYPE html>...
 ```
 
-The one exception is the `fetchComments()` helper in the Azure DevOps
-datasource (`src/datasources/azdevops.ts:188`), which wraps the entire comment
-fetch (including `JSON.parse`) in a `try/catch` and returns `[]` on failure.
+The `fetchComments()` helper in the Azure DevOps datasource
+(`src/datasources/azdevops.ts:364`) remains a separate case -- it wraps the
+entire comment fetch (including `JSON.parse`) in a `try/catch` and returns `[]`
+on failure.
 
 ## ENOENT behavior
 
@@ -87,8 +91,10 @@ Error: spawn gh ENOENT
     at ChildProcess._handle.onexit (node:internal/child_process:286:19)
 ```
 
-There are no pre-flight checks for tool availability. The error surfaces only
-when a datasource operation is first called. This applies to:
+There are no pre-flight checks for tool availability at the datasource level
+(the [prerequisite checker](../prereqs-and-safety/prereqs.md) validates tool
+presence at startup, but only when the datasource is known). The error surfaces
+only when a datasource operation is first called. This applies to:
 
 | Tool | Required by | Detection point |
 |------|------------|-----------------|
@@ -220,8 +226,13 @@ operations.
 All three datasource implementations use a consistent branch naming convention:
 
 ```
-dispatch/<issueNumber>-<slugified-title>
+<username>/dispatch/<issueNumber>-<slugified-title>
 ```
+
+The `username` is resolved by the `getUsername()` method, which reads
+`git config user.name` and slugifies it. The GitHub and Azure DevOps
+datasources fall back to `"unknown"`, while the markdown datasource falls back
+to `"local"`.
 
 ### Slug construction
 
@@ -236,13 +247,14 @@ datasources):
 
 ### CI/CD implications
 
-The `dispatch/` prefix creates a predictable namespace for CI/CD configuration:
+The `<username>/dispatch/` prefix creates a predictable namespace for CI/CD
+configuration:
 
 **GitHub Actions:**
 ```yaml
 on:
   push:
-    branches: ['dispatch/**']
+    branches: ['*/dispatch/**']
 ```
 
 **Azure DevOps Pipelines:**
@@ -250,7 +262,7 @@ on:
 trigger:
   branches:
     include:
-      - dispatch/*
+      - '*/dispatch/*'
 ```
 
 This allows teams to create pipeline triggers that run only on
@@ -262,6 +274,47 @@ The `createAndSwitchBranch()` method handles the case where a branch already
 exists by falling back to `git checkout <branch>` (switching to it). This
 means re-running dispatch for the same issue will reuse the existing branch
 rather than failing.
+
+## Username resolution
+
+The `getUsername()` method on the `Datasource` interface resolves the current
+developer's git identity for branch namespacing. All three implementations
+read `git config user.name` and slugify the result.
+
+| Datasource | Command | Fallback |
+|------------|---------|----------|
+| **GitHub** | `git config user.name` | `"unknown"` |
+| **Azure DevOps** | `git config user.name` | `"unknown"` |
+| **Markdown** | `git config user.name` | `"local"` |
+
+The resolved username is used as a prefix in branch names
+(`<username>/dispatch/<number>-<slug>`), preventing branch name collisions
+when multiple developers run dispatch on the same repository.
+
+If `git config user.name` is not set, or the working directory is not a git
+repository, the fallback value is used. The markdown datasource uses `"local"`
+instead of `"unknown"` to better reflect its offline, local-first nature.
+
+## Azure DevOps remote URL parsing
+
+The `parseAzDevOpsRemoteUrl()` function exported from `src/datasources/index.ts`
+parses Azure DevOps git remote URLs and extracts the organization URL and
+project name. It supports three URL formats:
+
+| Format | Example |
+|--------|---------|
+| **HTTPS** | `https://dev.azure.com/{org}/{project}/_git/{repo}` |
+| **SSH** | `git@ssh.dev.azure.com:v3/{org}/{project}/{repo}` |
+| **Legacy** | `https://{org}.visualstudio.com/[DefaultCollection/]{project}/_git/{repo}` |
+
+The organization URL is always normalized to `https://dev.azure.com/{org}`,
+even for legacy `visualstudio.com` inputs. URL-encoded segments are decoded.
+Returns `null` if the URL does not match any recognized format.
+
+This function is used to auto-resolve `--org` and `--project` defaults from
+the git remote when they are not provided explicitly, eliminating the need to
+pass `--org https://dev.azure.com/myorg --project myproject` on every command
+for Azure DevOps repositories.
 
 ## Temp file lifecycle
 
@@ -358,7 +411,7 @@ means:
 | Tool not installed | `ENOENT` for `gh` | `ENOENT` for `az` | N/A |
 | Not authenticated | Non-zero exit from `gh` | Non-zero exit from `az` | N/A |
 | Item not found | Non-zero exit from `gh` | Non-zero exit from `az` | `ENOENT` from `readFile` |
-| Malformed JSON | `SyntaxError` | `SyntaxError` | N/A |
+| Malformed JSON | `Error` with context | `Error` with context | N/A |
 | Directory missing | N/A | N/A | Graceful `[]` from `list()`; `ENOENT` from `fetch()` |
 | Network failure | Non-zero exit from `gh` | Non-zero exit from `az` | N/A |
 | Rate limit | Non-zero exit from `gh` | Non-zero exit from `az` | N/A |
@@ -424,5 +477,9 @@ for migration guidance and removal assessment.
   `--source` defaults and three-tier merge logic
 - [Slugify](../shared-utilities/slugify.md) -- Branch name and temp file slug
   construction algorithm
+- [Prerequisite Checker](../prereqs-and-safety/prereqs.md) -- Startup
+  validation that checks for `git`, `gh`, and `az` availability
+- [Timeout Utility](../shared-utilities/timeout.md) -- Deadline enforcement
+  used at the orchestrator level (not applied to datasource subprocess calls)
 - [Shared Types: Integrations](../shared-types/integrations.md) -- Node.js
   fs/promises and child_process operational details

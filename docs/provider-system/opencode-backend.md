@@ -339,7 +339,8 @@ delivers a `session.idle` or `session.error` event.
 - A network interruption silently broke the SSE connection without closing it.
 
 **Resolution**: Kill the dispatch process (Ctrl+C). There is no per-prompt
-timeout. See
+timeout. The [timeout utility](../shared-utilities/timeout.md) is only applied
+to the planning phase, not to executor prompts. See
 [prompt timeouts](./provider-overview.md#prompt-timeouts-and-cancellation) for
 the broader discussion of timeout limitations.
 
@@ -389,9 +390,15 @@ reference.
   sessions for read-only exploration
 - [CLI Options](../cli-orchestration/cli.md) -- `--provider opencode` and
   `--server-url` flags
+- [Configuration System](../cli-orchestration/configuration.md) -- Persistent
+  `--provider` and `--server-url` defaults
 - [Cleanup Registry](../shared-types/cleanup.md) -- Process-level cleanup
   mechanism used for idempotent server shutdown
 - [Orchestrator](../cli-orchestration/orchestrator.md) -- Boot, dispatch, and
   cleanup lifecycle that drives the OpenCode provider
 - [CLI Integrations](../cli-orchestration/integrations.md) -- OpenCode SDK
   integration details and troubleshooting from the CLI perspective
+- [Testing Overview](../testing/overview.md) -- test suite framework and
+  coverage
+- [Provider Tests](../testing/provider-tests.md) -- detailed breakdown of the
+  OpenCode provider unit tests (`opencode.test.ts`)

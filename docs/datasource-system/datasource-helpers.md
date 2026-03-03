@@ -39,7 +39,7 @@ provides clean bridge functions.
 | `getDatasource`, `detectDatasource` | `src/datasources/index.ts` | Resolve datasource by name or auto-detect |
 | `Datasource`, `DatasourceName`, `IssueDetails`, `IssueFetchOptions` | `src/datasources/interface.ts` | Type imports |
 | `TaskFile` | `src/parser.ts` | Represents a parsed spec file with its tasks (see [Task Parsing](../task-parsing/overview.md)) |
-| `DispatchResult` | `src/dispatcher.ts` | Represents the outcome of a dispatched task (see [Dispatcher](../planning-and-dispatch/dispatcher.md)) |
+| `DispatchResult` | `src/dispatcher.ts` | Represents the outcome of a dispatched task (see [Dispatcher](../planning-and-dispatch/dispatcher.md) and [Executor](../planning-and-dispatch/executor.md)) |
 | `log` | `src/logger.ts` | Logging (warnings and success messages) (see [Logger](../shared-types/logger.md)) |
 
 ## `parseIssueFilename`
@@ -142,7 +142,7 @@ truncation limits:
 | Context | Pattern | Slug length limit |
 |---------|---------|-------------------|
 | Temp files | `<number>-<slug>.md` | 60 characters |
-| Branch names | `dispatch/<number>-<slug>` | 50 characters |
+| Branch names | `<username>/dispatch/<number>-<slug>` | 50 characters |
 
 ### Temp directory cleanup
 
@@ -294,5 +294,8 @@ flowchart TD
   checkbox format that the parser extracts
 - [Shared Utilities — Slugify](../shared-utilities/slugify.md) -- The `slugify()`
   function used for temp filename and branch name generation
+- [Executor Agent](../planning-and-dispatch/executor.md) -- How the executor
+  coordinates dispatch and task completion, producing the `DispatchResult`
+  objects consumed by `closeCompletedSpecIssues`
 - [Datasource Testing](./testing.md) -- Test suite covering the md
   datasource and registry
