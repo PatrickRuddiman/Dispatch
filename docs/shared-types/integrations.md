@@ -114,8 +114,31 @@ If upgrading chalk across major versions in the future:
 
 - **v4 to v5:** The API is largely the same. The main change is the switch to
   ESM. If your build pipeline or test runner does not support ESM, stay on v4.
+  Other v5 changes: the `Chalk` constructor replaces `chalk.Instance`; the
+  `keyword()` and `hsl()` color methods were removed (use `rgb()` or `hex()`
+  instead); the `supportsColor` export moved to a separate named import.
 - **Named imports:** v5 exports `Chalk` as a named export for creating custom
   instances. The default import `chalk` continues to work as before.
+
+### Nested chalk styles
+
+Chalk supports arbitrary nesting of styles. When styles of the same category
+(e.g., two foreground colors) are nested, the inner style takes precedence and
+the outer style resumes after the inner string ends:
+
+```typescript
+chalk.green('I am green ' + chalk.blue('I am blue') + ' I am green again')
+```
+
+This works because chalk inserts the correct ANSI reset and re-open sequences.
+Dispatch uses nested styles in `renderHeaderLines()` (`src/helpers/format.ts:39`)
+where `chalk.bold.white(...)` is combined with `chalk.dim(...)` on the same
+line, and in the TUI's issue display (`src/tui.ts:136`) where `chalk.white()`
+is nested inside a `chalk.dim()` context.
+
+Nesting is safe and has no performance implications. Each style call appends
+ANSI open/close escape codes — there is no parsing or state tracking overhead
+beyond string concatenation.
 
 ## Node.js fs/promises
 
@@ -191,7 +214,9 @@ write-to-temp-then-rename pattern (see [Architecture & Concurrency](../task-pars
 1.  Write to a temporary file in the same directory
 2.  `rename()` the temp file to the target path (atomic on most filesystems)
 
-This is not currently implemented in Dispatch.
+This is not currently implemented in Dispatch. For an example of atomic writes
+in the codebase, see the [run-state module](../git-and-worktree/run-state.md#atomic-write-strategy)
+which uses a write-to-temp-then-rename pattern for its state file.
 
 ### Encoding
 
@@ -295,5 +320,9 @@ runs. This is a fundamental OS constraint, not a Dispatch limitation.
   to cleanup on signal
 - [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) --
   File I/O safety, race conditions, and the read-modify-write pattern
+- [Datasource Integrations](../datasource-system/integrations.md) --
+  Subprocess execution model and external CLI tool dependencies
+- [Run State Persistence](../git-and-worktree/run-state.md) -- Atomic write
+  strategy using write-to-temp-then-rename
 - [Testing Overview](../testing/overview.md) -- Test infrastructure for the
   modules that depend on these integrations

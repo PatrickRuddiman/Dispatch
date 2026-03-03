@@ -2,9 +2,9 @@
 
 The provider abstraction layer is the strategy pattern at the heart of dispatch
 that decouples the orchestration pipeline from any specific AI agent runtime. It
-allows the system to swap between OpenCode, GitHub Copilot, or future backends
-through a single `ProviderInstance` interface without changing the orchestrator,
-planner, or dispatcher code.
+allows the system to swap between OpenCode, GitHub Copilot, Claude, Codex, or
+future backends through a single `ProviderInstance` interface without changing
+the orchestrator, planner, or dispatcher code.
 
 ## Why this exists
 
@@ -18,10 +18,12 @@ while the rest of the pipeline remains agnostic.
 
 | File | Role |
 |------|------|
-| `src/provider.ts` | Defines the `ProviderInstance` interface and `ProviderName` union type |
+| `src/providers/interface.ts` | Defines the `ProviderInstance` interface and `ProviderName` union type |
 | `src/providers/index.ts` | Provider registry -- maps names to boot functions |
 | `src/providers/opencode.ts` | OpenCode backend implementation |
 | `src/providers/copilot.ts` | GitHub Copilot backend implementation |
+| `src/providers/claude.ts` | Claude backend implementation |
+| `src/providers/codex.ts` | Codex backend implementation |
 | `src/cleanup.ts` | Process-level cleanup registry for session leak prevention |
 
 ## The ProviderInstance interface
@@ -132,12 +134,14 @@ graph TD
 
     subgraph "Interface (provider.ts)"
         IF["ProviderInstance interface"]
-        PN["ProviderName union type<br/>&quot;opencode&quot; | &quot;copilot&quot;"]
+        PN["ProviderName union type<br/>&quot;opencode&quot; | &quot;copilot&quot; | &quot;claude&quot; | &quot;codex&quot;"]
     end
 
     subgraph "Backends"
         OC["providers/opencode.ts<br/>@opencode-ai/sdk"]
         CP["providers/copilot.ts<br/>@github/copilot-sdk"]
+        CL["providers/claude.ts<br/>@anthropic-ai/claude-agent-sdk"]
+        CX["providers/codex.ts<br/>(codex backend)"]
     end
 
     subgraph "Consumers"
@@ -148,8 +152,12 @@ graph TD
 
     REG --> OC
     REG --> CP
+    REG --> CL
+    REG --> CX
     OC -.->|implements| IF
     CP -.->|implements| IF
+    CL -.->|implements| IF
+    CX -.->|implements| IF
     ORCH -->|bootProvider| REG
     PLAN -->|createSession, prompt| IF
     DISP -->|createSession, prompt| IF
@@ -177,14 +185,14 @@ dispatch "tasks/**/*.md" --provider opencode --server-url http://localhost:4096
 
 ## Why ProviderName is a compile-time union
 
-`ProviderName` is defined as `"opencode" | "copilot"` -- a string literal union
-type rather than a runtime-discovered plugin set. This is a deliberate design
-choice:
+`ProviderName` is defined as `"opencode" | "copilot" | "claude" | "codex"` -- a
+string literal union type rather than a runtime-discovered plugin set. This is a
+deliberate design choice:
 
 - **Type safety**: TypeScript can verify at compile time that only valid provider
   names flow through the CLI, orchestrator, and registry. Misspelled names are
   caught by `tsc`, not at runtime.
-- **Simplicity**: The project is small (two providers). A plugin discovery system
+- **Simplicity**: The project has four providers. A plugin discovery system
   (dynamic `import()`, file scanning, or a plugin manifest) would add complexity
   without proportional benefit.
 - **Explicitness**: All available providers are visible in a single union type and
@@ -382,3 +390,7 @@ implementations normalize to `string | null`:
   format and `(P)`/`(S)` mode prefixes that determine task execution order
 - [Testing Overview](../testing/overview.md) -- Test suite framework and
   coverage including provider-related test patterns
+- [Provider Detection](../prereqs-and-safety/provider-detection.md) -- Binary
+  detection used by the config wizard to show install status
+- [Provider Tests](../testing/provider-tests.md) -- Detailed breakdown of
+  provider unit tests for Claude, Copilot, OpenCode, and the registry

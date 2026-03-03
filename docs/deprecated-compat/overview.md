@@ -495,6 +495,10 @@ interface).
   uses issue fetching
 - [CLI Argument Parser](../cli-orchestration/cli.md) -- `--source` flag
   validation and datasource name references
+- [Datasource Testing](../datasource-system/testing.md) -- Test coverage for
+  the datasource implementations that the shims delegate to
+- [Prerequisite Checker](../prereqs-and-safety/prereqs.md) -- Startup
+  validation of `gh` and `az` CLI tools required by the underlying datasources
 
 ## External references
 

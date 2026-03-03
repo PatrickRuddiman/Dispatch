@@ -238,6 +238,10 @@ creates a unique `/tmp/dispatch-test-*` directory and removes it in `afterEach`.
 - [Shared parser types](../shared-types/parser.md) — `Task`, `TaskFile`, and exported function signatures
 - [Planning & Dispatch overview](../planning-and-dispatch/overview.md) — the planner and dispatcher that consume parser output
 - [Task context and lifecycle](../planning-and-dispatch/task-context-and-lifecycle.md) — task lifecycle from parsing through dispatch
+- [Run State Persistence](../git-and-worktree/run-state.md) — Task ID
+  construction from `Task.file` and `Task.line` fields validated by parser tests
+- [Configuration System](../cli-orchestration/configuration.md) — `--concurrency`
+  setting that controls how `groupTasksByMode` groups are dispatched
 - [Spec generator tests](spec-generator-tests.md) — `(P)`/`(S)`/`(I)` prefix instructions in prompts
 - [Configuration tests](config-tests.md) — config I/O, validation, and merge
   precedence tests for comparison

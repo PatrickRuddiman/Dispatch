@@ -4,7 +4,7 @@ Dispatch is a command-line tool that automates software engineering work by
 delegating tasks from issue trackers to AI coding agents. It reads work items
 from GitHub Issues, Azure DevOps Work Items, or local markdown files, converts
 them into structured specification and task files, and orchestrates AI agents
-(OpenCode or GitHub Copilot) to plan and execute each task — committing changes,
+(OpenCode, GitHub Copilot, Claude, or Codex) to plan and execute each task — committing changes,
 pushing branches, and opening pull requests automatically.
 
 ## Why Dispatch exists
@@ -37,7 +37,7 @@ C4Context
 
     System_Boundary(dispatch, "Dispatch CLI") {
         Container(cli, "CLI Entry Point", "src/cli.ts", "Argument parsing, signal handlers, config routing")
-        Container(config, "Configuration", "src/config.ts, config-prompts.ts, orchestrator/cli-config.ts", "Persistent config (~/.dispatch/config.json), interactive wizard, three-tier merge")
+        Container(config, "Configuration", "src/config.ts, config-prompts.ts, orchestrator/cli-config.ts", "Persistent config ({CWD}/.dispatch/config.json), interactive wizard, three-tier merge")
         Container(runner, "Orchestrator Runner", "src/orchestrator/runner.ts", "Pipeline router: dispatch, spec, fix-tests modes")
 
         Container(spec_pipe, "Spec Pipeline", "src/orchestrator/spec-pipeline.ts", "Issue-to-spec generation with batch concurrency")
@@ -126,7 +126,7 @@ before reaching any pipeline:
 ```mermaid
 flowchart TD
     A["CLI flags<br/>(--provider, --source, etc.)"] --> D["resolveCliConfig()<br/>src/orchestrator/cli-config.ts"]
-    B["Config file<br/>(~/.dispatch/config.json)"] --> D
+    B["Config file<br/>({CWD}/.dispatch/config.json)"] --> D
     C["Hardcoded defaults<br/>(opencode, auto-detect, etc.)"] --> D
     D -->|"explicitFlags set<br/>distinguishes intentional args"| E["Resolved options"]
     E --> F{"Mode?"}
@@ -222,17 +222,17 @@ compile-time string literal union keys, and a boot/get function:
 
 | Registry | Key type | Location | Extension guide |
 |----------|----------|----------|-----------------|
-| Providers | `ProviderName` (`"opencode"` \| `"copilot"`) | `src/providers/index.ts` | [Adding a provider](provider-system/adding-a-provider.md) |
+| Providers | `ProviderName` (`"opencode"` \| `"copilot"` \| `"claude"` \| `"codex"`) | `src/providers/index.ts` | [Adding a provider](provider-system/adding-a-provider.md) |
 | Agents | `AgentName` (`"planner"` \| `"executor"` \| `"spec"`) | `src/agents/index.ts` | `src/agents/interface.ts` docstring |
 | Datasources | `DatasourceName` (`"github"` \| `"azdevops"` \| `"md"`) | `src/datasources/index.ts` | [Adding a datasource](datasource-system/overview.md#adding-a-new-datasource) |
 
 ### Datasource layer
 
-The [datasource interface](datasource-system/overview.md) defines a twelve-method
+The [datasource interface](datasource-system/overview.md) defines a thirteen-method
 contract covering five CRUD operations (`list`, `fetch`, `update`, `close`,
-`create`) and seven git lifecycle operations (`getDefaultBranch`,
-`buildBranchName`, `createAndSwitchBranch`, `switchBranch`, `pushBranch`,
-`commitAllChanges`, `createPullRequest`).
+`create`), one identity method (`getUsername`), and seven git lifecycle
+operations (`getDefaultBranch`, `buildBranchName`, `createAndSwitchBranch`,
+`switchBranch`, `pushBranch`, `commitAllChanges`, `createPullRequest`).
 
 | Datasource | Backend | Auth method | Detail page |
 |------------|---------|-------------|-------------|
@@ -245,9 +245,11 @@ Auto-detection from `git remote get-url origin` matches `github.com`,
 formats are supported. See [auto-detection](datasource-system/overview.md#auto-detection)
 for limitations (no GitHub Enterprise, only checks `origin` remote).
 
-All three implementations use a shared `dispatch/<number>-<slug>` branch naming
-convention via [slugify](shared-utilities/slugify.md), and platform-specific
-PR auto-close syntax (`Closes #N` for GitHub, `Resolves AB#N` for Azure DevOps).
+All three implementations use a shared `<username>/dispatch/<number>-<slug>` branch
+naming convention via [slugify](shared-utilities/slugify.md), and
+platform-specific PR auto-close syntax (`Closes #N` for GitHub,
+`Resolves AB#N` for Azure DevOps) that is used as a fallback when the caller
+does not provide a PR body.
 
 ### Provider layer
 
@@ -259,6 +261,8 @@ agent runtimes behind a session-based lifecycle: `boot` → `createSession` →
 |----------|-----|-------------|-------------|
 | `opencode` | `@opencode-ai/sdk` | Async (fire-and-forget + SSE events) | [OpenCode backend](provider-system/opencode-backend.md) |
 | `copilot` | `@github/copilot-sdk` | Sync (blocking `sendAndWait`) | [Copilot backend](provider-system/copilot-backend.md) |
+| `claude` | Claude CLI | CLI-based interaction | -- |
+| `codex` | Codex CLI | CLI-based interaction | -- |
 
 Each task gets an isolated session to prevent context leakage between tasks.
 Providers manage their own server lifecycle (spawning or connecting to external
@@ -295,7 +299,7 @@ external CLI tools and SDKs:
 There is no secrets rotation mechanism within Dispatch. Token lifecycle is
 managed by the underlying tools. For CI/CD environments, use environment
 variables instead of interactive login. The only persistent data is
-`~/.dispatch/config.json`, which contains user preferences but no secrets.
+`{CWD}/.dispatch/config.json`, which contains user preferences but no secrets.
 See [datasource integrations](datasource-system/integrations.md) and
 [provider overview](provider-system/provider-overview.md).
 
@@ -378,10 +382,10 @@ Concurrent task execution (`--concurrency > 1`) introduces risks documented in
 The planner agent is wrapped in [`withTimeout()`](shared-utilities/timeout.md)
 with configurable bounds:
 
-| Setting | CLI flag | Default | Config key |
-|---------|----------|---------|------------|
-| Planning timeout | `--plan-timeout` | 10 minutes | `planTimeout` |
-| Planning retries | `--plan-retries` | 1 | `planRetries` |
+| Setting | CLI flag | Default |
+|---------|----------|---------|
+| Planning timeout | `--plan-timeout` | 10 minutes |
+| Planning retries | `--plan-retries` | 1 |
 
 On `TimeoutError`, the pipeline retries up to `maxPlanAttempts`. Non-timeout
 errors break immediately. Provider `prompt()` calls themselves have no timeout
@@ -409,7 +413,7 @@ There are no subprocess timeouts on `execFile` calls (except the 10 MB
 
 | Location | Purpose | Lifecycle |
 |----------|---------|-----------|
-| `~/.dispatch/config.json` | Persistent user configuration | Manual via `dispatch config` or by deleting the file |
+| `{CWD}/.dispatch/config.json` | Project-local persistent configuration | Manual via `dispatch config` or by deleting the file |
 | `.dispatch/specs/` | Generated spec files; markdown datasource storage | Managed by datasource lifecycle |
 | `.dispatch/specs/archive/` | Closed specs (markdown datasource) | Manual recovery via file move |
 | `.dispatch/tmp/` | Temp spec files during AI generation (UUID-named) | Cleaned per-spec; may accumulate on crash |
@@ -488,9 +492,9 @@ creates a conventional commit. The commit type (`feat`, `fix`, `docs`,
 
 ### Three-tier configuration precedence
 
-CLI flags override config file values (`~/.dispatch/config.json`), which
+CLI flags override config file values (`{CWD}/.dispatch/config.json`), which
 override hardcoded defaults. An interactive wizard (`dispatch config`) guides
-first-time setup with conditional prompts based on datasource selection. See
+first-time setup with sequential prompts (provider, model, datasource). See
 [configuration](cli-orchestration/configuration.md).
 
 ## Infrastructure
