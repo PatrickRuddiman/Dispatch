@@ -22,7 +22,7 @@ import { log } from "../helpers/logger.js";
 import { confirmLargeBatch } from "../helpers/confirm-large-batch.js";
 import chalk from "chalk";
 import { elapsed, renderHeaderLines } from "../helpers/format.js";
-import { slugify } from "../helpers/slugify.js";
+import { slugify, MAX_SLUG_LENGTH } from "../helpers/slugify.js";
 
 /**
  * Run the spec-generation pipeline end-to-end.
@@ -103,7 +103,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     // Inline text mode: construct IssueDetails from the raw text
     const text = Array.isArray(issues) ? issues.join(" ") : issues;
     const title = text.length > 80 ? text.slice(0, 80).trimEnd() + "…" : text;
-    const slug = slugify(text, 60);
+    const slug = slugify(text, MAX_SLUG_LENGTH);
     const filename = `${slug}.md`;
     const filepath = join(outputDir, filename);
 
@@ -215,7 +215,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
         let filepath: string;
         if (isTrackerMode) {
           // Issue-tracker: write to outputDir with slug filename
-          const slug = slugify(details!.title, 60);
+          const slug = slugify(details!.title, MAX_SLUG_LENGTH);
           const filename = `${id}-${slug}.md`;
           filepath = join(outputDir, filename);
         } else if (isInlineText) {
@@ -244,7 +244,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
           // Derive final filename from H1 heading in the generated spec
           if (isTrackerMode || isInlineText) {
             const h1Title = extractTitle(result.content, filepath);
-            const h1Slug = slugify(h1Title, 60);
+            const h1Slug = slugify(h1Title, MAX_SLUG_LENGTH);
             const finalFilename = isTrackerMode ? `${id}-${h1Slug}.md` : `${h1Slug}.md`;
             const finalFilepath = join(outputDir, finalFilename);
             if (finalFilepath !== filepath) {

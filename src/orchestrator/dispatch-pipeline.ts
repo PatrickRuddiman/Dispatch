@@ -30,6 +30,12 @@ import { withTimeout, TimeoutError } from "../helpers/timeout.js";
 import chalk from "chalk";
 import { elapsed, renderHeaderLines } from "../helpers/format.js";
 
+/** Default planning timeout in minutes when not specified by the user. */
+const DEFAULT_PLAN_TIMEOUT_MIN = 10;
+
+/** Default number of planning retries when not specified by the user. */
+const DEFAULT_PLAN_RETRIES = 1;
+
 /**
  * Run the full dispatch pipeline: discover tasks from a datasource,
  * optionally plan them via the planner agent, execute via the executor
@@ -57,8 +63,8 @@ export async function runDispatchPipeline(
   } = opts;
 
   // Planning timeout/retry defaults
-  const planTimeoutMs = (planTimeout ?? 10) * 60_000; // default 10 minutes → ms
-  const maxPlanAttempts = (planRetries ?? 1) + 1;     // retries + initial attempt
+  const planTimeoutMs = (planTimeout ?? DEFAULT_PLAN_TIMEOUT_MIN) * 60_000;
+  const maxPlanAttempts = (planRetries ?? DEFAULT_PLAN_RETRIES) + 1; // retries + initial attempt
 
   // Dry-run mode uses simple log output
   if (dryRun) {
@@ -276,7 +282,7 @@ export async function runDispatchPipeline(
 
                 // All attempts exhausted with timeout — produce failure result
                 if (!planResult) {
-                  const timeoutMin = planTimeout ?? 10;
+                  const timeoutMin = planTimeout ?? DEFAULT_PLAN_TIMEOUT_MIN;
                   planResult = {
                     prompt: "",
                     success: false,

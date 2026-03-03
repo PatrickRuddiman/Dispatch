@@ -24,6 +24,20 @@ import { getDatasource, detectDatasource, DATASOURCE_NAMES } from "./datasources
 import type { ProviderName } from "./providers/interface.js";
 import { log } from "./helpers/logger.js";
 
+/** Estimated memory (in MB) required per concurrent spec-generation task. */
+export const MB_PER_CONCURRENT_TASK = 500;
+
+/** Recognized H2 section headings used to detect spec structure boundaries. */
+export const RECOGNIZED_H2 = new Set([
+  "## Context",
+  "## Why",
+  "## Approach",
+  "## Integration Points",
+  "## Tasks",
+  "## References",
+  "## Key Guidelines",
+]);
+
 export interface SpecOptions {
   /** Comma-separated issue numbers, glob pattern(s), or "list" to use datasource.list() */
   issues: string | string[];
@@ -51,7 +65,7 @@ export interface SpecOptions {
 
 /** Returns a safe default concurrency: min(cpuCount, freeMB/500), at least 1. */
 export function defaultConcurrency(): number {
-  return Math.max(1, Math.min(cpus().length, Math.floor(freemem() / 1024 / 1024 / 500)));
+  return Math.max(1, Math.min(cpus().length, Math.floor(freemem() / 1024 / 1024 / MB_PER_CONCURRENT_TASK)));
 }
 
 /**
@@ -134,16 +148,6 @@ export function extractSpecContent(raw: string): string {
   content = content.slice(h1Index);
 
   // 3. Remove postamble — trim after the last recognized H2 section's content
-  const RECOGNIZED_H2 = new Set([
-    "## Context",
-    "## Why",
-    "## Approach",
-    "## Integration Points",
-    "## Tasks",
-    "## References",
-    "## Key Guidelines",
-  ]);
-
   const lines = content.split("\n");
   let lastRecognizedSectionEnd = lines.length;
 
