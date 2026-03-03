@@ -182,6 +182,15 @@ export async function runDispatchPipeline(
 
     const lifecycleOpts: DispatchLifecycleOptions = { cwd };
 
+    // Resolve git username once for branch naming
+    let username = "";
+    try {
+      username = await datasource.getUsername(lifecycleOpts);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn(`Could not resolve git username for branch naming: ${message}`);
+    }
+
     // Group tasks by their source file (each file = one issue)
     const tasksByFile = new Map<string, typeof allTasks>();
     for (const task of allTasks) {
@@ -200,7 +209,7 @@ export async function runDispatchPipeline(
       if (!noBranch && details) {
         try {
           defaultBranch = await datasource.getDefaultBranch(lifecycleOpts);
-          branchName = datasource.buildBranchName(details.number, details.title);
+          branchName = datasource.buildBranchName(details.number, details.title, username);
           await datasource.createAndSwitchBranch(branchName, lifecycleOpts);
           log.debug(`Switched to branch ${branchName}`);
         } catch (err) {
@@ -433,6 +442,15 @@ export async function dryRunMode(
 
   const datasource = getDatasource(source);
   const fetchOpts: IssueFetchOptions = { cwd, org, project, workItemType };
+
+  const lifecycleOpts = { cwd };
+  let username = "";
+  try {
+    username = await datasource.getUsername(lifecycleOpts);
+  } catch {
+    // Fall back to empty prefix if username resolution fails
+  }
+
   const items = issueIds.length > 0
     ? await fetchItemsById(issueIds, datasource, fetchOpts)
     : await datasource.list(fetchOpts);
@@ -465,7 +483,7 @@ export async function dryRunMode(
     const parsed = parseIssueFilename(task.file);
     const details = parsed ? items.find((item) => item.number === parsed.issueId) : undefined;
     const branchInfo = details
-      ? ` [branch: ${datasource.buildBranchName(details.number, details.title)}]`
+      ? ` [branch: ${datasource.buildBranchName(details.number, details.title, username)}]`
       : "";
     log.task(allTasks.indexOf(task), allTasks.length, `${task.file}:${task.line} — ${task.text}${branchInfo}`);
   }

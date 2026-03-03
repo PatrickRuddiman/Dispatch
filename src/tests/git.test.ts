@@ -31,37 +31,43 @@ beforeEach(() => {
 // ─── Section A: GitHub — buildBranchName ────────────────────────────────────────
 
 describe("GitHub datasource — buildBranchName", () => {
-  it("builds a branch name from issue number and title", () => {
-    expect(github.buildBranchName("42", "Add User Auth")).toBe(
-      "dispatch/42-add-user-auth",
+  it("builds a branch name from issue number, title, and username", () => {
+    expect(github.buildBranchName("42", "Add User Auth", "jdoe")).toBe(
+      "jdoe/dispatch/42-add-user-auth",
     );
   });
 
   it("strips non-alphanumeric characters and converts to lowercase", () => {
-    expect(github.buildBranchName("10", "Fix Bug #123 (Urgent!)")).toBe(
-      "dispatch/10-fix-bug-123-urgent",
+    expect(github.buildBranchName("10", "Fix Bug #123 (Urgent!)", "jdoe")).toBe(
+      "jdoe/dispatch/10-fix-bug-123-urgent",
     );
   });
 
   it("strips leading and trailing hyphens from slug", () => {
-    expect(github.buildBranchName("5", "---Special---")).toBe(
-      "dispatch/5-special",
+    expect(github.buildBranchName("5", "---Special---", "jdoe")).toBe(
+      "jdoe/dispatch/5-special",
     );
   });
 
   it("truncates slug to 50 characters", () => {
-    expect(github.buildBranchName("1", "a".repeat(100))).toBe(
-      "dispatch/1-" + "a".repeat(50),
+    expect(github.buildBranchName("1", "a".repeat(100), "jdoe")).toBe(
+      "jdoe/dispatch/1-" + "a".repeat(50),
     );
   });
 
   it("handles empty title", () => {
-    expect(github.buildBranchName("1", "")).toBe("dispatch/1-");
+    expect(github.buildBranchName("1", "", "jdoe")).toBe("jdoe/dispatch/1-");
   });
 
   it("handles mixed case and special characters", () => {
-    expect(github.buildBranchName("7", "Hello WORLD! @#$ Test")).toBe(
-      "dispatch/7-hello-world-test",
+    expect(github.buildBranchName("7", "Hello WORLD! @#$ Test", "jdoe")).toBe(
+      "jdoe/dispatch/7-hello-world-test",
+    );
+  });
+
+  it("falls back to 'unknown' when username is omitted", () => {
+    expect(github.buildBranchName("42", "Add User Auth")).toBe(
+      "unknown/dispatch/42-add-user-auth",
     );
   });
 });
@@ -110,6 +116,47 @@ describe("GitHub datasource — getDefaultBranch", () => {
     const result = await github.getDefaultBranch({ cwd: "/tmp/repo" });
 
     expect(result).toBe("develop");
+  });
+});
+
+// ─── Section B2: GitHub — getUsername ───────────────────────────────────────────
+
+describe("GitHub datasource — getUsername", () => {
+  it("returns slugified git username", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "John Doe\n" });
+
+    const result = await github.getUsername({ cwd: "/tmp/repo" });
+
+    expect(result).toBe("john-doe");
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "git",
+      ["config", "user.name"],
+      { cwd: "/tmp/repo" },
+    );
+  });
+
+  it("returns 'unknown' when git config fails", async () => {
+    mockExecFile.mockRejectedValue(new Error("no config"));
+
+    const result = await github.getUsername({ cwd: "/tmp/repo" });
+
+    expect(result).toBe("unknown");
+  });
+
+  it("returns 'unknown' when git username is empty", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "  \n" });
+
+    const result = await github.getUsername({ cwd: "/tmp/repo" });
+
+    expect(result).toBe("unknown");
+  });
+
+  it("slugifies usernames with special characters", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "Jane O'Brien-Smith\n" });
+
+    const result = await github.getUsername({ cwd: "/tmp/repo" });
+
+    expect(result).toBe("jane-o-brien-smith");
   });
 });
 
@@ -682,8 +729,8 @@ describe("Azure DevOps datasource — createPullRequest", () => {
 
 describe("Azure DevOps datasource — buildBranchName", () => {
   it("builds a branch name with the same format as GitHub", () => {
-    expect(azdevops.buildBranchName("42", "Add User Auth")).toBe(
-      "dispatch/42-add-user-auth",
+    expect(azdevops.buildBranchName("42", "Add User Auth", "testuser")).toBe(
+      "testuser/dispatch/42-add-user-auth",
     );
   });
 });
@@ -697,9 +744,22 @@ describe("MD datasource — no-op dispatch lifecycle methods", () => {
     expect(mockExecFile).not.toHaveBeenCalled();
   });
 
-  it("buildBranchName returns the same slug format", () => {
-    expect(md.buildBranchName("42", "My Feature")).toBe(
-      "dispatch/42-my-feature",
+  it("getUsername resolves via git config user.name", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: "John Doe\n", stderr: "" });
+    const result = await md.getUsername({ cwd: "/tmp" });
+    expect(result).toBe("john-doe");
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["config", "user.name"], { cwd: "/tmp" });
+  });
+
+  it("getUsername falls back to 'local' on error", async () => {
+    mockExecFile.mockRejectedValueOnce(new Error("not configured"));
+    const result = await md.getUsername({ cwd: "/tmp" });
+    expect(result).toBe("local");
+  });
+
+  it("buildBranchName returns the new username-prefixed format", () => {
+    expect(md.buildBranchName("42", "My Feature", "local")).toBe(
+      "local/dispatch/42-my-feature",
     );
     expect(mockExecFile).not.toHaveBeenCalled();
   });
