@@ -87,6 +87,14 @@ function statusLabel(status: TaskStatus): string {
   }
 }
 
+function countVisualRows(text: string, cols: number): number {
+  const stripped = text.replace(/\x1B\[[0-9;]*m/g, "");
+  return stripped.split("\n").reduce((sum, line) => {
+    const len = line.length;
+    return sum + Math.max(1, Math.ceil(len / Math.max(1, cols)));
+  }, 0);
+}
+
 function phaseLabel(phase: TuiState["phase"], provider?: string): string {
   switch (phase) {
     case "discovering":
@@ -150,54 +158,126 @@ function render(state: TuiState): string {
     const cols = process.stdout.columns || 80;
     const maxTextLen = cols - 30;
 
-    // Show up to 15 tasks with focus on current active + recent
     const running = state.tasks.filter((t) => t.status === "running" || t.status === "planning");
     const completed = state.tasks.filter(
       (t) => t.status === "done" || t.status === "failed"
     );
     const pending = state.tasks.filter((t) => t.status === "pending");
 
-    // Show completed (last 3), then running, then pending (first 3)
-    const visible: TaskState[] = [
-      ...completed.slice(-3),
-      ...running,
-      ...pending.slice(0, 3),
-    ];
-
-    if (completed.length > 3) {
-      lines.push(chalk.dim(`  ··· ${completed.length - 3} earlier task(s) completed`));
-    }
-
-    for (const ts of visible) {
-      const icon = statusIcon(ts.status);
-      const idx = chalk.dim(`#${state.tasks.indexOf(ts) + 1}`);
-      let text = ts.task.text;
-      if (text.length > maxTextLen) {
-        text = text.slice(0, maxTextLen - 1) + "…";
+    if (showWorktree) {
+      // ── Grouped-by-worktree display ───────────────────────
+      const groups = new Map<string, TaskState[]>();
+      const ungrouped: TaskState[] = [];
+      for (const ts of state.tasks) {
+        if (ts.worktree) {
+          const arr = groups.get(ts.worktree) ?? [];
+          arr.push(ts);
+          groups.set(ts.worktree, arr);
+        } else {
+          ungrouped.push(ts);
+        }
       }
 
-      const elapsedStr =
-        ts.status === "running" || ts.status === "planning"
-          ? chalk.dim(` ${elapsed(now - (ts.elapsed || now))}`)
-          : ts.status === "done" && ts.elapsed
-            ? chalk.dim(` ${elapsed(ts.elapsed)}`)
-            : "";
-
-      const label = statusLabel(ts.status);
-
-      const wtTag = showWorktree && ts.worktree
-        ? chalk.dim(` [wt:${ts.worktree}]`)
-        : "";
-
-      lines.push(`  ${icon} ${idx} ${text} ${label}${elapsedStr}${wtTag}`);
-
-      if (ts.error) {
-        lines.push(chalk.red(`       └─ ${ts.error}`));
+      const doneGroups: [string, TaskState[]][] = [];
+      const activeGroups: [string, TaskState[]][] = [];
+      for (const [wt, tasks] of groups) {
+        const allDone = tasks.every((t) => t.status === "done" || t.status === "failed");
+        if (allDone) {
+          doneGroups.push([wt, tasks]);
+        } else {
+          activeGroups.push([wt, tasks]);
+        }
       }
-    }
 
-    if (pending.length > 3) {
-      lines.push(chalk.dim(`  ··· ${pending.length - 3} more task(s) pending`));
+      // Done groups (collapsed, last 3)
+      if (doneGroups.length > 3) {
+        lines.push(chalk.dim(`  ··· ${doneGroups.length - 3} earlier issue(s) completed`));
+      }
+      for (const [wt, tasks] of doneGroups.slice(-3)) {
+        const issueNum = wt.match(/^(\d+)/)?.[1] ?? wt.slice(0, 12);
+        const anyFailed = tasks.some((t) => t.status === "failed");
+        const icon = anyFailed ? chalk.red("✖") : chalk.green("●");
+        const doneCount = tasks.filter((t) => t.status === "done").length;
+        const maxElapsed = Math.max(...tasks.map((t) => t.elapsed ?? 0));
+        lines.push(`  ${icon} ${chalk.dim(`#${issueNum}`)}  ${chalk.dim(`${doneCount}/${tasks.length} tasks`)}  ${chalk.dim(elapsed(maxElapsed))}`);
+      }
+
+      // Active groups (one row per group)
+      for (const [wt, tasks] of activeGroups) {
+        const issueNum = wt.match(/^(\d+)/)?.[1] ?? wt.slice(0, 12);
+        const activeTasks = tasks.filter((t) => t.status === "running" || t.status === "planning");
+        const activeCount = activeTasks.length;
+        const firstActive = activeTasks[0];
+        const truncLen = Math.min(cols - 26, 60);
+        let text = firstActive?.task.text ?? "";
+        if (text.length > truncLen) {
+          text = text.slice(0, truncLen - 1) + "…";
+        }
+        const earliest = Math.min(...activeTasks.map((t) => t.elapsed ?? now));
+        const elapsedStr = elapsed(now - earliest);
+        lines.push(`  ${spinner()} ${chalk.white(`#${issueNum}`)}  ${activeCount} active  ${text}  ${chalk.dim(elapsedStr)}`);
+      }
+
+      // Ungrouped tasks (only running/planning, flat)
+      for (const ts of ungrouped) {
+        if (ts.status !== "running" && ts.status !== "planning") continue;
+        const icon = statusIcon(ts.status);
+        const idx = chalk.dim(`#${state.tasks.indexOf(ts) + 1}`);
+        let text = ts.task.text;
+        if (text.length > maxTextLen) {
+          text = text.slice(0, maxTextLen - 1) + "…";
+        }
+        const elapsedStr = chalk.dim(` ${elapsed(now - (ts.elapsed || now))}`);
+        const label = statusLabel(ts.status);
+        lines.push(`  ${icon} ${idx} ${text} ${label}${elapsedStr}`);
+        if (ts.error) {
+          lines.push(chalk.red(`       └─ ${ts.error}`));
+        }
+      }
+    } else {
+      // ── Flat display with running cap ─────────────────────
+      const visibleRunning = running.slice(0, 8);
+      const visible: TaskState[] = [
+        ...completed.slice(-3),
+        ...visibleRunning,
+        ...pending.slice(0, 3),
+      ];
+
+      if (completed.length > 3) {
+        lines.push(chalk.dim(`  ··· ${completed.length - 3} earlier task(s) completed`));
+      }
+
+      for (const ts of visible) {
+        const icon = statusIcon(ts.status);
+        const idx = chalk.dim(`#${state.tasks.indexOf(ts) + 1}`);
+        let text = ts.task.text;
+        if (text.length > maxTextLen) {
+          text = text.slice(0, maxTextLen - 1) + "…";
+        }
+
+        const elapsedStr =
+          ts.status === "running" || ts.status === "planning"
+            ? chalk.dim(` ${elapsed(now - (ts.elapsed || now))}`)
+            : ts.status === "done" && ts.elapsed
+              ? chalk.dim(` ${elapsed(ts.elapsed)}`)
+              : "";
+
+        const label = statusLabel(ts.status);
+
+        lines.push(`  ${icon} ${idx} ${text} ${label}${elapsedStr}`);
+
+        if (ts.error) {
+          lines.push(chalk.red(`       └─ ${ts.error}`));
+        }
+      }
+
+      if (running.length > 8) {
+        lines.push(chalk.dim(`  ··· ${running.length - 8} more running`));
+      }
+
+      if (pending.length > 3) {
+        lines.push(chalk.dim(`  ··· ${pending.length - 3} more task(s) pending`));
+      }
     }
 
     // ── Summary line ────────────────────────────────────────
@@ -226,7 +306,8 @@ function draw(state: TuiState): void {
   }
   const output = render(state);
   process.stdout.write(output);
-  lastLineCount = output.split("\n").length;
+  const cols = process.stdout.columns || 80;
+  lastLineCount = countVisualRows(output, cols);
 }
 
 /**

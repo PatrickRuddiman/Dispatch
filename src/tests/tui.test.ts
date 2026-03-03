@@ -280,15 +280,16 @@ describe("task list truncation", () => {
 });
 
 describe("worktree indicator rendering", () => {
-  it("shows worktree tag when multiple worktrees are active", async () => {
+  it("shows grouped display when multiple worktrees are active", async () => {
     await setup();
     tui.state.phase = "dispatching";
-    addTask("running", "Task in wt1", 0, { worktree: "123-fix-auth" });
-    addTask("running", "Task in wt2", 1, { worktree: "456-add-feature" });
+    addTask("running", "Task in wt1", 0, { worktree: "123-fix-auth", elapsed: Date.now() });
+    addTask("running", "Task in wt2", 1, { worktree: "456-add-feature", elapsed: Date.now() });
     tui.update();
     const output = lastOutput();
-    expect(output).toContain("[wt:123-fix-auth]");
-    expect(output).toContain("[wt:456-add-feature]");
+    expect(output).toContain("#123");
+    expect(output).toContain("#456");
+    expect(output).not.toContain("[wt:");
   });
 
   it("hides worktree tag when only one worktree is active", async () => {
@@ -308,16 +309,55 @@ describe("worktree indicator rendering", () => {
     expect(lastOutput()).not.toContain("[wt:");
   });
 
-  it("shows worktree tag only for tasks that have a worktree", async () => {
+  it("shows grouped display with ungrouped tasks rendered flat", async () => {
     await setup();
     tui.state.phase = "dispatching";
-    addTask("running", "Task with wt", 0, { worktree: "123-fix-auth" });
-    addTask("running", "Task without wt", 1);
-    addTask("running", "Task with wt2", 2, { worktree: "456-add-feature" });
+    addTask("running", "Task with wt", 0, { worktree: "123-fix-auth", elapsed: Date.now() });
+    addTask("running", "Task without wt", 1, { elapsed: Date.now() });
+    addTask("running", "Task with wt2", 2, { worktree: "456-add-feature", elapsed: Date.now() });
     tui.update();
     const output = lastOutput();
-    expect(output).toContain("[wt:123-fix-auth]");
-    expect(output).toContain("[wt:456-add-feature]");
+    expect(output).toContain("#123");
+    expect(output).toContain("#456");
+    expect(output).not.toContain("[wt:");
+  });
+
+  it("grouped display shows one row per issue", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    addTask("running", "First task for 123", 0, { worktree: "123-fix-auth", elapsed: Date.now() });
+    addTask("running", "Second task for 123", 1, { worktree: "123-fix-auth", elapsed: Date.now() });
+    addTask("running", "Task for 456", 2, { worktree: "456-add-feature", elapsed: Date.now() });
+    tui.update();
+    const output = lastOutput();
+    expect(output).toContain("#123");
+    expect(output).toContain("#456");
+    expect(output).toContain("2 active");
+    expect(output).toContain("1 active");
+  });
+
+  it("caps running tasks at 8 in flat mode", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    for (let i = 0; i < 12; i++) {
+      addTask("running", `Running task ${i}`, i, { elapsed: Date.now() });
+    }
+    tui.update();
+    const output = lastOutput();
+    expect(output).toContain("4 more running");
+    expect(output).not.toContain("Running task 8");
+  });
+
+  it("shows collapsed done groups in worktree mode", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    addTask("done", "Done task 1", 0, { worktree: "100-old-issue", elapsed: 5000 });
+    addTask("done", "Done task 2", 1, { worktree: "100-old-issue", elapsed: 3000 });
+    addTask("running", "Active task", 2, { worktree: "200-new-issue", elapsed: Date.now() });
+    tui.update();
+    const output = lastOutput();
+    expect(output).toContain("#100");
+    expect(output).toContain("#200");
   });
 });
 
