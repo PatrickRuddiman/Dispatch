@@ -87,14 +87,6 @@ function statusLabel(status: TaskStatus): string {
   }
 }
 
-function countVisualRows(text: string, cols: number): number {
-  const stripped = text.replace(/\x1B\[[0-9;]*m/g, "");
-  return stripped.split("\n").reduce((sum, line) => {
-    const len = line.length;
-    return sum + Math.max(1, Math.ceil(len / Math.max(1, cols)));
-  }, 0);
-}
-
 function phaseLabel(phase: TuiState["phase"], provider?: string): string {
   switch (phase) {
     case "discovering":
@@ -110,6 +102,14 @@ function phaseLabel(phase: TuiState["phase"], provider?: string): string {
     case "done":
       return chalk.green("✔") + " Complete";
   }
+}
+
+function countVisualRows(text: string, cols: number): number {
+  const stripped = text.replace(/\x1B\[[0-9;]*m/g, "");
+  const safeCols = Math.max(1, cols);
+  return stripped.split("\n").reduce((sum, line) => {
+    return sum + Math.max(1, Math.ceil(line.length / safeCols));
+  }, 0);
 }
 
 function render(state: TuiState): string {

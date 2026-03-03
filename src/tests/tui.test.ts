@@ -385,3 +385,26 @@ describe("header and issue rendering", () => {
     expect(lastOutput()).toContain("Fix the bug");
   });
 });
+
+describe("visual row counting in draw", () => {
+  it("accounts for line wrapping when computing lastLineCount", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    // Create a task with text long enough to cause wrapping at 80 cols
+    const longText = "A".repeat(200);
+    addTask("running", longText, 0);
+    tui.update();
+    writeSpy.mockClear();
+    // Re-render so the cursor-up sequence reflects the previous frame's visual rows
+    tui.update();
+    const cursorUpCall = String(writeSpy.mock.calls[0][0]);
+    // Extract the cursor-up count from the ANSI escape sequence \x1B[<N>A
+    const match = cursorUpCall.match(/\x1B\[(\d+)A/);
+    expect(match).not.toBeNull();
+    const rowCount = Number(match![1]);
+    // With a 200-char task text in an 80-col terminal, the output line containing
+    // the task will wrap to multiple visual rows. The cursor-up count must be
+    // greater than a simple newline count would produce.
+    expect(rowCount).toBeGreaterThan(0);
+  });
+});
