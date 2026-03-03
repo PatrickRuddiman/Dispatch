@@ -47,6 +47,8 @@ export interface SpecOptions {
   workItemType?: string;
   /** Max parallel fetches/generations (default: min(cpuCount, freeMB/500)) */
   concurrency?: number;
+  /** When true, log a preview of what would be generated without booting the provider or writing files. */
+  dryRun?: boolean;
 }
 
 /** Returns a safe default concurrency: min(cpuCount, freeMB/500), at least 1. */

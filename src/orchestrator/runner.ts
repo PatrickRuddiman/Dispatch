@@ -25,6 +25,7 @@ export interface OrchestrateRunOptions {
   noPlan?: boolean;
   noBranch?: boolean;
   noWorktree?: boolean;
+  force?: boolean;
   provider?: ProviderName;
   /** Model override to pass to the provider (provider-specific format). */
   model?: string;
@@ -44,6 +45,7 @@ export interface RawCliArgs {
   noPlan: boolean;
   noBranch: boolean;
   noWorktree: boolean;
+  force: boolean;
   concurrency?: number;
   provider: ProviderName;
   /** Model override from config or CLI (provider-specific format). */
@@ -172,6 +174,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
           issues: m.spec, issueSource: m.issueSource, provider: m.provider,
           model: m.model, serverUrl: m.serverUrl, cwd: m.cwd, outputDir: m.outputDir,
           org: m.org, project: m.project, workItemType: m.workItemType, concurrency: m.concurrency,
+          dryRun: m.dryRun,
         });
       }
 
@@ -209,6 +212,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
           issues, issueSource: m.issueSource, provider: m.provider,
           model: m.model, serverUrl: m.serverUrl, cwd: m.cwd, outputDir: m.outputDir,
           org: m.org, project: m.project, workItemType: m.workItemType, concurrency: m.concurrency,
+          dryRun: m.dryRun,
         });
       }
 
@@ -217,6 +221,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
         dryRun: m.dryRun, noPlan: m.noPlan, noBranch: m.noBranch, noWorktree: m.noWorktree, provider: m.provider,
         model: m.model, serverUrl: m.serverUrl, source: m.issueSource, org: m.org, project: m.project,
         workItemType: m.workItemType, planTimeout: m.planTimeout, planRetries: m.planRetries,
+        force: m.force,
       });
     },
   };

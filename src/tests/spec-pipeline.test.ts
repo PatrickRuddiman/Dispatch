@@ -114,9 +114,10 @@ import { runSpecPipeline } from "../orchestrator/spec-pipeline.js";
 import { log } from "../helpers/logger.js";
 import { isIssueNumbers, isGlobOrFilePath, resolveSource } from "../spec-generator.js";
 import { getDatasource } from "../datasources/index.js";
-import { readFile, rename, unlink } from "node:fs/promises";
+import { readFile, mkdir, rename, unlink } from "node:fs/promises";
 import { extractTitle } from "../datasources/md.js";
 import { confirmLargeBatch } from "../helpers/confirm-large-batch.js";
+import { bootProvider } from "../providers/index.js";
 import type { SpecOptions } from "../spec-generator.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -500,6 +501,83 @@ describe("runSpecPipeline", () => {
       expect(result.generated).toBe(0);
       expect(result.failed).toBe(0);
       expect(result.files).toEqual([]);
+      expect(mocks.mockGenerate).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Dry-run mode ──────────────────────────────────────────────
+
+  describe("dry-run mode", () => {
+    it("returns summary with generated: 0 and does not boot provider", async () => {
+      const result = await runSpecPipeline(baseOpts({ dryRun: true, concurrency: 1 }));
+
+      expect(result.generated).toBe(0);
+      expect(result.total).toBe(2);
+      expect(result.files).toEqual([]);
+      expect(result.issueNumbers).toEqual([]);
+      expect(vi.mocked(bootProvider)).not.toHaveBeenCalled();
+    });
+
+    it("does not call confirmLargeBatch", async () => {
+      await runSpecPipeline(baseOpts({ dryRun: true, concurrency: 1 }));
+
+      expect(confirmLargeBatch).not.toHaveBeenCalled();
+    });
+
+    it("does not write any files or generate specs", async () => {
+      await runSpecPipeline(baseOpts({ dryRun: true, concurrency: 1 }));
+
+      expect(mkdir).not.toHaveBeenCalled();
+      expect(mocks.mockGenerate).not.toHaveBeenCalled();
+    });
+
+    it("logs a structured preview for each valid item", async () => {
+      await runSpecPipeline(baseOpts({ dryRun: true, issues: "1,2", concurrency: 1 }));
+
+      expect(vi.mocked(log.info)).toHaveBeenCalledWith(
+        expect.stringContaining("[DRY RUN]"),
+      );
+      expect(vi.mocked(log.info)).toHaveBeenCalledWith(
+        expect.stringContaining("Would generate spec for #1"),
+      );
+      expect(vi.mocked(log.info)).toHaveBeenCalledWith(
+        expect.stringContaining("Would generate spec for #2"),
+      );
+    });
+
+    it("returns failed count for items that could not be loaded", async () => {
+      mocks.mockFetch
+        .mockRejectedValueOnce(new Error("Not found"))
+        .mockResolvedValueOnce({
+          number: "2",
+          title: "Test Issue 2",
+          body: "Issue body 2",
+          labels: [],
+          state: "open",
+          url: "https://example.com/2",
+          comments: [],
+          acceptanceCriteria: "",
+        });
+
+      const result = await runSpecPipeline(baseOpts({ dryRun: true, issues: "1,2", concurrency: 1 }));
+
+      expect(result.total).toBe(2);
+      expect(result.generated).toBe(0);
+      expect(result.failed).toBe(1);
+      expect(vi.mocked(bootProvider)).not.toHaveBeenCalled();
+    });
+
+    it("works in file/glob mode", async () => {
+      vi.mocked(isIssueNumbers).mockReturnValue(false);
+      vi.mocked(isGlobOrFilePath).mockReturnValue(true);
+      mocks.mockGlob.mockResolvedValue(["/tmp/test-cwd/spec1.md"]);
+      vi.mocked(readFile).mockResolvedValue("# File Content\n\nBody");
+
+      const result = await runSpecPipeline(baseOpts({ dryRun: true, issues: "*.md" }));
+
+      expect(result.generated).toBe(0);
+      expect(result.total).toBe(1);
+      expect(vi.mocked(bootProvider)).not.toHaveBeenCalled();
       expect(mocks.mockGenerate).not.toHaveBeenCalled();
     });
   });

@@ -42,6 +42,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     project,
     workItemType,
     concurrency = defaultConcurrency(),
+    dryRun,
   } = opts;
 
   const pipelineStart = Date.now();
@@ -158,6 +159,36 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     const noun = isTrackerMode ? "issues" : isInlineText ? "inline specs" : "files";
     log.error(`No ${noun} could be loaded. Aborting spec generation.`);
     return { total: items.length, generated: 0, failed: items.length, files: [], issueNumbers: [], durationMs: Date.now() - pipelineStart, fileDurationsMs: {} };
+  }
+
+  // ── Dry-run: preview items without booting provider ────────
+  if (dryRun) {
+    const mode = isTrackerMode ? "tracker" : isInlineText ? "inline" : "file";
+    log.info(`[DRY RUN] Would generate ${validItems.length} spec(s) (mode: ${mode}):\n`);
+
+    for (const { id, details } of validItems) {
+      let filepath: string;
+      if (isTrackerMode) {
+        const slug = slugify(details!.title, 60);
+        filepath = join(outputDir, `${id}-${slug}.md`);
+      } else {
+        filepath = id;
+      }
+
+      const label = isTrackerMode ? `#${id}` : filepath;
+      log.info(`[DRY RUN] Would generate spec for ${label}: "${details!.title}"`);
+      log.dim(`    → ${filepath}`);
+    }
+
+    return {
+      total: items.length,
+      generated: 0,
+      failed: items.filter((i) => i.details === null).length,
+      files: [],
+      issueNumbers: [],
+      durationMs: Date.now() - pipelineStart,
+      fileDurationsMs: {},
+    };
   }
 
   // ── Confirm large batch ─────────────────────────────────────
