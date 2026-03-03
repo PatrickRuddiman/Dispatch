@@ -4,7 +4,8 @@ import { runInteractiveConfigWizard } from "../config-prompts.js";
 import { loadConfig, saveConfig } from "../config.js";
 import { detectDatasource } from "../datasources/index.js";
 import { detectWorkItemType } from "../datasources/azdevops.js";
-import { listProviderModels } from "../providers/index.js";
+import { listProviderModels, checkProviderInstalled } from "../providers/index.js";
+import chalk from "chalk";
 
 vi.mock("@inquirer/prompts", () => ({
   select: vi.fn(),
@@ -43,6 +44,7 @@ vi.mock("../providers/index.js", async (importOriginal) => {
   return {
     ...actual,
     listProviderModels: vi.fn().mockResolvedValue([]),
+    checkProviderInstalled: vi.fn().mockResolvedValue(true),
   };
 });
 
@@ -359,5 +361,51 @@ describe("runInteractiveConfigWizard", () => {
     await runInteractiveConfigWizard();
     const datasourceCall = vi.mocked(select).mock.calls[1][0];
     expect(datasourceCall.choices[0]).toMatchObject({ name: "auto", value: "auto" });
+  });
+
+  it("provider select choices include install indicator annotations", async () => {
+    vi.mocked(checkProviderInstalled).mockResolvedValue(true);
+    vi.mocked(loadConfig).mockResolvedValueOnce({});
+    vi.mocked(select)
+      .mockResolvedValueOnce("copilot")
+      .mockResolvedValueOnce("github");
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // advanced settings
+      .mockResolvedValueOnce(true); // save
+    await runInteractiveConfigWizard();
+    const providerCall = vi.mocked(select).mock.calls[0][0];
+    for (const choice of providerCall.choices as Array<{ name: string; value: string }>) {
+      expect(choice.name).toBe(
+        `${chalk.green("●")} ${choice.value}`,
+      );
+    }
+  });
+
+  it("provider select choices show red indicator for uninstalled providers", async () => {
+    vi.mocked(checkProviderInstalled).mockImplementation(
+      async (name) => name !== "copilot",
+    );
+    vi.mocked(loadConfig).mockResolvedValueOnce({});
+    vi.mocked(select)
+      .mockResolvedValueOnce("copilot")
+      .mockResolvedValueOnce("github");
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // advanced settings
+      .mockResolvedValueOnce(true); // save
+    await runInteractiveConfigWizard();
+    const providerCall = vi.mocked(select).mock.calls[0][0];
+    const choices = providerCall.choices as Array<{ name: string; value: string }>;
+    const copilotChoice = choices.find(
+      (c) => c.value === "copilot",
+    );
+    expect(copilotChoice!.name).toBe(`${chalk.red("●")} copilot`);
+    const otherChoices = choices.filter(
+      (c) => c.value !== "copilot",
+    );
+    for (const choice of otherChoices) {
+      expect(choice.name).toBe(
+        `${chalk.green("●")} ${choice.value}`,
+      );
+    }
   });
 });
