@@ -10,6 +10,7 @@ import { parseTaskFile, buildTaskContext, groupTasksByMode, type TaskFile } from
 import type { DispatchResult } from "../dispatcher.js";
 import { boot as bootPlanner, type PlanResult } from "../agents/planner.js";
 import { boot as bootExecutor } from "../agents/executor.js";
+import { boot as bootCommit } from "../agents/commit.js";
 import { log } from "../helpers/logger.js";
 import { registerCleanup } from "../helpers/cleanup.js";
 import { createWorktree, removeWorktree, worktreeName } from "../helpers/worktree.js";
@@ -26,6 +27,8 @@ import {
   parseIssueFilename,
   buildPrBody,
   buildPrTitle,
+  getBranchDiff,
+  squashBranchCommits,
 } from "./datasource-helpers.js";
 import { withTimeout, TimeoutError } from "../helpers/timeout.js";
 import chalk from "chalk";
@@ -175,6 +178,7 @@ export async function runDispatchPipeline(
     // ── 4. Boot planner agent (unless --no-plan) ────────────────
     const planner = noPlan ? null : await bootPlanner({ provider: instance, cwd });
     const executor = await bootExecutor({ provider: instance, cwd });
+    const commitAgent = await bootCommit({ provider: instance, cwd });
 
     // ── 5. Dispatch tasks ───────────────────────────────────────
     tui.state.phase = "dispatching";
@@ -389,6 +393,36 @@ export async function runDispatchPipeline(
         }
       }
 
+      // ── Commit agent (rewrite commits + generate PR metadata) ───
+      let commitAgentResult: import("../agents/commit.js").CommitResult | undefined;
+      if (!noBranch && branchName && defaultBranch && details) {
+        try {
+          const branchDiff = await getBranchDiff(defaultBranch, issueCwd);
+          if (branchDiff) {
+            const result = await commitAgent.generate({
+              branchDiff,
+              issue: details,
+              taskResults: issueResults,
+              cwd: issueCwd,
+            });
+            if (result.success) {
+              commitAgentResult = result;
+              // Rewrite commit history with the generated message
+              try {
+                await squashBranchCommits(defaultBranch, result.commitMessage, issueCwd);
+                log.debug(`Rewrote commit message for issue #${details.number}`);
+              } catch (err) {
+                log.warn(`Could not rewrite commit message for issue #${details.number}: ${log.formatErrorChain(err)}`);
+              }
+            } else {
+              log.warn(`Commit agent failed for issue #${details.number}: ${result.error}`);
+            }
+          }
+        } catch (err) {
+          log.warn(`Commit agent error for issue #${details.number}: ${log.formatErrorChain(err)}`);
+        }
+      }
+
       // ── Branch teardown (push, PR, cleanup) ──────────────────
       if (!noBranch && branchName && defaultBranch && details) {
         try {
@@ -399,15 +433,17 @@ export async function runDispatchPipeline(
         }
 
         try {
-          const prTitle = await buildPrTitle(details.title, defaultBranch, issueLifecycleOpts.cwd);
-          const prBody = await buildPrBody(
-            details,
-            fileTasks,
-            issueResults,
-            defaultBranch,
-            datasource.name,
-            issueLifecycleOpts.cwd,
-          );
+          const prTitle = commitAgentResult?.prTitle
+            || await buildPrTitle(details.title, defaultBranch, issueLifecycleOpts.cwd);
+          const prBody = commitAgentResult?.prDescription
+            || await buildPrBody(
+              details,
+              fileTasks,
+              issueResults,
+              defaultBranch,
+              datasource.name,
+              issueLifecycleOpts.cwd,
+            );
           const prUrl = await datasource.createPullRequest(
             branchName,
             details.number,
@@ -457,6 +493,7 @@ export async function runDispatchPipeline(
     await closeCompletedSpecIssues(taskFiles, results, cwd, source, org, project, workItemType);
 
     // ── 7. Cleanup ──────────────────────────────────────────────
+    await commitAgent.cleanup();
     await executor.cleanup();
     await planner?.cleanup();
     await instance.cleanup();
