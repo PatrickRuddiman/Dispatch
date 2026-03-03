@@ -13,7 +13,6 @@ import { resolve, join } from "node:path";
 import { boot as bootOrchestrator, type RawCliArgs } from "./orchestrator/runner.js";
 import { log } from "./helpers/logger.js";
 import { runCleanup } from "./helpers/cleanup.js";
-import { checkPrereqs } from "./helpers/prereqs.js";
 import type { ProviderName } from "./providers/interface.js";
 import type { DatasourceName } from "./datasources/interface.js";
 import { PROVIDER_NAMES } from "./providers/index.js";
@@ -271,15 +270,6 @@ async function main() {
   if (args.version) {
     console.log(`dispatch v${__VERSION__}`);
     process.exit(0);
-  }
-
-  // ── Prerequisite checks ───────────────────────────────────
-  const prereqFailures = await checkPrereqs();
-  if (prereqFailures.length > 0) {
-    for (const msg of prereqFailures) {
-      log.error(msg);
-    }
-    process.exit(1);
   }
 
   // ── Delegate to orchestrator ───────────────────────────────

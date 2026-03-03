@@ -11,6 +11,7 @@ import { defaultConcurrency, resolveSource } from "../spec-generator.js";
 import { getDatasource } from "../datasources/index.js";
 import { log } from "../helpers/logger.js";
 import { confirmLargeBatch } from "../helpers/confirm-large-batch.js";
+import { checkPrereqs } from "../helpers/prereqs.js";
 import { resolveCliConfig } from "./cli-config.js";
 import { runSpecPipeline } from "./spec-pipeline.js";
 import { runDispatchPipeline } from "./dispatch-pipeline.js";
@@ -123,6 +124,15 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
 
     async runFromCli(args: RawCliArgs): Promise<RunResult> {
       const m = await resolveCliConfig(args);
+
+      // ── Prerequisite checks ───────────────────────────────────
+      const prereqFailures = await checkPrereqs({ datasource: m.issueSource });
+      if (prereqFailures.length > 0) {
+        for (const msg of prereqFailures) {
+          log.error(msg);
+        }
+        process.exit(1);
+      }
 
       // ── Mutual exclusion: --spec, --respec, --fix-tests ────
       const modeFlags = [
