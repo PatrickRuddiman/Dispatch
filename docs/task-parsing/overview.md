@@ -115,3 +115,6 @@ for a detailed analysis.
   including [parser tests](../testing/parser-tests.md) (62 test cases)
 - [Datasource System](../datasource-system/overview.md) -- the markdown
   datasource also reads/writes `.md` files (in `.dispatch/specs/`)
+- [Git Worktree Helpers](../git-and-worktree/overview.md) -- worktree
+  isolation model; task files are parsed and mutated within isolated worktrees
+  during parallel dispatch

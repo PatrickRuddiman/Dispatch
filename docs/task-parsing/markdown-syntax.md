@@ -60,7 +60,8 @@ verified by the negative test cases in `src/parser.test.ts:182-196` (see
 Tasks can be annotated with a `(P)`, `(S)`, or `(I)` prefix to control whether
 they execute in parallel, serial, or isolated mode within the dispatch pipeline.
 This prefix appears immediately after the checkbox and before the task
-description.
+description. The [spec generation pipeline](../spec-generation/overview.md#output-format)
+instructs the AI to produce these prefixes when generating spec files.
 
 ### Regex definition
 

@@ -185,6 +185,10 @@ When adding tests for the parser:
   `TaskFile`, and exported functions from the shared-types perspective
 - [Shared Utilities Testing](../shared-utilities/testing.md) -- slugify and
   timeout test patterns for comparison (pure-function and fake-timer testing)
+- [Provider Tests](../testing/provider-tests.md) -- Provider unit test patterns
+  for comparison (mock-heavy integration testing)
+- [Prerequisite Tests](../prereqs-and-safety/prereqs.md#testing) -- Prerequisite
+  checker test patterns for comparison (mock-based CLI tool detection)
 - [Planning & Dispatch Overview](../planning-and-dispatch/overview.md) -- the
   planner and dispatcher that consume parser output
 
