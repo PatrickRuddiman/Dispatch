@@ -288,7 +288,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
 
           // Derive final filename from H1 heading in the generated spec
           if (isTrackerMode || isInlineText) {
-            const h1Title = extractTitle(result.content, filepath);
+            const h1Title = extractTitle(result.data!.content, filepath);
             const h1Slug = slugify(h1Title, MAX_SLUG_LENGTH);
             const finalFilename = isTrackerMode ? `${id}-${h1Slug}.md` : `${h1Slug}.md`;
             const finalFilepath = join(outputDir, finalFilename);
@@ -309,7 +309,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
           try {
             if (isTrackerMode) {
               // Tracker mode: update the existing issue with the generated spec
-              await datasource.update(id, details.title, result.content, fetchOpts);
+              await datasource.update(id, details.title, result.data!.content, fetchOpts);
               log.success(`Updated issue #${id} with spec content`);
               await unlink(filepath);
               log.success(`Deleted local spec ${filepath} (now tracked as issue #${id})`);
@@ -317,7 +317,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
               issueNumbers.push(id);
             } else if (datasource.name !== "md") {
               // File/glob mode with tracker datasource: create a new issue and delete the local file
-              const created = await datasource.create(details.title, result.content, fetchOpts);
+              const created = await datasource.create(details.title, result.data!.content, fetchOpts);
               log.success(`Created issue #${created.number} from ${filepath}`);
               await unlink(filepath);
               log.success(`Deleted local spec ${filepath} (now tracked as issue #${created.number})`);

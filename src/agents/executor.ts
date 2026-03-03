@@ -8,9 +8,10 @@
  */
 
 import type { Agent, AgentBootOptions } from "./interface.js";
+import type { AgentResult, ExecutorData } from "./types.js";
 import type { Task } from "../parser.js";
 import { markTaskComplete } from "../parser.js";
-import { dispatchTask, type DispatchResult } from "../dispatcher.js";
+import { dispatchTask } from "../dispatcher.js";
 import { log } from "../helpers/logger.js";
 
 /**
@@ -32,23 +33,6 @@ export interface ExecuteInput {
 }
 
 /**
- * Structured result of executing a single task.
- *
- * The orchestrator maps these fields to TUI state changes — the executor
- * does not own the TUI.
- */
-export interface ExecuteResult {
-  /** The underlying dispatch result */
-  dispatchResult: DispatchResult;
-  /** Whether the task completed successfully */
-  success: boolean;
-  /** Error message if execution failed */
-  error?: string;
-  /** Elapsed wall-clock time in milliseconds */
-  elapsedMs: number;
-}
-
-/**
  * A booted executor agent that can execute planned (or unplanned) tasks.
  */
 export interface ExecutorAgent extends Agent {
@@ -56,7 +40,7 @@ export interface ExecutorAgent extends Agent {
    * Execute a single task. Dispatches to the provider, marks the task
    * complete on success, and returns a structured result.
    */
-  execute(input: ExecuteInput): Promise<ExecuteResult>;
+  execute(input: ExecuteInput): Promise<AgentResult<ExecutorData>>;
 }
 
 /**
@@ -75,7 +59,7 @@ export async function boot(opts: AgentBootOptions): Promise<ExecutorAgent> {
   return {
     name: "executor",
 
-    async execute(input: ExecuteInput): Promise<ExecuteResult> {
+    async execute(input: ExecuteInput): Promise<AgentResult<ExecutorData>> {
       const { task, cwd, plan, worktreeRoot } = input;
       const startTime = Date.now();
 
@@ -89,18 +73,18 @@ export async function boot(opts: AgentBootOptions): Promise<ExecutorAgent> {
         }
 
         return {
-          dispatchResult: result,
+          data: { dispatchResult: result },
           success: result.success,
           error: result.error,
-          elapsedMs: Date.now() - startTime,
+          durationMs: Date.now() - startTime,
         };
       } catch (err) {
         const message = log.extractMessage(err);
         return {
-          dispatchResult: { task, success: false, error: message },
+          data: { dispatchResult: { task, success: false, error: message } },
           success: false,
           error: message,
-          elapsedMs: Date.now() - startTime,
+          durationMs: Date.now() - startTime,
         };
       }
     },

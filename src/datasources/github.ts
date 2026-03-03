@@ -85,6 +85,10 @@ export async function getCommitMessages(defaultBranch: string, cwd: string): Pro
 export const datasource: Datasource = {
   name: "github",
 
+  supportsGit(): boolean {
+    return true;
+  },
+
   async list(opts: IssueFetchOptions = {}): Promise<IssueDetails[]> {
     const cwd = opts.cwd || process.cwd();
 

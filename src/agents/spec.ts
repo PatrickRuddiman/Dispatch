@@ -13,6 +13,7 @@ import { mkdir, readFile, writeFile, unlink } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Agent, AgentBootOptions } from "./interface.js";
+import type { AgentResult, SpecData } from "./types.js";
 import type { IssueDetails } from "../datasources/interface.js";
 import { extractSpecContent, validateSpecStructure } from "../spec-generator.js";
 import { extractTitle } from "../datasources/md.js";
@@ -39,22 +40,6 @@ export interface SpecGenerateOptions {
 }
 
 /**
- * Result returned by the spec agent's `generate()` method.
- */
-export interface SpecResult {
-  /** The cleaned spec content */
-  content: string;
-  /** Whether generation succeeded */
-  success: boolean;
-  /** Error message if generation failed */
-  error?: string;
-  /** Whether the spec passed structural validation */
-  valid: boolean;
-  /** Validation failure reason, if any */
-  validationReason?: string;
-}
-
-/**
  * A booted spec agent that can generate spec files.
  */
 export interface SpecAgent extends Agent {
@@ -63,7 +48,7 @@ export interface SpecAgent extends Agent {
    * to write to a temp file, post-processes and validates the content,
    * writes the cleaned result to the final output path, and cleans up.
    */
-  generate(opts: SpecGenerateOptions): Promise<SpecResult>;
+  generate(opts: SpecGenerateOptions): Promise<AgentResult<SpecData>>;
 }
 
 /**
@@ -82,7 +67,7 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
   return {
     name: "spec",
 
-    async generate(genOpts: SpecGenerateOptions): Promise<SpecResult> {
+    async generate(genOpts: SpecGenerateOptions): Promise<AgentResult<SpecData>> {
       const { issue, filePath, fileContent, inlineText, cwd: workingDir, outputPath } = genOpts;
 
       try {
@@ -94,10 +79,9 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
           !resolvedOutput.startsWith(resolvedCwd + sep)
         ) {
           return {
-            content: "",
+            data: null,
             success: false,
             error: `Output path "${outputPath}" escapes the working directory "${workingDir}"`,
-            valid: false,
           };
         }
 
@@ -119,10 +103,9 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
           prompt = buildFileSpecPrompt(filePath, fileContent, workingDir, tmpPath);
         } else {
           return {
-            content: "",
+            data: null,
             success: false,
             error: "Either issue, inlineText, or filePath+fileContent must be provided",
-            valid: false,
           };
         }
 
@@ -133,10 +116,9 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
 
         if (response === null) {
           return {
-            content: "",
+            data: null,
             success: false,
             error: "AI agent returned no response",
-            valid: false,
           };
         }
 
@@ -148,10 +130,9 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
           rawContent = await readFile(tmpPath, "utf-8");
         } catch {
           return {
-            content: "",
+            data: null,
             success: false,
             error: `Spec agent did not write the file to ${tmpPath}. Agent response: ${response.slice(0, 300)}`,
-            valid: false,
           };
         }
 
@@ -177,18 +158,19 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
         }
 
         return {
-          content: cleanedContent,
+          data: {
+            content: cleanedContent,
+            valid: validation.valid,
+            validationReason: validation.reason,
+          },
           success: true,
-          valid: validation.valid,
-          validationReason: validation.reason,
         };
       } catch (err) {
         const message = log.extractMessage(err);
         return {
-          content: "",
+          data: null,
           success: false,
           error: message,
-          valid: false,
         };
       }
     },

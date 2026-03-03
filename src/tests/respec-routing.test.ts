@@ -106,6 +106,7 @@ function createIssueDetails(overrides?: Partial<IssueDetails>): IssueDetails {
 function createMockDatasource(overrides?: Partial<Datasource>): Datasource {
   return {
     name: "md",
+    supportsGit: vi.fn<Datasource["supportsGit"]>().mockReturnValue(false),
     list: vi.fn<Datasource["list"]>().mockResolvedValue([]),
     fetch: vi.fn<Datasource["fetch"]>().mockResolvedValue({} as IssueDetails),
     update: vi.fn<Datasource["update"]>().mockResolvedValue(undefined),

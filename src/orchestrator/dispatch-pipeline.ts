@@ -8,8 +8,9 @@
 import { readFile } from "node:fs/promises";
 import { parseTaskFile, buildTaskContext, groupTasksByMode, type TaskFile } from "../parser.js";
 import type { DispatchResult } from "../dispatcher.js";
-import { boot as bootPlanner, type PlanResult, type PlannerAgent } from "../agents/planner.js";
-import { boot as bootExecutor, type ExecutorAgent, type ExecuteResult } from "../agents/executor.js";
+import { boot as bootPlanner, type PlannerAgent } from "../agents/planner.js";
+import type { AgentResult, PlannerData, ExecutorData } from "../agents/types.js";
+import { boot as bootExecutor, type ExecutorAgent } from "../agents/executor.js";
 import { boot as bootCommit, type CommitAgent } from "../agents/commit.js";
 import { log } from "../helpers/logger.js";
 import { registerCleanup } from "../helpers/cleanup.js";
@@ -258,7 +259,7 @@ export async function runDispatchPipeline(
               const tuiTask = tui.state.tasks.find((t) => t.task === task);
               if (tuiTask) tuiTask.worktree = wtName;
             }
-          } else {
+          } else if (datasource.supportsGit()) {
             await datasource.createAndSwitchBranch(branchName, lifecycleOpts);
             log.debug(`Switched to branch ${branchName}`);
           }
@@ -327,7 +328,7 @@ export async function runDispatchPipeline(
                 const rawContent = fileContentMap.get(task.file);
                 const fileContext = rawContent ? buildTaskContext(rawContent, task) : undefined;
 
-                let planResult: PlanResult | undefined;
+                let planResult: AgentResult<PlannerData> | undefined;
 
                 for (let attempt = 1; attempt <= maxPlanAttempts; attempt++) {
                   try {
@@ -348,9 +349,10 @@ export async function runDispatchPipeline(
                     } else {
                       // Non-timeout error — do not retry, surface immediately
                       planResult = {
-                        prompt: "",
+                        data: null,
                         success: false,
                         error: log.extractMessage(err),
+                        durationMs: 0,
                       };
                       break;
                     }
@@ -361,9 +363,10 @@ export async function runDispatchPipeline(
                 if (!planResult) {
                   const timeoutMin = planTimeout ?? 10;
                   planResult = {
-                    prompt: "",
+                    data: null,
                     success: false,
                     error: `Planning timed out after ${timeoutMin}m (${maxPlanAttempts} attempts)`,
+                    durationMs: 0,
                   };
                 }
 
@@ -376,7 +379,7 @@ export async function runDispatchPipeline(
                   return { task, success: false, error: tuiTask.error } as DispatchResult;
                 }
 
-                plan = planResult.prompt;
+                plan = planResult.data?.prompt;
               }
 
               // ── Phase B: Execute via executor agent ──────────────
@@ -398,11 +401,11 @@ export async function runDispatchPipeline(
                 },
                 execRetries,
                 { label: `executor "${task.text}"` },
-              ).catch((err): ExecuteResult => ({
-                dispatchResult: { task, success: false, error: log.extractMessage(err) },
+              ).catch((err): AgentResult<ExecutorData> => ({
+                data: { dispatchResult: { task, success: false, error: log.extractMessage(err) } },
                 success: false,
                 error: log.extractMessage(err),
-                elapsedMs: 0,
+                durationMs: 0,
               }));
 
               if (execResult.success) {
@@ -432,7 +435,7 @@ export async function runDispatchPipeline(
                 failed++;
               }
 
-              return execResult.dispatchResult;
+              return execResult.data!.dispatchResult;
             })
           );
 
@@ -493,37 +496,41 @@ export async function runDispatchPipeline(
 
       // ── Branch teardown (push, PR, cleanup) ──────────────────
       if (!noBranch && branchName && defaultBranch && details) {
-        try {
-          await datasource.pushBranch(branchName, issueLifecycleOpts);
-          log.debug(`Pushed branch ${branchName}`);
-        } catch (err) {
-          log.warn(`Could not push branch ${branchName}: ${log.formatErrorChain(err)}`);
+        if (datasource.supportsGit()) {
+          try {
+            await datasource.pushBranch(branchName, issueLifecycleOpts);
+            log.debug(`Pushed branch ${branchName}`);
+          } catch (err) {
+            log.warn(`Could not push branch ${branchName}: ${log.formatErrorChain(err)}`);
+          }
         }
 
-        try {
-          const prTitle = commitAgentResult?.prTitle
-            || await buildPrTitle(details.title, defaultBranch, issueLifecycleOpts.cwd);
-          const prBody = commitAgentResult?.prDescription
-            || await buildPrBody(
-              details,
-              fileTasks,
-              issueResults,
-              defaultBranch,
-              datasource.name,
-              issueLifecycleOpts.cwd,
+        if (datasource.supportsGit()) {
+          try {
+            const prTitle = commitAgentResult?.prTitle
+              || await buildPrTitle(details.title, defaultBranch, issueLifecycleOpts.cwd);
+            const prBody = commitAgentResult?.prDescription
+              || await buildPrBody(
+                details,
+                fileTasks,
+                issueResults,
+                defaultBranch,
+                datasource.name,
+                issueLifecycleOpts.cwd,
+              );
+            const prUrl = await datasource.createPullRequest(
+              branchName,
+              details.number,
+              prTitle,
+              prBody,
+              issueLifecycleOpts,
             );
-          const prUrl = await datasource.createPullRequest(
-            branchName,
-            details.number,
-            prTitle,
-            prBody,
-            issueLifecycleOpts,
-          );
-          if (prUrl) {
-            log.success(`Created PR for issue #${details.number}: ${prUrl}`);
+            if (prUrl) {
+              log.success(`Created PR for issue #${details.number}: ${prUrl}`);
+            }
+          } catch (err) {
+            log.warn(`Could not create PR for issue #${details.number}: ${log.formatErrorChain(err)}`);
           }
-        } catch (err) {
-          log.warn(`Could not create PR for issue #${details.number}: ${log.formatErrorChain(err)}`);
         }
 
         if (useWorktrees && worktreePath) {
@@ -533,7 +540,7 @@ export async function runDispatchPipeline(
           } catch (err) {
             log.warn(`Could not remove worktree for issue #${details.number}: ${log.formatErrorChain(err)}`);
           }
-        } else if (!useWorktrees) {
+        } else if (!useWorktrees && datasource.supportsGit()) {
           try {
             await datasource.switchBranch(defaultBranch, lifecycleOpts);
             log.debug(`Switched back to ${defaultBranch}`);

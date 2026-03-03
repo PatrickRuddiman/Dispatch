@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Task, TaskFile } from "../parser.js";
-import type { PlanResult, PlannerAgent } from "../agents/planner.js";
+import type { PlannerAgent } from "../agents/planner.js";
+import type { AgentResult, PlannerData } from "../agents/types.js";
 import type { ProviderInstance } from "../providers/interface.js";
 import type { Datasource, IssueDetails } from "../datasources/interface.js";
 
@@ -90,6 +91,7 @@ vi.mock("../agents/commit.js", () => ({
 vi.mock("../datasources/index.js", () => ({
   getDatasource: vi.fn().mockReturnValue({
     name: "md",
+    supportsGit: vi.fn().mockReturnValue(true),
     list: vi.fn().mockResolvedValue([]),
     fetch: vi.fn().mockResolvedValue({} as IssueDetails),
     update: vi.fn().mockResolvedValue(undefined),
@@ -225,8 +227,8 @@ describe("planning timeout and retry", () => {
     // Reset the executor mock to default success
     mocks.mockExecute.mockResolvedValue({
       success: true,
-      dispatchResult: { task: TASK_FIXTURE, success: true },
-      elapsedMs: 100,
+      data: { dispatchResult: { task: TASK_FIXTURE, success: true } },
+      durationMs: 100,
     });
     mocks.mockGenerate.mockResolvedValue({
       commitMessage: "",
@@ -243,8 +245,8 @@ describe("planning timeout and retry", () => {
 
   it("succeeds when planning completes within the timeout", async () => {
     mocks.mockPlan.mockImplementation(() =>
-      new Promise<PlanResult>((resolve) => {
-        setTimeout(() => resolve({ prompt: "Execute step 1", success: true }), 100);
+      new Promise<AgentResult<PlannerData>>((resolve) => {
+        setTimeout(() => resolve({ data: { prompt: "Execute step 1" }, success: true, durationMs: 100 }), 100);
       }),
     );
 
@@ -266,13 +268,13 @@ describe("planning timeout and retry", () => {
       callCount++;
       if (callCount === 1) {
         // First attempt: never resolves within timeout (hangs for 2 minutes)
-        return new Promise<PlanResult>((resolve) => {
-          setTimeout(() => resolve({ prompt: "too late", success: true }), 120_000);
+        return new Promise<AgentResult<PlannerData>>((resolve) => {
+          setTimeout(() => resolve({ data: { prompt: "too late" }, success: true, durationMs: 120000 }), 120_000);
         });
       }
       // Second attempt: succeeds quickly
-      return new Promise<PlanResult>((resolve) => {
-        setTimeout(() => resolve({ prompt: "Execute step 1", success: true }), 100);
+      return new Promise<AgentResult<PlannerData>>((resolve) => {
+        setTimeout(() => resolve({ data: { prompt: "Execute step 1" }, success: true, durationMs: 100 }), 100);
       });
     });
 
@@ -299,7 +301,7 @@ describe("planning timeout and retry", () => {
   it("fails the task when all planning attempts time out", async () => {
     // Both attempts hang forever
     mocks.mockPlan.mockImplementation(
-      () => new Promise<PlanResult>(() => {}), // never resolves
+      () => new Promise<AgentResult<PlannerData>>(() => {}), // never resolves
     );
 
     const resultPromise = runDispatchPipeline(baseOpts({ planTimeout: 1, planRetries: 1 }), "/tmp/test");
@@ -354,7 +356,7 @@ describe("planning timeout and retry", () => {
 
   it("makes only one attempt when planRetries is 0", async () => {
     mocks.mockPlan.mockImplementation(
-      () => new Promise<PlanResult>(() => {}), // never resolves
+      () => new Promise<AgentResult<PlannerData>>(() => {}), // never resolves
     );
 
     const resultPromise = runDispatchPipeline(baseOpts({ planTimeout: 1, planRetries: 0 }), "/tmp/test");
@@ -370,7 +372,7 @@ describe("planning timeout and retry", () => {
 
   it("uses default timeout (10 min) and retries (1) when not configured", async () => {
     mocks.mockPlan.mockImplementation(
-      () => new Promise<PlanResult>(() => {}), // never resolves
+      () => new Promise<AgentResult<PlannerData>>(() => {}), // never resolves
     );
 
     const resultPromise = runDispatchPipeline(
@@ -391,7 +393,7 @@ describe("planning timeout and retry", () => {
 
   it("falls back to general retries when planRetries is not set", async () => {
     mocks.mockPlan.mockImplementation(
-      () => new Promise<PlanResult>(() => {}), // never resolves
+      () => new Promise<AgentResult<PlannerData>>(() => {}), // never resolves
     );
 
     const resultPromise = runDispatchPipeline(
@@ -434,8 +436,8 @@ describe("verbose mode", () => {
     vi.clearAllMocks();
     mocks.mockExecute.mockResolvedValue({
       success: true,
-      dispatchResult: { task: TASK_FIXTURE, success: true },
-      elapsedMs: 100,
+      data: { dispatchResult: { task: TASK_FIXTURE, success: true } },
+      durationMs: 100,
     });
     mocks.mockGenerate.mockResolvedValue({
       commitMessage: "",
@@ -445,8 +447,8 @@ describe("verbose mode", () => {
       error: "mock: not configured",
     });
     mocks.mockPlan.mockImplementation(() =>
-      new Promise<PlanResult>((resolve) => {
-        setTimeout(() => resolve({ prompt: "Execute step 1", success: true }), 100);
+      new Promise<AgentResult<PlannerData>>((resolve) => {
+        setTimeout(() => resolve({ data: { prompt: "Execute step 1" }, success: true, durationMs: 100 }), 100);
       }),
     );
   });
@@ -562,8 +564,8 @@ describe("runDispatchPipeline edge cases", () => {
     vi.clearAllMocks();
     mocks.mockExecute.mockResolvedValue({
       success: true,
-      dispatchResult: { task: TASK_FIXTURE, success: true },
-      elapsedMs: 100,
+      data: { dispatchResult: { task: TASK_FIXTURE, success: true } },
+      durationMs: 100,
     });
     mocks.mockGenerate.mockResolvedValue({
       commitMessage: "",
@@ -573,8 +575,8 @@ describe("runDispatchPipeline edge cases", () => {
       error: "mock: not configured",
     });
     mocks.mockPlan.mockImplementation(() =>
-      new Promise<PlanResult>((resolve) => {
-        setTimeout(() => resolve({ prompt: "Execute step 1", success: true }), 100);
+      new Promise<AgentResult<PlannerData>>((resolve) => {
+        setTimeout(() => resolve({ data: { prompt: "Execute step 1" }, success: true, durationMs: 100 }), 100);
       }),
     );
   });
@@ -625,8 +627,8 @@ describe("runDispatchPipeline edge cases", () => {
 
   it("exercises branch lifecycle when noBranch is false", async () => {
     mocks.mockPlan.mockImplementation(() =>
-      new Promise<PlanResult>((resolve) => {
-        setTimeout(() => resolve({ prompt: "Execute step 1", success: true }), 50);
+      new Promise<AgentResult<PlannerData>>((resolve) => {
+        setTimeout(() => resolve({ data: { prompt: "Execute step 1" }, success: true, durationMs: 50 }), 50);
       }),
     );
 
@@ -645,12 +647,12 @@ describe("runDispatchPipeline edge cases", () => {
   it("handles executor failure", async () => {
     mocks.mockExecute.mockResolvedValue({
       success: false,
-      dispatchResult: { task: TASK_FIXTURE, success: false, error: "exec error" },
-      elapsedMs: 50,
+      data: { dispatchResult: { task: TASK_FIXTURE, success: false, error: "exec error" } },
+      durationMs: 50,
     });
     mocks.mockPlan.mockImplementation(() =>
-      new Promise<PlanResult>((resolve) => {
-        setTimeout(() => resolve({ prompt: "Plan", success: true }), 50);
+      new Promise<AgentResult<PlannerData>>((resolve) => {
+        setTimeout(() => resolve({ data: { prompt: "Plan" }, success: true, durationMs: 50 }), 50);
       }),
     );
 
@@ -672,8 +674,8 @@ describe("commitAllChanges safety-net", () => {
     vi.clearAllMocks();
     mocks.mockExecute.mockResolvedValue({
       success: true,
-      dispatchResult: { task: TASK_FIXTURE, success: true },
-      elapsedMs: 100,
+      data: { dispatchResult: { task: TASK_FIXTURE, success: true } },
+      durationMs: 100,
     });
     mocks.mockGenerate.mockResolvedValue({
       commitMessage: "",
@@ -683,8 +685,8 @@ describe("commitAllChanges safety-net", () => {
       error: "mock: not configured",
     });
     mocks.mockPlan.mockImplementation(() =>
-      new Promise<PlanResult>((resolve) => {
-        setTimeout(() => resolve({ prompt: "Execute step 1", success: true }), 50);
+      new Promise<AgentResult<PlannerData>>((resolve) => {
+        setTimeout(() => resolve({ data: { prompt: "Execute step 1" }, success: true, durationMs: 50 }), 50);
       }),
     );
   });
@@ -750,8 +752,8 @@ describe("branch creation failure", () => {
     vi.clearAllMocks();
     mocks.mockExecute.mockResolvedValue({
       success: true,
-      dispatchResult: { task: TASK_FIXTURE, success: true },
-      elapsedMs: 100,
+      data: { dispatchResult: { task: TASK_FIXTURE, success: true } },
+      durationMs: 100,
     });
   });
 
@@ -820,6 +822,77 @@ describe("branch creation failure", () => {
   });
 });
 
+describe("supportsGit() guard behavior", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    // Reset createAndSwitchBranch to clear any leftover mockRejectedValueOnce
+    // from "branch creation failure" tests (clearAllMocks does not flush the once-queue).
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    vi.mocked(ds.createAndSwitchBranch).mockReset().mockResolvedValue(undefined);
+    mocks.mockExecute.mockResolvedValue({
+      success: true,
+      data: { dispatchResult: { task: TASK_FIXTURE, success: true } },
+      durationMs: 100,
+    });
+    mocks.mockGenerate.mockResolvedValue({
+      commitMessage: "",
+      prTitle: "",
+      prDescription: "",
+      success: false,
+      error: "mock: not configured",
+    });
+    mocks.mockPlan.mockImplementation(() =>
+      new Promise<AgentResult<PlannerData>>((resolve) => {
+        setTimeout(() => resolve({ data: { prompt: "Execute step 1" }, success: true, durationMs: 50 }), 50);
+      }),
+    );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("skips git lifecycle calls when supportsGit() returns false", async () => {
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    vi.mocked(ds.supportsGit).mockReturnValue(false);
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ noBranch: false }),
+      "/tmp/test",
+    );
+    await vi.advanceTimersByTimeAsync(50);
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result.completed).toBe(1);
+    expect(ds.createAndSwitchBranch).not.toHaveBeenCalled();
+    expect(ds.switchBranch).not.toHaveBeenCalled();
+    expect(ds.pushBranch).not.toHaveBeenCalled();
+    expect(ds.createPullRequest).not.toHaveBeenCalled();
+  });
+
+  it("calls git lifecycle methods when supportsGit() returns true", async () => {
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    vi.mocked(ds.supportsGit).mockReturnValue(true);
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ noBranch: false }),
+      "/tmp/test",
+    );
+    await vi.advanceTimersByTimeAsync(50);
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result.completed).toBe(1);
+    expect(ds.createAndSwitchBranch).toHaveBeenCalled();
+    expect(ds.pushBranch).toHaveBeenCalled();
+    expect(ds.createPullRequest).toHaveBeenCalled();
+  });
+});
+
 describe("commit agent integration", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -830,12 +903,12 @@ describe("commit agent integration", () => {
     vi.mocked(ds.createAndSwitchBranch).mockReset().mockResolvedValue(undefined);
     mocks.mockExecute.mockResolvedValue({
       success: true,
-      dispatchResult: { task: TASK_FIXTURE, success: true },
-      elapsedMs: 100,
+      data: { dispatchResult: { task: TASK_FIXTURE, success: true } },
+      durationMs: 100,
     });
     mocks.mockPlan.mockImplementation(() =>
-      new Promise<PlanResult>((resolve) => {
-        setTimeout(() => resolve({ prompt: "Execute step 1", success: true }), 50);
+      new Promise<AgentResult<PlannerData>>((resolve) => {
+        setTimeout(() => resolve({ data: { prompt: "Execute step 1" }, success: true, durationMs: 50 }), 50);
       }),
     );
     mocks.mockGenerate.mockResolvedValue({
@@ -1066,8 +1139,8 @@ describe("worktree dispatch pipeline", () => {
       vi.clearAllMocks();
       mocks.mockExecute.mockImplementation(async ({ task }: any) => ({
         success: true,
-        dispatchResult: { task, success: true },
-        elapsedMs: 100,
+        data: { dispatchResult: { task, success: true } },
+        durationMs: 100,
       }));
       mocks.mockGenerate.mockResolvedValue({
         commitMessage: "",
@@ -1199,7 +1272,7 @@ describe("worktree dispatch pipeline", () => {
     });
 
     it("passes issueCwd to planner.plan() call", async () => {
-      mocks.mockPlan.mockResolvedValue({ prompt: "Execute step 1", success: true });
+      mocks.mockPlan.mockResolvedValue({ data: { prompt: "Execute step 1" }, success: true, durationMs: 100 });
 
       await runDispatchPipeline(multiIssueOpts({ noPlan: false }), "/tmp/test");
 
@@ -1212,7 +1285,7 @@ describe("worktree dispatch pipeline", () => {
     });
 
     it("passes worktreeRoot to planner.plan() call in worktree mode", async () => {
-      mocks.mockPlan.mockResolvedValue({ prompt: "Execute step 1", success: true });
+      mocks.mockPlan.mockResolvedValue({ data: { prompt: "Execute step 1" }, success: true, durationMs: 100 });
 
       await runDispatchPipeline(multiIssueOpts({ noPlan: false }), "/tmp/test");
 
@@ -1266,8 +1339,8 @@ describe("worktree dispatch pipeline", () => {
       vi.mocked(parseIssueFilename).mockReturnValue({ issueId: "1", slug: "test" });
       mocks.mockExecute.mockResolvedValue({
         success: true,
-        dispatchResult: { task: TASK_FIXTURE, success: true },
-        elapsedMs: 100,
+        data: { dispatchResult: { task: TASK_FIXTURE, success: true } },
+        durationMs: 100,
       });
       // Reset datasource branch mocks to prevent leftover rejections from earlier tests
       const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
@@ -1299,8 +1372,8 @@ describe("worktree dispatch pipeline", () => {
       setupMultiIssueScenario();
       mocks.mockExecute.mockImplementation(async ({ task }: any) => ({
         success: true,
-        dispatchResult: { task, success: true },
-        elapsedMs: 100,
+        data: { dispatchResult: { task, success: true } },
+        durationMs: 100,
       }));
 
       const result = await runDispatchPipeline(
@@ -1321,8 +1394,8 @@ describe("worktree dispatch pipeline", () => {
       vi.mocked(getBranchDiff).mockResolvedValue("diff --git a/file.ts b/file.ts\n+added line");
       mocks.mockExecute.mockImplementation(async ({ task }: any) => ({
         success: true,
-        dispatchResult: { task, success: true },
-        elapsedMs: 100,
+        data: { dispatchResult: { task, success: true } },
+        durationMs: 100,
       }));
       mocks.mockGenerate.mockResolvedValue({
         commitMessage: "feat: test",
@@ -1362,7 +1435,7 @@ describe("worktree dispatch pipeline", () => {
     });
 
     it("boots planner and executor once with shared provider", async () => {
-      mocks.mockPlan.mockResolvedValue({ prompt: "Execute step 1", success: true });
+      mocks.mockPlan.mockResolvedValue({ data: { prompt: "Execute step 1" }, success: true, durationMs: 100 });
 
       await runDispatchPipeline(
         baseOpts({ noBranch: false, noPlan: false }),
@@ -1379,7 +1452,7 @@ describe("worktree dispatch pipeline", () => {
     });
 
     it("does not pass worktreeRoot in serial mode", async () => {
-      mocks.mockPlan.mockResolvedValue({ prompt: "Execute step 1", success: true });
+      mocks.mockPlan.mockResolvedValue({ data: { prompt: "Execute step 1" }, success: true, durationMs: 100 });
       vi.mocked(getBranchDiff).mockResolvedValue("diff --git a/file.ts b/file.ts\n+added line");
       mocks.mockGenerate.mockResolvedValue({
         commitMessage: "feat: test",
@@ -1420,8 +1493,8 @@ describe("worktree dispatch pipeline", () => {
       vi.mocked(parseTaskFile).mockResolvedValue(TASK_FILE_FIXTURE);
       vi.mocked(parseIssueFilename).mockReturnValue({ issueId: "1", slug: "test" });
       mocks.mockPlan.mockImplementation(() =>
-        new Promise<PlanResult>((resolve) => {
-          setTimeout(() => resolve({ prompt: "Execute step 1", success: true }), 100);
+        new Promise<AgentResult<PlannerData>>((resolve) => {
+          setTimeout(() => resolve({ data: { prompt: "Execute step 1" }, success: true, durationMs: 100 }), 100);
         }),
       );
     });
@@ -1437,15 +1510,15 @@ describe("worktree dispatch pipeline", () => {
         if (callCount === 1) {
           return {
             success: false,
-            dispatchResult: { task: TASK_FIXTURE, success: false, error: "transient error" },
+            data: { dispatchResult: { task: TASK_FIXTURE, success: false, error: "transient error" } },
             error: "transient error",
-            elapsedMs: 50,
+            durationMs: 50,
           };
         }
         return {
           success: true,
-          dispatchResult: { task: TASK_FIXTURE, success: true },
-          elapsedMs: 100,
+          data: { dispatchResult: { task: TASK_FIXTURE, success: true } },
+          durationMs: 100,
         };
       });
 
@@ -1463,9 +1536,9 @@ describe("worktree dispatch pipeline", () => {
     it("fails the task when all executor attempts are exhausted", async () => {
       mocks.mockExecute.mockResolvedValue({
         success: false,
-        dispatchResult: { task: TASK_FIXTURE, success: false, error: "persistent error" },
+        data: { dispatchResult: { task: TASK_FIXTURE, success: false, error: "persistent error" } },
         error: "persistent error",
-        elapsedMs: 50,
+        durationMs: 50,
       });
 
       const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
@@ -1483,8 +1556,8 @@ describe("worktree dispatch pipeline", () => {
     it("does not retry when executor succeeds on first attempt", async () => {
       mocks.mockExecute.mockResolvedValue({
         success: true,
-        dispatchResult: { task: TASK_FIXTURE, success: true },
-        elapsedMs: 100,
+        data: { dispatchResult: { task: TASK_FIXTURE, success: true } },
+        durationMs: 100,
       });
 
       const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
@@ -1533,8 +1606,8 @@ describe("error-path handling", () => {
     vi.mocked(parseIssueFilename).mockReturnValue({ issueId: "1", slug: "test" });
     mocks.mockExecute.mockResolvedValue({
       success: true,
-      dispatchResult: { task: TASK_FIXTURE, success: true },
-      elapsedMs: 100,
+      data: { dispatchResult: { task: TASK_FIXTURE, success: true } },
+      durationMs: 100,
     });
   });
 

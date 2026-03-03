@@ -14,6 +14,7 @@ import { join, parse as parsePath } from "node:path";
 import { promisify } from "node:util";
 import type { Datasource, IssueDetails, IssueFetchOptions, DispatchLifecycleOptions } from "./interface.js";
 import { slugify } from "../helpers/slugify.js";
+import { UnsupportedOperationError } from "../helpers/errors.js";
 
 const exec = promisify(execFile);
 
@@ -81,6 +82,10 @@ function toIssueDetails(filename: string, content: string, dir: string): IssueDe
 
 export const datasource: Datasource = {
   name: "md",
+
+  supportsGit(): boolean {
+    return false;
+  },
 
   async list(opts?: IssueFetchOptions): Promise<IssueDetails[]> {
     const dir = resolveDir(opts);
@@ -157,15 +162,15 @@ export const datasource: Datasource = {
   },
 
   async createAndSwitchBranch(_branchName: string, _opts: DispatchLifecycleOptions): Promise<void> {
-    // No-op for local markdown datasource
+    throw new UnsupportedOperationError("createAndSwitchBranch");
   },
 
   async switchBranch(_branchName: string, _opts: DispatchLifecycleOptions): Promise<void> {
-    // No-op for local markdown datasource
+    throw new UnsupportedOperationError("switchBranch");
   },
 
   async pushBranch(_branchName: string, _opts: DispatchLifecycleOptions): Promise<void> {
-    // No-op for local markdown datasource
+    throw new UnsupportedOperationError("pushBranch");
   },
 
   async commitAllChanges(_message: string, _opts: DispatchLifecycleOptions): Promise<void> {

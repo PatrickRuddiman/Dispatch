@@ -71,6 +71,13 @@ export interface Datasource {
   readonly name: DatasourceName;
 
   /**
+   * Whether this datasource supports git operations (branching, pushing, PRs).
+   *
+   * @returns `true` if git lifecycle methods are functional, `false` otherwise
+   */
+  supportsGit(): boolean;
+
+  /**
    * List available issues or specs.
    *
    * @param opts - Platform-specific options (org, project, cwd)
