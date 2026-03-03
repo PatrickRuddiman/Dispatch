@@ -174,7 +174,7 @@ Dispatch uses three-tier configuration: CLI flags override config file values, w
 dispatch config
 ```
 
-Config is stored at `~/.dispatch/config.json`:
+Config is stored at `./.dispatch/config.json` (in your current project directory):
 
 ```json
 {
