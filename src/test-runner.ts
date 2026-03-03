@@ -80,7 +80,7 @@ export async function runTests(cwd: string): Promise<TestRunResult> {
     });
 
     child.on("error", (err: Error) => {
-      reject(new Error(err.message));
+      reject(new Error(`Test runner spawn error: ${err.message}`, { cause: err }));
     });
 
     child.on("close", (code: number | null) => {
