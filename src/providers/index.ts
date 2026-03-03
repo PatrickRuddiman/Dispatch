@@ -10,6 +10,7 @@
 import type { ProviderName, ProviderInstance, ProviderBootOptions } from "./interface.js";
 import { boot as bootOpencode, listModels as listOpencodeModels } from "./opencode.js";
 import { boot as bootCopilot, listModels as listCopilotModels } from "./copilot.js";
+import { boot as bootClaude, listModels as listClaudeModels } from "./claude.js";
 
 type BootFn = (opts?: ProviderBootOptions) => Promise<ProviderInstance>;
 type ListModelsFn = (opts?: ProviderBootOptions) => Promise<string[]>;
@@ -17,11 +18,13 @@ type ListModelsFn = (opts?: ProviderBootOptions) => Promise<string[]>;
 const PROVIDERS: Record<ProviderName, BootFn> = {
   opencode: bootOpencode,
   copilot: bootCopilot,
+  claude: bootClaude,
 };
 
 const LIST_MODELS: Record<ProviderName, ListModelsFn> = {
   opencode: listOpencodeModels,
   copilot: listCopilotModels,
+  claude: listClaudeModels,
 };
 
 /**
