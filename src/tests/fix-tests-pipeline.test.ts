@@ -112,6 +112,15 @@ describe("detectTestCommand", () => {
     const result = await detectTestCommand("/dir");
     expect(result).toBeNull();
   });
+
+  it("returns null and logs debug when package.json contains malformed JSON", async () => {
+    vi.mocked(readFile).mockResolvedValue("this is not json");
+    const result = await detectTestCommand("/dir");
+    expect(result).toBeNull();
+    expect(log.debug).toHaveBeenCalledWith(
+      expect.stringContaining("Failed to parse package.json"),
+    );
+  });
 });
 
 describe("runTestCommand", () => {

@@ -8,7 +8,7 @@
  * through this contract.
  */
 
-export type ProviderName = "opencode" | "copilot" | "claude";
+export type ProviderName = "opencode" | "copilot" | "claude" | "codex";
 
 /**
  * Options passed when booting a provider.

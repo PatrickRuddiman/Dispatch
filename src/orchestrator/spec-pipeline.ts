@@ -22,6 +22,7 @@ import { log } from "../helpers/logger.js";
 import { confirmLargeBatch } from "../helpers/confirm-large-batch.js";
 import chalk from "chalk";
 import { elapsed, renderHeaderLines } from "../helpers/format.js";
+import { withRetry } from "../helpers/retry.js";
 import { slugify, MAX_SLUG_LENGTH } from "../helpers/slugify.js";
 
 /**
@@ -42,6 +43,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     project,
     workItemType,
     concurrency = defaultConcurrency(),
+    retries = 2,
   } = opts;
 
   const pipelineStart = Date.now();
@@ -228,13 +230,17 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
         try {
           log.info(`Generating spec for ${isTrackerMode ? `#${id}` : filepath}: ${details!.title}...`);
 
-          const result = await specAgent.generate({
-            issue: isTrackerMode ? details! : undefined,
-            filePath: isTrackerMode ? undefined : id,
-            fileContent: isTrackerMode ? undefined : details!.body,
-            cwd: specCwd,
-            outputPath: filepath,
-          });
+          const result = await withRetry(
+            () => specAgent.generate({
+              issue: isTrackerMode ? details! : undefined,
+              filePath: isTrackerMode ? undefined : id,
+              fileContent: isTrackerMode ? undefined : details!.body,
+              cwd: specCwd,
+              outputPath: filepath,
+            }),
+            retries,
+            { label: `specAgent.generate(${isTrackerMode ? `#${id}` : filepath})` },
+          );
 
           if (!result.success) {
             throw new Error(result.error ?? "Spec generation failed");
@@ -265,6 +271,8 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
               // Tracker mode: update the existing issue with the generated spec
               await datasource.update(id, details!.title, result.content, fetchOpts);
               log.success(`Updated issue #${id} with spec content`);
+              await unlink(filepath);
+              log.success(`Deleted local spec ${filepath} (now tracked as issue #${id})`);
               identifier = id;
               issueNumbers.push(id);
             } else if (datasource.name !== "md") {

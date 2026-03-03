@@ -371,9 +371,9 @@ describe("azdevops datasource — getDefaultBranch", () => {
 });
 
 describe("azdevops datasource — buildBranchName", () => {
-  it("builds <username>/dispatch/<number>-<slug>", () => {
-    const result = datasource.buildBranchName("42", "Add Auth Feature", "testuser");
-    expect(result).toBe("testuser/dispatch/42-add-auth-feature");
+  it("builds <username>/dispatch/<number>", () => {
+    const result = datasource.buildBranchName("42", "testuser");
+    expect(result).toBe("testuser/dispatch/42");
   });
 });
 
