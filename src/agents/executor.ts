@@ -13,6 +13,7 @@ import type { Task } from "../parser.js";
 import { markTaskComplete } from "../parser.js";
 import { dispatchTask } from "../dispatcher.js";
 import { log } from "../helpers/logger.js";
+import { fileLoggerStorage } from "../helpers/file-logger.js";
 
 /**
  * Input to the executor for a single task.
@@ -64,18 +65,22 @@ export async function boot(opts: AgentBootOptions): Promise<ExecutorAgent> {
       const startTime = Date.now();
 
       try {
+        fileLoggerStorage.getStore()?.agentEvent("executor", "started", task.text);
         // Dispatch the task — plan being non-null triggers the planned prompt path
         // in dispatchTask, otherwise the generic prompt is used
         const result = await dispatchTask(provider, task, cwd, plan ?? undefined, worktreeRoot);
 
         if (result.success) {
           await markTaskComplete(task);
+          fileLoggerStorage.getStore()?.agentEvent("executor", "completed", `${Date.now() - startTime}ms`);
           return { data: { dispatchResult: result }, success: true, durationMs: Date.now() - startTime };
         }
 
+        fileLoggerStorage.getStore()?.agentEvent("executor", "failed", result.error ?? "unknown error");
         return { data: null, success: false, error: result.error, durationMs: Date.now() - startTime };
       } catch (err) {
         const message = log.extractMessage(err);
+        fileLoggerStorage.getStore()?.error(`executor error: ${message}${err instanceof Error && err.stack ? `\n${err.stack}` : ""}`);
         return { data: null, success: false, error: message, durationMs: Date.now() - startTime };
       }
     },

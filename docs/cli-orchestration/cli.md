@@ -142,14 +142,13 @@ frameworks handle automatically:
 
 ### Spec mode options
 
-Spec mode is activated by passing `--spec` or `--respec`. When active, the
-issue IDs are not required and the dispatch-specific flags (`--dry-run`,
-`--no-plan`, `--concurrency`) are ignored.
+Spec mode is activated by passing `--spec`. When active, the issue IDs are not
+required and the dispatch-specific flags (`--dry-run`, `--no-plan`,
+`--concurrency`) are ignored.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `--spec <values...>` | string (one or more) | *none* | Comma-separated issue numbers, multiple space-separated args, glob pattern for local `.md` files, or inline text description. Activates spec mode. See [issue IDs vs glob patterns](configuration.md#the---spec-flag-issue-ids-vs-glob-patterns). |
-| `--respec [values...]` | string (zero or more) | *none* | Regenerate existing specs. Accepts the same value types as `--spec` (issue numbers, glob, multiple args), or can be passed with no arguments to regenerate all existing specs. Uses variadic collection -- consumes all subsequent non-flag arguments. An empty invocation (`--respec` with no args or immediately followed by another flag) produces an empty array. |
+| `--spec [values...]` | string (zero or more) | *none* | Comma-separated issue numbers, multiple space-separated args, glob pattern for local `.md` files, or inline text description. Activates spec mode. Pass with no arguments to regenerate all existing specs. See [issue IDs vs glob patterns](configuration.md#the---spec-flag-issue-ids-vs-glob-patterns). |
 | `--source <name>` | string | *auto-detected* | Datasource: `github`, `azdevops`, or `md`. Auto-detected from `git remote get-url origin` if omitted. See [datasource detection](configuration.md#auto-detection-from-git-remote), [Datasource Overview](../datasource-system/overview.md), and individual datasource docs: [GitHub](../datasource-system/github-datasource.md), [Azure DevOps](../datasource-system/azdevops-datasource.md), [Markdown](../datasource-system/markdown-datasource.md). |
 | `--org <url>` | string | *none* | Azure DevOps organization URL (e.g., `https://dev.azure.com/myorg`). Required when `--source azdevops`. |
 | `--project <name>` | string | *none* | Azure DevOps project name. Required when `--source azdevops`. |
@@ -163,11 +162,11 @@ issue IDs are not required and the dispatch-specific flags (`--dry-run`,
 
 Fix-tests mode is activated by passing `--fix-tests`. It runs the project's
 test suite and uses an AI agent to fix any failures. This mode is mutually
-exclusive with `--spec`, `--respec`, and positional issue IDs.
+exclusive with `--spec` and positional issue IDs.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `--fix-tests` | boolean | `false` | Activate fix-tests mode. Cannot be combined with `--spec`, `--respec`, or positional issue IDs. |
+| `--fix-tests` | boolean | `false` | Activate fix-tests mode. Cannot be combined with `--spec` or positional issue IDs. |
 | `--test-timeout <min>` | float | `5` | Test timeout in minutes (shared with dispatch mode) |
 | `--provider <name>` | string | `"opencode"` | AI agent backend (shared with dispatch mode) |
 | `--server-url <url>` | string | *none* | Connect to a running provider server (shared with dispatch mode) |
@@ -185,35 +184,32 @@ the pipeline aborts with an error suggesting `--source` be specified explicitly.
 See the [Spec Generation overview](../spec-generation/overview.md) for the
 full detection logic.
 
-#### `--spec` and `--respec` variadic parsing
+#### `--spec` variadic parsing
 
-Both `--spec` and `--respec` use variadic collection loops
-(`src/cli.ts:141-150` and `src/cli.ts:151-160`) that consume all subsequent
-non-flag arguments (arguments not starting with `--`). The collection stops
-when the next `--`-prefixed flag is encountered or the argument list is
-exhausted.
+`--spec` uses a variadic collection loop (`src/cli.ts:141-150`) that consumes
+all subsequent non-flag arguments (arguments not starting with `--`). The
+collection stops when the next `--`-prefixed flag is encountered or the
+argument list is exhausted.
 
 - **Single value**: stored as a string (e.g., `--spec 42` produces `"42"`)
 - **Multiple values**: stored as an array (e.g., `--spec 42 43` produces
   `["42", "43"]`)
 - **Empty** (no args before next flag or end of input): produces an empty
-  array for `--respec` (e.g., `--respec --verbose` produces `[]`); `--spec`
-  with no arguments also produces an empty array.
+  array (e.g., `--spec --verbose` produces `[]`), triggering regeneration
+  of all existing specs.
 
-The `--spec`, `--respec`, and `--fix-tests` flags are mutually exclusive.
-Mutual exclusion is enforced downstream by the runner
-(`src/orchestrator/runner.ts:153-163`), which checks for multiple mode flags
-and produces an error.
+The `--spec` and `--fix-tests` flags are mutually exclusive. Mutual exclusion
+is enforced downstream by the runner (`src/orchestrator/runner.ts`), which
+checks for multiple mode flags and produces an error.
 
 Examples:
 
 ```bash
-dispatch --respec                        # respec = []     (regenerate all)
-dispatch --respec 42                     # respec = "42"   (single issue)
-dispatch --respec 42 43 44              # respec = ["42", "43", "44"]
-dispatch --respec "specs/*.md"          # respec = "specs/*.md"
-dispatch --respec --verbose             # respec = []     (empty, --verbose consumed separately)
-dispatch --spec 1,2 --respec 3,4       # spec = "1,2", respec = "3,4" (both set — rejected by runner)
+dispatch --spec                          # spec = []      (regenerate all existing specs)
+dispatch --spec 42                       # spec = "42"    (single issue)
+dispatch --spec 42 43 44                # spec = ["42", "43", "44"]
+dispatch --spec "specs/*.md"            # spec = "specs/*.md"
+dispatch --spec --verbose               # spec = []      (empty, --verbose consumed separately)
 dispatch --fix-tests                     # fix-tests mode
 dispatch --fix-tests --test-timeout 10   # fix-tests with custom timeout
 ```
@@ -384,7 +380,6 @@ flowchart TD
     L --> M{"Mode?"}
     M -->|--fix-tests| N["Fix-tests pipeline"]
     M -->|--spec| O["Spec pipeline"]
-    M -->|--respec| O
     M -->|default| P["Dispatch pipeline"]
     N --> Q["Summary"]
     O --> Q

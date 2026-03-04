@@ -11,3 +11,4 @@ export * from "./run-state.js";
 export * from "./errors.js";
 export * from "./guards.js";
 export * from "./branch-validation.js";
+export * from "./file-logger.js";

@@ -33,6 +33,18 @@ export interface IssueDetails {
   comments: string[];
   /** Acceptance criteria (if the tracker supports it) */
   acceptanceCriteria: string;
+  /** Iteration path / sprint (Azure DevOps) */
+  iterationPath?: string;
+  /** Area path / team (Azure DevOps) */
+  areaPath?: string;
+  /** Assignee display name */
+  assignee?: string;
+  /** Priority (1 = Critical … 4 = Low) */
+  priority?: number;
+  /** Story points / effort / size */
+  storyPoints?: number;
+  /** Work item type (e.g. "User Story", "Bug") */
+  workItemType?: string;
 }
 
 /**
@@ -47,6 +59,10 @@ export interface IssueFetchOptions {
   project?: string;
   /** Work item type (e.g. "User Story", "Product Backlog Item") */
   workItemType?: string;
+  /** Iteration path filter (e.g. "MyProject\\Sprint 1" or "@CurrentIteration") */
+  iteration?: string;
+  /** Area path filter (e.g. "MyProject\\Team A") */
+  area?: string;
 }
 
 /**

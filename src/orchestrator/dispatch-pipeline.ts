@@ -26,7 +26,6 @@ import type { OrchestrateRunOptions, DispatchSummary } from "./runner.js";
 import {
   fetchItemsById,
   writeItemsToTempDir,
-  closeCompletedSpecIssues,
   parseIssueFilename,
   buildPrBody,
   buildPrTitle,
@@ -39,6 +38,7 @@ import { withTimeout, TimeoutError } from "../helpers/timeout.js";
 import { withRetry } from "../helpers/retry.js";
 import chalk from "chalk";
 import { elapsed, renderHeaderLines } from "../helpers/format.js";
+import { FileLogger, fileLoggerStorage } from "../helpers/file-logger.js";
 
 const exec = promisify(execFile);
 
@@ -72,6 +72,8 @@ export async function runDispatchPipeline(
     org,
     project,
     workItemType,
+    iteration,
+    area,
     planTimeout,
     planRetries,
     retries,
@@ -85,7 +87,7 @@ export async function runDispatchPipeline(
 
   // Dry-run mode uses simple log output
   if (dryRun) {
-    return dryRunMode(issueIds, cwd, source, org, project, workItemType);
+    return dryRunMode(issueIds, cwd, source, org, project, workItemType, iteration, area);
   }
 
   // ── Start TUI (or inline logging for verbose mode) ──────────
@@ -129,7 +131,7 @@ export async function runDispatchPipeline(
     }
 
     const datasource = getDatasource(source);
-    const fetchOpts: IssueFetchOptions = { cwd, org, project, workItemType };
+    const fetchOpts: IssueFetchOptions = { cwd, org, project, workItemType, iteration, area };
     const items = issueIds.length > 0
       ? await fetchItemsById(issueIds, datasource, fetchOpts)
       : await datasource.list(fetchOpts);
@@ -277,6 +279,9 @@ export async function runDispatchPipeline(
     // serial branch modes, parameterised by useWorktrees.
     const processIssueFile = async (file: string, fileTasks: typeof allTasks) => {
       const details = issueDetailsByFile.get(file);
+      const fileLogger = verbose && details ? new FileLogger(details.number, cwd) : null;
+
+      const body = async () => {
       let defaultBranch: string | undefined;
       let branchName: string | undefined;
       let worktreePath: string | undefined;
@@ -284,6 +289,7 @@ export async function runDispatchPipeline(
 
       // ── Branch / worktree setup (unless --no-branch) ────────────
       if (!noBranch && details) {
+        fileLogger?.phase("Branch/worktree setup");
         try {
           defaultBranch = feature ? featureBranchName! : await datasource.getDefaultBranch(lifecycleOpts);
           branchName = datasource.buildBranchName(details.number, details.title, username);
@@ -293,6 +299,7 @@ export async function runDispatchPipeline(
             registerCleanup(async () => { await removeWorktree(cwd, file); });
             issueCwd = worktreePath;
             log.debug(`Created worktree for issue #${details.number} at ${worktreePath}`);
+            fileLogger?.info(`Worktree created at ${worktreePath}`);
 
             // Tag TUI tasks with worktree name for display
             const wtName = worktreeName(file);
@@ -303,9 +310,11 @@ export async function runDispatchPipeline(
           } else if (datasource.supportsGit()) {
             await datasource.createAndSwitchBranch(branchName, lifecycleOpts);
             log.debug(`Switched to branch ${branchName}`);
+            fileLogger?.info(`Switched to branch ${branchName}`);
           }
         } catch (err) {
           const errorMsg = `Branch creation failed for issue #${details.number}: ${log.extractMessage(err)}`;
+          fileLogger?.error(`Branch creation failed: ${log.extractMessage(err)}${err instanceof Error && err.stack ? `\n${err.stack}` : ""}`);
           log.error(errorMsg);
           for (const task of fileTasks) {
             const tuiTask = tui.state.tasks.find((t) => t.task === task);
@@ -324,6 +333,7 @@ export async function runDispatchPipeline(
       const issueLifecycleOpts: DispatchLifecycleOptions = { cwd: issueCwd };
 
       // ── Boot per-worktree provider and agents (or use shared ones) ──
+      fileLogger?.phase("Provider/agent boot");
       let localInstance: ProviderInstance;
       let localPlanner: PlannerAgent | null;
       let localExecutor: ExecutorAgent;
@@ -339,6 +349,7 @@ export async function runDispatchPipeline(
         localPlanner = noPlan ? null : await bootPlanner({ provider: localInstance, cwd: issueCwd });
         localExecutor = await bootExecutor({ provider: localInstance, cwd: issueCwd });
         localCommitAgent = await bootCommit({ provider: localInstance, cwd: issueCwd });
+        fileLogger?.info(`Provider booted: ${localInstance.model ?? provider}`);
       } else {
         localInstance = instance!;
         localPlanner = planner;
@@ -365,6 +376,7 @@ export async function runDispatchPipeline(
               let plan: string | undefined;
               if (localPlanner) {
                 tuiTask.status = "planning";
+                fileLogger?.phase(`Planning task: ${task.text}`);
               if (verbose) log.info(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: planning — "${task.text}"`);
                 const rawContent = fileContentMap.get(task.file);
                 const fileContext = rawContent ? buildTaskContext(rawContent, task) : undefined;
@@ -384,8 +396,10 @@ export async function runDispatchPipeline(
                       log.warn(
                         `Planning timed out for task "${task.text}" (attempt ${attempt}/${maxPlanAttempts})`,
                       );
+                      fileLogger?.warn(`Planning timeout (attempt ${attempt}/${maxPlanAttempts})`);
                       if (attempt < maxPlanAttempts) {
                         log.debug(`Retrying planning (attempt ${attempt + 1}/${maxPlanAttempts})`);
+                        fileLogger?.info(`Retrying planning (attempt ${attempt + 1}/${maxPlanAttempts})`);
                       }
                     } else {
                       // Non-timeout error — do not retry, surface immediately
@@ -414,6 +428,7 @@ export async function runDispatchPipeline(
                 if (!planResult.success) {
                   tuiTask.status = "failed";
                   tuiTask.error = `Planning failed: ${planResult.error}`;
+                  fileLogger?.error(`Planning failed: ${planResult.error}`);
                   tuiTask.elapsed = Date.now() - startTime;
                   if (verbose) log.error(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: failed — ${tuiTask.error} (${elapsed(tuiTask.elapsed)})`);
                   failed++;
@@ -421,10 +436,12 @@ export async function runDispatchPipeline(
                 }
 
                 plan = planResult.data.prompt;
+                fileLogger?.info(`Planning completed (${planResult.durationMs ?? 0}ms)`);
               }
 
               // ── Phase B: Execute via executor agent ──────────────
               tuiTask.status = "running";
+              fileLogger?.phase(`Executing task: ${task.text}`);
               if (verbose) log.info(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: executing — "${task.text}"`);
               const execRetries = 2;
               const execResult = await withRetry(
@@ -450,6 +467,7 @@ export async function runDispatchPipeline(
               }));
 
               if (execResult.success) {
+                fileLogger?.info(`Execution completed successfully (${Date.now() - startTime}ms)`);
                 // Sync checked-off state back to the datasource
                 try {
                   const parsed = parseIssueFilename(task.file);
@@ -469,6 +487,7 @@ export async function runDispatchPipeline(
                 if (verbose) log.success(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: done — "${task.text}" (${elapsed(tuiTask.elapsed)})`);
                 completed++;
               } else {
+                fileLogger?.error(`Execution failed: ${execResult.error}`);
                 tuiTask.status = "failed";
                 tuiTask.error = execResult.error;
                 tuiTask.elapsed = Date.now() - startTime;
@@ -512,6 +531,7 @@ export async function runDispatchPipeline(
       }
 
       // ── Commit agent (rewrite commits + generate PR metadata) ───
+      fileLogger?.phase("Commit generation");
       let commitAgentResult: import("../agents/commit.js").CommitResult | undefined;
       if (!noBranch && branchName && defaultBranch && details && datasource.supportsGit()) {
         try {
@@ -526,15 +546,18 @@ export async function runDispatchPipeline(
             });
             if (result.success) {
               commitAgentResult = result;
+              fileLogger?.info(`Commit message generated for issue #${details.number}`);
               // Rewrite commit history with the generated message
               try {
                 await squashBranchCommits(defaultBranch, result.commitMessage, issueCwd);
                 log.debug(`Rewrote commit message for issue #${details.number}`);
+                fileLogger?.info(`Rewrote commit history for issue #${details.number}`);
               } catch (err) {
                 log.warn(`Could not rewrite commit message for issue #${details.number}: ${log.formatErrorChain(err)}`);
               }
             } else {
               log.warn(`Commit agent failed for issue #${details.number}: ${result.error}`);
+              fileLogger?.warn(`Commit agent failed: ${result.error}`);
             }
           }
         } catch (err) {
@@ -543,6 +566,7 @@ export async function runDispatchPipeline(
       }
 
       // ── Branch teardown (push, PR, cleanup) ──────────────────
+      fileLogger?.phase("PR lifecycle");
       if (!noBranch && branchName && defaultBranch && details) {
         if (feature && featureBranchName) {
           // ── Feature mode: merge working branch into feature branch ──
@@ -599,6 +623,7 @@ export async function runDispatchPipeline(
             try {
               await datasource.pushBranch(branchName, issueLifecycleOpts);
               log.debug(`Pushed branch ${branchName}`);
+              fileLogger?.info(`Pushed branch ${branchName}`);
             } catch (err) {
               log.warn(`Could not push branch ${branchName}: ${log.formatErrorChain(err)}`);
             }
@@ -626,9 +651,11 @@ export async function runDispatchPipeline(
             );
             if (prUrl) {
               log.success(`Created PR for issue #${details.number}: ${prUrl}`);
+              fileLogger?.info(`Created PR: ${prUrl}`);
             }
           } catch (err) {
             log.warn(`Could not create PR for issue #${details.number}: ${log.formatErrorChain(err)}`);
+            fileLogger?.warn(`PR creation failed: ${log.extractMessage(err)}`);
           }
           }
 
@@ -650,10 +677,24 @@ export async function runDispatchPipeline(
       }
 
       // ── Per-worktree resource cleanup ───────────────────────────
+      fileLogger?.phase("Resource cleanup");
       if (useWorktrees) {
         await localExecutor.cleanup();
         await localPlanner?.cleanup();
         await localInstance.cleanup();
+      }
+      };
+
+      if (fileLogger) {
+        await fileLoggerStorage.run(fileLogger, async () => {
+          try {
+            await body();
+          } finally {
+            fileLogger.close();
+          }
+        });
+      } else {
+        await body();
       }
     };
 
@@ -713,14 +754,7 @@ export async function runDispatchPipeline(
       }
     }
 
-    // ── 6. Close originating issues for completed spec files ────
-    try {
-      await closeCompletedSpecIssues(taskFiles, results, cwd, source, org, project, workItemType);
-    } catch (err) {
-      log.warn(`Could not close completed spec issues: ${log.formatErrorChain(err)}`);
-    }
-
-    // ── 7. Cleanup ──────────────────────────────────────────────
+    // ── 6. Cleanup ──────────────────────────────────────────────
     // Per-worktree resources are cleaned up inside processIssueFile.
     // Shared resources (when !useWorktrees) are cleaned up here.
     await commitAgent?.cleanup();
@@ -750,6 +784,8 @@ export async function dryRunMode(
   org?: string,
   project?: string,
   workItemType?: string,
+  iteration?: string,
+  area?: string,
 ): Promise<DispatchSummary> {
   if (!source) {
     log.error("No datasource configured. Use --source or run 'dispatch config' to set up defaults.");
@@ -757,7 +793,7 @@ export async function dryRunMode(
   }
 
   const datasource = getDatasource(source);
-  const fetchOpts: IssueFetchOptions = { cwd, org, project, workItemType };
+  const fetchOpts: IssueFetchOptions = { cwd, org, project, workItemType, iteration, area };
 
   const lifecycleOpts = { cwd };
   let username = "";

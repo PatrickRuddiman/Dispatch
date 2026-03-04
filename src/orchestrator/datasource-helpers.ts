@@ -4,9 +4,8 @@ import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { log } from "../helpers/logger.js";
-import { getDatasource, detectDatasource } from "../datasources/index.js";
 import type { Datasource, DatasourceName, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
-import type { Task, TaskFile } from "../parser.js";
+import type { Task } from "../parser.js";
 import type { DispatchResult } from "../dispatcher.js";
 import { slugify, MAX_SLUG_LENGTH } from "../helpers/slugify.js";
 
@@ -83,59 +82,6 @@ export async function writeItemsToTempDir(items: IssueDetails[]): Promise<WriteI
   });
 
   return { files, issueDetailsByFile };
-}
-
-/**
- * For each spec file where all tasks completed successfully, extract the
- * issue number from the filename (`<id>-<slug>.md`) and close the originating
- * issue on the tracker.
- */
-export async function closeCompletedSpecIssues(
-  taskFiles: TaskFile[],
-  results: DispatchResult[],
-  cwd: string,
-  source?: DatasourceName,
-  org?: string,
-  project?: string,
-  workItemType?: string,
-): Promise<void> {
-  // Resolve the datasource — use explicit source or auto-detect
-  let datasourceName = source;
-  if (!datasourceName) {
-    datasourceName = await detectDatasource(cwd) ?? undefined;
-  }
-  if (!datasourceName) return;
-
-  const datasource = getDatasource(datasourceName);
-
-  // Build a set of tasks that succeeded
-  const succeededTasks = new Set(
-    results.filter((r) => r.success).map((r) => r.task)
-  );
-
-  const fetchOpts: IssueFetchOptions = { cwd, org, project, workItemType };
-
-  for (const taskFile of taskFiles) {
-    const fileTasks = taskFile.tasks;
-    if (fileTasks.length === 0) continue;
-
-    // Only close if every task in this file completed successfully
-    const allSucceeded = fileTasks.every((t) => succeededTasks.has(t));
-    if (!allSucceeded) continue;
-
-    // Extract the issue ID from the filename: "<id>-<slug>.md"
-    const parsed = parseIssueFilename(taskFile.path);
-    if (!parsed) continue;
-
-    const { issueId } = parsed;
-    const filename = basename(taskFile.path);
-    try {
-      await datasource.close(issueId, fetchOpts);
-      log.success(`Closed issue #${issueId} (all tasks in ${filename} completed)`);
-    } catch (err) {
-      log.warn(`Could not close issue #${issueId}: ${log.formatErrorChain(err)}`);
-    }
-  }
 }
 
 /**
