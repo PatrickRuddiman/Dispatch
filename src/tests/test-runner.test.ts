@@ -238,7 +238,7 @@ describe("runTests", () => {
 
     expect(spawn).toHaveBeenCalledWith("npm", ["test"], {
       cwd: "/project",
-      shell: true,
+      shell: false,
     });
   });
 });

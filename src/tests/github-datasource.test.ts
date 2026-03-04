@@ -151,6 +151,39 @@ describe("github datasource — getDefaultBranch", () => {
     const result = await datasource.getDefaultBranch({ cwd: "/tmp" });
     expect(result).toBe("master");
   });
+
+  it("rejects branch names containing spaces", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/my branch\n" });
+
+    await expect(datasource.getDefaultBranch({ cwd: "/tmp" })).rejects.toThrow(
+      "Invalid branch name",
+    );
+  });
+
+  it("rejects branch names containing shell metacharacters", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/$(whoami)\n" });
+
+    await expect(datasource.getDefaultBranch({ cwd: "/tmp" })).rejects.toThrow(
+      "Invalid branch name",
+    );
+  });
+
+  it("rejects branch names exceeding 255 characters", async () => {
+    const longName = "a".repeat(256);
+    mockExecFile.mockResolvedValue({ stdout: `refs/remotes/origin/${longName}\n` });
+
+    await expect(datasource.getDefaultBranch({ cwd: "/tmp" })).rejects.toThrow(
+      "Invalid branch name",
+    );
+  });
+
+  it("rejects empty branch names", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/\n" });
+
+    await expect(datasource.getDefaultBranch({ cwd: "/tmp" })).rejects.toThrow(
+      "Invalid branch name",
+    );
+  });
 });
 
 describe("github datasource — buildBranchName", () => {
