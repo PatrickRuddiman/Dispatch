@@ -181,16 +181,16 @@ Config is stored at `.dispatch/config.json` (project-local):
   "provider": "copilot",
   "model": "claude-sonnet-4-5",
   "source": "github",
-  "testTimeout": 10
+  "testTimeout": 60
 }
 ```
 
 | Key | Description |
 |-----|-------------|
 | `provider` | AI backend: `opencode` (default), `copilot`, `claude`, or `codex` |
-| `model` | Model ID to use (provider-specific format; omit to use the provider default) |
+| `model` | Model name to use with the chosen provider |
 | `source` | Issue tracker: `github`, `azdevops`, or `md` |
-| `testTimeout` | Test timeout in minutes (default: 10) |
+| `testTimeout` | Test execution timeout in seconds (default: 60) |
 
 ## Options reference
 
