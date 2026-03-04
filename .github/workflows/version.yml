@@ -65,7 +65,7 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
 
       - name: Create version bump PR
         if: steps.next.outputs.bump == 'true' && steps.existing.outputs.exists != 'true'
@@ -91,4 +91,4 @@ jobs:
             --base main \
             --head "$BRANCH"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
