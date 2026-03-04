@@ -16,6 +16,7 @@ import type { Agent, AgentBootOptions } from "./interface.js";
 import type { IssueDetails } from "../datasources/interface.js";
 import type { DispatchResult } from "../dispatcher.js";
 import { log } from "../helpers/logger.js";
+import { fileLoggerStorage } from "../helpers/file-logger.js";
 
 /** Options for the commit agent's `generate()` method. */
 export interface CommitGenerateOptions {
@@ -83,10 +84,12 @@ export async function boot(opts: AgentBootOptions): Promise<CommitAgent> {
         const tmpPath = join(tmpDir, tmpFilename);
 
         const prompt = buildCommitPrompt(genOpts);
+        fileLoggerStorage.getStore()?.prompt("commit", prompt);
 
         const sessionId = await provider.createSession();
         log.debug(`Commit prompt built (${prompt.length} chars)`);
         const response = await provider.prompt(sessionId, prompt);
+        if (response) fileLoggerStorage.getStore()?.response("commit", response);
 
         if (!response?.trim()) {
           return {
@@ -117,12 +120,14 @@ export async function boot(opts: AgentBootOptions): Promise<CommitAgent> {
         await writeFile(tmpPath, outputContent, "utf-8");
         log.debug(`Wrote commit agent output to ${tmpPath}`);
 
+        fileLoggerStorage.getStore()?.agentEvent("commit", "completed", `message: ${parsed.commitMessage.slice(0, 80)}`);
         return {
           ...parsed,
           success: true,
           outputPath: tmpPath,
         };
       } catch (err) {
+        fileLoggerStorage.getStore()?.error(`commit error: ${log.extractMessage(err)}${err instanceof Error && err.stack ? `\n${err.stack}` : ""}`);
         const message = log.extractMessage(err);
         return {
           commitMessage: "",

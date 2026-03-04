@@ -18,6 +18,7 @@ import type { IssueDetails } from "../datasources/interface.js";
 import { extractSpecContent, validateSpecStructure } from "../spec-generator.js";
 import { extractTitle } from "../datasources/md.js";
 import { log } from "../helpers/logger.js";
+import { fileLoggerStorage } from "../helpers/file-logger.js";
 
 /**
  * Options passed to the spec agent's `generate()` method.
@@ -112,6 +113,8 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
           };
         }
 
+        fileLoggerStorage.getStore()?.prompt("spec", prompt);
+
         // 4. Create a session via the provider and send the prompt
         const sessionId = await provider.createSession();
         log.debug(`Spec prompt built (${prompt.length} chars)`);
@@ -127,6 +130,7 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
         }
 
         log.debug(`Spec agent response (${response.length} chars)`);
+        fileLoggerStorage.getStore()?.response("spec", response);
 
         // 5. Read the temp file
         let rawContent: string;
@@ -162,6 +166,7 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
           // Ignore cleanup errors — temp file may already be gone
         }
 
+        fileLoggerStorage.getStore()?.agentEvent("spec", "completed", `${Date.now() - startTime}ms`);
         return {
           data: {
             content: cleanedContent,
@@ -173,6 +178,7 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
         };
       } catch (err) {
         const message = log.extractMessage(err);
+        fileLoggerStorage.getStore()?.error(`spec error: ${message}${err instanceof Error && err.stack ? `\n${err.stack}` : ""}`);
         return {
           data: null,
           success: false,

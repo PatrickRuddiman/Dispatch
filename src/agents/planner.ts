@@ -12,6 +12,7 @@ import type { Agent, AgentBootOptions } from "./interface.js";
 import type { Task } from "../parser.js";
 import type { AgentResult, PlannerData } from "./types.js";
 import { log } from "../helpers/logger.js";
+import { fileLoggerStorage } from "../helpers/file-logger.js";
 
 /**
  * A booted planner agent that can produce execution plans for tasks.
@@ -60,16 +61,20 @@ export async function boot(opts: AgentBootOptions): Promise<PlannerAgent> {
       try {
         const sessionId = await provider.createSession();
         const prompt = buildPlannerPrompt(task, cwdOverride ?? cwd, fileContext, worktreeRoot);
+        fileLoggerStorage.getStore()?.prompt("planner", prompt);
 
         const plan = await provider.prompt(sessionId, prompt);
+        if (plan) fileLoggerStorage.getStore()?.response("planner", plan);
 
         if (!plan?.trim()) {
           return { data: null, success: false, error: "Planner returned empty plan", durationMs: Date.now() - startTime };
         }
 
+        fileLoggerStorage.getStore()?.agentEvent("planner", "completed", `${Date.now() - startTime}ms`);
         return { data: { prompt: plan }, success: true, durationMs: Date.now() - startTime };
       } catch (err) {
         const message = log.extractMessage(err);
+        fileLoggerStorage.getStore()?.error(`planner error: ${message}${err instanceof Error && err.stack ? `\n${err.stack}` : ""}`);
         return { data: null, success: false, error: message, durationMs: Date.now() - startTime };
       }
     },
