@@ -39,7 +39,7 @@ export interface OrchestrateRunOptions {
   planTimeout?: number;
   planRetries?: number;
   retries?: number;
-  feature?: boolean;
+  feature?: string | boolean;
 }
 
 /** Raw CLI arguments before config resolution. */
@@ -70,7 +70,7 @@ export interface RawCliArgs {
   planRetries?: number;
   testTimeout?: number;
   retries?: number;
-  feature?: boolean;
+  feature?: string | boolean;
   outputDir?: string;
   explicitFlags: Set<string>;
 }

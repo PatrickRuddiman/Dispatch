@@ -134,7 +134,7 @@ describe("saveConfig", () => {
 
 describe("getConfigPath", () => {
   it("returns path under the given directory", () => {
-    expect(getConfigPath("/custom/dir")).toBe("/custom/dir/config.json");
+    expect(getConfigPath("/custom/dir")).toBe(join("/custom/dir", "config.json"));
   });
 
   it("defaults to {CWD}/.dispatch/config.json when no override", () => {

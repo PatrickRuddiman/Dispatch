@@ -131,6 +131,10 @@ vi.mock("../helpers/worktree.js", () => ({
   generateFeatureBranchName: vi.fn().mockReturnValue("dispatch/feature-abcd1234"),
 }));
 
+vi.mock("../helpers/branch-validation.js", () => ({
+  isValidBranchName: vi.fn().mockReturnValue(true),
+}));
+
 vi.mock("../helpers/logger.js", () => ({
   log: {
     verbose: false,
@@ -212,6 +216,7 @@ import { execFile } from "node:child_process";
 import { bootProvider } from "../providers/index.js";
 import { boot as bootPlannerBoot } from "../agents/planner.js";
 import { boot as bootExecutorBoot } from "../agents/executor.js";
+import { isValidBranchName } from "../helpers/branch-validation.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
@@ -1925,6 +1930,94 @@ describe("feature branch workflow", () => {
     for (const call of worktreeCalls) {
       // Fourth arg is startPoint, should be the feature branch
       expect(call[3]).toBe("dispatch/feature-abcd1234");
+    }
+  });
+
+  it("uses a user-supplied string as the feature branch name with dispatch/ prefix", async () => {
+    await runDispatchPipeline(featureOpts({ feature: "my-cool-feature" }), "/tmp/test");
+
+    // Should NOT call generateFeatureBranchName when a string is provided
+    expect(vi.mocked(generateFeatureBranchName)).not.toHaveBeenCalled();
+
+    // Should create branch with dispatch/ prefix
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    expect(ds.createAndSwitchBranch).toHaveBeenCalledWith(
+      "dispatch/my-cool-feature",
+      expect.any(Object),
+    );
+  });
+
+  it("preserves user-supplied name when it already contains a path separator", async () => {
+    await runDispatchPipeline(featureOpts({ feature: "feature/auth-refactor" }), "/tmp/test");
+
+    expect(vi.mocked(generateFeatureBranchName)).not.toHaveBeenCalled();
+
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    expect(ds.createAndSwitchBranch).toHaveBeenCalledWith(
+      "feature/auth-refactor",
+      expect.any(Object),
+    );
+  });
+
+  it("reuses an existing branch when createAndSwitchBranch fails with 'already exists'", async () => {
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    vi.mocked(ds.createAndSwitchBranch).mockRejectedValueOnce(
+      new Error("branch 'dispatch/my-feature' already exists"),
+    );
+    vi.mocked(log.extractMessage).mockReturnValueOnce("branch 'dispatch/my-feature' already exists");
+
+    const result = await runDispatchPipeline(featureOpts({ feature: "my-feature" }), "/tmp/test");
+
+    // Should fall back to switchBranch instead of failing
+    expect(ds.switchBranch).toHaveBeenCalledWith("dispatch/my-feature", expect.any(Object));
+    // Pipeline should succeed, not fail
+    expect(result.completed).toBe(2);
+    expect(result.failed).toBe(0);
+  });
+
+  it("returns early with all tasks failed when feature branch name is invalid", async () => {
+    vi.mocked(isValidBranchName).mockReturnValueOnce(false);
+
+    const result = await runDispatchPipeline(featureOpts({ feature: "invalid..name" }), "/tmp/test");
+
+    expect(result.completed).toBe(0);
+    expect(result.failed).toBe(2);
+    expect(result.total).toBe(2);
+    expect(vi.mocked(log.error)).toHaveBeenCalledWith(
+      expect.stringContaining("Invalid feature branch name"),
+    );
+    // Should not attempt to create any branches or worktrees
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    expect(ds.createAndSwitchBranch).not.toHaveBeenCalled();
+    expect(vi.mocked(createWorktree)).not.toHaveBeenCalled();
+  });
+
+  it("threads user-supplied feature name through to push and PR creation", async () => {
+    await runDispatchPipeline(featureOpts({ feature: "my-feature" }), "/tmp/test");
+
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    // Verify the feature name is used for push
+    expect(ds.pushBranch).toHaveBeenCalledWith(
+      "dispatch/my-feature",
+      expect.any(Object),
+    );
+    // Verify the feature name is used for PR creation
+    expect(ds.createPullRequest).toHaveBeenCalledWith(
+      "dispatch/my-feature",
+      expect.any(String),
+      expect.any(String),
+      expect.any(String),
+      expect.any(Object),
+    );
+  });
+
+  it("uses user-supplied feature name as worktree start point", async () => {
+    await runDispatchPipeline(featureOpts({ feature: "my-feature" }), "/tmp/test");
+
+    const worktreeCalls = vi.mocked(createWorktree).mock.calls;
+    expect(worktreeCalls.length).toBe(2);
+    for (const call of worktreeCalls) {
+      expect(call[3]).toBe("dispatch/my-feature");
     }
   });
 });

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { join } from "node:path";
 import type { ProviderInstance } from "../providers/interface.js";
 import type { IssueDetails } from "../datasources/interface.js";
 
@@ -153,7 +154,7 @@ describe("generate", () => {
     expect(result.error).toBeUndefined();
 
     expect(mkdir).toHaveBeenCalledWith(
-      expect.stringContaining(".dispatch/tmp"),
+      expect.stringContaining(join(".dispatch", "tmp")),
       { recursive: true },
     );
     expect(provider.createSession).toHaveBeenCalledOnce();
