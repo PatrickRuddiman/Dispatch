@@ -16,6 +16,33 @@ import { log } from "../helpers/logger.js";
 
 const exec = promisify(execFile);
 
+/**
+ * Map a raw Azure DevOps work item JSON object to an IssueDetails.
+ */
+function mapWorkItemToIssueDetails(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  item: any,
+  id: string,
+  comments: string[],
+  defaults?: { title?: string; body?: string; state?: string }
+): IssueDetails {
+  const fields = item.fields ?? {};
+  return {
+    number: String(item.id ?? id),
+    title: fields["System.Title"] ?? defaults?.title ?? "",
+    body: fields["System.Description"] ?? defaults?.body ?? "",
+    labels: (fields["System.Tags"] ?? "")
+      .split(";")
+      .map((t: string) => t.trim())
+      .filter(Boolean),
+    state: fields["System.State"] ?? defaults?.state ?? "",
+    url: item._links?.html?.href ?? item.url ?? "",
+    comments,
+    acceptanceCriteria:
+      fields["Microsoft.VSTS.Common.AcceptanceCriteria"] ?? "",
+  };
+}
+
 export async function detectWorkItemType(
   opts: IssueFetchOptions = {}
 ): Promise<string | null> {
@@ -67,19 +94,53 @@ export const datasource: Datasource = {
     } catch {
       throw new Error(`Failed to parse Azure CLI output: ${stdout.slice(0, 200)}`);
     }
-    const items: IssueDetails[] = [];
 
-    if (Array.isArray(data)) {
-      for (const row of data) {
-        const id = String(row.id ?? row.ID ?? "");
-        if (id) {
-          const detail = await datasource.fetch(id, opts);
-          items.push(detail);
-        }
+    if (!Array.isArray(data)) return [];
+
+    const ids = data
+      .map((row) => String(row.id ?? row.ID ?? ""))
+      .filter(Boolean);
+
+    if (ids.length === 0) return [];
+
+    try {
+      const batchArgs = [
+        "boards", "work-item", "show",
+        "--id", ...ids,
+        "--output", "json",
+      ];
+      if (opts.org) batchArgs.push("--org", opts.org);
+      if (opts.project) batchArgs.push("--project", opts.project);
+
+      const { stdout: batchStdout } = await exec("az", batchArgs, {
+        cwd: opts.cwd || process.cwd(),
+      });
+
+      let batchItems;
+      try {
+        batchItems = JSON.parse(batchStdout);
+      } catch {
+        throw new Error(`Failed to parse Azure CLI output: ${batchStdout.slice(0, 200)}`);
       }
-    }
 
-    return items;
+      const itemsArray = Array.isArray(batchItems) ? batchItems : [batchItems];
+
+      const commentsArray = await Promise.all(
+        itemsArray.map((item) =>
+          fetchComments(String(item.id), opts)
+        )
+      );
+
+      return itemsArray.map((item, i) =>
+        mapWorkItemToIssueDetails(item, String(item.id), commentsArray[i])
+      );
+    } catch {
+      // Fallback: fetch items individually in parallel
+      const results = await Promise.all(
+        ids.map((id) => datasource.fetch(id, opts))
+      );
+      return results;
+    }
   },
 
   async fetch(
@@ -113,24 +174,9 @@ export const datasource: Datasource = {
     } catch {
       throw new Error(`Failed to parse Azure CLI output: ${stdout.slice(0, 200)}`);
     }
-    const fields = item.fields ?? {};
-
     const comments = await fetchComments(issueId, opts);
 
-    return {
-      number: String(item.id ?? issueId),
-      title: fields["System.Title"] ?? "",
-      body: fields["System.Description"] ?? "",
-      labels: (fields["System.Tags"] ?? "")
-        .split(";")
-        .map((t: string) => t.trim())
-        .filter(Boolean),
-      state: fields["System.State"] ?? "",
-      url: item._links?.html?.href ?? item.url ?? "",
-      comments,
-      acceptanceCriteria:
-        fields["Microsoft.VSTS.Common.AcceptanceCriteria"] ?? "",
-    };
+    return mapWorkItemToIssueDetails(item, issueId, comments);
   },
 
   async update(
@@ -213,22 +259,11 @@ export const datasource: Datasource = {
     } catch {
       throw new Error(`Failed to parse Azure CLI output: ${stdout.slice(0, 200)}`);
     }
-    const fields = item.fields ?? {};
-
-    return {
-      number: String(item.id),
-      title: fields["System.Title"] ?? title,
-      body: fields["System.Description"] ?? body,
-      labels: (fields["System.Tags"] ?? "")
-        .split(";")
-        .map((t: string) => t.trim())
-        .filter(Boolean),
-      state: fields["System.State"] ?? "New",
-      url: item._links?.html?.href ?? item.url ?? "",
-      comments: [],
-      acceptanceCriteria:
-        fields["Microsoft.VSTS.Common.AcceptanceCriteria"] ?? "",
-    };
+    return mapWorkItemToIssueDetails(item, String(item.id), [], {
+      title,
+      body,
+      state: "New",
+    });
   },
 
   async getDefaultBranch(opts: DispatchLifecycleOptions): Promise<string> {
