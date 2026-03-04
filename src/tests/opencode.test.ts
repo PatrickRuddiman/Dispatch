@@ -444,7 +444,7 @@ describe("opencode provider", () => {
       expect(result).toBeNull();
     });
 
-    it("cleans up AbortController when event.subscribe() throws synchronously", async () => {
+    it("cleans up AbortController when event.subscribe() rejects", async () => {
       const abortSpy = vi.spyOn(AbortController.prototype, "abort");
 
       mocks.mockSessionPromptAsync.mockResolvedValue({});
