@@ -8,6 +8,7 @@ vi.mock("node:util", () => ({ promisify: () => mockExecFile }));
 import { checkPrereqs } from "../helpers/prereqs.js";
 
 const realNodeVersion = process.versions.node;
+const realPlatform = process.platform;
 
 beforeEach(() => {
   mockExecFile.mockReset();
@@ -15,11 +16,19 @@ beforeEach(() => {
     value: realNodeVersion,
     configurable: true,
   });
+  Object.defineProperty(process, "platform", {
+    value: realPlatform,
+    configurable: true,
+  });
 });
 
 afterEach(() => {
   Object.defineProperty(process.versions, "node", {
     value: realNodeVersion,
+    configurable: true,
+  });
+  Object.defineProperty(process, "platform", {
+    value: realPlatform,
     configurable: true,
   });
 });
@@ -31,7 +40,7 @@ describe("checkPrereqs", () => {
     const failures = await checkPrereqs();
 
     expect(failures).toEqual([]);
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["--version"]);
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["--version"], { shell: false });
   });
 
   it("reports failure when git is not found", async () => {
@@ -107,9 +116,9 @@ describe("checkPrereqs", () => {
     const failures = await checkPrereqs({ datasource: "md" });
 
     expect(failures).toEqual([]);
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["--version"]);
-    expect(mockExecFile).not.toHaveBeenCalledWith("gh", expect.anything());
-    expect(mockExecFile).not.toHaveBeenCalledWith("az", expect.anything());
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["--version"], { shell: false });
+    expect(mockExecFile).not.toHaveBeenCalledWith("gh", expect.anything(), expect.anything());
+    expect(mockExecFile).not.toHaveBeenCalledWith("az", expect.anything(), expect.anything());
   });
 
   it("does not check gh or az when no context is provided", async () => {
@@ -118,9 +127,9 @@ describe("checkPrereqs", () => {
     const failures = await checkPrereqs();
 
     expect(failures).toEqual([]);
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["--version"]);
-    expect(mockExecFile).not.toHaveBeenCalledWith("gh", expect.anything());
-    expect(mockExecFile).not.toHaveBeenCalledWith("az", expect.anything());
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["--version"], { shell: false });
+    expect(mockExecFile).not.toHaveBeenCalledWith("gh", expect.anything(), expect.anything());
+    expect(mockExecFile).not.toHaveBeenCalledWith("az", expect.anything(), expect.anything());
   });
 
   it("reports multiple failures including datasource-specific CLI tool", async () => {
@@ -152,7 +161,7 @@ describe("checkPrereqs", () => {
     const failures = await checkPrereqs({ datasource: "github" });
 
     expect(failures).toEqual([]);
-    expect(mockExecFile).toHaveBeenCalledWith("gh", ["--version"]);
+    expect(mockExecFile).toHaveBeenCalledWith("gh", ["--version"], { shell: false });
   });
 
   it("passes all checks when az is available and datasource is azdevops", async () => {
@@ -165,6 +174,94 @@ describe("checkPrereqs", () => {
     const failures = await checkPrereqs({ datasource: "azdevops" });
 
     expect(failures).toEqual([]);
-    expect(mockExecFile).toHaveBeenCalledWith("az", ["--version"]);
+    expect(mockExecFile).toHaveBeenCalledWith("az", ["--version"], { shell: false });
+  });
+
+  it("passes shell option to git exec on Windows", async () => {
+    Object.defineProperty(process, "platform", {
+      value: "win32",
+      configurable: true,
+    });
+    mockExecFile.mockResolvedValue({ stdout: "git version 2.43.0\n" });
+
+    await checkPrereqs();
+
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["--version"], { shell: true });
+  });
+
+  it("passes shell option to gh exec on Windows", async () => {
+    Object.defineProperty(process, "platform", {
+      value: "win32",
+      configurable: true,
+    });
+    mockExecFile.mockImplementation((cmd: string) => {
+      if (cmd === "git") return Promise.resolve({ stdout: "git version 2.43.0\n" });
+      if (cmd === "gh") return Promise.resolve({ stdout: "gh version 2.50.0\n" });
+      return Promise.resolve({ stdout: "" });
+    });
+
+    await checkPrereqs({ datasource: "github" });
+
+    expect(mockExecFile).toHaveBeenCalledWith("gh", ["--version"], { shell: true });
+  });
+
+  it("passes shell option to az exec on Windows", async () => {
+    Object.defineProperty(process, "platform", {
+      value: "win32",
+      configurable: true,
+    });
+    mockExecFile.mockImplementation((cmd: string) => {
+      if (cmd === "git") return Promise.resolve({ stdout: "git version 2.43.0\n" });
+      if (cmd === "az") return Promise.resolve({ stdout: "azure-cli 2.60.0\n" });
+      return Promise.resolve({ stdout: "" });
+    });
+
+    await checkPrereqs({ datasource: "azdevops" });
+
+    expect(mockExecFile).toHaveBeenCalledWith("az", ["--version"], { shell: true });
+  });
+
+  it("omits shell option for git exec on non-Windows", async () => {
+    Object.defineProperty(process, "platform", {
+      value: "linux",
+      configurable: true,
+    });
+    mockExecFile.mockResolvedValue({ stdout: "git version 2.43.0\n" });
+
+    await checkPrereqs();
+
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["--version"], { shell: false });
+  });
+
+  it("omits shell option for gh exec on non-Windows", async () => {
+    Object.defineProperty(process, "platform", {
+      value: "linux",
+      configurable: true,
+    });
+    mockExecFile.mockImplementation((cmd: string) => {
+      if (cmd === "git") return Promise.resolve({ stdout: "git version 2.43.0\n" });
+      if (cmd === "gh") return Promise.resolve({ stdout: "gh version 2.50.0\n" });
+      return Promise.resolve({ stdout: "" });
+    });
+
+    await checkPrereqs({ datasource: "github" });
+
+    expect(mockExecFile).toHaveBeenCalledWith("gh", ["--version"], { shell: false });
+  });
+
+  it("omits shell option for az exec on non-Windows", async () => {
+    Object.defineProperty(process, "platform", {
+      value: "linux",
+      configurable: true,
+    });
+    mockExecFile.mockImplementation((cmd: string) => {
+      if (cmd === "git") return Promise.resolve({ stdout: "git version 2.43.0\n" });
+      if (cmd === "az") return Promise.resolve({ stdout: "azure-cli 2.60.0\n" });
+      return Promise.resolve({ stdout: "" });
+    });
+
+    await checkPrereqs({ datasource: "azdevops" });
+
+    expect(mockExecFile).toHaveBeenCalledWith("az", ["--version"], { shell: false });
   });
 });
