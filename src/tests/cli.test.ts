@@ -25,6 +25,11 @@ vi.mock("../datasources/index.js", () => ({
 
 vi.mock("../config.js", () => ({
   handleConfigCommand: vi.fn(),
+  CONFIG_BOUNDS: {
+    testTimeout: { min: 1, max: 120 },
+    planTimeout: { min: 1, max: 120 },
+    concurrency: { min: 1, max: 64 },
+  },
 }));
 
 vi.mock("../helpers/cleanup.js", () => ({
@@ -408,7 +413,7 @@ describe("parseArgs error cases", () => {
   });
 
   it("exits for --concurrency exceeding MAX_CONCURRENCY", () => {
-    expect(() => parseArgs(["--concurrency", "65"])).toThrow("process.exit called");
+    expect(() => parseArgs(["--concurrency", String(MAX_CONCURRENCY + 1)])).toThrow("process.exit called");
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
@@ -424,6 +429,11 @@ describe("parseArgs error cases", () => {
 
   it("exits for non-numeric --plan-timeout", () => {
     expect(() => parseArgs(["--plan-timeout", "abc"])).toThrow("process.exit called");
+  });
+
+  it("exits for --plan-timeout exceeding maximum", () => {
+    expect(() => parseArgs(["--plan-timeout", "121"])).toThrow("process.exit called");
+    expect(mockExit).toHaveBeenCalledWith(1);
   });
 
   it("exits for non-positive --test-timeout", () => {
