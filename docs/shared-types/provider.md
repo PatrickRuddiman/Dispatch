@@ -27,7 +27,7 @@ knowing whether the underlying agent is OpenCode, Copilot, or something else.
 ## Provider lifecycle
 
 For the full provider lifecycle (boot → session → prompt → cleanup), see
-[Provider Abstraction Layer](../provider-system/provider-overview.md#lifecycle-boot-session-prompt-cleanup).
+[Provider Abstraction Layer](../provider-system/overview.md#lifecycle-boot-session-prompt-cleanup).
 
 ## ProviderBootOptions
 
@@ -90,7 +90,7 @@ the agent's text response, or `null` if no response was produced.
 
 The interface defines no timeout or retry contract. For details on timeout
 behavior, crash recovery, and how `null` responses are handled, see
-[Provider Abstraction Layer -- Prompt timeouts and cancellation](../provider-system/provider-overview.md#prompt-timeouts-and-cancellation).
+[Provider Abstraction Layer -- Prompt timeouts and cancellation](../provider-system/overview.md#prompt-timeouts-and-cancellation).
 
 ### `cleanup(): Promise<void>`
 
@@ -98,13 +98,13 @@ Tears down the provider -- stops servers, releases resources via the
 [cleanup registry](./cleanup.md). Documented as safe
 to call multiple times (idempotent). For details on cleanup behavior and
 in-flight session handling, see
-[Provider Abstraction Layer -- Cleanup and in-flight sessions](../provider-system/provider-overview.md#cleanup-and-in-flight-sessions).
+[Provider Abstraction Layer -- Cleanup and in-flight sessions](../provider-system/overview.md#cleanup-and-in-flight-sessions).
 
 ## Why ProviderName is a string literal union
 
 `ProviderName` is a compile-time string literal union rather than an enum or
 runtime registry key. For the full rationale and trade-offs, see
-[Provider Abstraction Layer](../provider-system/provider-overview.md#why-providername-is-a-compile-time-union).
+[Provider Abstraction Layer](../provider-system/overview.md#why-providername-is-a-compile-time-union).
 
 ## Adding a new provider backend
 
@@ -122,17 +122,20 @@ see [Adding a New Provider](../provider-system/adding-a-provider.md).
 
 - [Overview](./overview.md) -- Shared Interfaces & Utilities layer
 - [Cleanup Registry](./cleanup.md) -- Process-level cleanup used by `cleanup()` implementations
-- [Provider Abstraction & Backends](../provider-system/provider-overview.md) -- Concrete implementations
+- [Integrations Reference](./integrations.md) -- External dependencies of the shared types layer
+- [Provider Abstraction & Backends](../provider-system/overview.md) -- Concrete implementations
+- [Adding a Provider](../provider-system/adding-a-provider.md) -- Step-by-step
+  guide for implementing the `ProviderInstance` interface
 - [OpenCode Backend](../provider-system/opencode-backend.md) -- OpenCode-specific setup and behavior
 - [Copilot Backend](../provider-system/copilot-backend.md) -- Copilot-specific setup and authentication
-- [Adding a provider](../provider-system/adding-a-provider.md) -- Step-by-step guide
 - [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) -- How the provider is consumed
 - [Dispatcher](../planning-and-dispatch/dispatcher.md) -- Concurrent task dispatch using `ProviderInstance`
 - [Planner](../planning-and-dispatch/planner.md) -- Plan generation using `ProviderInstance.prompt()`
 - [CLI & Orchestration](../cli-orchestration/overview.md) -- Provider boot and cleanup lifecycle
 - [Timeout Utility](../shared-utilities/timeout.md) -- Deadline enforcement for provider prompt calls
-- [Integrations Reference](./integrations.md) -- External dependencies of the shared types layer
 - [Configuration System](../cli-orchestration/configuration.md) -- `--provider`
   flag persistence and three-tier merge logic
 - [Provider Tests](../testing/provider-tests.md) -- Unit test coverage for
   OpenCode and Copilot provider implementations
+- [Spec Generation](../spec-generation/overview.md) -- How the spec pipeline
+  boots and uses providers

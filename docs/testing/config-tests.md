@@ -1,23 +1,28 @@
 # Configuration Tests
 
-This document provides a detailed breakdown of `src/tests/config.test.ts`, which
-tests the configuration data layer defined in
-[`src/config.ts`](../../src/config.ts).
+This document covers the three test files for the configuration system:
+`src/tests/config.test.ts`, `src/tests/cli-config.test.ts`, and
+`src/tests/config-prompts.test.ts`.
 
-## What is tested
+## Test file inventory
 
-The configuration module manages persistent user settings stored at
-`~/.dispatch/config.json`. The test file covers:
+| Test file | Production module | Lines (test) | Test count | Category |
+|-----------|-------------------|-------------|------------|----------|
+| `config.test.ts` | `src/config.ts` | 407 | 32 | File I/O, validation, merge |
+| `cli-config.test.ts` | `src/orchestrator/cli-config.ts` | 689 | 29 | Config resolution, auto-detection |
+| `config-prompts.test.ts` | `src/config-prompts.ts` | 365 | 16 | Interactive wizard flow |
 
-- File I/O operations (load, save, path resolution)
-- Key and value validation logic
-- Value parsing (type coercion)
-- Merge precedence between [CLI flags](../cli-orchestration/cli.md), config file, and defaults
-- The `handleConfigCommand` CLI subcommand
+**Total: 1,461 lines of test code** covering 77 tests across 3 files.
 
-## Describe blocks
+## config.test.ts
 
-The test file contains **8 describe blocks** with **48 tests** total.
+Tests the configuration data layer defined in
+[`src/config.ts`](../cli-orchestration/configuration.md): file I/O operations,
+key/value validation, numeric bounds enforcement, and merge precedence logic.
+
+### Describe blocks
+
+The test file contains **5 describe blocks** with **32 tests** total.
 
 ### loadConfig (5 tests)
 
@@ -30,15 +35,15 @@ directory and returns a `DispatchConfig` object.
 | returns empty object for empty config file | Empty file treated as no-config |
 | loads a valid config file | Standard JSON round-trip |
 | returns empty object for corrupt JSON | Malformed JSON does not throw |
-| loads config with all fields populated | All 8 `DispatchConfig` fields load correctly |
+| loads config with all fields populated | All `DispatchConfig` fields load correctly |
 
 All tests use real filesystem I/O with temporary directories.
 
 **Key behavior:** `loadConfig` never throws. Invalid or missing files silently
 return `{}`. This means corrupt config files are treated identically to absent
-ones -- there is no error message or recovery prompt.
+ones — there is no error message or recovery prompt.
 
-### saveConfig (4 tests)
+### saveConfig (5 tests)
 
 Tests the `saveConfig()` function, which writes a `DispatchConfig` object to
 disk as pretty-printed JSON.
@@ -49,6 +54,7 @@ disk as pretty-printed JSON.
 | creates parent directory if it doesn't exist | `mkdir -p` semantics for nested paths |
 | writes pretty-printed JSON with trailing newline | Format: `JSON.stringify(config, null, 2) + "\n"` |
 | overwrites existing config | Second save replaces first completely |
+| round-trips config with all Azure DevOps fields | org, project, workItemType, iteration, area survive round-trip |
 
 **Key behavior:** `saveConfig` performs a full replacement, not a merge. Saving
 `{ provider: "copilot" }` after `{ provider: "opencode", concurrency: 2 }` drops
@@ -61,24 +67,14 @@ Tests the `getConfigPath()` function, which resolves the config file location.
 | Test | What it verifies |
 |------|------------------|
 | returns path under the given directory | Custom directory override works |
-| defaults to `~/.dispatch/config.json` when no override | Default path uses `homedir()` |
+| defaults to `{CWD}/.dispatch/config.json` when no override | Default path uses `process.cwd()` |
 
-### isValidConfigKey (2 tests)
-
-Tests the `isValidConfigKey()` type guard function.
-
-| Test | What it verifies |
-|------|------------------|
-| returns true for each valid config key | All 8 keys from `CONFIG_KEYS` are valid |
-| returns false for unknown keys | `"unknown"`, `"dryRun"`, `"noPlan"`, `"verbose"`, `""` all rejected |
-
-The valid config keys are: `provider`, `concurrency`, `source`, `org`,
-`project`, `serverUrl`, `planTimeout`, `planRetries`.
-
-### validateConfigValue (16 tests)
+### validateConfigValue (15 tests)
 
 Tests the `validateConfigValue()` function, which returns `null` for valid
-values or an error message string for invalid ones.
+values or an error message string for invalid ones. Tests exercise all
+[`CONFIG_BOUNDS`](../cli-orchestration/configuration.md#numeric-bounds-config_bounds)
+boundary values.
 
 | Test | What it verifies |
 |------|------------------|
@@ -86,70 +82,58 @@ values or an error message string for invalid ones.
 | rejects invalid provider name | `"invalid"` returns error containing `"Invalid provider"` |
 | accepts valid source names | `"github"` and `"azdevops"` return `null` |
 | rejects invalid source name | `"jira"` returns error containing `"Invalid source"` |
-| accepts valid concurrency (positive integer) | `"1"`, `"5"`, `"100"` all valid |
-| rejects non-positive concurrency | `"0"` and `"-1"` return error containing `"positive integer"` |
-| rejects non-integer concurrency | `"1.5"` and `"abc"` both rejected |
-| accepts non-empty string for org, project, serverUrl | `"some-value"` returns `null` for all three keys |
-| rejects empty string for org, project, serverUrl | `""` returns error containing `"must not be empty"` |
-| rejects whitespace-only for org, project, serverUrl | `"   "` returns error containing `"must not be empty"` |
-| accepts valid planTimeout (positive number) | `"1"`, `"10"`, `"1.5"`, `"0.5"` all valid |
-| rejects non-positive planTimeout | `"0"` and `"-5"` return error containing `"positive number"` |
-| rejects non-numeric planTimeout | `"abc"` returns error containing `"positive number"`; `""` rejected |
-| accepts valid planRetries (non-negative integer) | `"0"`, `"1"`, `"5"` all valid |
-| rejects negative planRetries | `"-1"` returns error containing `"non-negative integer"` |
-| rejects non-integer planRetries | `"1.5"` and `"abc"` return error containing `"non-negative integer"` |
+| accepts valid testTimeout (within bounds) | Min (1), 10, 1.5, max (120) all valid |
+| rejects testTimeout below minimum | `"0"` and `"-5"` rejected with `"between"` |
+| rejects testTimeout above maximum | 121 rejected with `"between"` |
+| rejects non-numeric testTimeout | `"abc"` and `""` both rejected |
+| rejects Infinity and NaN for testTimeout | Special values rejected |
+| accepts valid planTimeout (within bounds) | Min (1), 10, 1.5, max (120) all valid |
+| rejects planTimeout below/above bounds | `"0"`, `"-1"`, 121 all rejected |
+| rejects non-numeric planTimeout | `"abc"` and `""` rejected |
+| rejects Infinity and NaN for planTimeout | Special values rejected |
+| accepts valid concurrency (within bounds) | Min (1), 4, max (64) all valid |
+| rejects concurrency below/above bounds | `"0"`, `"-1"`, 65 all rejected |
+| rejects non-integer concurrency | `"1.5"`, `"abc"`, `""` rejected |
+| rejects Infinity and NaN for concurrency | Special values rejected |
+| accepts valid org, project, workItemType, iteration, area | Non-empty strings accepted |
+| rejects empty org, project, workItemType, iteration, area | `""` and whitespace-only rejected |
 
 **Validation rules by key:**
 
 | Config key | Valid values | Validation rule |
 |------------|-------------|-----------------|
-| `provider` | `"opencode"`, `"copilot"` | Must be in [`PROVIDER_NAMES`](../shared-types/provider.md) |
-| `source` | `"github"`, `"azdevops"` | Must be in `ISSUE_SOURCE_NAMES` |
-| `concurrency` | `"1"`, `"2"`, ... | Must parse to positive integer |
+| `provider` | `"opencode"`, `"copilot"`, `"claude"`, `"codex"` | Must be in `PROVIDER_NAMES` |
+| `model` | Any non-empty string | Must not be empty or whitespace-only |
+| `source` | `"github"`, `"azdevops"`, `"md"` | Must be in `DATASOURCE_NAMES` |
+| `testTimeout` | 1–120 | Finite number within `CONFIG_BOUNDS` |
+| `planTimeout` | 1–120 | Finite number within `CONFIG_BOUNDS` |
+| `concurrency` | 1–64 | Integer within `CONFIG_BOUNDS` |
 | `org` | Any non-empty string | Must not be empty or whitespace-only |
 | `project` | Any non-empty string | Must not be empty or whitespace-only |
-| `serverUrl` | Any non-empty string | Must not be empty or whitespace-only |
-| `planTimeout` | `"1"`, `"10"`, `"1.5"`, `"0.5"` | Must parse to positive finite number |
-| `planRetries` | `"0"`, `"1"`, `"5"` | Must parse to non-negative integer |
-
-### parseConfigValue (4 tests)
-
-Tests the `parseConfigValue()` function, which converts string values to the
-appropriate type for storage.
-
-| Test | What it verifies |
-|------|------------------|
-| converts concurrency to a number | `parseConfigValue("concurrency", "5")` returns `5` (number) |
-| returns string for non-concurrency keys | `parseConfigValue("provider", "copilot")` returns `"copilot"` (string) |
-| converts planTimeout to a number via parseFloat | `parseConfigValue("planTimeout", "10.5")` returns `10.5` (number) |
-| converts planRetries to a number via parseInt | `parseConfigValue("planRetries", "3")` returns `3` (number) |
-
-**Key behavior:** `concurrency` and `planRetries` are coerced to integers via
-`parseInt`. `planTimeout` is coerced to a float via `parseFloat`. All other
-keys remain strings.
+| `workItemType` | Any non-empty string | Must not be empty or whitespace-only |
+| `iteration` | Any non-empty string | Must not be empty or whitespace-only |
+| `area` | Any non-empty string | Must not be empty or whitespace-only |
 
 ### merge precedence (5 tests)
 
 Tests the three-way merge logic: **[CLI flags](../cli-orchestration/cli.md) > config file > defaults**.
 
-This describe block replicates the merge logic from `src/cli.ts` as a local
-`applyMerge()` helper. It uses a `CONFIG_TO_CLI` mapping that mirrors the
-production code's field name translation:
+This describe block replicates the merge logic from `src/orchestrator/cli-config.ts`
+as a local `applyMerge()` helper. It uses a `CONFIG_TO_CLI` mapping that
+mirrors the production code's field name translation:
 
 | Config key | CLI args field |
 |------------|---------------|
 | `provider` | `provider` |
-| `concurrency` | `concurrency` |
+| `model` | `model` |
 | `source` | `issueSource` |
-| `org` | `org` |
-| `project` | `project` |
-| `serverUrl` | `serverUrl` |
 
-Note that `source` maps to `issueSource` in CLI args -- this is the only
+Note that `source` maps to `issueSource` in CLI args — this is the only
 field where the config key differs from the CLI field name. The test's local
-`CONFIG_TO_CLI` mapping covers the original 6 keys; the production code's
-mapping in [`src/orchestrator/cli-config.ts:21-30`](../cli-orchestration/configuration.md) additionally includes
-`planTimeout` and `planRetries`.
+`CONFIG_TO_CLI` mapping covers the core 3 keys; the production code's
+mapping in [`src/orchestrator/cli-config.ts:25-37`](../cli-orchestration/configuration.md)
+additionally includes `testTimeout`, `planTimeout`, `concurrency`, `org`,
+`project`, `workItemType`, `iteration`, and `area`.
 
 ```mermaid
 flowchart TD
@@ -164,59 +148,218 @@ flowchart TD
 | config value fills in when CLI flag is not explicit | Config overrides defaults |
 | CLI flag takes precedence over config | Explicit flags win over config |
 | default is used when neither CLI nor config provides a value | Fallback to defaults |
-| merge applies to each configurable field | All 5 non-provider fields merge correctly |
+| merge applies to each configurable field | Model and source merge correctly |
 | partially explicit flags still allow config for other fields | Per-field independence |
 
-### handleConfigCommand (10 tests)
+## cli-config.test.ts
 
-Tests the `dispatch config` CLI subcommand handler.
+Tests the config resolution layer defined in
+[`src/orchestrator/cli-config.ts`](../cli-orchestration/configuration.md#config-resolution-pipeline):
+three-tier merge, mandatory validation, output-dir validation, datasource
+auto-detection, and mode-dependent behavior.
 
-| Test | What it verifies |
-|------|------------------|
-| `set` with missing key and value exits with error | Missing args → exit(1) |
-| `set` with invalid key exits with error | Unknown key → exit(1) |
-| `set` with invalid provider value exits with error | Bad provider → exit(1) |
-| `set` with invalid source value exits with error | `"jira"` → exit(1) |
-| `set` with invalid concurrency exits with error | `"abc"` → exit(1) |
-| `get` with missing key exits with error | Missing key → exit(1) |
-| `get` with invalid key exits with error | Unknown key → exit(1) |
-| unknown operation exits with error | `"badop"` → exit(1) |
-| missing operation exits with error | Empty args → exit(1) |
+### Test structure
 
-The `path` subcommand is also tested: it prints the config file path to stdout
-and does not exit with an error.
-
-**Process exit mocking pattern:** Since calling `process.exit()` would
-terminate the test runner, the tests spy on `process.exit` with an
-implementation that throws an error:
+The test file contains **5 describe blocks** with **29 tests** total. All
+tests mock `process.exit` to prevent test runner termination:
 
 ```
-vi.spyOn(process, "exit").mockImplementation(() => { throw new Error("process.exit called"); })
+vi.spyOn(process, "exit").mockImplementation(
+  (() => { throw new Error("process.exit called"); }) as never,
+);
 ```
 
 Tests then assert with `expect(...).rejects.toThrow("process.exit called")`
-and verify the exit code via `expect(mockExit).toHaveBeenCalledWith(1)`.
+and verify error messages via `expect(log.error).toHaveBeenCalledWith(...)`.
+
+### config merging (10 tests)
+
+| Test | What it verifies |
+|------|------------------|
+| returns args unchanged when config file is empty | Empty config is a no-op |
+| merges config defaults for fields not in explicitFlags | Config fills gaps |
+| CLI flags take precedence over config values when in explicitFlags | Explicit flags win |
+| merges source config key to issueSource CLI field | `source` → `issueSource` mapping |
+| does not overwrite explicit issueSource with config source | Explicit source preserved |
+| merges all CONFIG_TO_CLI fields from config | Full mapping works |
+| merges azdevops config values (org, project, workItemType, iteration, area) | All AzDevOps fields merge |
+| CLI flags take precedence over config for org, project, workItemType, iteration, area | AzDevOps CLI wins |
+| merges only the azdevops config fields that are set, leaving others undefined | Partial AzDevOps config |
+| uses config for azdevops fields not in explicitFlags and CLI for those in explicitFlags | Mixed AzDevOps precedence |
+
+### validation errors (5 tests)
+
+| Test | What it verifies |
+|------|------------------|
+| exits when provider is not configured | Missing provider → `process.exit(1)` |
+| auto-detects datasource when source is not configured | `detectDatasource()` called |
+| exits when only provider is missing | Missing provider with no config |
+| does not require source in fix-tests mode | `fixTests` skips source check |
+| still requires provider in fix-tests mode | Provider mandatory in all modes |
+
+### output-dir validation (4 tests)
+
+| Test | What it verifies |
+|------|------------------|
+| exits with error when output directory does not exist | ENOENT → exit(1) |
+| exits with error when output directory is not writable | EACCES → exit(1) |
+| passes validation when output directory exists and is writable | `access()` success |
+| skips validation when outputDir is not set | `access()` not called |
+
+### datasource auto-detection (14 tests)
+
+These tests verify the conditional datasource detection logic documented in
+[datasource auto-detection](../cli-orchestration/configuration.md#datasource-auto-detection-conditional):
+
+| Test | What it verifies |
+|------|------------------|
+| uses detected datasource when source is not explicitly set | `detectDatasource()` result applied |
+| exits with error when detection returns null | Fatal error on detection failure |
+| does not auto-detect when issueSource is in explicitFlags | Explicit source skips detection |
+| does not auto-detect when config source is set | Config source skips detection |
+| skips auto-detection in fix-tests mode | `fixTests` → no detection |
+| skips auto-detection in spec mode | `spec` → no detection |
+| skips auto-detection in respec mode | `respec` → no detection |
+| still auto-detects for dispatch mode | Default mode runs detection |
+| explicit --source flag still works in spec mode | Source passthrough in spec |
+| config-file source still applies in spec mode | Config source in spec |
+| detects azdevops from git remote | Azure DevOps detection |
+| includes remediation guidance when detection fails | Error message quality |
+| explicit --source flag overrides auto-detection | CLI wins over detection |
+| config source value overrides auto-detection | Config wins over detection |
+
+### verbose logging (2 tests)
+
+| Test | What it verifies |
+|------|------------------|
+| enables verbose logging when verbose is true | `log.verbose = true` |
+| does not enable verbose logging when verbose is false | `log.verbose = false` |
+
+## config-prompts.test.ts
+
+Tests the interactive configuration wizard defined in
+[`src/config-prompts.ts`](../cli-orchestration/configuration.md#config-wizard-flow).
+All external dependencies (`@inquirer/prompts`, `config.ts`, `datasources/index.ts`,
+`providers/index.ts`) are mocked to simulate user interactions.
+
+### Test structure
+
+The test file contains **1 describe block** (`runInteractiveConfigWizard`)
+with **16 tests** total. Mock setup follows this pattern:
+
+1. `vi.mock("@inquirer/prompts")` — mocks `select`, `confirm`, `input`
+2. `vi.mock("../config.js")` — mocks `loadConfig`, `saveConfig`
+3. `vi.mock("../datasources/index.js")` — mocks `detectDatasource`,
+   `getGitRemoteUrl`, `parseAzDevOpsRemoteUrl`
+4. `vi.mock("../providers/index.js")` — mocks `listProviderModels`,
+   `checkProviderInstalled`
+
+Each test orchestrates the wizard flow by providing mock return values for
+the prompt functions in sequence, then asserts on `saveConfig` calls.
+
+### runInteractiveConfigWizard (16 tests)
+
+| Test | What it verifies |
+|------|------------------|
+| basic flow — selects provider and datasource, saves config | Core happy path |
+| model selection — saves selected model when provider returns models | Model from `listProviderModels` |
+| model selection — default option omits model from config | Empty model → `undefined` |
+| existing config — user declines reconfiguration | Early exit, no save |
+| user cancels at save confirmation | Decline save → no `saveConfig` |
+| existing config — user accepts reconfiguration | Full reconfigure flow |
+| default is auto when no existing source | Datasource default = "auto" |
+| existing config source takes precedence over auto-detected | Existing source as default |
+| default is auto when no existing source and no detection | No detection → "auto" default |
+| selecting auto saves config without source field | "auto" → `source: undefined` |
+| datasource choices include auto as first option | "auto" is first choice |
+| provider select choices include install indicator annotations | Green dot for installed |
+| azdevops source — prompts for org, project, workItemType, iteration, area | All 5 AzDevOps fields |
+| azdevops source — empty inputs omit fields from config | Empty → `undefined` |
+| azdevops source — pre-fills org and project from git remote | Git remote pre-fill |
+| non-azdevops source — does not prompt for azdevops fields | `input` not called |
+| provider select choices show red indicator for uninstalled providers | Red dot for uninstalled |
+
+## Testing patterns
+
+### Real filesystem I/O
+
+The `config.test.ts` file uses real filesystem operations with temporary
+directories created via `mkdtemp(join(tmpdir(), "dispatch-test-"))`. Each
+test creates its own temp directory and removes it in `afterEach`. This
+avoids mocking `fs/promises` and catches real I/O edge cases (permissions,
+encoding, directory creation).
+
+### Process exit mocking
+
+The `cli-config.test.ts` file mocks `process.exit` to prevent test runner
+termination:
+
+```
+vi.spyOn(process, "exit").mockImplementation(
+  (() => { throw new Error("process.exit called"); }) as never,
+);
+```
+
+Tests assert with `expect(...).rejects.toThrow("process.exit called")` and
+verify the error messages via `expect(log.error).toHaveBeenCalledWith(...)`.
+This pattern is necessary because `resolveCliConfig()` calls `process.exit(1)`
+directly on validation failure rather than throwing an error.
+
+### Sequential mock return values
+
+The `config-prompts.test.ts` file chains mock return values to simulate
+multi-step wizard flows:
+
+```
+vi.mocked(select)
+  .mockResolvedValueOnce("copilot")    // provider
+  .mockResolvedValueOnce("model-a")    // model
+  .mockResolvedValueOnce("github");    // datasource
+vi.mocked(confirm).mockResolvedValueOnce(true); // save
+```
+
+Each `mockResolvedValueOnce` call provides the return value for the next
+invocation in sequence, matching the wizard's prompt order.
+
+## How to run
+
+```sh
+# Run all configuration tests
+npx vitest run src/tests/config.test.ts src/tests/cli-config.test.ts src/tests/config-prompts.test.ts
+
+# Run a single test file
+npx vitest run src/tests/config.test.ts
+
+# Run in watch mode
+npx vitest src/tests/config.test.ts
+
+# Run with verbose output
+npx vitest run --reporter=verbose src/tests/cli-config.test.ts
+```
 
 ## Temporary file cleanup
 
-The `loadConfig` and `saveConfig` describe blocks use the standard temporary
-directory pattern described in the [overview](overview.md). Each test creates a
-unique `/tmp/dispatch-test-*` directory and removes it in `afterEach`.
+The `config.test.ts` describe blocks use the standard temporary directory
+pattern described in the [overview](overview.md). Each test creates a unique
+`/tmp/dispatch-test-*` directory and removes it in `afterEach`.
 
 ## Related documentation
 
 - [Test suite overview](overview.md) -- framework, patterns, and coverage map
 - [Architecture overview](../architecture.md) -- system-wide context
 - [CLI documentation](../cli-orchestration/cli.md) -- CLI argument parsing and config integration
-- [Configuration](../cli-orchestration/configuration.md) -- `DispatchConfig` type and merge logic
-- [Provider overview](../provider-system/provider-overview.md) -- provider names validated by config
+- [Configuration](../cli-orchestration/configuration.md) -- `DispatchConfig` type, merge logic,
+  wizard flow, and validation rules
+- [Provider overview](../provider-system/overview.md) -- provider names validated by config
 - [Provider interface](../shared-types/provider.md) -- `ProviderName` type used in config validation
-- [Issue fetching overview](../issue-fetching/overview.md) -- issue source names validated by config
-- [Timeout utility](../shared-utilities/timeout.md) -- `planTimeout` and `planRetries` consumed by timeout wrapping
-- [Shared Utilities Overview](../shared-utilities/overview.md) -- Slugify and
-  timeout utilities referenced by config validation (planTimeout, planRetries)
-- [Batch Confirmation](../prereqs-and-safety/confirm-large-batch.md) -- Safety
-  prompt with threshold logic related to config-validated parameters
+- [Datasource overview](../datasource-system/overview.md) -- datasource names and auto-detection
+- [Timeout utility](../shared-utilities/timeout.md) -- `planTimeout` consumed by timeout wrapping
 - [Spec generator tests](spec-generator-tests.md) -- adjacent test documentation
 - [Parser tests](parser-tests.md) -- another test file using real filesystem I/O pattern
 - [Format utility tests](format-tests.md) -- adjacent test documentation
+- [Provider tests](provider-tests.md) -- SDK mocking patterns comparable to config prompt mocks
+- [Batch Confirmation](../prereqs-and-safety/confirm-large-batch.md) --
+  large batch threshold logic related to configuration validation
+- [Shared Utilities](../shared-utilities/overview.md) -- timeout and
+  slugify utilities whose configuration (`planTimeout`, `concurrency`)
+  is validated by these tests

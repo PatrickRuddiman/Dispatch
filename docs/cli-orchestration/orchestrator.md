@@ -1,28 +1,43 @@
 # Orchestrator Pipeline
 
-The orchestrator (`src/orchestrator/runner.ts`) implements the core multi-phase
-pipeline that drives the entire dispatch tool. It coordinates datasource-driven
-work item discovery, task parsing, AI provider lifecycle, optional planning,
-execution, per-issue branch management, datasource sync, and automatic issue
-closing on external trackers.
+The orchestrator (`src/orchestrator/runner.ts`) is the top-level coordination
+layer for the dispatch tool. It exposes a `boot()` factory that produces an
+`OrchestratorAgent` — a thin façade that routes CLI arguments into one of three
+mutually exclusive pipelines: **dispatch** (issue execution), **spec** (spec
+generation), and **fix-tests** (automated test repair). The runner owns no
+domain logic itself; it resolves configuration, checks prerequisites, enforces
+mutual exclusion of mode flags, and delegates to the appropriate pipeline module.
 
 ## What it does
 
-The orchestrator exposes two entry points from the CLI:
+The orchestrator exposes four methods via the `OrchestratorAgent` interface:
 
-1. **`runFromCli(args)`**: Called by the CLI after `bootOrchestrator()`. This
-   method first calls [`resolveCliConfig()`](configuration.md#three-tier-configuration-precedence)
-   to merge config-file defaults with CLI flags, then routes to either the
-   spec pipeline (if `--spec` is present; see [Spec Generation](../spec-generation/overview.md)) or the dispatch pipeline.
+1. **`runFromCli(args)`**: Called by the CLI after `boot()`. This method first
+   calls [`resolveCliConfig()`](configuration.md#three-tier-configuration-precedence)
+   to merge config-file defaults with CLI flags, runs
+   [prerequisite checks](../prereqs-and-safety/prereqs.md), ensures
+   `.dispatch/worktrees/` is [gitignored](../git-and-worktree/gitignore-helper.md),
+   enforces [mutual exclusion of mode flags](#mode-routing-and-mutual-exclusion),
+   and then routes to either the spec pipeline, fix-tests pipeline, respec
+   discovery flow, or the dispatch pipeline.
 
 2. **`orchestrate()`**: The core dispatch function that accepts an
    `OrchestrateRunOptions` object and executes the dispatch pipeline
-   (`src/orchestrator/dispatch-pipeline.ts`):
+   (`src/orchestrator/dispatch-pipeline.ts`).
+
+3. **`generateSpecs()`**: Delegates to the
+   [spec pipeline](../spec-generation/overview.md) via `runSpecPipeline()`.
+
+4. **`run()`**: A unified entry point that accepts a
+   [`UnifiedRunOptions`](#unifiedrunoptions) discriminated union and routes to
+   the correct pipeline based on the `mode` discriminator.
+
+The `orchestrate()` method executes the dispatch pipeline:
 
     1. **Discover** work items from the configured [datasource](../datasource-system/overview.md) (GitHub, Azure DevOps, or local markdown), optionally filtered by issue IDs
     2. **Write** discovered items to temporary spec files via `writeItemsToTempDir()`
     3. **Parse** unchecked tasks from the spec files using [`parseTaskFile()`](../task-parsing/api-reference.md#parsetaskfile) (see [Markdown Syntax Reference](../task-parsing/markdown-syntax.md) for supported checkbox formats)
-    4. **Boot** the selected [AI provider](../provider-system/provider-overview.md) (OpenCode, Copilot, Claude, or Codex)
+    4. **Boot** the selected [AI provider](../provider-system/overview.md) (OpenCode, Copilot, Claude, or Codex)
     5. **Group** tasks by source file (one file = one issue), then by execution mode using [`groupTasksByMode()`](../task-parsing/api-reference.md#grouptasksbymode)
     6. **Branch** (unless `--no-branch`): create a per-issue feature branch, dispatch tasks, push, create PR, switch back (see [branch lifecycle](cli.md#the---no-branch-flag))
     7. **Dispatch** tasks in [group-aware concurrent batches](#concurrency-model) (plan + execute per task)
@@ -47,10 +62,205 @@ Before `runFromCli()` delegates to the dispatch or spec pipeline, it calls
 See [Configuration — Three-tier precedence](configuration.md#three-tier-configuration-precedence)
 for the full merge algorithm and precedence rules.
 
+## The `boot()` factory
+
+The `boot()` function (`src/orchestrator/runner.ts:123-247`) is the entry point
+for the runner. It accepts `AgentBootOptions` (which provides `cwd`) and returns
+an `OrchestratorAgent` object with four methods. The factory captures `cwd` at
+boot time so callers do not need to pass it on every invocation.
+
+The `boot()` function is lightweight — it performs no I/O, boots no providers,
+and checks no prerequisites. All heavy initialization (provider boot, datasource
+detection, agent creation) happens lazily when one of the four methods is called.
+
+### The `run()` method and `UnifiedRunOptions`
+
+The `run()` method provides a programmatic entry point that accepts a
+[`UnifiedRunOptions`](#unifiedrunoptions) discriminated union. It routes based
+on the `mode` field:
+
+- **`mode: "spec"`**: Strips the `mode` discriminator, injects `cwd` from boot,
+  and delegates to `generateSpecs()`.
+- **`mode: "fix-tests"`**: Uses [dynamic `import()`](#why-fix-tests-uses-dynamic-import)
+  to load the fix-tests pipeline and calls `runFixTestsPipeline()` with
+  hardcoded `provider: "opencode"`.
+- **`mode: "dispatch"`**: Strips the `mode` discriminator and delegates to
+  `orchestrate()`.
+
+Unlike `runFromCli()`, the `run()` method does **not** resolve configuration,
+check prerequisites, enforce mutual exclusion, or ensure gitignore entries. It
+assumes the caller has already performed validation.
+
+## Mode routing and mutual exclusion
+
+After config resolution and prerequisite checks, `runFromCli()` determines
+which pipeline to invoke. The routing logic at `src/orchestrator/runner.ts:159-243`
+uses a four-way mutual exclusion check across mode flags.
+
+### Mode flag matrix
+
+The `modeFlags` array filters four flags — `--spec`, `--respec`, `--fix-tests`,
+and `--feature` — and rejects the invocation if more than one is truthy:
+
+```mermaid
+flowchart TD
+    A["runFromCli(args)"] --> B["resolveCliConfig(args)"]
+    B --> C["checkPrereqs()"]
+    C --> D["ensureGitignoreEntry<br/>.dispatch/worktrees/"]
+    D --> E{"Count mode flags:<br/>--spec, --respec,<br/>--fix-tests, --feature"}
+
+    E -->|"> 1"| F["log.error: mutually exclusive<br/>process.exit(1)"]
+    E -->|"≤ 1"| G{"--feature && --no-branch?"}
+    G -->|Yes| H["log.error: mutually exclusive<br/>process.exit(1)"]
+    G -->|No| I{"--fix-tests && issueIds?"}
+    I -->|Yes| J["log.error: cannot combine<br/>process.exit(1)"]
+    I -->|No| K{"Which mode?"}
+
+    K -->|"--fix-tests"| L["runFixTestsPipeline()"]
+    K -->|"--spec"| M["generateSpecs()"]
+    K -->|"--respec"| N{"respec empty?"}
+    K -->|"default"| O["orchestrate()<br/>dispatch pipeline"]
+
+    N -->|Yes| P["Discovery flow:<br/>resolveSource → datasource.list()"]
+    N -->|No| Q["Direct delegation:<br/>generateSpecs(respec)"]
+```
+
+### Mutual exclusion rules
+
+| Flag combination | Allowed? | Error message |
+|-----------------|----------|---------------|
+| `--spec` alone | Yes | — |
+| `--respec` alone | Yes | — |
+| `--fix-tests` alone | Yes | — |
+| `--feature` alone | Yes | — |
+| `--spec` + `--respec` | No | `--spec and --respec are mutually exclusive` |
+| `--spec` + `--fix-tests` | No | `--spec and --fix-tests are mutually exclusive` |
+| `--spec` + `--feature` | No | `--spec and --feature are mutually exclusive` |
+| `--respec` + `--fix-tests` | No | `--respec and --fix-tests are mutually exclusive` |
+| `--feature` + `--fix-tests` | No | `--feature and --fix-tests are mutually exclusive` |
+| `--feature` + `--no-branch` | No | `--feature and --no-branch are mutually exclusive` |
+| `--fix-tests` + issue IDs | No | `--fix-tests cannot be combined with issue IDs` |
+
+All validation failures call `process.exit(1)` immediately after logging the
+error. There is no retry or recovery — these are configuration errors that
+require the user to fix their invocation.
+
+### Prerequisite checks and gitignore
+
+Before mode routing, `runFromCli()` performs two setup steps:
+
+1. **`checkPrereqs({ datasource })`** — validates that required tools (Node.js
+   version, `git`, and datasource-specific CLIs like `gh` or `az`) are available.
+   If any check fails, the failures are logged and the process exits with code `1`.
+   See [Prerequisites](../prereqs-and-safety/prereqs.md).
+
+2. **`ensureGitignoreEntry(cwd, ".dispatch/worktrees/")`** — ensures the
+   `.dispatch/worktrees/` directory is listed in the repository's `.gitignore`
+   file. This runs unconditionally (regardless of whether worktrees are enabled)
+   so the entry is present when the user later switches to worktree mode. See
+   [Gitignore Helper](../git-and-worktree/gitignore-helper.md).
+
+## The respec discovery flow
+
+The `--respec` flag has two fundamentally different code paths depending on
+whether arguments are provided:
+
+### With arguments (direct delegation)
+
+When `--respec` has arguments (e.g., `dispatch --respec 5,10` or
+`dispatch --respec "src/**/*.md"`), the arguments are passed directly to
+`generateSpecs()` as the `issues` parameter — identically to `--spec`. No
+datasource discovery or listing occurs.
+
+### Without arguments (discovery mode)
+
+When `--respec` is passed with no arguments (bare `dispatch --respec`), the
+runner discovers all existing specs via the datasource:
+
+1. **Resolve datasource** — calls `resolveSource([], issueSource, cwd)` to
+   determine which datasource to use.
+2. **Get datasource instance** — calls `getDatasource(source)` to obtain the
+   datasource implementation.
+3. **List existing items** — calls `datasource.list()` with the current `cwd`,
+   `org`, `project`, `workItemType`, `iteration`, and `area` options. If no
+   items are found, the process exits with `"No existing specs found to
+   regenerate"`.
+4. **Format identifiers** — extracts the `number` field from each item. If all
+   numbers are purely numeric (matching `/^\d+$/`), they are joined into a
+   comma-separated string (e.g., `"42,99,7"`). If any number contains
+   non-numeric characters (e.g., filename-based identifiers from the markdown
+   datasource), the numbers are passed as an array.
+5. **Confirm large batch** — calls
+   [`confirmLargeBatch(count)`](../prereqs-and-safety/confirm-large-batch.md)
+   if the batch exceeds 100 items. If the user declines, the process exits
+   with code `0` (clean exit, not an error).
+6. **Generate specs** — delegates to `generateSpecs()` with the formatted
+   identifiers.
+
+### Why identifier format matters
+
+The numeric-vs-array distinction exists because the downstream spec pipeline
+(`src/orchestrator/spec-pipeline.ts`) uses `isIssueNumbers()` to classify
+input. A comma-separated numeric string like `"42,99,7"` triggers **tracker
+mode** (fetching issues by ID), while an array triggers **file/glob mode**
+(reading local files). The respec discovery path formats identifiers to match
+the correct downstream classification:
+
+- **Numeric identifiers** (from GitHub or Azure DevOps) → comma-separated
+  string → tracker mode
+- **Non-numeric identifiers** (from the markdown datasource, which uses
+  filenames as identifiers) → array → file/glob mode
+
+## Fix-tests pipeline delegation
+
+The `--fix-tests` flag activates the fix-tests pipeline, which runs the
+project's test suite and uses an AI agent to fix failures.
+
+### Why fix-tests hardcodes `provider: "opencode"`
+
+In the `run()` method (`src/orchestrator/runner.ts:138`), the fix-tests pipeline
+is always called with `provider: "opencode"` regardless of the user's configured
+provider. In `runFromCli()` (`src/orchestrator/runner.ts:186`), the user's
+configured provider is passed through. This discrepancy means:
+
+- **`run({ mode: "fix-tests" })`** (programmatic API): Always uses OpenCode.
+- **`runFromCli({ fixTests: true })`** (CLI path): Passes the user's
+  `--provider` flag through to the pipeline.
+
+The `run()` hardcoding exists because the fix-tests pipeline was initially
+developed against the OpenCode provider's tool capabilities. The `runFromCli()`
+path was later updated to respect the user's provider choice.
+
+### Why fix-tests uses dynamic `import()`
+
+Both the `run()` and `runFromCli()` paths use `await import("./fix-tests-pipeline.js")`
+instead of a static `import` at the top of the file. This is a **code-splitting
+optimization**: when running in dispatch or spec mode, the fix-tests pipeline
+module and its dependencies (test runner, test discovery) are never loaded. This
+reduces startup time and memory usage for the common case where `--fix-tests`
+is not used.
+
+## Error handling in the runner
+
+The runner itself performs **no retry logic**. Errors from any pipeline propagate
+unmodified to the caller:
+
+- **`resolveCliConfig()` errors**: Propagate directly (e.g., missing provider
+  configuration).
+- **Dispatch pipeline errors**: Propagate directly. Retry logic for individual
+  tasks lives inside `src/orchestrator/dispatch-pipeline.ts`.
+- **Spec pipeline errors**: Propagate directly. Per-item retry logic lives
+  inside `src/orchestrator/spec-pipeline.ts` via `withRetry()`.
+- **Fix-tests pipeline errors**: Propagate directly.
+
+The runner is designed as a thin routing layer. All error recovery, retry
+strategies, and graceful degradation are the responsibility of the individual
+pipeline modules.
+
 ## Why it exists
 
 The orchestrator is the "glue" that turns independent modules ([parser](../task-parsing/overview.md), [planner](../planning-and-dispatch/planner.md),
-[dispatcher](../planning-and-dispatch/dispatcher.md), [git](../planning-and-dispatch/git.md), [provider](../provider-system/provider-overview.md)) into a coherent pipeline. Without it, each module
+[dispatcher](../planning-and-dispatch/dispatcher.md), [git](../planning-and-dispatch/git.md), [provider](../provider-system/overview.md)) into a coherent pipeline. Without it, each module
 would need to know about the others. The orchestrator enforces execution order,
 manages the provider lifecycle (including the [cleanup registry](../shared-types/cleanup.md)), and translates between module interfaces.
 
@@ -141,7 +351,7 @@ flat task list into contiguous groups of same-mode tasks:
 - **`(S)` (serial)** tasks cap the current group and start a new one.
 - **`(I)` (isolated)** tasks flush the current group, run alone in a solo group,
   then a new group begins.
-- Tasks with no prefix default to parallel mode.
+- Tasks with no prefix default to serial mode.
 
 For example, given tasks `[A(P), B(P), C(I), D(S), E(P)]`, grouping produces:
 
@@ -433,6 +643,53 @@ AI providers or modifying any files.
 
 ## Interfaces
 
+### OrchestratorAgent
+
+The `boot()` factory returns this interface (`src/orchestrator/runner.ts:115-120`):
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `orchestrate` | `(opts: OrchestrateRunOptions) => Promise<DispatchSummary>` | Run the dispatch pipeline |
+| `generateSpecs` | `(opts: SpecOptions) => Promise<SpecSummary>` | Run the spec generation pipeline |
+| `run` | `(opts: UnifiedRunOptions) => Promise<RunResult>` | Unified entry point with mode discriminator |
+| `runFromCli` | `(args: RawCliArgs) => Promise<RunResult>` | CLI entry point with config resolution and validation |
+
+### RawCliArgs
+
+Raw CLI arguments before config resolution
+(`src/orchestrator/runner.ts:46-76`). This is the input to `runFromCli()`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `issueIds` | `string[]` | Positional issue IDs |
+| `dryRun` | `boolean` | Preview mode |
+| `noPlan` | `boolean` | Skip planner phase |
+| `noBranch` | `boolean` | Skip branch lifecycle |
+| `noWorktree` | `boolean` | Skip worktree isolation |
+| `force` | `boolean` | Force operation |
+| `concurrency` | `number?` | Max parallel dispatches |
+| `provider` | `ProviderName` | AI backend name |
+| `model` | `string?` | Model override |
+| `serverUrl` | `string?` | Provider server URL |
+| `cwd` | `string` | Working directory |
+| `verbose` | `boolean` | Debug output |
+| `spec` | `string \| string[]?` | Spec mode input |
+| `respec` | `string \| string[]?` | Respec mode input |
+| `fixTests` | `boolean?` | Fix-tests mode flag |
+| `issueSource` | `DatasourceName?` | Datasource backend |
+| `org` | `string?` | Azure DevOps org URL |
+| `project` | `string?` | Azure DevOps project |
+| `workItemType` | `string?` | Azure DevOps work item type filter |
+| `iteration` | `string?` | Azure DevOps iteration filter |
+| `area` | `string?` | Azure DevOps area filter |
+| `planTimeout` | `number?` | Planning timeout in minutes |
+| `planRetries` | `number?` | Planning retry attempts |
+| `testTimeout` | `number?` | Test timeout in minutes |
+| `retries` | `number?` | General retry attempts |
+| `feature` | `boolean?` | Feature mode flag |
+| `outputDir` | `string?` | Spec output directory |
+| `explicitFlags` | `Set<string>` | Flags explicitly provided by the user (drives config merge precedence) |
+
 ### OrchestrateRunOptions
 
 Passed from `runFromCli()` (after config resolution) to `orchestrate()`
@@ -458,6 +715,31 @@ time via `boot({ cwd })` rather than passed per-invocation:
 | `planTimeout` | `number?` | Planning timeout in minutes. Passed through from CLI `--plan-timeout` or config. Used with [`withTimeout()`](../shared-utilities/timeout.md). |
 | `planRetries` | `number?` | Number of retry attempts after planning timeout. Passed through from CLI `--plan-retries` or config. |
 | `retries` | `number?` | Number of retries for task execution failures. Passed through from CLI `--retries`. |
+| `feature` | `boolean?` | Feature mode — groups multiple issues into a single branch and PR (optional, defaults to `false`) |
+
+### UnifiedRunOptions
+
+A discriminated union of all runner run options
+(`src/orchestrator/runner.ts:109`). The `mode` field determines which pipeline
+is invoked by the `run()` method:
+
+```
+type UnifiedRunOptions = DispatchRunOptions | SpecRunOptions | FixTestsRunOptions;
+```
+
+| Variant | Mode | Description |
+|---------|------|-------------|
+| `DispatchRunOptions` | `"dispatch"` | Extends `OrchestrateRunOptions` with `mode: "dispatch"` |
+| `SpecRunOptions` | `"spec"` | Extends `SpecOptions` (minus `cwd`) with `mode: "spec"` |
+| `FixTestsRunOptions` | `"fix-tests"` | Contains `mode: "fix-tests"` and optional `testTimeout` |
+
+### RunResult
+
+Union of all possible return types (`src/orchestrator/runner.ts:112`):
+
+```
+type RunResult = DispatchSummary | SpecSummary | FixTestsSummary;
+```
 
 ### DispatchSummary
 
@@ -471,8 +753,29 @@ Returned from `orchestrate()` to the CLI:
 | `skipped` | `number` | Tasks skipped (dry-run mode only) |
 | `results` | `DispatchResult[]` | Per-task result objects |
 
+### FixTestsSummary
+
+Returned from `runFixTestsPipeline()` (`src/orchestrator/runner.ts:86-90`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `mode` | `"fix-tests"` | Literal discriminator |
+| `success` | `boolean` | Whether the test fix attempt succeeded |
+| `error` | `string?` | Error message if unsuccessful |
+
+### `parseIssueFilename` re-export
+
+The runner re-exports `parseIssueFilename` from `src/orchestrator/datasource-helpers.ts`
+(`src/orchestrator/runner.ts:249`). This utility extracts the issue ID and slug
+from temp filenames matching the `<digits>-<slug>.md` pattern. See
+[Datasource Helpers](../datasource-system/datasource-helpers.md#parseissuefilename)
+for details.
+
 ## Related documentation
 
+- [Dispatch Pipeline](dispatch-pipeline.md) -- deep-dive into the dispatch
+  execution engine: worktree-parallel mode, feature branch workflow, planning
+  timeout/retry, executor retry, commit agent integration, and TUI modes
 - [CLI](cli.md) -- how options are parsed and exit codes are determined
 - [Configuration](configuration.md) -- persistent config, `resolveCliConfig()`
   merge logic, mandatory validation, and `dispatch config` subcommand
@@ -486,7 +789,7 @@ Returned from `orchestrate()` to the CLI:
   signatures including `groupTasksByMode()`
 - [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) -- `planTask()`,
   `dispatchTask()`, and `commitTask()` internals
-- [Provider Abstraction & Backends](../provider-system/provider-overview.md) -- `bootProvider()`
+- [Provider Abstraction & Backends](../provider-system/overview.md) -- `bootProvider()`
   lifecycle
 - [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) -- concurrent
   write safety concerns for `markTaskComplete()`
@@ -509,9 +812,21 @@ Returned from `orchestrate()` to the CLI:
 - [Timeout Utility](../shared-utilities/timeout.md) -- `withTimeout()` used for
   controlling planning execution timeouts (`planTimeout` option)
 - [Testing Overview](../testing/overview.md) -- project-wide test suite
-  documentation (note: orchestrator is not directly tested)
+  documentation
+- [Runner Tests](../testing/runner-tests.md) -- unit tests for the runner's
+  boot factory, mode routing, respec discovery, and datasource sync
 - [Prerequisites & Safety Checks](../prereqs-and-safety/overview.md) -- How
   environment validation (Node.js, git, CLI tools) runs before the orchestrator
   pipeline starts
+- [Batch Confirmation](../prereqs-and-safety/confirm-large-batch.md) -- safety
+  prompt for large batches used by the respec discovery flow
+- [Gitignore Helper](../git-and-worktree/gitignore-helper.md) -- ensures
+  `.dispatch/worktrees/` is gitignored on every CLI run
 - [Run State & Lifecycle](../git-and-worktree/run-state.md) -- Worktree run
   state tracking and future resume feature for interrupted orchestrator runs
+- [Executor Agent](../planning-and-dispatch/executor.md) -- the dispatch +
+  mark-complete coupling that the orchestrator invokes per task
+- [Planner Agent](../planning-and-dispatch/planner.md) -- the read-only
+  planning phase that the orchestrator calls before execution
+- [Logger](../shared-types/logger.md) -- dry-run task listing and verbose
+  debug output used by the orchestrator

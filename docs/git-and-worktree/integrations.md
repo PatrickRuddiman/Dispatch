@@ -1,9 +1,10 @@
 # Integrations Reference
 
-This document covers the three external dependencies used by the git-and-worktree
+This document covers the external dependencies used by the git-and-worktree
 helper group: the **Git CLI** for worktree operations, **Node.js
-`child_process.execFile`** for subprocess management, and **Node.js
-`fs/promises`** for state persistence and `.gitignore` manipulation.
+`child_process.execFile`** for subprocess management, **Node.js `fs/promises`**
+for state persistence and `.gitignore` manipulation, **Node.js
+`crypto.randomUUID`** for branch name generation, and **Vitest** for testing.
 
 ## Git CLI
 
@@ -59,6 +60,12 @@ check for git availability — it relies on the prereq check.
 If the prereq check is bypassed (e.g., in tests), `execFile("git", ...)`
 throws an `ENOENT` error, which propagates as an unhandled rejection from
 `createWorktree`.
+
+If the current working directory is not a git repository, `git worktree add`
+fails with `fatal: not a git repository`. This error propagates from
+`createWorktree` as a thrown exception. The prerequisite checks validate that
+the cwd is a git repository by running `git rev-parse --git-dir` during
+startup.
 
 ## Node.js child_process (execFile)
 
@@ -182,18 +189,95 @@ The asymmetry in `run-state.ts` is intentional: a read failure is recoverable
 (re-execute all tasks), but a write failure means state may be lost and should
 surface as an error rather than being silently swallowed.
 
+## Node.js crypto.randomUUID
+
+- **Module:** `node:crypto` (built-in)
+- **Function used:** `randomUUID()`
+- **Used in:** `src/helpers/worktree.ts:12` (imported), `src/helpers/worktree.ts:144`
+  (called in `generateFeatureBranchName`)
+- **Official docs:**
+  [nodejs.org/api/crypto.html#cryptorandomuuidoptions](https://nodejs.org/api/crypto.html#cryptorandomuuidoptions)
+
+### How it is used
+
+`generateFeatureBranchName()` calls `randomUUID()` and extracts the first
+8-character hex segment (before the first hyphen) to produce branch names like
+`dispatch/feature-a1b2c3d4`.
+
+### Entropy and collisions
+
+Only 8 hex characters (32 bits) of the full 128-bit UUID are used. The birthday
+bound for 32-bit values is approximately 65,000 — meaning collisions become
+likely after generating ~65,000 feature branches. Since Dispatch branches are
+ephemeral and cleaned up regularly, the active set is typically well under 100,
+making collisions negligible in practice.
+
+### Runtime requirements
+
+`crypto.randomUUID()` was added in Node.js 19.0.0 as a stable API (it was
+available behind a flag since Node.js 14.17.0 via the Web Crypto API). The
+project's minimum Node.js version requirement covers this. No polyfill is
+needed.
+
+## Vitest (test framework)
+
+- **Module:** `vitest`
+- **Used in:** All three test files in this group:
+    - `src/tests/branch-validation.test.ts`
+    - `src/tests/gitignore.test.ts`
+    - `src/tests/worktree.test.ts`
+- **Official docs:** [vitest.dev](https://vitest.dev/)
+
+### How it is used
+
+All tests import `describe`, `it`, `expect`, `vi`, `beforeEach`, and
+`afterEach` from Vitest. The test files use Vitest's mocking APIs:
+
+| API | Purpose |
+|-----|---------|
+| `vi.hoisted()` | Define mock implementations above imports (hoisted by Vitest) |
+| `vi.mock()` | Replace modules at the module level |
+| `vi.mocked()` | Type-safe access to mocked functions |
+| `vi.fn()` | Create mock functions |
+| `mockReset()` | Clear call history and implementation between tests |
+| `vi.restoreAllMocks()` | Restore original implementations after each test |
+
+### Running the tests
+
+```bash
+# Run all git-and-worktree tests
+npx vitest run tests/branch-validation.test.ts tests/gitignore.test.ts tests/worktree.test.ts
+
+# Run a single test file
+npx vitest run tests/worktree.test.ts
+
+# Run in watch mode for development
+npx vitest tests/worktree.test.ts
+```
+
+See [Testing](./testing.md) for detailed coverage of what each test file
+verifies and the mocking strategy used.
+
 ## Related documentation
 
 - [Overview](./overview.md) — Group-level summary
+- [Branch Validation](./branch-validation.md) — Branch name validation rules
+  and security properties; works with `execFile`'s array-based argument passing
+  to provide defense-in-depth against command injection
 - [Worktree Management](./worktree-management.md) — How the Git CLI commands
   are orchestrated
 - [Run State Persistence](./run-state.md) — The atomic write strategy in detail
 - [Gitignore Helper](./gitignore-helper.md) — Error handling and race
   conditions
+- [Testing](./testing.md) — Test coverage and mocking strategy for all
+  integrations documented here
 - [Shared Types — Integrations](../shared-types/integrations.md) — `fs/promises`
   patterns used across the broader codebase
 - [Planning and Dispatch — Integrations](../planning-and-dispatch/integrations.md) —
   Git integration for commit operations (distinct from worktree management)
+- [Dispatch Pipeline](../cli-orchestration/dispatch-pipeline.md) -- The
+  execution engine that creates, uses, and removes worktrees through Git CLI
+  commands documented here
 - [Prerequisites — External Integrations](../prereqs-and-safety/integrations.md) —
   How the prerequisite checker validates Git CLI availability before the
   pipeline starts (the `git --version` detection pattern)

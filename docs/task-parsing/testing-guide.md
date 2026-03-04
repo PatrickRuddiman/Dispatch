@@ -42,8 +42,8 @@ The `package.json` defines two test scripts:
 
 ## Test suite structure
 
-The test file (`src/tests/parser.test.ts`) is organized into five `describe` blocks
-covering each public function. For a comprehensive breakdown of all 62 tests, see
+The test file (`src/tests/parser.test.ts`) is organized into six `describe` blocks
+covering each public function. For a comprehensive breakdown of all 79 tests, see
 the [detailed parser tests](../testing/parser-tests.md) documentation.
 
 ### [parseTaskContent](./api-reference.md#parsetaskcontent) (pure, no I/O)
@@ -93,6 +93,8 @@ file contents afterward.
 | preserves indentation when marking complete | Indented tasks stay indented |
 | throws on out-of-range line number | Error when `task.line` exceeds file length |
 | throws if the line no longer matches unchecked pattern | Error when line is already checked or modified |
+| preserves CRLF line endings when marking complete | CRLF round-trip fidelity |
+| preserves LF line endings when marking complete | LF round-trip fidelity |
 
 ### [buildTaskContext](./api-reference.md#buildtaskcontext)
 
@@ -125,9 +127,17 @@ These tests verify the execution group partitioning logic.
 | treats undefined mode as serial | Default mode behavior |
 | preserves task order within groups | Index ordering |
 | handles serial at start followed by parallel | `[S,P,P]` → `[[S],[P,P]]` |
+| handles alternating P S P S pattern | `[P,S,P,S]` → `[[P,S],[P,S]]` |
+| single serial task produces exactly one group | Length verification |
+| groups a lone isolated task as a solo group | `[I]` → `[[I]]` |
+| isolated task at start flushes into solo group | `[I,P,P]` → `[[I],[P,P]]` |
+| isolated task in middle produces three groups | `[P,P,I,P,P]` → `[[P,P],[I],[P,P]]` |
+| isolated task at end flushes preceding group | `[P,P,I]` → `[[P,P],[I]]` |
+| consecutive isolated tasks get solo groups | `[I,I]` → `[[I],[I]]` |
+| handles mixed P/S/I sequences | `[P,S,I,P,P,I,S]` → 5 groups |
 
 For the detailed grouping algorithm and examples, see
-[Parser Tests (detailed)](../testing/parser-tests.md#grouptasksbymode-10-tests).
+[Parser Tests (detailed)](../testing/parser-tests.md#grouptasksbymode-18-tests).
 
 ## Temporary file cleanup
 
@@ -185,6 +195,8 @@ When adding tests for the parser:
   `TaskFile`, and exported functions from the shared-types perspective
 - [Shared Utilities Testing](../shared-utilities/testing.md) -- slugify and
   timeout test patterns for comparison (pure-function and fake-timer testing)
+- [Datasource Testing](../datasource-system/testing.md) -- Test patterns for
+  the datasource system using similar temporary directory patterns
 - [Provider Tests](../testing/provider-tests.md) -- Provider unit test patterns
   for comparison (mock-heavy integration testing)
 - [Prerequisite Tests](../prereqs-and-safety/prereqs.md#testing) -- Prerequisite
@@ -201,7 +213,8 @@ the [Testing section](../testing/overview.md):
 - [Test suite overview](../testing/overview.md) -- framework, patterns, and
   coverage map for all test files
 - [Parser tests (detailed)](../testing/parser-tests.md) -- comprehensive
-  breakdown of all 62 parser tests including mode extraction and grouping
+  breakdown of all 79 parser tests including mode extraction, isolated mode,
+  and grouping
 - [Configuration tests](../testing/config-tests.md) -- config I/O, validation,
   merge precedence, and `handleConfigCommand` tests
 - [Format utility tests](../testing/format-tests.md) -- `elapsed()` duration

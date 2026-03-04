@@ -14,17 +14,17 @@ system PATH. Without pre-flight validation, missing tools would cause cryptic
 errors deep inside pipeline execution, after partial side effects may have
 already occurred. The subsystem solves three problems:
 
-1.  **Fail fast on missing tools.** The prerequisite checker runs before any
+1.  **Fail fast on missing tools.** The [prerequisite checker](./prereqs.md) runs before any
     pipeline logic, so a missing `git` or `gh` binary produces a clear error
     message with installation instructions rather than an opaque `ENOENT`
     later in the pipeline.
 
-2.  **Prevent accidental large operations.** The batch confirmation prompt
+2.  **Prevent accidental large operations.** The [batch confirmation prompt](./confirm-large-batch.md)
     requires the user to explicitly type "yes" before processing more items
     than a safety threshold, protecting against unintentional runs that
     would consume significant AI resources.
 
-3.  **Inform provider selection.** The provider detection module probes all
+3.  **Inform provider selection.** The [provider detection](./provider-detection.md) module probes all
     known provider binaries and surfaces their availability as visual
     indicators (green/red dots) in the interactive configuration wizard,
     helping users choose a provider that is actually installed.
@@ -151,7 +151,7 @@ flowchart TD
     that uses `confirmLargeBatch`.
 -   [Datasource System](../datasource-system/overview.md) -- Datasource
     names that drive conditional prerequisite checks.
--   [Provider System](../provider-system/provider-overview.md) -- Provider
+-   [Provider System](../provider-system/overview.md) -- Provider
     lifecycle that `checkProviderInstalled` probes.
 -   [CLI Argument Parser](../cli-orchestration/cli.md) -- CLI flags including
     `--provider` and `--source` that interact with prerequisite checks.
@@ -160,3 +160,9 @@ flowchart TD
     orchestrator startup sequence.
 -   [Testing Overview](../testing/overview.md) -- Project-wide test suite
     (note: prerequisite checks have no dedicated unit tests).
+-   [Copilot Backend](../provider-system/copilot-backend.md) -- The Copilot
+    provider whose `copilot` binary is probed by `checkProviderInstalled()`.
+-   [OpenCode Backend](../provider-system/opencode-backend.md) -- The OpenCode
+    provider whose `opencode` binary is probed by `checkProviderInstalled()`.
+-   [Logger](../shared-types/logger.md) -- How `log.error()` surfaces
+    prerequisite failures and `log.debug()` traces signal handling.

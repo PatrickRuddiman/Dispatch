@@ -3,7 +3,7 @@
 This guide walks through the complete process of adding a new AI agent backend to
 dispatch. The provider system uses a strategy pattern that makes this
 straightforward -- you implement an interface, export a boot function, and
-register it. See the [Provider Overview](./provider-overview.md) for the
+register it. See the [Provider Overview](./overview.md) for the
 architectural context.
 
 ## Checklist
@@ -198,7 +198,7 @@ additional changes:
 The current design uses compile-time registration (union types and a static map)
 rather than runtime plugin discovery. This means adding a provider requires a
 code change and recompilation. The reasons for this choice are discussed in the
-[provider overview](./provider-overview.md#why-providername-is-a-compile-time-union).
+[provider overview](./overview.md#why-providername-is-a-compile-time-union).
 
 If runtime extensibility becomes necessary (e.g., third-party providers loaded
 from npm packages), the registry could be extended with a `registerProvider()`
@@ -208,7 +208,7 @@ runtime flexibility.
 
 ## Related documentation
 
-- [Provider Overview](./provider-overview.md) -- architecture and design
+- [Provider Overview](./overview.md) -- architecture and design
   decisions
 - [OpenCode Backend](./opencode-backend.md) -- reference implementation using
   `@opencode-ai/sdk`
@@ -220,6 +220,8 @@ runtime flexibility.
   functions are registered and invoked on process exit
 - [Dispatcher](../planning-and-dispatch/dispatcher.md) -- How the dispatcher
   consumes `ProviderInstance`
+- [Planner Agent](../planning-and-dispatch/planner.md) -- How the planner
+  consumes `ProviderInstance.prompt()`
 - [Spec Generation](../spec-generation/overview.md) -- The `--spec` pipeline
   that also boots and uses providers
 - [CLI Options](../cli-orchestration/cli.md) -- The `--provider` flag and
@@ -234,3 +236,5 @@ runtime flexibility.
   How provider binaries are detected during the configuration wizard; new
   providers should add their binary to the `PROVIDER_BINARIES` map in
   `src/providers/detect.ts`
+- [Prerequisites & Safety](../prereqs-and-safety/integrations.md) -- External
+  CLI tool dependencies including provider binary detection

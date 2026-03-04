@@ -1,0 +1,6 @@
+{
+  "model": {
+    "providerID": "github-copilot",
+    "modelID": "claude-opus-4.6"
+  }
+}

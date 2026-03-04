@@ -53,6 +53,8 @@ mocking, temporary files, or setup/teardown is needed.
   persistent settings and merge logic
 - [Spec Generator Tests](./spec-generator-tests.md) -- Test suite for spec
   generation utility functions
+- [Dispatch Pipeline Tests](./dispatch-pipeline-tests.md) -- The dispatch
+  pipeline test suite that exercises `elapsed()` indirectly through TUI timing
 - [Shared Utilities Testing](../shared-utilities/testing.md) -- Slugify and
   timeout test suites that follow similar pure-function testing patterns
 - [Cleanup Registry](../shared-types/cleanup.md) -- Process-level cleanup

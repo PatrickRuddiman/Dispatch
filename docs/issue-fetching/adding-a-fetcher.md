@@ -228,3 +228,7 @@ free of implementation imports at the cost of manual synchronization.
   dependencies should follow the same `execFile("tool", ["--version"])` pattern
 - [Provider Binary Detection](../prereqs-and-safety/provider-detection.md) --
   Similar binary detection pattern used for AI provider tools
+- [Testing Overview](../testing/overview.md) -- Project-wide test framework;
+  new fetchers should include tests following existing patterns
+- [Datasource Testing](../datasource-system/testing.md) -- Test coverage
+  for the datasource implementations that new fetchers should follow

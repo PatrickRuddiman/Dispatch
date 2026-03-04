@@ -1,7 +1,7 @@
 # Shared Utilities -- Testing
 
 This document covers the test infrastructure and patterns specific to the
-slugify and timeout utility modules.
+shared utility modules: slugify, timeout, and prerequisite checker.
 
 ## Test files
 
@@ -9,6 +9,7 @@ slugify and timeout utility modules.
 |-----------|-------------------|-------|-------------|----------------|----------|
 | [`src/tests/slugify.test.ts`](../../src/tests/slugify.test.ts) | [`src/slugify.ts`](../../src/slugify.ts) | 24 | 113 | 31 | Pure logic |
 | [`src/tests/timeout.test.ts`](../../src/tests/timeout.test.ts) | [`src/timeout.ts`](../../src/timeout.ts) | ~12 | 190 | 79 | Async + fake timers |
+| [`src/tests/prereqs.test.ts`](../../src/tests/prereqs.test.ts) | [`src/helpers/prereqs.ts`](../../src/helpers/prereqs.ts) | 17 | 267 | 98 | Mocking + platform |
 
 ## Running the tests
 
@@ -126,12 +127,41 @@ The following edge case is not covered by the current test suite:
   result ends with a trailing hyphen. The trim step runs before truncation,
   not after. This is cosmetically imperfect but functionally harmless.
 
+### Prerequisite checker testing (prereqs)
+
+The prerequisite checker tests are covered in detail in the
+[Prerequisite Checker](../prereqs-and-safety/prereqs.md#testing) documentation.
+Key patterns used in this test file:
+
+-   **`vi.mock("node:child_process")`** stubs `execFile` to simulate
+    tool-not-found and tool-available scenarios without executing real
+    binaries.
+-   **`Object.defineProperty(process.versions, "node", ...)`** overrides the
+    Node.js version string to simulate version-too-old and version-ok
+    scenarios.
+-   **Platform-specific assertions:** Six tests verify that all `execFile`
+    calls pass `shell: true` on Windows (via
+    `process.platform === "win32"` detection). See the
+    [Windows shell option](../prereqs-and-safety/prereqs.md#windows-shell-option)
+    section for why this is required.
+
+The test suite does not cover `errors.ts` or `guards.ts` directly -- the
+`UnsupportedOperationError` class is tested through the markdown datasource
+tests (`src/tests/md-datasource.test.ts`) and the `hasProperty` function
+is tested through the OpenCode provider tests
+(`src/tests/opencode.test.ts`).
+
 ## Related documentation
 
 - [Slugify](./slugify.md) -- Slugify function behavior and cross-codebase
   usage
 - [Timeout](./timeout.md) -- Timeout function behavior, retry strategy, and
   memory considerations
+- [Errors](./errors.md) -- UnsupportedOperationError class (tested via
+  datasource tests)
+- [Guards](./guards.md) -- hasProperty type guard (tested via provider tests)
+- [Prerequisite Checker](../prereqs-and-safety/prereqs.md) -- Detailed
+  prereqs documentation including the full test matrix
 - [Shared Utilities overview](./overview.md) -- Context for the shared
   utility group
 - [Testing Overview](../testing/overview.md) -- Project-wide test framework,
@@ -148,3 +178,5 @@ The following edge case is not covered by the current test suite:
   pure-function testing patterns (similar to slugify tests)
 - [Spec Generator Tests](../testing/spec-generator-tests.md) -- Test suite
   demonstrating pure-logic validation testing patterns
+- [Git & Worktree Testing](../git-and-worktree/testing.md) -- Related test
+  suite using similar mocking patterns for `execFile` and `fs/promises`

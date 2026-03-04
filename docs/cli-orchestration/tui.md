@@ -43,7 +43,8 @@ stateDiagram-v2
 ```
 
 The phase is set by the [orchestrator](orchestrator.md) via
-`tui.state.phase = "..."` at each pipeline transition point.
+`tui.state.phase = "..."` at each pipeline transition point. The
+[dispatch pipeline](dispatch-pipeline.md) performs the actual state mutations.
 
 ### Per-task state machine
 
@@ -460,9 +461,9 @@ flowchart TD
   header rendering
 - [Integrations](integrations.md) -- chalk color detection and ANSI behavior
 - [Task Parsing Overview](../task-parsing/overview.md) -- the `Task` type displayed by the TUI
+- [Dispatch Pipeline](dispatch-pipeline.md) -- the parallel dispatch
+  pipeline that drives TUI state mutations via task callbacks
 - [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) --
   pipeline stages that drive TUI phase transitions
 - [Worktree Management](../git-and-worktree/worktree-management.md) -- how
   worktree names are constructed, affecting the grouped display mode
-- [Configuration System](configuration.md) -- `--concurrency` and `--dry-run`
-  settings that affect TUI behavior

@@ -164,6 +164,8 @@ these tests.
   whose `prompt()` calls are timeout-wrapped
 - [Provider Tests](../testing/provider-tests.md) -- Unit tests for provider
   implementations that exercise the prompt interface
+- [Dispatch Pipeline](../cli-orchestration/dispatch-pipeline.md) -- The
+  execution engine that uses `withTimeout` for plan generation deadlines
 - [Prerequisite Checker](../prereqs-and-safety/prereqs.md) -- Startup validation
   that runs before timeout-wrapped pipeline operations
 - [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) --

@@ -9,8 +9,8 @@ a structured result.
 
 The dispatcher receives a [`Task`](../task-parsing/api-reference.md#task) object, an optional execution plan (produced
 by the [planner](./planner.md)), and an optional `worktreeRoot` path for
-[worktree isolation](#worktree-isolation). It constructs an appropriate prompt,
-creates a fresh [provider session](../provider-system/provider-overview.md#session-isolation-model), sends the prompt, and returns a `DispatchResult`
+[worktree isolation](#worktree-isolation) (see also [Git & Worktree Management](../git-and-worktree/overview.md)). It constructs an appropriate prompt,
+creates a fresh [provider session](../provider-system/overview.md#session-isolation-model), sends the prompt, and returns a `DispatchResult`
 indicating success or failure.
 
 ## Why it exists
@@ -18,7 +18,7 @@ indicating success or failure.
 The dispatcher exists to enforce **context isolation**: each task gets its own
 session so that conversation history from one task cannot influence another. It
 also serves as the boundary between the Dispatch pipeline logic and the
-[provider abstraction](../provider-system/provider-overview.md), keeping prompt construction separate from provider
+[provider abstraction](../provider-system/overview.md), keeping prompt construction separate from provider
 protocol details.
 
 ## How it works
@@ -28,7 +28,7 @@ protocol details.
 Every call to `dispatchTask()` begins by calling `instance.createSession()`,
 which returns an opaque session identifier. This session is used for exactly one
 `prompt()` call and is never reused. See
-[Provider session isolation](../provider-system/provider-overview.md#session-isolation-model)
+[Provider session isolation](../provider-system/overview.md#session-isolation-model)
 for how each backend implements session boundaries.
 
 **What guarantees does `createSession()` offer?**
@@ -223,9 +223,10 @@ of the backend. However, the underlying execution differs significantly:
 - **OpenCode**: The `prompt()` method uses a 5-step asynchronous flow involving
   `promptAsync()`, SSE event streaming, and post-completion message fetching. See
   [OpenCode async prompt model](../provider-system/opencode-backend.md#asynchronous-prompt-model).
-- **Copilot**: The `prompt()` method uses a single blocking `sendAndWait()` call
-  that returns when the agent finishes. See
-  [Copilot synchronous model](../provider-system/copilot-backend.md#synchronous-prompt-model).
+- **Copilot**: The `prompt()` method uses an event-based pattern: `session.send()`
+  fires the prompt, then event listeners wait for `session.idle` or
+  `session.error` within a 300-second timeout. See
+  [Copilot event-based model](../provider-system/copilot-backend.md#event-based-prompt-model).
 
 The dispatcher is unaware of these differences -- the `ProviderInstance`
 interface abstracts them away. From the dispatcher's perspective, `prompt()` is
@@ -244,14 +245,16 @@ Timeout behavior depends entirely on the provider backend:
 
 - **OpenCode**: The `@opencode-ai/sdk` HTTP client may have default request
   timeouts, but these are not configured by Dispatch. A hung OpenCode server
-  will cause the dispatch to hang. See [OpenCode prompt timeouts](../provider-system/provider-overview.md#prompt-timeouts-and-cancellation).
+  will cause the dispatch to hang. See [OpenCode prompt timeouts](../provider-system/overview.md#prompt-timeouts-and-cancellation).
 
-- **Copilot**: The `session.sendAndWait()` call blocks until the Copilot
-  backend responds. There is no explicit timeout in the Copilot provider
-  implementation. See [Copilot prompt timeouts](../provider-system/provider-overview.md#prompt-timeouts-and-cancellation).
+- **Copilot**: The `session.send()` call fires the prompt asynchronously, and
+  event listeners wait for `session.idle` or `session.error`. The Copilot
+  provider wraps this in a **300-second timeout** via `withTimeout()`. See
+  [Copilot prompt timeouts](../provider-system/overview.md#prompt-timeouts-and-cancellation).
 
-**Mitigation**: If a task hangs, the only recourse is to kill the Dispatch
-process (Ctrl+C / SIGINT). There is no per-task timeout configuration.
+**Mitigation**: If an OpenCode task hangs, the only recourse is to kill the
+Dispatch process (Ctrl+C / SIGINT). The Copilot provider's 300-second timeout
+provides automatic recovery for individual prompts.
 This is a known limitation. To add timeout support, wrap the `prompt()` call
 with [`Promise.race()`](../shared-utilities/timeout.md) against a timer, or use the `AbortSignal` option
 supported by Node.js `fetch` if the provider SDK exposes it.
@@ -304,7 +307,7 @@ Returned by `dispatchTask()`:
 - [Git Operations](./git.md) -- What happens after successful dispatch
 - [Task Context & Lifecycle](./task-context-and-lifecycle.md) -- How tasks are
   parsed and marked complete
-- [Provider Abstraction](../provider-system/provider-overview.md) -- The `ProviderInstance`
+- [Provider Abstraction](../provider-system/overview.md) -- The `ProviderInstance`
   interface and backend implementations
 - [Orchestrator](../cli-orchestration/orchestrator.md) -- How the orchestrator
   coordinates dispatch within the batch loop
@@ -315,6 +318,8 @@ Returned by `dispatchTask()`:
   File I/O safety relevant to `markTaskComplete` after dispatch
 - [Executor Agent](./executor.md) -- How the executor wraps `dispatchTask()`
   with task completion marking, forming the dispatch-then-complete coupling
+- [Agent Types](./agent-types.md) -- `AgentResult<T>`, `AgentErrorCode`, and
+  `ExecutorData` type definitions
 - [Datasource Helpers](../datasource-system/datasource-helpers.md) -- Helper
   utilities for datasource operations; `DispatchResult` from the dispatcher
   drives the auto-close logic in `closeCompletedSpecIssues()`
@@ -322,3 +327,9 @@ Returned by `dispatchTask()`:
   creation and isolation model that provides the `worktreeRoot` parameter
 - [Run State & Lifecycle](../git-and-worktree/run-state.md) -- State
   transitions for worktree-isolated task dispatch
+- [Markdown Syntax Reference](../task-parsing/markdown-syntax.md) -- Checkbox
+  format and mode prefixes that affect prompt construction
+- [Dispatch Pipeline Tests](../testing/dispatch-pipeline-tests.md) -- Tests
+  verifying dispatch pipeline behavior including worktree mode
+- [Provider Interface](../shared-types/provider.md) -- `ProviderInstance` type
+  definition consumed by `dispatchTask()`

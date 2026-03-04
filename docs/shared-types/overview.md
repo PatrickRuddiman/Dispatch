@@ -7,7 +7,8 @@ other module in the Dispatch CLI depends on. Seven files compose this layer:
 |------|---------|
 | `src/cleanup.ts` | Process-level [cleanup registry](./cleanup.md) for graceful shutdown of provider resources |
 | `src/format.ts` | Duration [formatting helper](./format.md) (`elapsed()`) for progress reporting |
-| `src/logger.ts` | Minimal chalk-based structured [logger](./logger.md) for CLI output with verbose/debug support |
+| `src/helpers/logger.ts` | Dual-channel [console logger](./logger.md) with chalk styling, level filtering, and file logger mirroring |
+| `src/helpers/file-logger.ts` | Per-issue [file logger](./file-logger.md) with `AsyncLocalStorage` scoping and timestamped plain-text output |
 | `src/parser.ts` | [Task/TaskFile data types](./parser.md) and pure + async helpers for markdown checkbox parsing |
 | `src/provider.ts` | [ProviderName, ProviderBootOptions, and ProviderInstance](./provider.md) abstractions for AI agent runtimes |
 | `src/slugify.ts` | Pure function to convert arbitrary text into URL/filesystem-safe identifiers ([slugify](../shared-utilities/slugify.md)) |
@@ -41,17 +42,21 @@ graph TD
     CLI --> ProviderTypes["provider.ts"]
     CLI --> Cleanup["cleanup.ts"]
     Orchestrator["orchestrator.ts"] --> Logger
+    Orchestrator --> FileLogger["file-logger.ts"]
     Orchestrator --> Parser["parser.ts"]
     Orchestrator --> ProviderTypes
     Orchestrator --> Cleanup
     Orchestrator --> Timeout["timeout.ts"]
+    Logger -.->|mirrors to| FileLogger
     Datasources["datasources/*"] --> Slugify["slugify.ts"]
     SpecPipeline["spec-pipeline.ts"] --> Slugify
+    SpecPipeline --> FileLogger
     SpecGen["spec-generator.ts"] --> Cleanup
     SpecGen --> Format["format.ts"]
     SpecGen --> Logger
     Planner["planner.ts"] --> Parser
     Planner --> ProviderTypes
+    Planner --> FileLogger
     Dispatcher["dispatcher.ts"] --> Parser
     Dispatcher --> ProviderTypes
     Dispatcher --> Logger
@@ -69,8 +74,10 @@ graph TD
 - [Cleanup registry](./cleanup.md) -- Process-level cleanup for graceful
   shutdown and signal handling
 - [Format utilities](./format.md) -- Duration formatting for progress reporting
-- [Logger](./logger.md) -- Structured terminal output with chalk styling,
-  verbose mode, and error-chain formatting
+- [Logger](./logger.md) -- Dual-channel console logger with chalk styling,
+  level filtering, verbose mode, and error-chain formatting
+- [File Logger](./file-logger.md) -- Per-issue file logging with
+  `AsyncLocalStorage` context scoping and timestamped plain-text output
 - [Parser utilities](./parser.md) -- Task extraction, context filtering, and
   completion marking
 - [Provider interface](./provider.md) -- AI agent runtime abstraction and
@@ -88,7 +95,7 @@ graph TD
   behavior and test coverage
 - [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) -- How
   planner and dispatcher use the provider and parser contracts
-- [Provider Abstraction & Backends](../provider-system/provider-overview.md) --
+- [Provider Abstraction & Backends](../provider-system/overview.md) --
   Concrete implementations of the ProviderInstance interface
 - [Spec Generation](../spec-generation/overview.md) -- The `--spec` pipeline
   that uses cleanup, provider, and logger utilities
@@ -98,6 +105,9 @@ graph TD
   implementing the `ProviderInstance` interface
 - [Deprecated Compatibility Layer](../deprecated-compat/overview.md) -- Legacy
   `IssueFetcher` shims that re-export shared types
+- [Dispatch Pipeline](../cli-orchestration/dispatch-pipeline.md) -- How
+  the dispatch pipeline consumes shared types for task parsing, provider
+  lifecycle, and cleanup
 - [Testing Overview](../testing/overview.md) -- Project-wide test suite
   covering config, format, parser, spec-generator, slugify, and timeout
   modules

@@ -2,7 +2,7 @@
 
 The CLI & Orchestration group is the entry point and central nervous system of
 the `dispatch` tool. It accepts user input from the command line, discovers and
-parses [markdown task files](../task-parsing/overview.md), boots an [AI provider](../provider-system/provider-overview.md), dispatches tasks through a
+parses [markdown task files](../task-parsing/overview.md), boots an [AI provider](../provider-system/overview.md), dispatches tasks through a
 multi-phase [pipeline](../planning-and-dispatch/overview.md), and renders real-time progress in the [terminal](tui.md).
 
 ## Why this group exists
@@ -22,7 +22,7 @@ Dispatch needs a single coherent entry point that:
 
 | File | Purpose |
 |------|---------|
-| [`src/cli.ts`](cli.md) | Hand-rolled argument parser, `main()` entry point, config subcommand routing, exit code logic |
+| [`src/cli.ts`](cli.md) | Commander.js argument parser, `main()` entry point, config subcommand routing, exit code logic |
 | [`src/config.ts`](configuration.md) | Persistent config data layer: file I/O (`{CWD}/.dispatch/config.json`), validation, `handleConfigCommand()` |
 | [`src/orchestrator/cli-config.ts`](configuration.md#three-tier-configuration-precedence) | Config resolution: three-tier merge of CLI flags, config file, and hardcoded defaults |
 | [`src/orchestrator/runner.ts`](orchestrator.md) | Pipeline router: dispatch, spec, and fix-tests modes |
@@ -67,7 +67,7 @@ This group depends on every other group in the project:
   `markTaskComplete()`, `buildTaskContext()`, [`Task`, `TaskFile`](../task-parsing/api-reference.md#types) types
 - **[Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md)**: `planTask()`,
   `dispatchTask()`, `commitTask()`
-- **[Provider Abstraction & Backends](../provider-system/provider-overview.md)**: `bootProvider()`,
+- **[Provider Abstraction & Backends](../provider-system/overview.md)**: `bootProvider()`,
   `ProviderInstance`, [`ProviderName`](../shared-types/provider.md#why-providername-is-a-string-literal-union), `PROVIDER_NAMES`
 - **[Datasource System](../datasource-system/overview.md)**: `DATASOURCE_NAMES`,
   `DatasourceName`, datasource detection from git remote
@@ -117,6 +117,10 @@ dispatch config
   precedence, `dispatch config` interactive wizard
 - [Orchestrator pipeline](orchestrator.md) -- concurrency, error handling, and
   pipeline phases
+- [Dispatch pipeline](dispatch-pipeline.md) -- the core execution engine for
+  AI-driven task dispatch, worktree isolation, and commit agent integration
+- [Fix-tests pipeline](fix-tests-pipeline.md) -- the `--fix-tests` pipeline
+  for automated test failure resolution
 - [Terminal UI](tui.md) -- rendering, state machines, and TTY compatibility
 - [Logger](../shared-types/logger.md) -- structured logging for non-interactive contexts
 - [Integrations](integrations.md) -- chalk, glob, tsup, Node.js process,

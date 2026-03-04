@@ -10,7 +10,10 @@ After the [dispatcher](./dispatcher.md) reports a successful task and the [parse
 marks the task complete](../task-parsing/api-reference.md#marktaskcomplete), `commitTask()` stages all working directory changes
 with `git add -A`, checks whether anything was staged, and if so, creates a
 commit with an automatically generated
-[Conventional Commits](https://www.conventionalcommits.org/) message. Branch
+[Conventional Commits](https://www.conventionalcommits.org/) message. For the
+final branch-level commit message, PR title, and PR description, see the
+[Commit Agent](../agent-system/commit-agent.md) which runs after all tasks
+complete. Branch
 creation and management are handled separately by the
 [datasource layer](../datasource-system/overview.md#git-lifecycle-operations).
 
@@ -250,3 +253,7 @@ If this becomes an issue, the `git()` helper can be modified to pass a larger
   that runs on signal exit alongside git operations
 - [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) --
   Concurrent write safety analysis relevant to git add races
+- [Commit Agent](../agent-system/commit-agent.md) -- AI-generated conventional
+  commit messages and PR metadata produced after all tasks complete
+- [Worktree Management](../git-and-worktree/worktree-management.md) -- Worktree
+  lifecycle for parallel issue isolation (distinct from per-task commits)

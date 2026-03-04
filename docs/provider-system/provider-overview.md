@@ -29,7 +29,7 @@ while the rest of the pipeline remains agnostic.
 ## The ProviderInstance interface
 
 Every provider backend must implement the four-method lifecycle contract defined
-in `src/provider.ts:31-52`:
+in `src/provider.ts:31-52` (see [Provider Interface](../shared-types/provider.md) for type details):
 
 | Method | Purpose | Returns |
 |--------|---------|---------|
@@ -79,8 +79,8 @@ sequenceDiagram
 ### Prompt dispatch state machine
 
 The following state machine shows the lifecycle of a single prompt dispatch
-through the provider layer, covering both the synchronous (Copilot) and
-asynchronous (OpenCode) paths:
+through the provider layer. Both Copilot and OpenCode use event-based
+asynchronous patterns, though with different transport mechanisms:
 
 ```mermaid
 stateDiagram-v2
@@ -91,19 +91,23 @@ stateDiagram-v2
     SessionReady --> PromptSending: prompt(sessionId, text)
 
     state PromptSending {
-        [*] --> SyncPath: Copilot
-        [*] --> AsyncPath: OpenCode
+        [*] --> CopilotPath: Copilot
+        [*] --> OpenCodePath: OpenCode
 
-        SyncPath --> WaitingForResponse: sendAndWait()
-        WaitingForResponse --> ResponseReceived: event returned
+        CopilotPath --> SendFired: session.send()
+        SendFired --> ListeningForIdle: session.on("session.idle")
+        ListeningForIdle --> CopilotFetchMessages: idle fires (within 300s)
+        ListeningForIdle --> ErrorState: session.error fires
+        ListeningForIdle --> ErrorState: 300s timeout
+        CopilotFetchMessages --> ResponseReceived: session.getMessages()
 
-        AsyncPath --> FireAndForget: promptAsync()
+        OpenCodePath --> FireAndForget: promptAsync()
         FireAndForget --> SSESubscribed: 204 accepted
         SSESubscribed --> FilteringEvents: for await (event)
         FilteringEvents --> FilteringEvents: wrong session / streaming delta
-        FilteringEvents --> FetchingMessages: session.idle
+        FilteringEvents --> OpenCodeFetchMessages: session.idle
         FilteringEvents --> ErrorState: session.error
-        FetchingMessages --> ResponseReceived: messages fetched
+        OpenCodeFetchMessages --> ResponseReceived: messages fetched
     }
 
     ResponseReceived --> ExtractingText: extract content
@@ -279,11 +283,11 @@ entire dispatch run.
 **What happens if `cleanup()` is called while a prompt is in flight?**
 
 - **Copilot provider** (`src/providers/copilot.ts:78-88`): Calls `destroy()` on
-  all tracked sessions, then `client.stop()`. If `sendAndWait()` is pending on a
-  session, destroying that session will cause the pending promise to reject (or
-  resolve with no data, depending on the SDK's internal behavior). The `.catch(() => {})`
-  on each destroy call swallows errors from sessions that may have already
-  completed.
+  all tracked sessions, then `client.stop()`. If a `send()` + event listener
+  promise is pending on a session, destroying that session will cause the
+  pending promise to reject (or resolve with no data, depending on the SDK's
+  internal behavior). The `.catch(() => {})` on each destroy call swallows
+  errors from sessions that may have already completed.
 - **OpenCode provider** (`src/providers/opencode.ts:166-171`): Calls
   `stopServer?.()` (which invokes `oc.server.close()`). The underlying HTTP
   server shuts down, which will cause the SSE stream to disconnect and the
@@ -314,47 +318,53 @@ rather than functional.
 
 ## Prompt model comparison
 
-The two backends use fundamentally different prompt execution models:
+The two backends use event-based asynchronous prompt models with different
+transport mechanisms:
 
 | Aspect | OpenCode | Copilot |
 |--------|----------|---------|
-| Prompt method | `promptAsync()` + SSE events | `sendAndWait()` |
-| Execution model | Asynchronous (fire-and-forget + event stream) | Synchronous (blocking call) |
-| HTTP timeout risk | None (204 returns immediately) | Managed by JSON-RPC layer |
-| Progress visibility | Streaming deltas via SSE events | None until completion |
-| Failure detection | `session.error` event or SSE disconnect | Promise rejection |
-| Resource overhead | SSE connection + AbortController per prompt | Single blocking call |
+| Prompt method | `promptAsync()` + SSE events | `session.send()` + idle/error events |
+| Execution model | Asynchronous (fire-and-forget + SSE stream) | Asynchronous (fire-and-forget + event listeners) |
+| HTTP timeout risk | None (204 returns immediately) | None (send() returns immediately) |
+| Progress visibility | Streaming deltas via SSE events | None until idle event fires |
+| Failure detection | `session.error` event or SSE disconnect | `session.error` event or 300-second timeout |
+| Prompt timeout | None (waits indefinitely) | 300 seconds via `withTimeout()` |
+| Resource overhead | SSE connection + AbortController per prompt | Event listeners unsubscribed in `finally` block |
 
 See [OpenCode async prompt model](./opencode-backend.md#asynchronous-prompt-model)
-and [Copilot synchronous model](./copilot-backend.md#synchronous-prompt-model)
+and [Copilot event-based model](./copilot-backend.md#event-based-prompt-model)
 for implementation details.
 
 ## Prompt timeouts and cancellation
 
-Neither the `ProviderInstance` interface nor the current backends expose a timeout
-or cancellation mechanism for `prompt()` calls:
+The `ProviderInstance` interface's `prompt()` signature returns
+`Promise<string | null>` with no timeout parameter. However, individual
+backends implement their own timeout strategies:
 
-- The `prompt()` signature returns `Promise<string | null>` with no timeout
-  parameter.
-- The OpenCode provider's SSE stream will wait indefinitely for a `session.idle`
-  or `session.error` event. The SDK's `createOpencode()` accepts a `timeout`
-  option (default 5000ms) for *server startup*, but not for individual prompts.
-- The Copilot SDK's `session.sendAndWait()` blocks until the agent produces a
-  completion event. The SDK does not expose a timeout parameter.
+- **Copilot provider** (`src/providers/copilot.ts:127`): Wraps the idle/error
+  event listener in `withTimeout(promise, 300_000, "copilot session ready")`,
+  imposing a **300-second (5-minute) hard timeout**. This value is hardcoded and
+  not configurable via CLI flags. It is separate from the `--plan-timeout` flag,
+  which controls the planner agent timeout at the orchestrator level. If the
+  timeout fires, the promise rejects with a descriptive error message.
+- **OpenCode provider**: The SSE stream will wait indefinitely for a
+  `session.idle` or `session.error` event. The SDK's `createOpencode()` accepts
+  a `timeout` option (default 5000ms) for *server startup*, but not for
+  individual prompts.
 
-If a prompt hangs indefinitely, the dispatch run will also hang. There is
-currently no built-in watchdog or timeout wrapper. If this becomes a problem in
-production, the recommended approach would be to wrap `prompt()` calls in a
-`Promise.race()` with a configurable timeout at the orchestrator level.
+If an OpenCode prompt hangs indefinitely, the dispatch run will also hang. If
+this becomes a problem in production, the recommended approach would be to add a
+`withTimeout()` wrapper similar to Copilot's implementation.
 
 ## Response format differences
 
 The two backends produce responses in different formats, which the provider
 implementations normalize to `string | null`:
 
-- **Copilot**: `session.sendAndWait()` returns an event object. The provider
-  extracts `event.data?.content` (`src/providers/copilot.ts:69`), which is a
-  plain string.
+- **Copilot**: After the `session.idle` event fires, `session.getMessages()`
+  retrieves the full conversation. The provider extracts the last event with
+  `type === "assistant.message"` and returns `event.data?.content`
+  (`src/providers/copilot.ts:138-142`), which is a plain string.
 - **OpenCode**: The provider fetches session messages after `session.idle`, finds
   the last assistant message, filters its `parts` array for `TextPart` objects
   (those with `type: "text"`), and joins their `.text` fields with newlines
@@ -372,8 +382,12 @@ implementations normalize to `string | null`:
   implementing and registering a new backend
 - [CLI & Orchestration](../cli-orchestration/overview.md) -- how the CLI parses arguments and
   drives the orchestrator
+- [CLI Argument Parser](../cli-orchestration/cli.md) -- `--provider` flag
+  documentation and argument validation
 - [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) -- how the planner
   and dispatcher consume `ProviderInstance`
+- [Dispatcher](../planning-and-dispatch/dispatcher.md) -- How the dispatcher
+  creates sessions and sends prompts via the provider interface
 - [Shared Provider Types](../shared-types/provider.md) -- `ProviderName`,
   `ProviderBootOptions`, and `ProviderInstance` type definitions
 - [Cleanup Registry](../shared-types/cleanup.md) -- Process-level cleanup
@@ -394,3 +408,5 @@ implementations normalize to `string | null`:
   detection used by the config wizard to show install status
 - [Provider Tests](../testing/provider-tests.md) -- Detailed breakdown of
   provider unit tests for Claude, Copilot, OpenCode, and the registry
+- [Prerequisites & Safety](../prereqs-and-safety/integrations.md) -- External
+  CLI tool dependencies including provider binary checks

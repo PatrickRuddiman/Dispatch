@@ -181,11 +181,12 @@ The parser uses `fs/promises` for reading task files and writing back completed 
 
 ## Provider system (ProviderInstance interface)
 
-**Used in**: `src/dispatcher.ts:6, 29, 32` and `src/planner.ts:11, 38, 41`
-**Interface defined in**: `src/provider.ts`
+**Used in**: `src/agents/executor.ts:10,14`, `src/agents/planner.ts:11`,
+and `src/dispatcher.ts:6, 24, 33, 38`
+**Interface defined in**: `src/providers/interface.ts`
 
 The pipeline interacts with AI agents through the `ProviderInstance` interface.
-See [Provider Abstraction & Backends](../provider-system/provider-overview.md) for complete
+See [Provider Abstraction & Backends](../provider-system/overview.md) for complete
 documentation of the interface and backend implementations.
 
 ### Monitoring provider health
@@ -236,7 +237,7 @@ is in-flight:
 The pipeline does **not** attempt to restart the provider or retry failed tasks.
 After a provider crash, the orchestrator calls `instance.cleanup()` during
 shutdown, which is designed to be safe to call even if the provider is already
-stopped. See [provider cleanup](../provider-system/provider-overview.md#cleanup-and-in-flight-sessions)
+stopped. See [provider cleanup](../provider-system/overview.md#cleanup-and-in-flight-sessions)
 for details. The [cleanup registry](../shared-types/cleanup.md) ensures this
 teardown runs even if the process exits via signal or unhandled error.
 
@@ -246,15 +247,120 @@ teardown runs even if the process exits via signal or unhandled error.
 2. Re-run dispatch (completed tasks are already marked `[x]` and will be
    skipped)
 
+## File logger (AsyncLocalStorage-based structured logging)
+
+**Used in**: `src/agents/executor.ts:16,68,75,79,83`,
+`src/agents/planner.ts:15,64,67,73,77`, `src/dispatcher.ts:9,36,42,47,52`
+**Module**: `src/helpers/file-logger.ts`
+**Official docs**: [Node.js AsyncLocalStorage](https://nodejs.org/api/async_context.html#class-asynclocalstorage)
+
+The file logger provides per-issue structured log files for debugging and
+post-mortem analysis. It uses Node.js `AsyncLocalStorage` to scope a
+`FileLogger` instance to each issue's async context, eliminating the need to
+thread logger parameters through the call stack.
+
+### How context propagation works
+
+The dispatch pipeline creates a `FileLogger` and calls
+`fileLoggerStorage.run(logger, callback)` at the start of each issue's
+processing. Node.js `AsyncLocalStorage` then automatically propagates this
+binding through all `await` calls within that callback — including nested
+calls into the planner agent, executor agent, and dispatcher. Each agent
+retrieves the logger via `fileLoggerStorage.getStore()?.agentEvent(...)`.
+
+When multiple issues are processed concurrently (via `Promise.all` with
+`--concurrency > 1`), each issue's `run()` call creates an independent
+async context. The `AsyncLocalStorage` ensures that each concurrent branch
+sees its own `FileLogger` instance, even though they share the same
+`fileLoggerStorage` singleton.
+
+### Log file location and format
+
+Log files are written to:
+
+```
+{CWD}/.dispatch/logs/issue-{sanitized-id}.log
+```
+
+The issue ID is sanitized by replacing non-alphanumeric characters (except
+`.`, `_`, `-`) with underscores. Each log line follows the format:
+
+```
+[2024-01-15T10:30:45.123Z] [LEVEL] message
+```
+
+Available levels: `INFO`, `DEBUG`, `WARN`, `ERROR`, `SUCCESS`, `TASK`, `DIM`,
+`PROMPT`, `RESPONSE`, `PHASE`, `AGENT`.
+
+### What is logged by the planning and execution agents
+
+| Source | Level | Content |
+|--------|-------|---------|
+| Planner | `PROMPT` | Full planning prompt (with `─` separators) |
+| Planner | `RESPONSE` | Full plan text from provider |
+| Planner | `AGENT` | `[planner] completed: {elapsed}ms` |
+| Planner | `ERROR` | Exception message with stack trace |
+| Executor | `AGENT` | `[executor] started: {task text}` |
+| Executor | `AGENT` | `[executor] completed: {elapsed}ms` |
+| Executor | `AGENT` | `[executor] failed: {error message}` |
+| Executor | `ERROR` | Exception message with stack trace |
+| Dispatcher | `PROMPT` | Full dispatch prompt |
+| Dispatcher | `RESPONSE` | Full agent response |
+| Dispatcher | `WARN` | Null response warning |
+| Dispatcher | `ERROR` | Dispatch error with stack trace |
+
+### Accessing logs for debugging
+
+```bash
+# View the log for issue 42
+cat .dispatch/logs/issue-42.log
+
+# Search for errors across all issue logs
+grep '\[ERROR\]' .dispatch/logs/*.log
+
+# Correlate planner and executor events for a task
+grep '\[AGENT\]' .dispatch/logs/issue-42.log
+```
+
+### Log file lifecycle
+
+- **Creation**: A new (empty) log file is created at the start of each issue's
+  processing via `writeFileSync(path, "")`.
+- **Appending**: Log entries are appended synchronously via `appendFileSync`.
+- **Cleanup**: Log files are **not** cleaned up automatically. They persist
+  in `.dispatch/logs/` until manually deleted.
+- **Concurrent safety**: Each issue writes to its own log file, so concurrent
+  issues do not interleave entries. However, `appendFileSync` is used for
+  individual writes, which is not atomic for large writes on all platforms.
+
+## Console logger (helpers/logger.ts)
+
+**Used in**: `src/agents/executor.ts:15,82`, `src/agents/planner.ts:14,76`,
+`src/dispatcher.ts:8,32,35,50,51`
+**Module**: `src/helpers/logger.ts`
+
+The console logger is used for user-facing output and debug messages. The
+planner and executor use `log.extractMessage(err)` to safely extract error
+messages from caught exceptions (handling both `Error` objects and non-Error
+values like raw strings). The dispatcher additionally uses
+`log.formatErrorChain(err)` which traverses nested `.cause` properties up to
+five levels deep, producing a chain like `"Error A → Error B → Error C"`.
+
+See [Logger](../shared-types/logger.md) for the full logger interface, log
+levels, and `--verbose` behavior.
+
 ## Related documentation
 
 - [Pipeline Overview](./overview.md) -- How integrations fit into the pipeline
 - [Dispatcher](./dispatcher.md) -- Provider interaction during execution
 - [Planner Agent](./planner.md) -- Provider interaction during planning
+- [Executor Agent](./executor.md) -- Dispatch + task completion coordination
+- [Agent Types](./agent-types.md) -- `AgentResult`, `AgentErrorCode`, and
+  concrete data types
 - [Git Operations](./git.md) -- Detailed git behavior and concurrency concerns
 - [Task Context & Lifecycle](./task-context-and-lifecycle.md) -- File system
   operations in the parser
-- [Provider Abstraction](../provider-system/provider-overview.md) -- Full provider interface and
+- [Provider Abstraction](../provider-system/overview.md) -- Full provider interface and
   backend details
 - [OpenCode Backend](../provider-system/opencode-backend.md) -- OpenCode-specific troubleshooting
 - [Copilot Backend](../provider-system/copilot-backend.md) -- Copilot-specific authentication and troubleshooting
@@ -263,8 +369,8 @@ teardown runs even if the process exits via signal or unhandled error.
   that drains provider teardown on exit
 - [Shared Types Integrations](../shared-types/integrations.md) -- chalk, Node.js
   fs/promises, and process signal details
-- [Testing Overview](../testing/overview.md) -- Test coverage (note: the
-  orchestrator, planner, dispatcher, and git modules are not unit tested)
+- [Planner & Executor Tests](../testing/planner-executor-tests.md) -- Unit
+  tests for the planner and executor agents
 - [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) --
   Read-modify-write patterns and concurrent file I/O race conditions
 - [Worktree Management](../git-and-worktree/worktree-management.md) -- Git
@@ -274,3 +380,7 @@ teardown runs even if the process exits via signal or unhandled error.
 - [Prereqs & Safety Integrations](../prereqs-and-safety/integrations.md) --
   Similar `execFile`/`child_process` patterns used for prerequisite binary
   detection
+- [Agent Framework](../agent-system/overview.md) -- Agent registry, boot
+  lifecycle, and `AgentResult<T>` types consumed by these integrations
+- [Testing Overview](../testing/overview.md) -- Project-wide test suite
+  including planner and executor integration test coverage

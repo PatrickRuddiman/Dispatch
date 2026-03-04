@@ -58,9 +58,27 @@ All test files live in `src/tests/` and follow the naming convention
 | [`copilot.test.ts`](provider-tests.md) | [`src/providers/copilot.ts`](../../src/providers/copilot.ts) | 264 | -- | SDK mock, event callbacks |
 | [`opencode.test.ts`](provider-tests.md) | [`src/providers/opencode.ts`](../../src/providers/opencode.ts) | 480 | -- | SDK mock, SSE streaming |
 | [`provider-index.test.ts`](provider-tests.md) | [`src/providers/index.ts`](../../src/providers/index.ts) | 197 | -- | Registry routing |
+| [`executor.test.ts`](planner-executor-tests.md) | [`src/agents/executor.ts`](../../src/agents/executor.ts) | 257 | 93 | Module mock, dispatch + mark-complete |
+| [`planner.test.ts`](planner-executor-tests.md) | [`src/agents/planner.ts`](../../src/agents/planner.ts) | 326 | 174 | Provider mock, prompt construction |
+| [`runner.test.ts`](runner-tests.md) | [`src/orchestrator/runner.ts`](../../src/orchestrator/runner.ts) | 377 | 250 | Boot, routing, mutual exclusion |
+| [`respec-routing.test.ts`](runner-tests.md) | [`src/orchestrator/runner.ts`](../../src/orchestrator/runner.ts) | 367 | 250 | Respec discovery, identifier formatting |
+| [`orchestrator.test.ts`](runner-tests.md) | [`src/orchestrator/runner.ts`](../../src/orchestrator/runner.ts) | 305 | 250 | Re-export, datasource sync |
+| [`fix-tests-pipeline.test.ts`](fix-tests-tests.md) | [`src/orchestrator/fix-tests-pipeline.ts`](../../src/orchestrator/fix-tests-pipeline.ts) | 313 | 229 | Pipeline flow, AI dispatch, edge cases |
+| [`test-runner.test.ts`](fix-tests-tests.md) | [`src/test-runner.ts`](../../src/test-runner.ts) | 334 | 105 | Detection, execution, timeout, errors |
+| [`dispatch-pipeline.test.ts`](dispatch-pipeline-tests.md) | [`src/orchestrator/dispatch-pipeline.ts`](../../src/orchestrator/dispatch-pipeline.ts) | 1,930 | 850 | Pipeline lifecycle, retry, worktree, feature branch |
+| [`integration/dispatch-flow.test.ts`](dispatch-pipeline-tests.md) | [`src/orchestrator/dispatch-pipeline.ts`](../../src/orchestrator/dispatch-pipeline.ts) | 290 | 850 | Integration: real md datasource + git |
+| [`cleanup.test.ts`](test-fixtures.md#cleanup-registry-tests) | [`src/helpers/cleanup.ts`](../../src/helpers/cleanup.ts) | 170 | 35 | Module mock, lifecycle, signal integration |
 
-**Total: 3,505 lines of test code** covering production modules across config,
-parsing, formatting, spec generation, utilities, and provider backends.
+**Shared test infrastructure**: `src/tests/fixtures.ts` (134 lines) exports
+reusable mock factories (`createMockProvider`, `createMockDatasource`,
+`createMockTask`, `createMockIssueDetails`, `createMockChildProcess`,
+`mockExecFile`) consumed by 7+ test files. See
+[Test Fixtures & Cleanup Tests](test-fixtures.md).
+
+**Total: ~8,174 lines of test code** covering production modules across config,
+parsing, formatting, spec generation, utilities, provider backends,
+planning/execution agents, orchestrator routing, fix-tests pipeline, dispatch
+pipeline, and the cleanup registry.
 
 ## Testing patterns
 
@@ -120,6 +138,9 @@ graph TD
         CPT["copilot.test.ts<br/>4 describe blocks, 14 tests"]
         OCT["opencode.test.ts<br/>4 describe blocks, 19 tests"]
         PIT["provider-index.test.ts<br/>3 describe blocks, 14 tests"]
+        EXT["executor.test.ts<br/>2 describe blocks, 10 tests"]
+        PLT["planner.test.ts<br/>3 describe blocks, 20 tests"]
+        CUT["cleanup.test.ts<br/>4 describe blocks, 10 tests"]
     end
 
     subgraph "Production Modules"
@@ -133,6 +154,13 @@ graph TD
         CPP["providers/copilot.ts<br/>Copilot SDK"]
         OCP["providers/opencode.ts<br/>OpenCode SDK"]
         PI["providers/index.ts<br/>Provider registry"]
+        EX["agents/executor.ts<br/>Task execution"]
+        PLA["agents/planner.ts<br/>Task planning"]
+        CU["helpers/cleanup.ts<br/>Cleanup registry"]
+    end
+
+    subgraph "Shared Test Infrastructure"
+        FIX["fixtures.ts<br/>6 mock factories"]
     end
 
     CT --> C
@@ -145,18 +173,22 @@ graph TD
     CPT --> CPP
     OCT --> OCP
     PIT --> PI
+    EXT --> EX
+    PLT --> PLA
+    CUT --> CU
+    FIX -.->|consumed by| EXT
+    FIX -.->|consumed by| PLT
+    FIX -.->|consumed by| PIT
 ```
 
 ## What is NOT tested
 
 The following production modules do not have corresponding test files:
 
-- `src/agents/orchestrator.ts` — pipeline controller (see [Orchestrator](../cli-orchestration/orchestrator.md))
-- `src/planner.ts` — planner agent prompt construction (see [Planner](../planning-and-dispatch/planner.md))
-- `src/dispatcher.ts` — executor agent dispatch (see [Dispatcher](../planning-and-dispatch/dispatcher.md))
+- `src/dispatcher.ts` — task dispatch prompt construction (see [Dispatcher](../planning-and-dispatch/dispatcher.md))
 - `src/git.ts` — conventional commit operations (see [Git Operations](../planning-and-dispatch/git.md))
 - `src/tui.ts` — terminal dashboard (see [TUI](../cli-orchestration/tui.md))
-- `src/logger.ts` — structured logging (see [Logger](../shared-types/logger.md))
+- `src/helpers/logger.ts` — structured logging (see [Logger](../shared-types/logger.md))
 - `src/issue-fetchers/github.ts` — GitHub issue fetcher (delegates to [GitHub datasource](../datasource-system/github-datasource.md)); see also [GitHub Fetcher](../issue-fetching/github-fetcher.md) and [Datasource Testing](../datasource-system/testing.md)
 - `src/issue-fetchers/azdevops.ts` — Azure DevOps issue fetcher (delegates to [Azure DevOps datasource](../datasource-system/azdevops-datasource.md)); see also [Azure DevOps Fetcher](../issue-fetching/azdevops-fetcher.md) and [Datasource Testing](../datasource-system/testing.md)
 - `src/cli.ts` — CLI argument parser (integration-level only)
@@ -182,8 +214,14 @@ on the fake timer setup, the async advancement requirement, and the no-op
 - [Spec generator tests](spec-generator-tests.md) -- `spec-generator.test.ts` detailed breakdown
 - [Provider tests](provider-tests.md) -- `claude.test.ts`, `copilot.test.ts`,
   `opencode.test.ts`, and `provider-index.test.ts` detailed breakdown
+- [Planner & executor tests](planner-executor-tests.md) -- `executor.test.ts`
+  and `planner.test.ts` detailed breakdown
+- [Runner tests](runner-tests.md) -- `runner.test.ts`,
+  `respec-routing.test.ts`, and `orchestrator.test.ts` detailed breakdown
 - [Shared Utilities testing](../shared-utilities/testing.md) -- `slugify.test.ts` and `timeout.test.ts`
   detailed breakdown, fake timer patterns
+- [Test Fixtures & Cleanup Tests](test-fixtures.md) -- `fixtures.ts` mock
+  factories and `cleanup.test.ts` detailed breakdown
 - [Parser testing guide](../task-parsing/testing-guide.md) -- parser-specific testing patterns
 - [Datasource testing](../datasource-system/testing.md) -- datasource-specific
   test suite (markdown datasource, registry, and config validation)
@@ -193,12 +231,12 @@ on the fake timer setup, the async advancement requirement, and the no-op
   timeout utilities tested by slugify.test.ts and timeout.test.ts
 - [Spec Generation](../spec-generation/overview.md) -- the spec pipeline
   tested by `spec-generator.test.ts`
-- [Provider System Overview](../provider-system/provider-overview.md) -- provider
+- [Provider System Overview](../provider-system/overview.md) -- provider
   interface and registry
 - [Adding a Provider](../provider-system/adding-a-provider.md) -- Guide for
   testing new provider implementations
 - [Cleanup Registry](../shared-types/cleanup.md) -- Process-level cleanup
-  (note: not unit tested)
+  (tested by `cleanup.test.ts`; see [test fixtures](test-fixtures.md#cleanup-registry-tests))
 - [CLI Argument Parser](../cli-orchestration/cli.md) -- CLI integration (note:
   covered indirectly by config tests)
 - [Architecture overview](../architecture.md) -- system-wide context
@@ -208,3 +246,9 @@ on the fake timer setup, the async advancement requirement, and the no-op
   environment validation, semver comparison, and failure message format
 - [Git Worktree Helpers](../git-and-worktree/overview.md) -- worktree
   isolation model (note: no dedicated unit tests)
+- [Git Worktree Testing](../git-and-worktree/testing.md) -- 74 unit tests
+  across branch-validation, gitignore, and worktree modules
+- [Fix-Tests Tests](fix-tests-tests.md) -- `fix-tests-pipeline.test.ts`
+  and `test-runner.test.ts` detailed breakdown
+- [Dispatch Pipeline Tests](dispatch-pipeline-tests.md) --
+  `dispatch-pipeline.test.ts` and integration test detailed breakdown

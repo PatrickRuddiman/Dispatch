@@ -1,7 +1,7 @@
 # Cleanup Registry
 
 The cleanup registry (`src/cleanup.ts`) implements a process-level callback
-registry that ensures AI [provider](../provider-system/provider-overview.md) resources are properly released before the
+registry that ensures AI [provider](../provider-system/overview.md) resources are properly released before the
 Dispatch process exits. Sub-modules register their provider's `cleanup()`
 function at boot time, and the [CLI's](../cli-orchestration/cli.md) signal handlers and error handler drain
 the registry before calling `process.exit()`.
@@ -287,7 +287,7 @@ This would give each cleanup function 5 seconds before the loop moves on.
   dispatch-mode cleanup is registered
 - [Spec Generation](../spec-generation/overview.md) -- Where spec-mode
   cleanup is registered
-- [Provider Abstraction](../provider-system/provider-overview.md) -- The
+- [Provider Abstraction](../provider-system/overview.md) -- The
   `cleanup()` method on ProviderInstance
 - [Provider Interface](./provider.md) -- The `ProviderInstance` type that
   defines the `cleanup()` method
@@ -297,5 +297,9 @@ This would give each cleanup function 5 seconds before the loop moves on.
   The `execFile` patterns and external CLI tool detection that run before cleanup
   registration; understanding the pipeline startup sequence helps contextualize
   when cleanup is registered
-- [Testing Overview](../testing/overview.md) -- Test coverage (note: the
-  cleanup registry is not unit tested)
+- [Testing Overview](../testing/overview.md) -- Test coverage map including
+  `cleanup.test.ts`
+- [Test Fixtures & Cleanup Tests](../testing/test-fixtures.md) -- Dedicated
+  documentation for the cleanup registry test suite (10 tests covering
+  registration, execution order, error handling, re-entrancy, and signal
+  integration) and shared mock factories

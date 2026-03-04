@@ -1,16 +1,16 @@
 # Planner Agent
 
-The planner agent (`src/planner.ts`) runs a read-only AI session that explores
-the codebase and produces a detailed execution plan for a task. The plan is
-then passed to the [dispatcher](./dispatcher.md) as context-rich instructions
-for the executor agent.
+The planner agent (`src/agents/planner.ts`) runs a read-only AI session that
+explores the codebase and produces a detailed execution plan for a task. The
+plan is then passed to the [dispatcher](./dispatcher.md) as context-rich
+instructions for the executor agent.
 
 ## What it does
 
 The planner receives a [`Task`](../task-parsing/api-reference.md#task), optional filtered file context, an optional
 working directory override, and an optional `worktreeRoot` path for
 [worktree isolation](#worktree-isolation). It creates an
-isolated [provider session](../provider-system/provider-overview.md#session-isolation-model), sends a planning prompt, and returns the agent's
+isolated [provider session](../provider-system/overview.md#session-isolation-model), sends a planning prompt, and returns the agent's
 response as a `PlanResult`. The plan text becomes the executor agent's primary
 instructions.
 
@@ -61,8 +61,8 @@ Avoid `--no-plan` when:
 ### Session isolation
 
 Like the [dispatcher](./dispatcher.md#session-isolation), the planner creates a
-fresh session via `instance.createSession()` for each task. The planning session
-is completely separate from the execution session -- the planner's conversation
+fresh session via `provider.createSession()` for each task. The planning session
+is completely separate from the execution session — the planner's conversation
 history does not carry over to the executor. The plan text is the only channel
 of communication between the two phases.
 
@@ -200,30 +200,79 @@ directory to the worktree path instead of the boot-time `cwd`.
 [dispatcher's worktree isolation](./dispatcher.md#worktree-isolation). The
 provider backends do not support filesystem sandboxing.
 
+### File logger integration
+
+Both the planner and executor agents write structured log entries to per-issue
+log files via `fileLoggerStorage.getStore()` — a Node.js
+[`AsyncLocalStorage<FileLogger>`](../shared-types/file-logger.md)
+instance exported from `src/helpers/file-logger.ts`.
+
+The `AsyncLocalStorage` propagation model works as follows: the dispatch
+pipeline calls `fileLoggerStorage.run(logger, callback)` at the start of
+each issue's processing, which binds a `FileLogger` instance to the async
+context. All code executing within that callback — including nested `await`
+calls into the planner and executor — can retrieve the logger via
+`fileLoggerStorage.getStore()` without any explicit parameter threading.
+
+The planner logs these events:
+
+| Method | When | Content |
+|--------|------|---------|
+| `prompt("planner", ...)` | Before provider call | The full planner prompt |
+| `response("planner", ...)` | After provider responds | The plan text (if non-null) |
+| `agentEvent("planner", "completed", ...)` | On success | Elapsed time in ms |
+| `error(...)` | On exception | Error message with stack trace |
+
+Log files are written to `{CWD}/.dispatch/logs/issue-{id}.log` in plain text
+format with ISO 8601 timestamps. Prompts and responses are stored verbatim
+(delimited by `─` separators), enabling post-mortem replay. To correlate
+planner and executor log entries for the same task, look for sequential
+`[AGENT] [planner] completed` and `[AGENT] [executor] started` entries within
+the same log file.
+
 ## Interfaces
 
-### `PlanResult`
+### Return type: `AgentResult<PlannerData>`
 
-Returned by `planTask()`:
+The `plan()` method returns
+[`AgentResult<PlannerData>`](./agent-types.md#agentresultt) — a discriminated
+union on `success`. When `success` is `true`, `data.prompt` contains the
+execution plan text. When `success` is `false`, `data` is `null` and `error`
+contains a human-readable message.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `prompt` | `string` | The execution plan (system prompt for the executor) |
-| `success` | `boolean` | Whether planning succeeded |
-| `error` | `string?` | Error message if `success` is `false` |
+| Field | Type (success) | Type (failure) | Description |
+|-------|---------------|----------------|-------------|
+| `success` | `true` | `false` | Discriminant |
+| `data` | `PlannerData` | `null` | Payload |
+| `data.prompt` | `string` | — | The system prompt for the executor |
+| `error` | `never` | `string?` | Error message |
+| `durationMs` | `number?` | `number?` | Wall-clock elapsed time |
 
 An empty or whitespace-only plan is treated as a failure with the message
 "Planner returned empty plan."
 
+### `PlannerAgent`
+
+The booted planner agent interface:
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `plan` | `(task: Task, fileContext?: string, cwd?: string, worktreeRoot?: string) => Promise<AgentResult<PlannerData>>` | Plan a single task |
+| `cleanup` | `() => Promise<void>` | No-op — provider lifecycle is external |
+| `name` | `string` | Always `"planner"` |
+
 ## Error handling
 
 All errors from `createSession()` or `prompt()` are caught and returned as a
-failed `PlanResult`. The error does not propagate. The orchestrator
-(`src/orchestrator.ts:129-135`) detects a failed plan and marks the task as
-failed without proceeding to the execution phase.
+failed `AgentResult`. The error does not propagate. The orchestrator detects a
+failed plan and marks the task as failed without proceeding to the execution
+phase.
 
-This means a planning failure is a hard stop for that task -- there is no retry
-or fallback to unplanned execution.
+This means a planning failure is a hard stop for that task — there is no
+fallback to unplanned execution. However, the orchestrator may retry the
+planner up to `--plan-retries` times (default 1) on timeout errors. See
+[timeout and retry](../cli-orchestration/orchestrator.md#the-filetimeout)
+in the orchestrator documentation.
 
 ## Related documentation
 
@@ -231,7 +280,7 @@ or fallback to unplanned execution.
 - [Dispatcher](./dispatcher.md) -- How plans are consumed by the executor
 - [Task Context & Lifecycle](./task-context-and-lifecycle.md) -- How
   `buildTaskContext()` produces filtered context
-- [Provider Abstraction](../provider-system/provider-overview.md) -- The
+- [Provider Abstraction](../provider-system/overview.md) -- The
   `ProviderInstance` interface and session isolation model
 - [Orchestrator](../cli-orchestration/orchestrator.md) -- How the orchestrator
   calls `planTask()` and handles plan failures
@@ -245,7 +294,15 @@ or fallback to unplanned execution.
   wrapping `planTask()` calls in the orchestrator
 - [Git Worktree Helpers](../git-and-worktree/overview.md) -- Worktree
   isolation model that determines when `worktreeRoot` is passed
+- [Agent Types](./agent-types.md) -- `AgentResult<T>`, `AgentErrorCode`, and
+  `PlannerData` type definitions
 - [Spec Agent](../spec-generation/spec-agent.md) -- The spec generation agent
   that shares the two-phase (read-only exploration then write) architecture
 - [Testing Overview](../testing/overview.md) -- Project-wide test suite
-  (note: the planner agent has no unit tests)
+- [Planner & Executor Tests](../testing/planner-executor-tests.md) -- The
+  planner test suite with 20 tests covering boot, planning, context, worktree
+  isolation, and error handling
+- [File Logger](../shared-types/file-logger.md) -- Per-issue structured
+  logging via `AsyncLocalStorage` that the planner uses for prompt/response logging
+- [Executor Agent](./executor.md) -- The downstream executor that receives
+  the planner's output as its primary instructions

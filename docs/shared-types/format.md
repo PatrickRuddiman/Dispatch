@@ -117,7 +117,9 @@ The test file (`src/tests/format.test.ts`, 34 lines) covers six categories
 including zero/sub-second edge cases, seconds-only formatting, minutes-and-seconds
 formatting, large durations (hour-scale), and fractional millisecond truncation.
 Tests use [Vitest](https://vitest.dev/) as described in the
-[Testing Overview](../testing/overview.md).
+[Testing Overview](../testing/overview.md). See also the
+[Shared Types Overview](./overview.md) for how format utilities fit
+within the broader shared layer.
 
 See [Format Utility Tests](../testing/format-tests.md) for the full test
 breakdown.
