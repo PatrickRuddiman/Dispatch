@@ -298,16 +298,35 @@ function render(state: TuiState): string {
 
 /**
  * Clear the previous render and draw a new frame.
+ * Uses a single-write, per-line overwrite strategy to eliminate flicker.
  */
 function draw(state: TuiState): void {
-  // Move cursor up and clear previous output
-  if (lastLineCount > 0) {
-    process.stdout.write(`\x1B[${lastLineCount}A\x1B[0J`);
-  }
   const output = render(state);
-  process.stdout.write(output);
   const cols = process.stdout.columns || 80;
-  lastLineCount = countVisualRows(output, cols);
+  const newLineCount = countVisualRows(output, cols);
+
+  let buffer = "";
+
+  // Move cursor up to the beginning of the previous frame
+  if (lastLineCount > 0) {
+    buffer += `\x1B[${lastLineCount}A`;
+  }
+
+  // Append each line with \x1B[K (Erase to End of Line)
+  const lines = output.split("\n");
+  buffer += lines.map((line) => line + "\x1B[K").join("\n");
+
+  // Clean up leftover rows if new frame is shorter than previous
+  const leftover = lastLineCount - newLineCount;
+  if (leftover > 0) {
+    for (let i = 0; i < leftover; i++) {
+      buffer += "\n\x1B[K";
+    }
+    buffer += `\x1B[${leftover}A`;
+  }
+
+  process.stdout.write(buffer);
+  lastLineCount = newLineCount;
 }
 
 /**
