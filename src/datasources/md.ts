@@ -184,7 +184,6 @@ export const datasource: Datasource = {
     _body: string,
     _opts: DispatchLifecycleOptions,
   ): Promise<string> {
-    // No-op for local markdown datasource
-    return "";
+    throw new UnsupportedOperationError("createPullRequest");
   },
 };

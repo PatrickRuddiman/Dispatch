@@ -789,28 +789,24 @@ describe("MD datasource — no-op dispatch lifecycle methods", () => {
     ).rejects.toThrow(UnsupportedOperationError);
   });
 
-  it("createPullRequest resolves to empty string (no-op)", async () => {
-    const result = await md.createPullRequest(
-      "dispatch/42-feature",
-      "42",
-      "title",
-      "",
-      { cwd: "/tmp" },
-    );
-    expect(result).toBe("");
-    expect(mockExecFile).not.toHaveBeenCalled();
+  it("createPullRequest throws UnsupportedOperationError", async () => {
+    await expect(
+      md.createPullRequest("dispatch/42-feature", "42", "title", "", {
+        cwd: "/tmp",
+      }),
+    ).rejects.toThrow(UnsupportedOperationError);
   });
 
-  it("createPullRequest with custom body still returns empty string (no-op)", async () => {
-    const result = await md.createPullRequest(
-      "dispatch/42-feature",
-      "42",
-      "feat: add auth",
-      "## Summary\n\nCustom body content\n\nCloses #42",
-      { cwd: "/tmp" },
-    );
-    expect(result).toBe("");
-    expect(mockExecFile).not.toHaveBeenCalled();
+  it("createPullRequest with custom body throws UnsupportedOperationError", async () => {
+    await expect(
+      md.createPullRequest(
+        "dispatch/42-feature",
+        "42",
+        "feat: add auth",
+        "## Summary\n\nCustom body content\n\nCloses #42",
+        { cwd: "/tmp" },
+      ),
+    ).rejects.toThrow(UnsupportedOperationError);
   });
 });
 

@@ -70,22 +70,13 @@ export async function boot(opts: AgentBootOptions): Promise<ExecutorAgent> {
 
         if (result.success) {
           await markTaskComplete(task);
+          return { data: { dispatchResult: result }, success: true, durationMs: Date.now() - startTime };
         }
 
-        return {
-          data: { dispatchResult: result },
-          success: result.success,
-          error: result.error,
-          durationMs: Date.now() - startTime,
-        };
+        return { data: null, success: false, error: result.error, durationMs: Date.now() - startTime };
       } catch (err) {
         const message = log.extractMessage(err);
-        return {
-          data: { dispatchResult: { task, success: false, error: message } },
-          success: false,
-          error: message,
-          durationMs: Date.now() - startTime,
-        };
+        return { data: null, success: false, error: message, durationMs: Date.now() - startTime };
       }
     },
 

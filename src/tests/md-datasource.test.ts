@@ -89,14 +89,15 @@ describe("git lifecycle", () => {
     ).rejects.toThrow(UnsupportedOperationError);
   });
 
-  it('createPullRequest resolves to ""', async () => {
-    const result = await datasource.createPullRequest(
-      "branch",
-      "42",
-      "title",
-      "body",
-      { cwd: "/tmp" },
-    );
-    expect(result).toBe("");
+  it("createPullRequest throws UnsupportedOperationError", async () => {
+    await expect(
+      datasource.createPullRequest(
+        "branch",
+        "42",
+        "title",
+        "body",
+        { cwd: "/tmp" },
+      ),
+    ).rejects.toThrow(UnsupportedOperationError);
   });
 });
