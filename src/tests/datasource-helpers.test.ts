@@ -57,6 +57,8 @@ import {
   closeCompletedSpecIssues,
   buildPrBody,
   buildPrTitle,
+  buildFeaturePrTitle,
+  buildFeaturePrBody,
   getBranchDiff,
   amendCommitMessage,
   squashBranchCommits,
@@ -645,6 +647,110 @@ describe("buildPrBody", () => {
 
     const body = await buildPrBody(details, [], [], "main", "github", "/tmp/repo");
 
+    expect(body).not.toContain("## Tasks");
+  });
+});
+
+// ─── buildFeaturePrTitle ────────────────────────────────────────────
+
+describe("buildFeaturePrTitle", () => {
+  it("returns the single issue title when only one issue is processed", () => {
+    const issues = [createIssueDetails({ number: "42", title: "Add user auth" })];
+    const result = buildFeaturePrTitle("dispatch/feature-a1b2c3d4", issues);
+    expect(result).toBe("Add user auth");
+  });
+
+  it("returns aggregated title with branch name and issue refs for multiple issues", () => {
+    const issues = [
+      createIssueDetails({ number: "10", title: "Auth module" }),
+      createIssueDetails({ number: "11", title: "Login page" }),
+      createIssueDetails({ number: "12", title: "Signup page" }),
+    ];
+    const result = buildFeaturePrTitle("dispatch/feature-a1b2c3d4", issues);
+    expect(result).toBe("feat: dispatch/feature-a1b2c3d4 (#10, #11, #12)");
+  });
+
+  it("handles two issues correctly", () => {
+    const issues = [
+      createIssueDetails({ number: "1", title: "First" }),
+      createIssueDetails({ number: "2", title: "Second" }),
+    ];
+    const result = buildFeaturePrTitle("dispatch/feature-deadbeef", issues);
+    expect(result).toBe("feat: dispatch/feature-deadbeef (#1, #2)");
+  });
+});
+
+// ─── buildFeaturePrBody ─────────────────────────────────────────────
+
+describe("buildFeaturePrBody", () => {
+  function createTask(overrides?: Partial<Task>): Task {
+    return {
+      index: 0,
+      text: "Implement feature",
+      line: 1,
+      raw: "- [ ] Implement feature",
+      file: "/tmp/dispatch-abc/42-feature.md",
+      ...overrides,
+    };
+  }
+
+  it("lists all issues in the issues section", () => {
+    const issues = [
+      createIssueDetails({ number: "10", title: "Auth module" }),
+      createIssueDetails({ number: "11", title: "Login page" }),
+    ];
+    const body = buildFeaturePrBody(issues, [], [], "github");
+    expect(body).toContain("## Issues");
+    expect(body).toContain("- #10: Auth module");
+    expect(body).toContain("- #11: Login page");
+  });
+
+  it("includes completed and failed tasks", () => {
+    const issues = [createIssueDetails({ number: "10" })];
+    const task1 = createTask({ index: 0, text: "Task one", line: 1 });
+    const task2 = createTask({ index: 1, text: "Task two", line: 2 });
+    const results: DispatchResult[] = [
+      { task: task1, success: true },
+      { task: task2, success: false, error: "timeout" },
+    ];
+
+    const body = buildFeaturePrBody(issues, [task1, task2], results, "github");
+    expect(body).toContain("## Tasks");
+    expect(body).toContain("- [x] Task one");
+    expect(body).toContain("- [ ] Task two");
+  });
+
+  it("appends GitHub close references for all issues", () => {
+    const issues = [
+      createIssueDetails({ number: "10" }),
+      createIssueDetails({ number: "11" }),
+    ];
+    const body = buildFeaturePrBody(issues, [], [], "github");
+    expect(body).toContain("Closes #10");
+    expect(body).toContain("Closes #11");
+  });
+
+  it("appends Azure DevOps close references for all issues", () => {
+    const issues = [
+      createIssueDetails({ number: "10" }),
+      createIssueDetails({ number: "11" }),
+    ];
+    const body = buildFeaturePrBody(issues, [], [], "azdevops");
+    expect(body).toContain("Resolves AB#10");
+    expect(body).toContain("Resolves AB#11");
+    expect(body).not.toContain("Closes #");
+  });
+
+  it("includes no close references for md datasource", () => {
+    const issues = [createIssueDetails({ number: "10" })];
+    const body = buildFeaturePrBody(issues, [], [], "md");
+    expect(body).not.toContain("Closes #");
+    expect(body).not.toContain("Resolves AB#");
+  });
+
+  it("omits tasks section when no tasks are provided", () => {
+    const issues = [createIssueDetails({ number: "10" })];
+    const body = buildFeaturePrBody(issues, [], [], "github");
     expect(body).not.toContain("## Tasks");
   });
 });

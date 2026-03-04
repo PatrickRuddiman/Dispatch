@@ -35,6 +35,7 @@ import {
   createWorktree,
   removeWorktree,
   listWorktrees,
+  generateFeatureBranchName,
 } from "../helpers/worktree.js";
 
 beforeEach(() => {
@@ -294,5 +295,20 @@ describe("listWorktrees", () => {
     const result = await listWorktrees("/repo");
 
     expect(result).toBe("/repo  abc1234 [main]\n");
+  });
+});
+
+// ─── generateFeatureBranchName ─────────────────────────────────────────
+
+describe("generateFeatureBranchName", () => {
+  it("returns a string matching dispatch/feature-{8-hex-chars}", () => {
+    const name = generateFeatureBranchName();
+    expect(name).toMatch(/^dispatch\/feature-[0-9a-f]{8}$/);
+  });
+
+  it("generates unique names on successive calls", () => {
+    const a = generateFeatureBranchName();
+    const b = generateFeatureBranchName();
+    expect(a).not.toBe(b);
   });
 });

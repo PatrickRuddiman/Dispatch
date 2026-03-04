@@ -329,3 +329,80 @@ export async function buildPrTitle(
   // Multiple commits — use the first commit message with a count suffix
   return `${commits[commits.length - 1]} (+${commits.length - 1} more)`;
 }
+
+/**
+ * Build an aggregated PR title for feature mode.
+ *
+ * When a single issue is processed, the PR title is just that issue's title.
+ * For multiple issues, the title includes the feature branch name and
+ * references to all issues.
+ *
+ * @param featureBranchName - The feature branch name (e.g. "dispatch/feature-a1b2c3d4")
+ * @param issues - All issue details processed in this feature run
+ * @returns An aggregated PR title string
+ */
+export function buildFeaturePrTitle(featureBranchName: string, issues: IssueDetails[]): string {
+  if (issues.length === 1) {
+    return issues[0].title;
+  }
+  const issueRefs = issues.map((d) => `#${d.number}`).join(", ");
+  return `feat: ${featureBranchName} (${issueRefs})`;
+}
+
+/**
+ * Build an aggregated PR body for feature mode that references all issues,
+ * their tasks, and completion status.
+ *
+ * Includes:
+ * - An issues section listing all issues addressed
+ * - A tasks section with completion checkboxes
+ * - Issue-close references appropriate for the datasource
+ *
+ * @param issues - All issue details processed in this feature run
+ * @param tasks - All tasks dispatched across all issues
+ * @param results - The dispatch results for all tasks
+ * @param datasourceName - The datasource backend name ("github", "azdevops", "md")
+ * @returns The assembled aggregated PR body as a markdown string
+ */
+export function buildFeaturePrBody(
+  issues: IssueDetails[],
+  tasks: Task[],
+  results: DispatchResult[],
+  datasourceName: DatasourceName,
+): string {
+  const sections: string[] = [];
+
+  sections.push("## Issues\n");
+  for (const issue of issues) {
+    sections.push(`- #${issue.number}: ${issue.title}`);
+  }
+  sections.push("");
+
+  const taskResults = new Map(results.map((r) => [r.task, r]));
+  const completedTasks = tasks.filter((t) => taskResults.get(t)?.success);
+  const failedTasks = tasks.filter((t) => {
+    const r = taskResults.get(t);
+    return r && !r.success;
+  });
+
+  if (completedTasks.length > 0 || failedTasks.length > 0) {
+    sections.push("## Tasks\n");
+    for (const task of completedTasks) {
+      sections.push(`- [x] ${task.text}`);
+    }
+    for (const task of failedTasks) {
+      sections.push(`- [ ] ${task.text}`);
+    }
+    sections.push("");
+  }
+
+  for (const issue of issues) {
+    if (datasourceName === "github") {
+      sections.push(`Closes #${issue.number}`);
+    } else if (datasourceName === "azdevops") {
+      sections.push(`Resolves AB#${issue.number}`);
+    }
+  }
+
+  return sections.join("\n");
+}

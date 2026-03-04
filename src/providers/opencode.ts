@@ -173,12 +173,12 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
 
         // ── 2. Subscribe to SSE events ────────────────────────────
         controller = new AbortController();
-        const { stream } = await client.event.subscribe({
-          signal: controller.signal,
-        });
-
-        // ── 3. Wait for session to become idle or error ───────────
         try {
+          const { stream } = await client.event.subscribe({
+            signal: controller.signal,
+          });
+
+          // ── 3. Wait for session to become idle or error ───────────
           for await (const event of stream) {
             if (!isSessionEvent(event, sessionId)) continue;
 

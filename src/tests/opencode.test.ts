@@ -443,6 +443,23 @@ describe("opencode provider", () => {
       const result = await instance.prompt("sess-1", "do something");
       expect(result).toBeNull();
     });
+
+    it("cleans up AbortController when event.subscribe() rejects", async () => {
+      const abortSpy = vi.spyOn(AbortController.prototype, "abort");
+
+      mocks.mockSessionPromptAsync.mockResolvedValue({});
+      mocks.mockEventSubscribe.mockRejectedValue(
+        new Error("subscribe failed"),
+      );
+
+      const instance = await boot({ url: "http://localhost:1234" });
+      await expect(instance.prompt("sess-1", "do something")).rejects.toThrow(
+        "subscribe failed",
+      );
+
+      expect(abortSpy).toHaveBeenCalled();
+      abortSpy.mockRestore();
+    });
   });
 
   // ── cleanup ──────────────────────────────────────────────────

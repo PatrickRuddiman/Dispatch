@@ -60,6 +60,7 @@ import { execFile } from "node:child_process";
 import { log } from "../helpers/logger.js";
 import { bootProvider } from "../providers/index.js";
 import { registerCleanup } from "../helpers/cleanup.js";
+import { createMockProvider } from "./fixtures.js";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -67,13 +68,13 @@ beforeEach(() => {
   mocks.mockCreateSession.mockResolvedValue("sess-1");
   mocks.mockPrompt.mockResolvedValue("Tests fixed.");
   mocks.mockCleanup.mockResolvedValue(undefined);
-  vi.mocked(bootProvider).mockResolvedValue({
-    name: "mock",
-    model: "mock-model",
-    createSession: mocks.mockCreateSession,
-    prompt: mocks.mockPrompt,
-    cleanup: mocks.mockCleanup,
-  } as any);
+  vi.mocked(bootProvider).mockResolvedValue(
+    createMockProvider({
+      createSession: mocks.mockCreateSession,
+      prompt: mocks.mockPrompt,
+      cleanup: mocks.mockCleanup,
+    }),
+  );
 });
 
 function baseOpts(
