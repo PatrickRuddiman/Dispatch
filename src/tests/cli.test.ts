@@ -41,6 +41,10 @@ vi.mock("../orchestrator/runner.js", () => ({
   boot: vi.fn().mockReturnValue(new Promise(() => {})),
 }));
 
+// Suppress Commander.js stdout/stderr output during tests
+vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
 import { parseArgs, MAX_CONCURRENCY } from "../cli.js";
 
 describe("parseArgs --respec", () => {
@@ -450,82 +454,87 @@ describe("parseArgs error cases", () => {
   });
 
   it("exits for invalid --source", () => {
-    expect(() => parseArgs(["--source", "invalid"])).toThrow("process.exit called");
+    expect(() => parseArgs(["--source", "invalid"])).toThrow();
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
   it("exits for invalid --provider", () => {
-    expect(() => parseArgs(["--provider", "invalid"])).toThrow("process.exit called");
+    expect(() => parseArgs(["--provider", "invalid"])).toThrow();
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
   it("exits for non-positive --concurrency", () => {
-    expect(() => parseArgs(["--concurrency", "-1"])).toThrow("process.exit called");
+    expect(() => parseArgs(["--concurrency", "-1"])).toThrow();
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
   it("exits for non-numeric --concurrency", () => {
-    expect(() => parseArgs(["--concurrency", "abc"])).toThrow("process.exit called");
+    expect(() => parseArgs(["--concurrency", "abc"])).toThrow();
+    expect(mockExit).toHaveBeenCalledWith(1);
   });
 
   it("exits for --concurrency exceeding MAX_CONCURRENCY", () => {
-    expect(() => parseArgs(["--concurrency", String(MAX_CONCURRENCY + 1)])).toThrow("process.exit called");
+    expect(() => parseArgs(["--concurrency", String(MAX_CONCURRENCY + 1)])).toThrow();
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
   it("exits for very large --concurrency value", () => {
-    expect(() => parseArgs(["--concurrency", "10000"])).toThrow("process.exit called");
+    expect(() => parseArgs(["--concurrency", "10000"])).toThrow();
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
   it("exits for non-positive --plan-timeout", () => {
-    expect(() => parseArgs(["--plan-timeout", "0"])).toThrow("process.exit called");
+    expect(() => parseArgs(["--plan-timeout", "0"])).toThrow();
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
   it("exits for non-numeric --plan-timeout", () => {
-    expect(() => parseArgs(["--plan-timeout", "abc"])).toThrow("process.exit called");
+    expect(() => parseArgs(["--plan-timeout", "abc"])).toThrow();
+    expect(mockExit).toHaveBeenCalledWith(1);
   });
 
   it("exits for --plan-timeout exceeding maximum", () => {
-    expect(() => parseArgs(["--plan-timeout", "121"])).toThrow("process.exit called");
+    expect(() => parseArgs(["--plan-timeout", "121"])).toThrow();
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
   it("exits for non-positive --test-timeout", () => {
-    expect(() => parseArgs(["--test-timeout", "0"])).toThrow("process.exit called");
+    expect(() => parseArgs(["--test-timeout", "0"])).toThrow();
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
   it("exits for non-numeric --test-timeout", () => {
-    expect(() => parseArgs(["--test-timeout", "abc"])).toThrow("process.exit called");
+    expect(() => parseArgs(["--test-timeout", "abc"])).toThrow();
+    expect(mockExit).toHaveBeenCalledWith(1);
   });
 
   it("exits for negative --test-timeout", () => {
-    expect(() => parseArgs(["--test-timeout", "-1"])).toThrow("process.exit called");
+    expect(() => parseArgs(["--test-timeout", "-1"])).toThrow();
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
   it("exits for negative --plan-retries", () => {
-    expect(() => parseArgs(["--plan-retries", "-1"])).toThrow("process.exit called");
+    expect(() => parseArgs(["--plan-retries", "-1"])).toThrow();
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
   it("exits for non-numeric --plan-retries", () => {
-    expect(() => parseArgs(["--plan-retries", "abc"])).toThrow("process.exit called");
+    expect(() => parseArgs(["--plan-retries", "abc"])).toThrow();
+    expect(mockExit).toHaveBeenCalledWith(1);
   });
 
   it("exits for negative --retries", () => {
-    expect(() => parseArgs(["--retries", "-1"])).toThrow("process.exit called");
+    expect(() => parseArgs(["--retries", "-1"])).toThrow();
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
   it("exits for non-numeric --retries", () => {
-    expect(() => parseArgs(["--retries", "abc"])).toThrow("process.exit called");
+    expect(() => parseArgs(["--retries", "abc"])).toThrow();
+    expect(mockExit).toHaveBeenCalledWith(1);
   });
 
   it("exits for unknown flag", () => {
-    expect(() => parseArgs(["--unknown-flag"])).toThrow("process.exit called");
+    expect(() => parseArgs(["--unknown-flag"])).toThrow();
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 });
