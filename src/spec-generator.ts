@@ -59,6 +59,10 @@ export interface SpecOptions {
   project?: string;
   /** Azure DevOps work item type (e.g. "User Story", "Product Backlog Item") */
   workItemType?: string;
+  /** Azure DevOps iteration path filter (e.g. "MyProject\\Sprint 1" or "@CurrentIteration") */
+  iteration?: string;
+  /** Azure DevOps area path filter (e.g. "MyProject\\Team A") */
+  area?: string;
   /** Max parallel fetches/generations (default: min(cpuCount, freeMB/500)) */
   concurrency?: number;
   /** When true, log a preview of what would be generated without booting the provider or writing files. */

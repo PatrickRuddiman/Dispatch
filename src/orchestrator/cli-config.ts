@@ -29,6 +29,11 @@ const CONFIG_TO_CLI: Record<ConfigKey, keyof RawCliArgs> = {
   testTimeout: "testTimeout",
   planTimeout: "planTimeout",
   concurrency: "concurrency",
+  org: "org",
+  project: "project",
+  workItemType: "workItemType",
+  iteration: "iteration",
+  area: "area",
 };
 
 /** Type-safe indexed write into a RawCliArgs object. */

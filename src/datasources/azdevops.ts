@@ -50,8 +50,23 @@ export const datasource: Datasource = {
   },
 
   async list(opts: IssueFetchOptions = {}): Promise<IssueDetails[]> {
-    const wiql =
-      "SELECT [System.Id] FROM workitems WHERE [System.State] <> 'Closed' AND [System.State] <> 'Removed' ORDER BY [System.CreatedDate] DESC";
+    const conditions = [
+      "[System.State] <> 'Closed'",
+      "[System.State] <> 'Removed'",
+    ];
+
+    if (opts.iteration) {
+      const iterValue = opts.iteration === "@CurrentIteration"
+        ? "@CurrentIteration"
+        : `'${opts.iteration}'`;
+      conditions.push(`[System.IterationPath] UNDER ${iterValue}`);
+    }
+
+    if (opts.area) {
+      conditions.push(`[System.AreaPath] UNDER '${opts.area}'`);
+    }
+
+    const wiql = `SELECT [System.Id] FROM workitems WHERE ${conditions.join(" AND ")} ORDER BY [System.CreatedDate] DESC`;
 
     const args = ["boards", "query", "--wiql", wiql, "--output", "json"];
     if (opts.org) args.push("--org", opts.org);

@@ -5,7 +5,7 @@
  * via an interactive terminal flow.
  */
 
-import { select, confirm } from "@inquirer/prompts";
+import { select, confirm, input } from "@inquirer/prompts";
 import chalk from "chalk";
 import { log } from "./helpers/logger.js";
 import {
@@ -18,6 +18,8 @@ import type { ProviderName } from "./providers/interface.js";
 import {
   DATASOURCE_NAMES,
   detectDatasource,
+  getGitRemoteUrl,
+  parseAzDevOpsRemoteUrl,
 } from "./datasources/index.js";
 import type { DatasourceName } from "./datasources/interface.js";
 
@@ -120,6 +122,65 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
   const source: DatasourceName | undefined =
     selectedSource === "auto" ? undefined : selectedSource;
 
+  // ── Azure DevOps-specific fields ───────────────────────────
+  let org: string | undefined;
+  let project: string | undefined;
+  let workItemType: string | undefined;
+  let iteration: string | undefined;
+  let area: string | undefined;
+
+  const effectiveSource = source ?? detectedSource;
+  if (effectiveSource === "azdevops") {
+    // Try to pre-fill org and project from git remote
+    let defaultOrg = existing.org ?? "";
+    let defaultProject = existing.project ?? "";
+    try {
+      const remoteUrl = await getGitRemoteUrl(process.cwd());
+      if (remoteUrl) {
+        const parsed = parseAzDevOpsRemoteUrl(remoteUrl);
+        if (parsed) {
+          if (!defaultOrg) defaultOrg = parsed.orgUrl;
+          if (!defaultProject) defaultProject = parsed.project;
+        }
+      }
+    } catch {
+      // ignore — pre-fill is best-effort
+    }
+
+    console.log();
+    log.info(chalk.bold("Azure DevOps settings") + chalk.dim(" (leave empty to skip):"));
+
+    const orgInput = await input({
+      message: "Organization URL:",
+      default: defaultOrg || undefined,
+    });
+    if (orgInput.trim()) org = orgInput.trim();
+
+    const projectInput = await input({
+      message: "Project name:",
+      default: defaultProject || undefined,
+    });
+    if (projectInput.trim()) project = projectInput.trim();
+
+    const workItemTypeInput = await input({
+      message: "Work item type (e.g. User Story, Bug):",
+      default: existing.workItemType ?? undefined,
+    });
+    if (workItemTypeInput.trim()) workItemType = workItemTypeInput.trim();
+
+    const iterationInput = await input({
+      message: "Iteration path (e.g. MyProject\\Sprint 1, or @CurrentIteration):",
+      default: existing.iteration ?? undefined,
+    });
+    if (iterationInput.trim()) iteration = iterationInput.trim();
+
+    const areaInput = await input({
+      message: "Area path (e.g. MyProject\\Team A):",
+      default: existing.area ?? undefined,
+    });
+    if (areaInput.trim()) area = areaInput.trim();
+  }
+
   // ── Build new config ───────────────────────────────────────
   const newConfig: DispatchConfig = {
     provider,
@@ -129,6 +190,11 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
   if (selectedModel !== undefined) {
     newConfig.model = selectedModel;
   }
+  if (org !== undefined) newConfig.org = org;
+  if (project !== undefined) newConfig.project = project;
+  if (workItemType !== undefined) newConfig.workItemType = workItemType;
+  if (iteration !== undefined) newConfig.iteration = iteration;
+  if (area !== undefined) newConfig.area = area;
 
   // ── Summary ────────────────────────────────────────────────
   console.log();
