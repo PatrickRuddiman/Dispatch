@@ -196,7 +196,7 @@ describe("log methods", () => {
     logger.agentEvent("executor", "finished");
     const written = mockAppendFileSync.mock.calls[0][1] as string;
     expect(written).toContain("[AGENT] [executor] finished");
-    expect(written).not.toMatch(/\[AGENT\] \[executor\] finished:/)
+    expect(written).not.toMatch(/\[AGENT\] \[executor\] finished:/);
   });
 });
 

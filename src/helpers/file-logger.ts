@@ -20,8 +20,14 @@ export const fileLoggerStorage = new AsyncLocalStorage<FileLogger>();
 export class FileLogger {
   readonly filePath: string;
 
+  private static sanitizeIssueId(issueId: string | number): string {
+    const raw = String(issueId);
+    return raw.replace(/[^a-zA-Z0-9._-]/g, "_");
+  }
+
   constructor(issueId: string | number, cwd: string) {
-    this.filePath = join(cwd, ".dispatch", "logs", `issue-${issueId}.log`);
+    const safeIssueId = FileLogger.sanitizeIssueId(issueId);
+    this.filePath = join(cwd, ".dispatch", "logs", `issue-${safeIssueId}.log`);
     mkdirSync(dirname(this.filePath), { recursive: true });
     writeFileSync(this.filePath, "", "utf-8");
   }

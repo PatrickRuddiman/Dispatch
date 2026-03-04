@@ -257,7 +257,7 @@ describe("integration: verbose file logging", () => {
     const logPath = join(tmpDir, ".dispatch", "logs", "issue-1.log");
     const content = readFileSync(logPath, "utf-8");
 
-    expect(content).toMatch(/^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z\]/m);
+    expect(content).toMatch(/^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\]/m);
   });
 
   it("log file contains phase markers", async () => {

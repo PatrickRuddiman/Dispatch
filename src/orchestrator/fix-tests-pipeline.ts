@@ -164,7 +164,6 @@ export async function runFixTestsPipeline(
 
       // Check if tests already pass
       if (testResult.exitCode === 0) {
-        fileLoggerStorage.getStore()?.success("All tests pass — nothing to fix.");
         log.success("All tests pass — nothing to fix.");
         return { mode: "fix-tests", success: true };
       }

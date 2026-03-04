@@ -376,7 +376,6 @@ async function generateSpecsBatch(
             const specDuration = Date.now() - specStart;
             fileDurationsMs[filepath] = specDuration;
             log.success(`Spec written: ${filepath} (${elapsed(specDuration)})`);
-            fileLoggerStorage.getStore()?.info(`Spec written: ${filepath}`);
 
             let identifier = filepath;
 

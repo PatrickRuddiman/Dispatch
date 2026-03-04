@@ -466,7 +466,7 @@ export async function runDispatchPipeline(
               }));
 
               if (execResult.success) {
-                fileLogger?.info(`Execution completed successfully (${Date.now() - startTime}ms`);
+                fileLogger?.info(`Execution completed successfully (${Date.now() - startTime}ms)`);
                 // Sync checked-off state back to the datasource
                 try {
                   const parsed = parseIssueFilename(task.file);
