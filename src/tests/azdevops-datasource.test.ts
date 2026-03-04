@@ -18,27 +18,25 @@ describe("azdevops datasource — list", () => {
     mockExecFile.mockResolvedValueOnce({
       stdout: JSON.stringify([{ id: 1 }, { id: 2 }]),
     });
-    // Second call: fetch item 1
+    // Second call: batch az boards work-item show --id 1 2
     mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        id: 1,
-        fields: { "System.Title": "Bug", "System.Description": "fix", "System.Tags": "bug", "System.State": "Active" },
-        _links: { html: { href: "https://dev.azure.com/1" } },
-      }),
+      stdout: JSON.stringify([
+        {
+          id: 1,
+          fields: { "System.Title": "Bug", "System.Description": "fix", "System.Tags": "bug", "System.State": "Active" },
+          _links: { html: { href: "https://dev.azure.com/1" } },
+        },
+        {
+          id: 2,
+          fields: { "System.Title": "Feature", "System.Description": "add", "System.Tags": "", "System.State": "New" },
+          url: "https://dev.azure.com/2",
+        },
+      ]),
     });
-    // Third call: fetchComments for item 1
+    // Third + Fourth calls: fetchComments for item 1 and item 2 (parallel)
     mockExecFile.mockResolvedValueOnce({
       stdout: JSON.stringify({ comments: [] }),
     });
-    // Fourth call: fetch item 2
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        id: 2,
-        fields: { "System.Title": "Feature", "System.Description": "add", "System.Tags": "", "System.State": "New" },
-        url: "https://dev.azure.com/2",
-      }),
-    });
-    // Fifth call: fetchComments for item 2
     mockExecFile.mockResolvedValueOnce({
       stdout: JSON.stringify({ comments: [] }),
     });
@@ -49,6 +47,40 @@ describe("azdevops datasource — list", () => {
     expect(result[0].number).toBe("1");
     expect(result[0].title).toBe("Bug");
     expect(result[1].number).toBe("2");
+
+    // Verify batch call args
+    const batchArgs = mockExecFile.mock.calls[1][1] as string[];
+    expect(batchArgs).toContain("show");
+    expect(batchArgs).toContain("--id");
+    expect(batchArgs).toContain("1");
+    expect(batchArgs).toContain("2");
+  });
+
+  it("falls back to individual fetches when batch call fails", async () => {
+    // First call: az boards query
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([{ id: 1 }]),
+    });
+    // Second call: batch show fails
+    mockExecFile.mockRejectedValueOnce(new Error("batch not supported"));
+    // Fallback: individual fetch for item 1
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        id: 1,
+        fields: { "System.Title": "Bug", "System.Description": "fix", "System.Tags": "", "System.State": "Active" },
+        _links: { html: { href: "https://dev.azure.com/1" } },
+      }),
+    });
+    // fetchComments for item 1
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify({ comments: [] }),
+    });
+
+    const result = await datasource.list({ cwd: "/tmp" });
+
+    expect(result).toHaveLength(1);
+    expect(result[0].number).toBe("1");
+    expect(result[0].title).toBe("Bug");
   });
 
   it("passes org and project to az command", async () => {
@@ -61,6 +93,48 @@ describe("azdevops datasource — list", () => {
     expect(args).toContain("https://dev.azure.com/myorg");
     expect(args).toContain("--project");
     expect(args).toContain("MyProj");
+  });
+
+  it("returns early when WIQL result is empty", async () => {
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([]),
+    });
+
+    const result = await datasource.list({ cwd: "/tmp" });
+
+    expect(result).toEqual([]);
+    // Only the WIQL query should have been called — no batch show call
+    expect(mockExecFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes org and project through on batch call", async () => {
+    // First call: WIQL query
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([{ id: 1 }]),
+    });
+    // Second call: batch show
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        {
+          id: 1,
+          fields: { "System.Title": "T", "System.Description": "D", "System.Tags": "", "System.State": "Active" },
+          _links: { html: { href: "https://dev.azure.com/1" } },
+        },
+      ]),
+    });
+    // Third call: fetchComments
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify({ comments: [] }),
+    });
+
+    await datasource.list({ cwd: "/tmp", org: "https://dev.azure.com/myorg", project: "MyProj" });
+
+    // Verify batch call (second call) includes --org and --project
+    const batchArgs = mockExecFile.mock.calls[1][1] as string[];
+    expect(batchArgs).toContain("--org");
+    expect(batchArgs).toContain("https://dev.azure.com/myorg");
+    expect(batchArgs).toContain("--project");
+    expect(batchArgs).toContain("MyProj");
   });
 
   it("appends iteration filter to WIQL query", async () => {
