@@ -97,7 +97,7 @@ async function getCommitSummaries(defaultBranch: string, cwd: string): Promise<s
     const { stdout } = await exec(
       "git",
       ["log", `${defaultBranch}..HEAD`, "--pretty=format:%s"],
-      { cwd },
+      { cwd, shell: process.platform === "win32" },
     );
     return stdout
       .trim()
@@ -120,7 +120,7 @@ export async function getBranchDiff(defaultBranch: string, cwd: string): Promise
     const { stdout } = await exec(
       "git",
       ["diff", `${defaultBranch}..HEAD`],
-      { cwd, maxBuffer: 10 * 1024 * 1024 },
+      { cwd, maxBuffer: 10 * 1024 * 1024, shell: process.platform === "win32" },
     );
     return stdout;
   } catch {
@@ -138,7 +138,7 @@ export async function amendCommitMessage(message: string, cwd: string): Promise<
   await exec(
     "git",
     ["commit", "--amend", "-m", message],
-    { cwd },
+    { cwd, shell: process.platform === "win32" },
   );
 }
 
@@ -161,11 +161,11 @@ export async function squashBranchCommits(
   const { stdout } = await exec(
     "git",
     ["merge-base", defaultBranch, "HEAD"],
-    { cwd },
+    { cwd, shell: process.platform === "win32" },
   );
   const mergeBase = stdout.trim();
-  await exec("git", ["reset", "--soft", mergeBase], { cwd });
-  await exec("git", ["commit", "-m", message], { cwd });
+  await exec("git", ["reset", "--soft", mergeBase], { cwd, shell: process.platform === "win32" });
+  await exec("git", ["commit", "-m", message], { cwd, shell: process.platform === "win32" });
 }
 
 /**

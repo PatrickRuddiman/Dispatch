@@ -55,6 +55,7 @@ export async function getGitRemoteUrl(cwd: string): Promise<string | null> {
   try {
     const { stdout } = await exec("git", ["remote", "get-url", "origin"], {
       cwd,
+      shell: process.platform === "win32",
     });
     return stdout.trim() || null;
   } catch {

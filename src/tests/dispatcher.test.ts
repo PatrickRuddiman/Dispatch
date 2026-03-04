@@ -169,4 +169,24 @@ describe("dispatchTask", () => {
     expect(prompt).toContain("Worktree isolation");
     expect(prompt).toContain("/tmp/worktree");
   });
+
+  it("includes environment section in prompt (no plan)", async () => {
+    const provider = createMockProvider();
+    await dispatchTask(provider, TASK_FIXTURE, "/tmp/test");
+
+    const prompt = vi.mocked(provider.prompt).mock.calls[0][1];
+    expect(prompt).toContain("## Environment");
+    expect(prompt).toContain("Operating System");
+    expect(prompt).toContain("Do NOT write intermediate scripts");
+  });
+
+  it("includes environment section in planned prompt", async () => {
+    const provider = createMockProvider();
+    await dispatchTask(provider, TASK_FIXTURE, "/tmp/test", "Step 1: do X");
+
+    const prompt = vi.mocked(provider.prompt).mock.calls[0][1];
+    expect(prompt).toContain("## Environment");
+    expect(prompt).toContain("Operating System");
+    expect(prompt).toContain("Do NOT write intermediate scripts");
+  });
 });

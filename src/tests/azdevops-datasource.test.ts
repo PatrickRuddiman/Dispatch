@@ -380,7 +380,7 @@ describe("azdevops datasource — update", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "az",
       expect.arrayContaining(["boards", "work-item", "update", "--id", "42", "--title", "New Title"]),
-      { cwd: "/tmp" },
+      { cwd: "/tmp", shell: false },
     );
   });
 
@@ -1073,7 +1073,7 @@ describe("azdevops datasource — createAndSwitchBranch", () => {
     await datasource.createAndSwitchBranch("dispatch/42-feat", { cwd: "/tmp" });
 
     expect(mockExecFile).toHaveBeenCalledWith(
-      "git", ["checkout", "-b", "dispatch/42-feat"], { cwd: "/tmp" },
+      "git", ["checkout", "-b", "dispatch/42-feat"], { cwd: "/tmp", shell: false },
     );
   });
 
@@ -1100,7 +1100,7 @@ describe("azdevops datasource — switchBranch", () => {
   it("calls git checkout", async () => {
     mockExecFile.mockResolvedValue({ stdout: "" });
     await datasource.switchBranch("main", { cwd: "/tmp" });
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "main"], { cwd: "/tmp" });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "main"], { cwd: "/tmp", shell: false });
   });
 });
 
@@ -1109,7 +1109,7 @@ describe("azdevops datasource — pushBranch", () => {
     mockExecFile.mockResolvedValue({ stdout: "" });
     await datasource.pushBranch("dispatch/42-feat", { cwd: "/tmp" });
     expect(mockExecFile).toHaveBeenCalledWith(
-      "git", ["push", "--set-upstream", "origin", "dispatch/42-feat"], { cwd: "/tmp" },
+      "git", ["push", "--set-upstream", "origin", "dispatch/42-feat"], { cwd: "/tmp", shell: false },
     );
   });
 });

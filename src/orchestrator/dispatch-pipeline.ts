@@ -603,14 +603,14 @@ export async function runDispatchPipeline(
 
           try {
             await datasource.switchBranch(featureBranchName, lifecycleOpts);
-            await exec("git", ["merge", branchName, "--no-ff", "-m", `merge: issue #${details.number}`], { cwd });
+            await exec("git", ["merge", branchName, "--no-ff", "-m", `merge: issue #${details.number}`], { cwd, shell: process.platform === "win32" });
             log.debug(`Merged ${branchName} into ${featureBranchName}`);
           } catch (err) {
             const mergeError = `Could not merge ${branchName} into feature branch: ${log.formatErrorChain(err)}`;
             log.warn(mergeError);
             // Abort the failed merge so the repo is left in a clean state
             try {
-              await exec("git", ["merge", "--abort"], { cwd });
+              await exec("git", ["merge", "--abort"], { cwd, shell: process.platform === "win32" });
             } catch { /* merge --abort may fail if there's nothing to abort */ }
             // Record every task in this issue as failed
             for (const task of fileTasks) {
@@ -629,7 +629,7 @@ export async function runDispatchPipeline(
           }
 
           try {
-            await exec("git", ["branch", "-d", branchName], { cwd });
+            await exec("git", ["branch", "-d", branchName], { cwd, shell: process.platform === "win32" });
             log.debug(`Deleted local branch ${branchName}`);
           } catch (err) {
             log.warn(`Could not delete local branch ${branchName}: ${log.formatErrorChain(err)}`);

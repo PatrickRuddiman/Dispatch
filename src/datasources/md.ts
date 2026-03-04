@@ -147,7 +147,7 @@ export const datasource: Datasource = {
 
   async getUsername(opts: DispatchLifecycleOptions): Promise<string> {
     try {
-      const { stdout } = await exec("git", ["config", "user.name"], { cwd: opts.cwd });
+      const { stdout } = await exec("git", ["config", "user.name"], { cwd: opts.cwd, shell: process.platform === "win32" });
       const name = stdout.trim();
       if (!name) return "local";
       return slugify(name);

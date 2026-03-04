@@ -498,7 +498,7 @@ describe("buildPrTitle", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["log", "main..HEAD", "--pretty=format:%s"],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
   });
 
@@ -757,7 +757,7 @@ describe("getBranchDiff", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["diff", "main..HEAD"],
-      { cwd: "/tmp/repo", maxBuffer: 10 * 1024 * 1024 },
+      { cwd: "/tmp/repo", maxBuffer: 10 * 1024 * 1024, shell: false },
     );
   });
 
@@ -789,7 +789,7 @@ describe("amendCommitMessage", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["commit", "--amend", "-m", "feat: new message"],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
   });
 
@@ -814,17 +814,17 @@ describe("squashBranchCommits", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["merge-base", "main", "HEAD"],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["reset", "--soft", "abc123"],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["commit", "-m", "feat: squashed"],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
   });
 

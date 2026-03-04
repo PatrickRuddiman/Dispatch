@@ -314,6 +314,20 @@ describe("plan", () => {
     expect(promptArg).toContain("MUST be confined");
     expect(promptArg).toContain("/boot-dir");
   });
+
+  it("includes environment section in the prompt", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("plan output"),
+    });
+
+    const agent = await boot({ cwd: "/tmp/test", provider });
+    await agent.plan(TASK_FIXTURE);
+
+    const promptArg = vi.mocked(provider.prompt).mock.calls[0][1];
+    expect(promptArg).toContain("## Environment");
+    expect(promptArg).toContain("Operating System");
+    expect(promptArg).toContain("Do NOT write intermediate scripts");
+  });
 });
 
 describe("cleanup", () => {
