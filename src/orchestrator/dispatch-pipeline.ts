@@ -379,7 +379,7 @@ export async function runDispatchPipeline(
                   return { task, success: false, error: tuiTask.error } as DispatchResult;
                 }
 
-                plan = planResult.data?.prompt;
+                plan = planResult.data.prompt;
               }
 
               // ── Phase B: Execute via executor agent ──────────────
@@ -402,7 +402,7 @@ export async function runDispatchPipeline(
                 execRetries,
                 { label: `executor "${task.text}"` },
               ).catch((err): AgentResult<ExecutorData> => ({
-                data: { dispatchResult: { task, success: false, error: log.extractMessage(err) } },
+                data: null,
                 success: false,
                 error: log.extractMessage(err),
                 durationMs: 0,
@@ -435,13 +435,13 @@ export async function runDispatchPipeline(
                 failed++;
               }
 
-              const dispatchResult: DispatchResult =
-                execResult.data?.dispatchResult ??
-                {
-                  task,
-                  success: false,
-                  error: execResult.error ?? "Executor failed without returning a dispatch result.",
-                };
+              const dispatchResult: DispatchResult = execResult.success
+                ? execResult.data.dispatchResult
+                : {
+                    task,
+                    success: false,
+                    error: execResult.error ?? "Executor failed without returning a dispatch result.",
+                  };
               return dispatchResult;
             })
           );

@@ -647,7 +647,8 @@ describe("runDispatchPipeline edge cases", () => {
   it("handles executor failure", async () => {
     mocks.mockExecute.mockResolvedValue({
       success: false,
-      data: { dispatchResult: { task: TASK_FIXTURE, success: false, error: "exec error" } },
+      data: null,
+      error: "exec error",
       durationMs: 50,
     });
     mocks.mockPlan.mockImplementation(() =>
