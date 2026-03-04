@@ -190,7 +190,7 @@ export async function runDispatchPipeline(
     // Worktrees are used when: not opted out, branching is enabled, and
     // there are multiple issues to process (single-issue runs use serial
     // mode to avoid unnecessary worktree overhead).
-    const useWorktrees = feature || (!noWorktree && !noBranch && tasksByFile.size > 1);
+    const useWorktrees = !noWorktree && (feature || (!noBranch && tasksByFile.size > 1));
 
     // ── 3. Boot provider ────────────────────────────────────────
     tui.state.phase = "booting";
@@ -546,7 +546,23 @@ export async function runDispatchPipeline(
             await exec("git", ["merge", branchName, "--no-ff", "-m", `merge: issue #${details.number}`], { cwd });
             log.debug(`Merged ${branchName} into ${featureBranchName}`);
           } catch (err) {
-            log.warn(`Could not merge ${branchName} into feature branch: ${log.formatErrorChain(err)}`);
+            const mergeError = `Could not merge ${branchName} into feature branch: ${log.formatErrorChain(err)}`;
+            log.error(mergeError);
+            // Abort the failed merge so the repo is left in a clean state
+            try {
+              await exec("git", ["merge", "--abort"], { cwd });
+            } catch { /* merge --abort may fail if there's nothing to abort */ }
+            // Record every task in this issue as failed
+            for (const task of fileTasks) {
+              const tuiTask = tui.state.tasks.find((t) => t.task === task);
+              if (tuiTask) {
+                tuiTask.status = "failed";
+                tuiTask.error = mergeError;
+              }
+              results.push({ task, success: false, error: mergeError });
+            }
+            failed += fileTasks.length;
+            return;
           }
 
           try {
