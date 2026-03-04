@@ -1675,8 +1675,8 @@ describe("feature branch workflow", () => {
     setupMultiIssueScenario();
     mocks.mockExecute.mockImplementation(async ({ task }: any) => ({
       success: true,
-      dispatchResult: { task, success: true },
-      elapsedMs: 100,
+      data: { dispatchResult: { task, success: true } },
+      durationMs: 100,
     }));
     mocks.mockGenerate.mockResolvedValue({
       commitMessage: "",
@@ -1919,8 +1919,8 @@ describe("feature branch workflow", () => {
       executionOrder.push(task.text);
       return {
         success: true,
-        dispatchResult: { task, success: true },
-        elapsedMs: 100,
+        data: { dispatchResult: { task, success: true } },
+        durationMs: 100,
       };
     });
 
