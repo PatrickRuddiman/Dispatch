@@ -83,6 +83,7 @@ jobs:
 
           git add package.json package-lock.json
           git commit -m "chore(release): bump version to ${VERSION}"
+          git pull --rebase origin "$BRANCH" || true
           git push origin "$BRANCH"
 
           gh pr create \
