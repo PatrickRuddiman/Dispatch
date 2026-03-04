@@ -249,12 +249,31 @@ export const datasource: Datasource = {
   async getUsername(opts: DispatchLifecycleOptions): Promise<string> {
     try {
       const { stdout } = await exec("git", ["config", "user.name"], { cwd: opts.cwd });
-      const name = stdout.trim();
-      if (!name) return "unknown";
-      return slugify(name);
+      const name = slugify(stdout.trim());
+      if (name) return name;
     } catch {
-      return "unknown";
+      // fall through
     }
+
+    try {
+      const { stdout } = await exec("az", ["account", "show", "--query", "user.name", "-o", "tsv"], { cwd: opts.cwd });
+      const name = slugify(stdout.trim());
+      if (name) return name;
+    } catch {
+      // fall through
+    }
+
+    try {
+      const { stdout } = await exec("az", ["account", "show", "--query", "user.principalName", "-o", "tsv"], { cwd: opts.cwd });
+      const principal = stdout.trim();
+      const prefix = principal.split("@")[0];
+      const name = slugify(prefix);
+      if (name) return name;
+    } catch {
+      // fall through
+    }
+
+    return "unknown";
   },
 
   buildBranchName(issueNumber: string, title: string, username: string): string {

@@ -343,6 +343,70 @@ describe("detectWorkItemType", () => {
   });
 });
 
+describe("azdevops datasource — getUsername", () => {
+  it("returns slugified git config user.name when available", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: "Alice Smith\n" });
+
+    const result = await datasource.getUsername({ cwd: "/tmp" });
+
+    expect(result).toBe("alice-smith");
+    expect(mockExecFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to az account show user.name when git config fails", async () => {
+    mockExecFile.mockRejectedValueOnce(new Error("git config not set"));
+    mockExecFile.mockResolvedValueOnce({ stdout: "Bob Jones\n" });
+
+    const result = await datasource.getUsername({ cwd: "/tmp" });
+
+    expect(result).toBe("bob-jones");
+    expect(mockExecFile).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to az account show user.name when git config returns empty", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: "\n" });
+    mockExecFile.mockResolvedValueOnce({ stdout: "Bob Jones\n" });
+
+    const result = await datasource.getUsername({ cwd: "/tmp" });
+
+    expect(result).toBe("bob-jones");
+    expect(mockExecFile).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to az account show user.principalName email prefix", async () => {
+    mockExecFile.mockRejectedValueOnce(new Error("git config not set"));
+    mockExecFile.mockRejectedValueOnce(new Error("az user.name failed"));
+    mockExecFile.mockResolvedValueOnce({ stdout: "john@corp.com\n" });
+
+    const result = await datasource.getUsername({ cwd: "/tmp" });
+
+    expect(result).toBe("john");
+    expect(mockExecFile).toHaveBeenCalledTimes(3);
+  });
+
+  it("returns unknown when all fallbacks fail", async () => {
+    mockExecFile.mockRejectedValueOnce(new Error("git config not set"));
+    mockExecFile.mockRejectedValueOnce(new Error("az user.name failed"));
+    mockExecFile.mockRejectedValueOnce(new Error("az principalName failed"));
+
+    const result = await datasource.getUsername({ cwd: "/tmp" });
+
+    expect(result).toBe("unknown");
+    expect(mockExecFile).toHaveBeenCalledTimes(3);
+  });
+
+  it("skips empty az account show user.name and tries principalName", async () => {
+    mockExecFile.mockRejectedValueOnce(new Error("git config not set"));
+    mockExecFile.mockResolvedValueOnce({ stdout: "\n" });
+    mockExecFile.mockResolvedValueOnce({ stdout: "alice@example.com\n" });
+
+    const result = await datasource.getUsername({ cwd: "/tmp" });
+
+    expect(result).toBe("alice");
+    expect(mockExecFile).toHaveBeenCalledTimes(3);
+  });
+});
+
 describe("azdevops datasource — getDefaultBranch", () => {
   it("returns branch from symbolic-ref", async () => {
     mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/develop\n" });
