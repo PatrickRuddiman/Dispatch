@@ -19,13 +19,13 @@ const exec = promisify(execFile);
 
 /** Execute a git command and return stdout. */
 async function git(args: string[], cwd: string): Promise<string> {
-  const { stdout } = await exec("git", args, { cwd });
+  const { stdout } = await exec("git", args, { cwd, shell: process.platform === "win32" });
   return stdout;
 }
 
 /** Execute a gh CLI command and return stdout. */
 async function gh(args: string[], cwd: string): Promise<string> {
-  const { stdout } = await exec("gh", args, { cwd });
+  const { stdout } = await exec("gh", args, { cwd, shell: process.platform === "win32" });
   return stdout;
 }
 
@@ -115,7 +115,7 @@ export const datasource: Datasource = {
         "--json",
         "number,title,body,labels,state,url",
       ],
-      { cwd }
+      { cwd, shell: process.platform === "win32" }
     );
 
     let issues;
@@ -158,7 +158,7 @@ export const datasource: Datasource = {
         "--json",
         "number,title,body,labels,state,url,comments",
       ],
-      { cwd }
+      { cwd, shell: process.platform === "win32" }
     );
 
     let issue;
@@ -190,12 +190,12 @@ export const datasource: Datasource = {
 
   async update(issueId: string, title: string, body: string, opts: IssueFetchOptions = {}): Promise<void> {
     const cwd = opts.cwd || process.cwd();
-    await exec("gh", ["issue", "edit", issueId, "--title", title, "--body", body], { cwd });
+    await exec("gh", ["issue", "edit", issueId, "--title", title, "--body", body], { cwd, shell: process.platform === "win32" });
   },
 
   async close(issueId: string, opts: IssueFetchOptions = {}): Promise<void> {
     const cwd = opts.cwd || process.cwd();
-    await exec("gh", ["issue", "close", issueId], { cwd });
+    await exec("gh", ["issue", "close", issueId], { cwd, shell: process.platform === "win32" });
   },
 
   async create(title: string, body: string, opts: IssueFetchOptions = {}): Promise<IssueDetails> {
@@ -206,7 +206,7 @@ export const datasource: Datasource = {
     const { stdout } = await exec(
       "gh",
       ["issue", "create", "--title", title, "--body", body],
-      { cwd }
+      { cwd, shell: process.platform === "win32" }
     );
 
     const url = stdout.trim();

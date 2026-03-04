@@ -13,6 +13,7 @@ import { bootProvider } from "../providers/index.js";
 import { registerCleanup } from "../helpers/cleanup.js";
 import { log } from "../helpers/logger.js";
 import { FileLogger, fileLoggerStorage } from "../helpers/file-logger.js";
+import { formatEnvironmentPrompt } from "../helpers/environment.js";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -74,7 +75,7 @@ export function runTestCommand(
     execFileCb(
       cmd,
       args,
-      { cwd, maxBuffer: 10 * 1024 * 1024 },
+      { cwd, maxBuffer: 10 * 1024 * 1024, shell: process.platform === "win32" },
       (error, stdout, stderr) => {
         const exitCode =
           error && "code" in error
@@ -106,6 +107,8 @@ export function buildFixTestsPrompt(
     `**Working directory:** ${cwd}`,
     `**Test command:** ${testResult.command}`,
     `**Exit code:** ${testResult.exitCode}`,
+    ``,
+    formatEnvironmentPrompt(),
     ``,
     `## Test Output`,
     ``,

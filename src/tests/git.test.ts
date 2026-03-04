@@ -85,7 +85,7 @@ describe("GitHub datasource — getDefaultBranch", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["symbolic-ref", "refs/remotes/origin/HEAD"],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
   });
 
@@ -132,7 +132,7 @@ describe("GitHub datasource — getUsername", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["config", "user.name"],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
   });
 
@@ -174,7 +174,7 @@ describe("GitHub datasource — createAndSwitchBranch", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["checkout", "-b", "dispatch/42-feature"],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
   });
 
@@ -196,13 +196,13 @@ describe("GitHub datasource — createAndSwitchBranch", () => {
       1,
       "git",
       ["checkout", "-b", "dispatch/42-feature"],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
     expect(mockExecFile).toHaveBeenNthCalledWith(
       2,
       "git",
       ["checkout", "dispatch/42-feature"],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
   });
 
@@ -228,7 +228,7 @@ describe("GitHub datasource — switchBranch", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["checkout", "main"],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
   });
 
@@ -252,7 +252,7 @@ describe("GitHub datasource — pushBranch", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["push", "--set-upstream", "origin", "dispatch/42-feature"],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
   });
 
@@ -283,19 +283,19 @@ describe("GitHub datasource — commitAllChanges", () => {
       1,
       "git",
       ["add", "-A"],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
     expect(mockExecFile).toHaveBeenNthCalledWith(
       2,
       "git",
       ["diff", "--cached", "--stat"],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
     expect(mockExecFile).toHaveBeenNthCalledWith(
       3,
       "git",
       ["commit", "-m", "feat: implement feature"],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
   });
 
@@ -341,7 +341,7 @@ describe("GitHub datasource — createPullRequest", () => {
         "--head",
         "dispatch/42-feature",
       ],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
   });
 
@@ -372,7 +372,7 @@ describe("GitHub datasource — createPullRequest", () => {
         "--head",
         "dispatch/42-feature",
       ],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
   });
 
@@ -400,7 +400,7 @@ describe("GitHub datasource — createPullRequest", () => {
       2,
       "gh",
       ["pr", "view", "dispatch/42-feature", "--json", "url", "--jq", ".url"],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
   });
 
@@ -454,7 +454,7 @@ describe("GitHub datasource — createPullRequest", () => {
         "--head",
         "dispatch/42-feature",
       ],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
   });
 
@@ -484,7 +484,7 @@ describe("GitHub datasource — createPullRequest", () => {
         "--head",
         "dispatch/99-bugfix",
       ],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
   });
 });
@@ -507,7 +507,7 @@ describe("GitHub datasource — getCommitMessages", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["log", "origin/main..HEAD", "--pretty=format:%s"],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
   });
 
@@ -576,7 +576,7 @@ describe("Azure DevOps datasource — createPullRequest", () => {
         "--output",
         "json",
       ],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
   });
 
@@ -616,7 +616,7 @@ describe("Azure DevOps datasource — createPullRequest", () => {
         "--output",
         "json",
       ],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
   });
 
@@ -682,7 +682,7 @@ describe("Azure DevOps datasource — createPullRequest", () => {
         "--output",
         "json",
       ],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
   });
 
@@ -721,7 +721,7 @@ describe("Azure DevOps datasource — createPullRequest", () => {
         "--output",
         "json",
       ],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
   });
 });
@@ -832,7 +832,7 @@ describe("buildPrTitle", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["log", "main..HEAD", "--pretty=format:%s"],
-      { cwd: "/tmp/repo" },
+      { cwd: "/tmp/repo", shell: false },
     );
   });
 

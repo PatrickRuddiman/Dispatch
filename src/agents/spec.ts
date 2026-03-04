@@ -19,6 +19,7 @@ import { extractSpecContent, validateSpecStructure } from "../spec-generator.js"
 import { extractTitle } from "../datasources/md.js";
 import { log } from "../helpers/logger.js";
 import { fileLoggerStorage } from "../helpers/file-logger.js";
+import { formatEnvironmentPrompt } from "../helpers/environment.js";
 
 /**
  * Options passed to the spec agent's `generate()` method.
@@ -324,6 +325,8 @@ function buildCommonSpecInstructions(params: {
     `## Working Directory`,
     ``,
     `\`${cwd}\``,
+    ``,
+    formatEnvironmentPrompt(),
     ``,
     `## Instructions`,
     ``,

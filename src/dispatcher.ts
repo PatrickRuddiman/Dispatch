@@ -7,6 +7,7 @@ import type { ProviderInstance } from "./providers/interface.js";
 import type { Task } from "./parser.js";
 import { log } from "./helpers/logger.js";
 import { fileLoggerStorage } from "./helpers/file-logger.js";
+import { getEnvironmentBlock } from "./helpers/environment.js";
 
 export interface DispatchResult {
   task: Task;
@@ -66,6 +67,8 @@ function buildPrompt(task: Task, cwd: string, worktreeRoot?: string): string {
     `**Source file:** ${task.file}`,
     `**Task (line ${task.line}):** ${task.text}`,
     ``,
+    getEnvironmentBlock(),
+    ``,
     `Instructions:`,
     `- Complete ONLY this specific task — do not work on other tasks.`,
     `- Make the minimal, correct changes needed.`,
@@ -87,6 +90,8 @@ function buildPlannedPrompt(task: Task, cwd: string, plan: string, worktreeRoot?
     `**Working directory:** ${cwd}`,
     `**Source file:** ${task.file}`,
     `**Task (line ${task.line}):** ${task.text}`,
+    ``,
+    getEnvironmentBlock(),
     ``,
     `---`,
     ``,

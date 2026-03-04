@@ -100,7 +100,7 @@ describe("createWorktree", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["worktree", "add", join("/repo", ".dispatch", "worktrees", "issue-42"), "-b", "user/dispatch/42-my-feature"],
-      { cwd: "/repo" },
+      { cwd: "/repo", shell: false },
     );
     expect(result).toBe(join("/repo", ".dispatch", "worktrees", "issue-42"));
   });
@@ -124,7 +124,7 @@ describe("createWorktree", () => {
     expect(mockExecFile).toHaveBeenLastCalledWith(
       "git",
       ["worktree", "add", join("/repo", ".dispatch", "worktrees", "issue-42"), "user/dispatch/42-my-feature"],
-      { cwd: "/repo" },
+      { cwd: "/repo", shell: false },
     );
     expect(result).toBe(join("/repo", ".dispatch", "worktrees", "issue-42"));
   });
@@ -175,13 +175,13 @@ describe("removeWorktree", () => {
       1,
       "git",
       ["worktree", "remove", join("/repo", ".dispatch", "worktrees", "issue-42")],
-      { cwd: "/repo" },
+      { cwd: "/repo", shell: false },
     );
     expect(mockExecFile).toHaveBeenNthCalledWith(
       2,
       "git",
       ["worktree", "prune"],
-      { cwd: "/repo" },
+      { cwd: "/repo", shell: false },
     );
   });
 
@@ -198,13 +198,13 @@ describe("removeWorktree", () => {
       2,
       "git",
       ["worktree", "remove", "--force", join("/repo", ".dispatch", "worktrees", "issue-42")],
-      { cwd: "/repo" },
+      { cwd: "/repo", shell: false },
     );
     expect(mockExecFile).toHaveBeenNthCalledWith(
       3,
       "git",
       ["worktree", "prune"],
-      { cwd: "/repo" },
+      { cwd: "/repo", shell: false },
     );
   });
 
@@ -257,7 +257,7 @@ describe("removeWorktree", () => {
       3,
       "git",
       ["worktree", "prune"],
-      { cwd: "/repo" },
+      { cwd: "/repo", shell: false },
     );
   });
 });
@@ -275,7 +275,7 @@ describe("listWorktrees", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["worktree", "list"],
-      { cwd: "/repo" },
+      { cwd: "/repo", shell: false },
     );
   });
 

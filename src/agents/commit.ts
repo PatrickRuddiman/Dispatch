@@ -17,6 +17,7 @@ import type { IssueDetails } from "../datasources/interface.js";
 import type { DispatchResult } from "../dispatcher.js";
 import { log } from "../helpers/logger.js";
 import { fileLoggerStorage } from "../helpers/file-logger.js";
+import { formatEnvironmentPrompt } from "../helpers/environment.js";
 
 /** Options for the commit agent's `generate()` method. */
 export interface CommitGenerateOptions {
@@ -154,6 +155,8 @@ export function buildCommitPrompt(opts: CommitGenerateOptions): string {
 
   const sections: string[] = [
     `You are a **commit message agent**. Your job is to analyze the git diff below and generate a meaningful, conventional-commit-compliant commit message, a PR title, and a PR description.`,
+    ``,
+    formatEnvironmentPrompt(),
     ``,
     `## Conventional Commit Guidelines`,
     ``,
