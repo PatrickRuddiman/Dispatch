@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { join } from "node:path";
 
 // ─── Mock setup ────────────────────────────────────────────────────────────────
 
@@ -98,10 +99,10 @@ describe("createWorktree", () => {
 
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
-      ["worktree", "add", "/repo/.dispatch/worktrees/issue-42", "-b", "user/dispatch/42-my-feature"],
+      ["worktree", "add", join("/repo", ".dispatch", "worktrees", "issue-42"), "-b", "user/dispatch/42-my-feature"],
       { cwd: "/repo" },
     );
-    expect(result).toBe("/repo/.dispatch/worktrees/issue-42");
+    expect(result).toBe(join("/repo", ".dispatch", "worktrees", "issue-42"));
   });
 
   it("returns the absolute worktree path", async () => {
@@ -109,7 +110,7 @@ describe("createWorktree", () => {
 
     const result = await createWorktree("/custom/path", "10-bug.md", "branch-name");
 
-    expect(result).toBe("/custom/path/.dispatch/worktrees/issue-10");
+    expect(result).toBe(join("/custom/path", ".dispatch", "worktrees", "issue-10"));
   });
 
   it("retries without -b when branch already exists", async () => {
@@ -122,10 +123,10 @@ describe("createWorktree", () => {
     expect(mockExecFile).toHaveBeenCalledTimes(2);
     expect(mockExecFile).toHaveBeenLastCalledWith(
       "git",
-      ["worktree", "add", "/repo/.dispatch/worktrees/issue-42", "user/dispatch/42-my-feature"],
+      ["worktree", "add", join("/repo", ".dispatch", "worktrees", "issue-42"), "user/dispatch/42-my-feature"],
       { cwd: "/repo" },
     );
-    expect(result).toBe("/repo/.dispatch/worktrees/issue-42");
+    expect(result).toBe(join("/repo", ".dispatch", "worktrees", "issue-42"));
   });
 
   it("throws on non-branch-exists errors", async () => {
@@ -173,7 +174,7 @@ describe("removeWorktree", () => {
     expect(mockExecFile).toHaveBeenNthCalledWith(
       1,
       "git",
-      ["worktree", "remove", "/repo/.dispatch/worktrees/issue-42"],
+      ["worktree", "remove", join("/repo", ".dispatch", "worktrees", "issue-42")],
       { cwd: "/repo" },
     );
     expect(mockExecFile).toHaveBeenNthCalledWith(
@@ -196,7 +197,7 @@ describe("removeWorktree", () => {
     expect(mockExecFile).toHaveBeenNthCalledWith(
       2,
       "git",
-      ["worktree", "remove", "--force", "/repo/.dispatch/worktrees/issue-42"],
+      ["worktree", "remove", "--force", join("/repo", ".dispatch", "worktrees", "issue-42")],
       { cwd: "/repo" },
     );
     expect(mockExecFile).toHaveBeenNthCalledWith(

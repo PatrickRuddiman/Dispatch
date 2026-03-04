@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { join } from "node:path";
 
 // ─── Hoisted mock references ────────────────────────────────────────
 
@@ -405,7 +406,7 @@ describe("runSpecPipeline", () => {
         expect.any(Object),
       );
       expect(result.issueNumbers).toContain("1");
-      expect(unlink).toHaveBeenCalledWith("/tmp/test-cwd/.dispatch/specs/1-mock-title.md");
+      expect(unlink).toHaveBeenCalledWith(join("/tmp/test-cwd/.dispatch/specs", "1-mock-title.md"));
     });
 
     it("logs success message after deleting local spec in tracker mode", async () => {
