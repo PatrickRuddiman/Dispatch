@@ -19,9 +19,10 @@ with its recommended Windows installation command and when it is required.
 [gitforwindows.org](https://gitforwindows.org/). **Node.js** can alternatively
 be managed through [nvm-windows](https://github.com/coreybutler/nvm-windows).
 
-All four tools are validated at startup by the prerequisite checker. See
-[Prerequisite Checker](./prereqs-and-safety/prereqs.md) for details on the
-runtime validation logic.
+Git and Node.js are always validated at startup by the prerequisite checker, and
+the GitHub CLI or Azure CLI are validated only when you use the corresponding
+datasource. See [Prerequisite Checker](./prereqs-and-safety/prereqs.md) for
+details on the runtime validation logic.
 
 ## Recommended setup
 
@@ -66,7 +67,7 @@ section of the Markdown Syntax page.
 | Issue | Description | Status |
 |-------|-------------|--------|
 | [#210](https://github.com/PatrickRuddiman/Dispatch/issues/210) | CRLF normalization gap in `markTaskComplete` | Open |
-| [#211](https://github.com/PatrickRuddiman/Dispatch/issues/211) | `isFilePath` regex misses Windows-style paths | Open |
+| [#211](https://github.com/PatrickRuddiman/Dispatch/issues/211) | `isGlobOrFilePath` regex misses Windows-style relative paths | Open |
 | [#212](https://github.com/PatrickRuddiman/Dispatch/issues/212) | Gitignore duplicate-entry check fails on Windows | Open |
 | [#213](https://github.com/PatrickRuddiman/Dispatch/issues/213) | Provider binary detection returns false on Windows | Open |
 | [#102](https://github.com/PatrickRuddiman/Dispatch/issues/102) | Command splitting (in-flight fix) | In progress |
