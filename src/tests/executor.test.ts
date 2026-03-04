@@ -120,7 +120,7 @@ describe("execute", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("No response from agent");
-    expect(result.data?.dispatchResult).toBe(dispatchResult);
+    expect(result.data).toBeNull();
     expect(result.durationMs).toBeGreaterThanOrEqual(0);
 
     // markTaskComplete should NOT be called when dispatch fails
@@ -143,8 +143,7 @@ describe("execute", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("Session creation failed");
-    expect(result.data?.dispatchResult.success).toBe(false);
-    expect(result.data?.dispatchResult.task).toBe(TASK_FIXTURE);
+    expect(result.data).toBeNull();
     expect(result.durationMs).toBeGreaterThanOrEqual(0);
 
     expect(mockMarkComplete).not.toHaveBeenCalled();

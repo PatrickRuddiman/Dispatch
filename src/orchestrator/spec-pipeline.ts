@@ -351,10 +351,6 @@ async function generateSpecsBatch(
             throw new Error(result.error ?? "Spec generation failed");
           }
 
-          if (!result.data) {
-            throw new Error("Spec generation succeeded but returned no data");
-          }
-
           if (isTrackerMode || isInlineText) {
             const h1Title = extractTitle(result.data.content, filepath);
             const h1Slug = slugify(h1Title, MAX_SLUG_LENGTH);

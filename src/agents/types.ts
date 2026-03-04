@@ -25,21 +25,36 @@ export type AgentErrorCode =
 /**
  * Generic result type returned by all agents.
  *
- * `T` is the domain-specific payload — `null` when the operation failed
- * before producing useful output.
+ * Discriminated on `success` so that TypeScript automatically narrows
+ * `data` to `T` (non-null) in the `success: true` branch, and to `null`
+ * in the `success: false` branch — eliminating the need for non-null
+ * assertions (`!`) at call sites.
  */
-export interface AgentResult<T> {
-  /** Domain-specific payload, or `null` on failure. */
-  data: T | null;
-  /** Whether the operation completed successfully. */
-  success: boolean;
-  /** Human-readable error message, if the operation failed. */
-  error?: string;
-  /** Machine-readable error classification. */
-  errorCode?: AgentErrorCode;
-  /** Elapsed wall-clock time in milliseconds. */
-  durationMs?: number;
-}
+export type AgentResult<T> =
+  | {
+      /** Operation succeeded; payload is guaranteed non-null. */
+      success: true;
+      /** Domain-specific payload. */
+      data: T;
+      /** Always absent on success — present only to allow `result.error` access without narrowing. */
+      error?: never;
+      /** Always absent on success. */
+      errorCode?: never;
+      /** Elapsed wall-clock time in milliseconds. */
+      durationMs?: number;
+    }
+  | {
+      /** Operation failed; no usable payload was produced. */
+      success: false;
+      /** Always `null` on failure. */
+      data: null;
+      /** Human-readable error message. */
+      error?: string;
+      /** Machine-readable error classification. */
+      errorCode?: AgentErrorCode;
+      /** Elapsed wall-clock time in milliseconds. */
+      durationMs?: number;
+    };
 
 // ---------------------------------------------------------------------------
 // Concrete data types — one per agent role
