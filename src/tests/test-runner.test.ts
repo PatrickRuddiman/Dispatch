@@ -25,7 +25,7 @@ vi.mock("node:child_process", () => ({
 
 import { detectTestCommand, runTests } from "../test-runner.js";
 import { readFile } from "node:fs/promises";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
 import { TimeoutError } from "../helpers/timeout.js";
 import { createMockChildProcess } from "./fixtures.js";
 
@@ -95,13 +95,13 @@ describe("runTests", () => {
     );
 
     const child = createMockChildProcess();
-    vi.mocked(spawn).mockImplementation((() => {
+    vi.mocked(spawn).mockImplementation(() => {
       process.nextTick(() => {
-        child.stdout.emit("data", "all tests passed\n");
+        child.stdout!.emit("data", "all tests passed\n");
         child.emit("close", 0);
       });
       return child;
-    }) as unknown as typeof spawn);
+    });
 
     const result = await runTests("/project");
 
@@ -119,13 +119,13 @@ describe("runTests", () => {
     );
 
     const child = createMockChildProcess();
-    vi.mocked(spawn).mockImplementation((() => {
+    vi.mocked(spawn).mockImplementation(() => {
       process.nextTick(() => {
-        child.stderr.emit("data", "FAIL src/test.ts\n");
+        child.stderr!.emit("data", "FAIL src/test.ts\n");
         child.emit("close", 1);
       });
       return child;
-    }) as unknown as typeof spawn);
+    });
 
     const result = await runTests("/project");
 
@@ -143,12 +143,12 @@ describe("runTests", () => {
     );
 
     const child = createMockChildProcess();
-    vi.mocked(spawn).mockImplementation((() => {
+    vi.mocked(spawn).mockImplementation(() => {
       process.nextTick(() => {
         child.emit("close", null);
       });
       return child;
-    }) as unknown as typeof spawn);
+    });
 
     const result = await runTests("/project");
 
@@ -162,12 +162,12 @@ describe("runTests", () => {
 
     const spawnError = new Error("spawn ENOENT");
     const child = createMockChildProcess();
-    vi.mocked(spawn).mockImplementation((() => {
+    vi.mocked(spawn).mockImplementation(() => {
       process.nextTick(() => {
         child.emit("error", spawnError);
       });
       return child;
-    }) as unknown as typeof spawn);
+    });
 
     const err = await runTests("/project").catch((err: Error) => err) as Error;
 
@@ -185,12 +185,12 @@ describe("runTests", () => {
       syscall: "spawn npm",
     });
     const child = createMockChildProcess();
-    vi.mocked(spawn).mockImplementation((() => {
+    vi.mocked(spawn).mockImplementation(() => {
       process.nextTick(() => {
         child.emit("error", spawnError);
       });
       return child;
-    }) as unknown as typeof spawn);
+    });
 
     const err = await runTests("/project").catch((err: Error) => err) as Error;
 
@@ -206,15 +206,15 @@ describe("runTests", () => {
     );
 
     const child = createMockChildProcess();
-    vi.mocked(spawn).mockImplementation((() => {
+    vi.mocked(spawn).mockImplementation(() => {
       process.nextTick(() => {
-        child.stdout.emit("data", "chunk1");
-        child.stdout.emit("data", "chunk2");
-        child.stdout.emit("data", "chunk3");
+        child.stdout!.emit("data", "chunk1");
+        child.stdout!.emit("data", "chunk2");
+        child.stdout!.emit("data", "chunk3");
         child.emit("close", 0);
       });
       return child;
-    }) as unknown as typeof spawn);
+    });
 
     const result = await runTests("/project");
 
@@ -227,12 +227,12 @@ describe("runTests", () => {
     );
 
     const child = createMockChildProcess();
-    vi.mocked(spawn).mockImplementation((() => {
+    vi.mocked(spawn).mockImplementation(() => {
       process.nextTick(() => {
         child.emit("close", 0);
       });
       return child;
-    }) as unknown as typeof spawn);
+    });
 
     await runTests("/project");
 
@@ -260,7 +260,7 @@ describe("runTests timeout", () => {
     );
 
     const child = createMockChildProcess();
-    vi.mocked(spawn).mockReturnValue(child as unknown as ChildProcess);
+    vi.mocked(spawn).mockReturnValue(child);
 
     const promise = runTests("/project", 5000);
     // Prevent unhandled rejection during fake-timer advancement
@@ -278,7 +278,7 @@ describe("runTests timeout", () => {
     );
 
     const child = createMockChildProcess();
-    vi.mocked(spawn).mockReturnValue(child as unknown as ChildProcess);
+    vi.mocked(spawn).mockReturnValue(child);
 
     const promise = runTests("/project", 5000);
     // Prevent unhandled rejection during fake-timer advancement
@@ -296,13 +296,13 @@ describe("runTests timeout", () => {
     );
 
     const child = createMockChildProcess();
-    vi.mocked(spawn).mockReturnValue(child as unknown as ChildProcess);
+    vi.mocked(spawn).mockReturnValue(child);
 
     const promise = runTests("/project", 10_000);
 
     // Child closes before timeout
     await vi.advanceTimersByTimeAsync(100);
-    child.stdout.emit("data", "ok\n");
+    child.stdout!.emit("data", "ok\n");
     child.emit("close", 0);
 
     const result = await promise;
@@ -316,7 +316,7 @@ describe("runTests timeout", () => {
     );
 
     const child = createMockChildProcess();
-    vi.mocked(spawn).mockReturnValue(child as unknown as ChildProcess);
+    vi.mocked(spawn).mockReturnValue(child);
 
     const promise = runTests("/project");
     // Prevent unhandled rejection during fake-timer advancement
