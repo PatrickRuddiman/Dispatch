@@ -135,6 +135,114 @@ describe("azdevops datasource — fetch", () => {
       "Failed to parse Azure CLI output"
     );
   });
+
+  it("populates new IssueDetails fields when present in API response", async () => {
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        id: 50,
+        fields: {
+          "System.Title": "Add login",
+          "System.Description": "implement login",
+          "System.Tags": "feature",
+          "System.State": "Active",
+          "Microsoft.VSTS.Common.AcceptanceCriteria": "works",
+          "System.IterationPath": "MyProject\\Sprint 5",
+          "System.AreaPath": "MyProject\\Backend",
+          "System.AssignedTo": { displayName: "Jane Doe" },
+          "Microsoft.VSTS.Common.Priority": 2,
+          "Microsoft.VSTS.Scheduling.StoryPoints": 8,
+          "System.WorkItemType": "User Story",
+        },
+        _links: { html: { href: "https://dev.azure.com/50" } },
+      }),
+    });
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify({ comments: [] }),
+    });
+
+    const result = await datasource.fetch("50", { cwd: "/tmp" });
+
+    expect(result.iterationPath).toBe("MyProject\\Sprint 5");
+    expect(result.areaPath).toBe("MyProject\\Backend");
+    expect(result.assignee).toBe("Jane Doe");
+    expect(result.priority).toBe(2);
+    expect(result.storyPoints).toBe(8);
+    expect(result.workItemType).toBe("User Story");
+  });
+
+  it("returns undefined for new fields when absent from API response", async () => {
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        id: 51,
+        fields: {
+          "System.Title": "Minimal item",
+          "System.Description": "",
+          "System.Tags": "",
+          "System.State": "New",
+        },
+        _links: { html: { href: "https://dev.azure.com/51" } },
+      }),
+    });
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify({ comments: [] }),
+    });
+
+    const result = await datasource.fetch("51", { cwd: "/tmp" });
+
+    expect(result.iterationPath).toBeUndefined();
+    expect(result.areaPath).toBeUndefined();
+    expect(result.assignee).toBeUndefined();
+    expect(result.priority).toBeUndefined();
+    expect(result.storyPoints).toBeUndefined();
+    expect(result.workItemType).toBeUndefined();
+  });
+
+  it("falls back across story point field variants (Agile → Scrum → CMMI)", async () => {
+    // Agile: uses StoryPoints
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        id: 60,
+        fields: {
+          "System.Title": "Agile item",
+          "Microsoft.VSTS.Scheduling.StoryPoints": 5,
+        },
+      }),
+    });
+    mockExecFile.mockResolvedValueOnce({ stdout: JSON.stringify({ comments: [] }) });
+
+    const agile = await datasource.fetch("60", { cwd: "/tmp" });
+    expect(agile.storyPoints).toBe(5);
+
+    // Scrum: uses Effort
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        id: 61,
+        fields: {
+          "System.Title": "Scrum item",
+          "Microsoft.VSTS.Scheduling.Effort": 13,
+        },
+      }),
+    });
+    mockExecFile.mockResolvedValueOnce({ stdout: JSON.stringify({ comments: [] }) });
+
+    const scrum = await datasource.fetch("61", { cwd: "/tmp" });
+    expect(scrum.storyPoints).toBe(13);
+
+    // CMMI: uses Size
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        id: 62,
+        fields: {
+          "System.Title": "CMMI item",
+          "Microsoft.VSTS.Scheduling.Size": 3,
+        },
+      }),
+    });
+    mockExecFile.mockResolvedValueOnce({ stdout: JSON.stringify({ comments: [] }) });
+
+    const cmmi = await datasource.fetch("62", { cwd: "/tmp" });
+    expect(cmmi.storyPoints).toBe(3);
+  });
 });
 
 describe("azdevops datasource — update", () => {
