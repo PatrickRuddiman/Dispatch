@@ -247,7 +247,7 @@ export const datasource: Datasource = {
         fields["Microsoft.VSTS.Scheduling.Effort"] ??
         fields["Microsoft.VSTS.Scheduling.Size"] ??
         undefined,
-      workItemType: fields["System.WorkItemType"] || undefined,
+      workItemType: fields["System.WorkItemType"] || workItemType,
     };
   },
 

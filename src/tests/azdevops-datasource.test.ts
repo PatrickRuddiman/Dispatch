@@ -361,6 +361,94 @@ describe("azdevops datasource — create", () => {
       datasource.create("Title", "Body", { cwd: "/tmp" })
     ).rejects.toThrow("Failed to parse Azure CLI output");
   });
+
+  it("populates new metadata fields when present in create response", async () => {
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        id: 200,
+        fields: {
+          "System.Title": "Rich Item",
+          "System.Description": "detailed",
+          "System.Tags": "epic;backend",
+          "System.State": "New",
+          "Microsoft.VSTS.Common.AcceptanceCriteria": "all tests pass",
+          "System.IterationPath": "MyProject\\Sprint 3",
+          "System.AreaPath": "MyProject\\API",
+          "System.AssignedTo": { displayName: "Bob Smith" },
+          "Microsoft.VSTS.Common.Priority": 1,
+          "Microsoft.VSTS.Scheduling.StoryPoints": 13,
+          "System.WorkItemType": "User Story",
+        },
+        _links: { html: { href: "https://dev.azure.com/200" } },
+      }),
+    });
+
+    const result = await datasource.create("Rich Item", "detailed", {
+      cwd: "/tmp",
+      workItemType: "User Story",
+    });
+
+    expect(result.number).toBe("200");
+    expect(result.iterationPath).toBe("MyProject\\Sprint 3");
+    expect(result.areaPath).toBe("MyProject\\API");
+    expect(result.assignee).toBe("Bob Smith");
+    expect(result.priority).toBe(1);
+    expect(result.storyPoints).toBe(13);
+    expect(result.workItemType).toBe("User Story");
+  });
+
+  it("returns undefined for new metadata fields when absent from create response", async () => {
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        id: 201,
+        fields: {
+          "System.Title": "Bare Item",
+          "System.Description": "minimal",
+          "System.Tags": "",
+          "System.State": "New",
+        },
+        _links: { html: { href: "https://dev.azure.com/201" } },
+      }),
+    });
+
+    const result = await datasource.create("Bare Item", "minimal", {
+      cwd: "/tmp",
+      workItemType: "Bug",
+    });
+
+    expect(result.number).toBe("201");
+    expect(result.iterationPath).toBeUndefined();
+    expect(result.areaPath).toBeUndefined();
+    expect(result.assignee).toBeUndefined();
+    expect(result.priority).toBeUndefined();
+    expect(result.storyPoints).toBeUndefined();
+    // workItemType falls back to the local value when API omits it
+    expect(result.workItemType).toBe("Bug");
+  });
+
+  it("falls back workItemType to local value when API response omits System.WorkItemType", async () => {
+    // detectWorkItemType returns "User Story"
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([{ name: "User Story" }]),
+    });
+    // create response omits System.WorkItemType
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        id: 202,
+        fields: {
+          "System.Title": "No Type Field",
+          "System.Description": "body",
+          "System.Tags": "",
+          "System.State": "New",
+        },
+        _links: { html: { href: "https://dev.azure.com/202" } },
+      }),
+    });
+
+    const result = await datasource.create("No Type Field", "body", { cwd: "/tmp" });
+
+    expect(result.workItemType).toBe("User Story");
+  });
 });
 
 describe("detectWorkItemType", () => {
