@@ -435,7 +435,14 @@ export async function runDispatchPipeline(
                 failed++;
               }
 
-              return execResult.data!.dispatchResult;
+              const dispatchResult: DispatchResult =
+                execResult.data?.dispatchResult ??
+                {
+                  task,
+                  success: false,
+                  error: execResult.error ?? "Executor failed without returning a dispatch result.",
+                };
+              return dispatchResult;
             })
           );
 
@@ -451,7 +458,7 @@ export async function runDispatchPipeline(
       results.push(...issueResults);
 
       // ── Safety-net commit (stage any uncommitted changes) ─────
-      if (!noBranch && branchName && defaultBranch && details) {
+      if (!noBranch && branchName && defaultBranch && details && datasource.supportsGit()) {
         try {
           await datasource.commitAllChanges(
             `chore: stage uncommitted changes for issue #${details.number}`,
