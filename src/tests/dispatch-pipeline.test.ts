@@ -1806,7 +1806,7 @@ describe("feature branch workflow", () => {
 
     // Should continue despite merge failure
     expect(result.completed).toBe(2);
-    expect(vi.mocked(log.error)).toHaveBeenCalledWith(
+    expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
       expect.stringContaining("Could not merge"),
     );
   });
