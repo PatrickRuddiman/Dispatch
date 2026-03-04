@@ -12,7 +12,9 @@ failures by producing clear, actionable error messages.
 
 The `checkPrereqs()` function runs up to four checks depending on the selected
 [datasource](../datasource-system/overview.md) and returns an array of human-readable failure messages. An empty
-array means all checks passed.
+array means all checks passed. The checker is called by the
+[orchestrator runner](../cli-orchestration/orchestrator.md) immediately after
+configuration resolution.
 
 | # | Check | Condition | When run | Failure message |
 |---|-------|-----------|----------|-----------------|
@@ -83,6 +85,25 @@ The check does not validate the output of `--version` or enforce a minimum
 version for git, gh, or az. It only verifies that the binary exists on PATH
 and can be invoked.
 
+### Windows shell option
+
+All `execFile` calls in `checkPrereqs` pass `{ shell: process.platform === "win32" }`.
+On Windows, CLI tools installed via package managers (winget, npm, Chocolatey)
+are often distributed as `.cmd` or `.bat` batch files rather than native
+executables. Node.js `execFile` cannot directly execute `.cmd` files without
+a shell interpreter -- it raises `ENOENT` even when the tool is correctly
+installed and on PATH. Setting `shell: true` tells Node.js to spawn the
+command through `cmd.exe`, which can resolve and execute batch file wrappers.
+
+This option has no effect on macOS or Linux (`process.platform !== "win32"`),
+where CLI tools are typically native binaries or shell scripts with shebangs
+that `execFile` handles natively.
+
+The test suite verifies this behavior: six dedicated tests confirm that the
+`shell` option is set to `true` when `process.platform` is `"win32"` and
+`false` otherwise. See the [Windows Guide](../windows.md) for broader
+platform-specific setup instructions.
+
 ### Failure accumulation
 
 All checks run unconditionally (within their datasource condition). Failures
@@ -134,6 +155,21 @@ The function runs once at startup and there is no need to cache results. Each
 check executes a fresh `execFile` call. This is acceptable because startup
 is a one-time cost and the checks are fast (each is a single `--version` call
 that returns immediately).
+
+### Extending for new datasource types
+
+The `DatasourceName` union type (defined in `src/datasources/interface.ts`)
+currently includes `"github"`, `"azdevops"`, and `"md"`. If a new datasource
+is added that requires an external CLI tool, two changes are needed:
+
+1.  Add the new name to the `DatasourceName` union in
+    `src/datasources/interface.ts`.
+2.  Add a corresponding conditional check in `checkPrereqs` following the
+    same pattern as the `gh` and `az` checks -- test for tool presence via
+    `execFile(binary, ["--version"])` and push a failure message if not found.
+
+The prerequisite checker does not auto-discover datasource requirements; each
+external tool dependency must be explicitly coded.
 
 ### Return value vs. throwing
 
@@ -187,3 +223,14 @@ Node.js versions. Each test resets the mock and restores the real version in
     prerequisite tests are in `src/tests/prereqs.test.ts`.
 -   [Timeout Utility](../shared-utilities/timeout.md) -- Deadline enforcement
     that runs after prerequisite checks pass.
+-   [Shared Utilities overview](../shared-utilities/overview.md) -- The
+    helpers barrel that re-exports `checkPrereqs`.
+-   [Shared Utilities Testing](../shared-utilities/testing.md) -- Test
+    patterns for the shared utility modules including prereqs.
+-   [Provider Detection](./provider-detection.md) -- Provider binary
+    detection that complements prerequisite checks with datasource-specific
+    tool validation.
+-   [Confirm Large Batch](./confirm-large-batch.md) -- Safety prompt
+    that runs after prerequisite checks pass.
+-   [Windows Guide](../windows.md) -- Platform-specific prerequisites and
+    the `shell: true` behavior on Windows.

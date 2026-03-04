@@ -213,47 +213,106 @@ passed to `create()`. For example, `create("My Feature", "no heading here")`
 returns `title: "my-feature"` (the filename stem) because the body has no H1
 heading.
 
-## Git lifecycle operations (mostly no-ops)
+## The `supportsGit()` method
+
+The markdown datasource returns `false` from `supportsGit()`
+(`src/datasources/md.ts:86-88`). This boolean flag is the mechanism by which
+the [dispatch pipeline](../planning-and-dispatch/overview.md) decides whether
+to call git lifecycle methods on a datasource. The pipeline checks
+`datasource.supportsGit()` before every git operation — branching, committing,
+pushing, and PR creation — and **skips the operation entirely** when it returns
+`false` (`src/orchestrator/dispatch-pipeline.ts:310,521,536,622,632,668`).
+
+This gating pattern is what makes the markdown datasource safe to use with the
+dispatch pipeline. Without the `supportsGit()` guard, the pipeline would call
+the git lifecycle methods, which would throw `UnsupportedOperationError` and
+fail the run.
+
+### How the pipeline gates operations via `supportsGit()`
+
+```mermaid
+flowchart TD
+    START["Dispatch pipeline<br/>per-issue processing"] --> PARSE["Parse tasks from file"]
+    PARSE --> CHECK_GIT{"datasource.supportsGit()?"}
+
+    CHECK_GIT -->|"true (GitHub, AzDevOps)"| BRANCH["createAndSwitchBranch()"]
+    BRANCH --> DISPATCH["Dispatch tasks<br/>(plan + execute)"]
+
+    CHECK_GIT -->|"false (Markdown)"| DISPATCH
+
+    DISPATCH --> CHECK_GIT2{"supportsGit()?"}
+    CHECK_GIT2 -->|"true"| COMMIT["commitAllChanges()<br/>+ commit agent"]
+    CHECK_GIT2 -->|"false"| SKIP_COMMIT["Skip commit + PR"]
+
+    COMMIT --> PUSH["pushBranch()"]
+    PUSH --> PR["createPullRequest()"]
+    PR --> SWITCH["switchBranch(default)"]
+    SWITCH --> CLOSE["close() — archive spec"]
+
+    SKIP_COMMIT --> CLOSE
+
+    style CHECK_GIT fill:#f9f,stroke:#333
+    style CHECK_GIT2 fill:#f9f,stroke:#333
+    style SKIP_COMMIT fill:#bfb,stroke:#333
+```
+
+## Git lifecycle operations
 
 The markdown datasource implements all git lifecycle methods from the
-`Datasource` interface (including `getUsername`), but most are intentional
-no-ops. This is because the markdown datasource is designed for local-first,
-offline workflows where git branching, pushing, and PR creation do not apply.
+`Datasource` interface. Three methods are functional (`getDefaultBranch`,
+`getUsername`, `buildBranchName`), while five **throw
+`UnsupportedOperationError`** to signal that the operation is not applicable
+to a local-filesystem datasource.
 
-| Method | Implementation | Return value |
-|--------|---------------|-------------|
-| `getDefaultBranch()` | Returns `"main"` without checking git | `"main"` |
+| Method | Implementation | Behavior |
+|--------|---------------|----------|
+| `getDefaultBranch()` | Returns `"main"` without checking git | Always returns `"main"` |
 | `getUsername()` | `git config user.name`, slugified; falls back to `"local"` | Branch-safe username or `"local"` |
 | `buildBranchName()` | Same slug logic as GitHub/Azure DevOps | `<username>/dispatch/<number>-<slug>` |
-| `createAndSwitchBranch()` | No-op (empty function body) | `void` |
-| `switchBranch()` | No-op (empty function body) | `void` |
-| `pushBranch()` | No-op (empty function body) | `void` |
-| `commitAllChanges()` | No-op (empty function body) | `void` |
-| `createPullRequest()` | No-op (returns empty string) | `""` |
+| `createAndSwitchBranch()` | **Throws** `UnsupportedOperationError` | Never succeeds |
+| `switchBranch()` | **Throws** `UnsupportedOperationError` | Never succeeds |
+| `pushBranch()` | **Throws** `UnsupportedOperationError` | Never succeeds |
+| `commitAllChanges()` | **Throws** `UnsupportedOperationError` | Never succeeds |
+| `createPullRequest()` | **Throws** `UnsupportedOperationError` | Never succeeds |
 
-### Why no-ops instead of throwing
+### Why throwing instead of no-ops
 
-The dispatch pipeline calls git lifecycle methods on whatever datasource is
-active. If the markdown datasource threw errors for these operations, the
-pipeline would fail when used with `--source md`. By implementing them as
-silent no-ops, the pipeline runs to completion -- it just skips the git
-workflow steps. The markdown datasource user is expected to manage their own
-git workflow (if any) outside of dispatch.
+The five git lifecycle methods (`createAndSwitchBranch`, `switchBranch`,
+`pushBranch`, `commitAllChanges`, `createPullRequest`) throw
+`UnsupportedOperationError` rather than silently succeeding. This is a
+defense-in-depth design: if a caller bypasses the `supportsGit()` check and
+calls these methods directly, it receives an explicit error rather than a
+silent no-op that could mask a bug.
 
-### `buildBranchName()` is not a no-op
+The [`UnsupportedOperationError`](../shared-utilities/errors.md) class (from `src/helpers/errors.ts`) includes
+an `operation` property that identifies which method was called, aiding
+diagnostics:
 
-Note that `buildBranchName()` is fully implemented (not a no-op) even in the
-markdown datasource. It produces `<username>/dispatch/<number>-<slug>` using
-the same slugification logic as the other datasources. This is because
-`buildBranchName` may be called for informational purposes (e.g., logging) even
-when the branching operations themselves are no-ops.
+```
+UnsupportedOperationError: Operation not supported: createAndSwitchBranch
+```
 
-### `getUsername()` differs from other datasources
+This is safe because the dispatch pipeline always checks `supportsGit()` before
+calling these methods (see [above](#the-supportsgit-method)). The errors would
+only surface if a new code path forgot to check the flag — in which case the
+error is a valuable bug signal. See the [dispatch pipeline tests](../testing/dispatch-pipeline-tests.md#supportsgit-guard)
+for how the `supportsGit()` guard is verified.
 
-Unlike the GitHub and Azure DevOps datasources which fall back to `"unknown"`,
-the markdown datasource falls back to `"local"` when `git config user.name`
-is empty or unavailable (`src/datasources/md.ts:143-152`). This reflects the
-local-first nature of the markdown datasource.
+### Why `buildBranchName()` and `getUsername()` are fully implemented
+
+Despite `supportsGit()` returning `false`, both `buildBranchName()` and
+`getUsername()` are fully functional. This is because these methods are called
+independently of the git lifecycle path:
+
+- **`buildBranchName()`** is used for informational purposes (e.g., dry-run
+  output, logging, TUI display) even when no branch will actually be created.
+  It produces `<username>/dispatch/<number>-<slug>` using the same
+  slugification logic as the other datasources.
+- **`getUsername()`** is called during branch name construction and may be
+  used by other parts of the pipeline for display purposes. It shells out to
+  `git config user.name` and falls back to `"local"` (not `"unknown"` like
+  the GitHub and Azure DevOps datasources) to reflect the local-first nature
+  of the markdown datasource.
 
 ### `getDefaultBranch()` hardcodes `"main"`
 
@@ -264,18 +323,155 @@ when using `--source md`.
 
 ### Impact on the dispatch pipeline
 
-When the dispatch pipeline runs with [`--source md`](../cli-orchestration/cli.md):
+When the dispatch pipeline runs with [`--source md`](../cli-orchestration/cli.md),
+all git lifecycle operations are **skipped** because `supportsGit()` returns
+`false`:
 
-1. **Branching:** `createAndSwitchBranch()` is a no-op -- the pipeline stays
-   on whatever branch is currently checked out.
-2. **Committing:** `commitAllChanges()` is a no-op -- file changes from task
-   execution remain uncommitted.
-3. **Pushing:** `pushBranch()` is a no-op -- nothing is pushed to a remote.
-4. **PR creation:** `createPullRequest()` returns `""` -- no PR is created.
-   The pipeline handles the empty string as "no PR URL available".
-5. **Auto-close:** `closeCompletedSpecIssues()` in the
-   [datasource helpers](./datasource-helpers.md) still calls `close()` on
-   completed specs, which moves them to the `archive/` directory.
+1. **Branching:** Skipped — the pipeline stays on whatever branch is currently
+   checked out.
+2. **Committing:** Skipped — file changes from task execution remain
+   uncommitted.
+3. **Pushing:** Skipped — nothing is pushed to a remote.
+4. **PR creation:** Skipped — no PR is created and no PR URL is logged.
+5. **Auto-close:** `close()` is still called on completed specs, which moves
+   them to the `archive/` directory. The `close()` method is a CRUD operation
+   (not a git lifecycle method) and is not gated by `supportsGit()`.
+
+## The `extractTitle()` function as an outbound dependency
+
+The `extractTitle()` function exported from `src/datasources/md.ts:41` is not
+only used internally by the markdown datasource — it is imported by two other
+groups as an outbound dependency:
+
+| Consumer | Import location | Purpose |
+|----------|----------------|---------|
+| Spec agent | `src/agents/spec.ts:19` | Extracts the title from generated spec content |
+| Spec pipeline | `src/orchestrator/spec-pipeline.ts:17` | Extracts H1 title for file renaming after spec generation |
+
+This makes `extractTitle()` a shared utility that happens to live in the
+markdown datasource module. Changes to its behavior affect both the markdown
+datasource's `list()`/`fetch()` title extraction and the spec generation
+pipeline's file naming.
+
+### Front-matter and non-standard markdown behavior
+
+The `extractTitle()` regex (`/^#\s+(.+)$/m`) does **not** handle YAML
+front-matter blocks. A file beginning with:
+
+```markdown
+---
+title: My Feature
+---
+
+# Actual Title
+```
+
+will match the H1 heading (`# Actual Title`) correctly because the regex uses
+the `m` (multiline) flag and scans for the first `# ` pattern anywhere in the
+content. However, a file beginning with `---` that has **no H1 heading** will
+fall through to the second-tier extraction, which would return the first
+meaningful line — likely the `title: My Feature` YAML line (after stripping
+the leading `---`).
+
+**Key edge cases:**
+
+| File content | Extracted title | Reason |
+|--------------|----------------|--------|
+| `# My Title\nBody` | `My Title` | H1 heading found |
+| `---\ntitle: Foo\n---\n# Bar` | `Bar` | H1 heading found after front-matter |
+| `---\ntitle: Foo\n---\nBody text` | `title: Foo` | No H1; first meaningful line after `---` stripped |
+| `Plain text only` | `Plain text only` | No H1; first meaningful line used |
+| `## Sub heading` | `Sub heading` | No H1; markdown prefix stripped from first line |
+| (empty file) | `filename-stem` | Fallback to filename without `.md` |
+
+## Filename-based identification and downstream interaction
+
+The markdown datasource uses the **full filename** (e.g., `"my-feature.md"`)
+as the `IssueDetails.number` field (`src/datasources/md.ts:72`). This differs
+from the GitHub and Azure DevOps datasources which use numeric IDs (`"42"`,
+`"1234"`).
+
+This has implications for downstream consumers that may expect numeric IDs:
+
+- **`parseIssueFilename()`** in `src/orchestrator/datasource-helpers.ts` uses
+  the regex `/^(\d+)-(.+)\.md$/` to extract issue IDs from temp filenames.
+  Files from the markdown datasource that don't start with digits (e.g.,
+  `my-feature.md`) will **not** match this regex, and `parseIssueFilename()`
+  returns `null`. This means:
+    - Auto-close via `closeCompletedSpecIssues()` requires filenames that
+      start with digits (e.g., `42-my-feature.md`). Specs created via
+      `create()` with non-numeric titles will not be auto-closed on the
+      originating tracker.
+    - The datasource sync step (`datasource.update()`) uses the original
+      filename as the issue ID, which works correctly for the markdown
+      datasource since the filename **is** the identifier.
+- **Branch naming:** `buildBranchName("my-feature.md", "My Feature", "local")`
+  produces `local/dispatch/my-feature.md-my-feature`, which includes the `.md`
+  extension in the branch name. This is cosmetically unusual but functionally
+  harmless since branches are not created when `supportsGit()` returns `false`.
+
+## Race conditions and concurrent access
+
+The markdown datasource has no file-locking mechanism. All operations use
+standard `fs/promises` calls (`readFile`, `writeFile`, `readdir`, `rename`)
+without advisory locks or atomic-rename patterns.
+
+**Concurrent write risks:**
+
+| Scenario | Risk | Impact |
+|----------|------|--------|
+| Two processes call `update()` on the same file | Last write wins; first write is silently lost | Data loss |
+| One process calls `close()` while another calls `fetch()` | `fetch()` may throw `ENOENT` if the file is renamed between the `readdir` and `readFile` calls | Transient error |
+| Two processes call `create()` with titles producing the same slug | Second `writeFile` silently overwrites the first | Data loss |
+| One process calls `list()` while another calls `close()` | `list()` may include the file in its `readdir` result but fail to `readFile` it (already moved to archive) | Transient error in `list()` |
+
+In practice, this is unlikely to be a problem because:
+1. The dispatch pipeline processes issues sequentially per file.
+2. The markdown datasource is designed for single-developer local-first
+   workflows.
+3. Concurrent worktree dispatches target different spec files.
+
+If concurrent access becomes a requirement, external locking (e.g., `flock`,
+`proper-lockfile`) would be needed.
+
+## File lifecycle
+
+A markdown spec file follows a linear lifecycle from creation through archival:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Created: create(title, body)
+    Created --> Listed: list() discovers file
+    Listed --> Fetched: fetch(id)
+    Fetched --> Updated: update(id, title, body)
+    Updated --> Fetched: fetch(id) re-reads
+    Updated --> Updated: update(id, title, body) again
+    Fetched --> Archived: close(id)
+    Updated --> Archived: close(id)
+    Listed --> Archived: close(id)
+    Archived --> [*]
+
+    note right of Created
+        File written to .dispatch/specs/
+        Filename: slugify(title).md
+    end note
+
+    note right of Archived
+        File moved to .dispatch/specs/archive/
+        Content preserved unchanged
+        Not visible to list()
+    end note
+```
+
+Key lifecycle properties:
+- **`list()` only reads the top-level directory** — it does not recurse into
+  `archive/`. Once a spec is archived, it disappears from list results.
+- **`close()` is a physical move**, not a state change — the file content is
+  preserved but its location changes.
+- **Archived files can be "reopened"** by manually moving them back from
+  `archive/` to the parent specs directory.
+- **There is no "deleted" state** — `close()` archives rather than deletes,
+  preserving an audit trail.
 
 ## Version control considerations
 
@@ -327,6 +523,51 @@ The auto-detection system (`detectDatasource()`) only matches GitHub and Azure
 DevOps remote URLs. It never auto-detects `"md"`. To use the markdown
 datasource, always pass [`--source md`](../cli-orchestration/cli.md) explicitly.
 
+### `list()` silently returns empty on filesystem errors
+
+The `list()` method catches **all** `readdir()` errors and returns an empty
+array (`src/datasources/md.ts:93-97`). This includes not just "directory does
+not exist" but also permission denied, I/O errors, and any other filesystem
+failure. If `list()` unexpectedly returns no results, check directory
+permissions (`ls -la .dispatch/specs/`) in addition to verifying the directory
+exists.
+
+In contrast, `fetch()` lets `readFile()` errors propagate — a missing file
+or permission error will throw to the caller.
+
+### Symlinks in the specs directory
+
+`readdir()` returns symlink names along with regular files. If the specs
+directory contains symlinks to `.md` files, they will be included in `list()`
+results and `readFile()` will follow them transparently. There is no symlink
+detection or rejection — a symlink pointing to a file outside `.dispatch/specs/`
+will be read and returned as a normal spec. The `close()` method's `rename()`
+call will move the symlink itself (not the target) to the archive directory.
+
+### File permissions for `.dispatch/specs/`
+
+The specs directory and its files inherit the default permissions of the
+project directory. On Unix systems, `mkdir({ recursive: true })` creates
+directories with the default umask (typically `0755`), and `writeFile()`
+creates files with mode `0644`. If the dispatch process runs under a different
+user than the directory owner, ensure the user has read-write access to
+`.dispatch/specs/` and its contents.
+
+### Running the markdown datasource tests
+
+```sh
+# Run the md-datasource unit tests (getUsername, buildBranchName, supportsGit, git lifecycle errors)
+npx vitest run src/tests/md-datasource.test.ts
+
+# Run the markdown datasource CRUD tests (list, fetch, update, close, create, extractTitle)
+npx vitest run src/tests/datasource.test.ts
+
+# Run the cross-datasource git lifecycle tests (includes Section J for markdown)
+npx vitest run src/tests/git.test.ts
+```
+
+See [Datasource Testing](./testing.md) for full test coverage details.
+
 ## Related documentation
 
 - [Datasource Overview](./overview.md) -- Interface definitions, registry,
@@ -345,3 +586,11 @@ datasource, always pass [`--source md`](../cli-orchestration/cli.md) explicitly.
 - [Slugify Utility](../shared-utilities/slugify.md) -- General slug generation
   used by `buildBranchName()` and related operations
 - [Datasource Testing](./testing.md) -- Test coverage for datasource implementations
+- [CLI Argument Parser](../cli-orchestration/cli.md) -- `--source md` flag
+  documentation for selecting the markdown datasource
+- [Branch Name Validation](../git-and-worktree/branch-validation.md) --
+  Validation rules enforced on branch names generated by `buildBranchName()`
+- [Shared Errors](../shared-utilities/errors.md) -- `UnsupportedOperationError`
+  thrown by unsupported git lifecycle methods
+- [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) --
+  Pipeline that gates git operations via `supportsGit()`

@@ -106,5 +106,7 @@ concurrency analysis, and testing:
   uses `parseTaskFile`, `buildTaskContext`, and `markTaskComplete`
 - [Spec Generation](../spec-generation/overview.md) -- The `--spec` pipeline
   that produces the markdown task files consumed by the parser
+- [Format Utilities](../shared-types/format.md) -- `elapsed()` used for
+  displaying task duration in the TUI alongside parser output
 - [Git Worktree Helpers](../git-and-worktree/overview.md) -- Worktree
   isolation model; `markTaskComplete` writes within isolated worktrees

@@ -13,6 +13,7 @@ import type { Task } from "../parser.js";
 import type { AgentResult, PlannerData } from "./types.js";
 import { log } from "../helpers/logger.js";
 import { fileLoggerStorage } from "../helpers/file-logger.js";
+import { formatEnvironmentPrompt } from "../helpers/environment.js";
 
 /**
  * A booted planner agent that can produce execution plans for tasks.
@@ -137,6 +138,11 @@ function buildPlannerPrompt(task: Task, cwd: string, fileContext?: string, workt
       `- All relative paths must resolve within the worktree root above.`,
     );
   }
+
+  sections.push(
+    ``,
+    formatEnvironmentPrompt(),
+  );
 
   sections.push(
     ``,

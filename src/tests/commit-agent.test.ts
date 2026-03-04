@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import type { ProviderInstance } from "../providers/interface.js";
-import { boot } from "../agents/commit.js";
+import { boot, buildCommitPrompt } from "../agents/commit.js";
 
 function createMockProvider(overrides?: Partial<ProviderInstance>): ProviderInstance {
   return {
@@ -38,5 +38,19 @@ describe("cleanup", () => {
     const provider = createMockProvider();
     const agent = await boot({ cwd: "/tmp", provider });
     await expect(agent.cleanup()).resolves.toBeUndefined();
+  });
+});
+
+describe("buildCommitPrompt", () => {
+  it("includes the environment section", () => {
+    const prompt = buildCommitPrompt({
+      branchDiff: "diff --git a/file.ts b/file.ts",
+      issue: { number: "1", title: "Test issue", body: "", labels: [], url: "", state: "open", comments: [], acceptanceCriteria: "" },
+      taskResults: [],
+      cwd: "/tmp/test",
+    });
+    expect(prompt).toContain("## Environment");
+    expect(prompt).toContain("Operating System");
+    expect(prompt).toContain("Do NOT write intermediate scripts");
   });
 });

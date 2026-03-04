@@ -86,7 +86,7 @@ string (before CRLF normalization).
    number
 5. Returns the `TaskFile` with the original (un-normalized) content
 
-Defined at `src/parser.ts:69-99`.
+Defined at `src/parser.ts:73-108`.
 
 ### parseTaskFile
 
@@ -115,11 +115,11 @@ Read a file from disk and parse its contents. Thin wrapper around
 
 **Notes:**
 
-- Reads the file as UTF-8 (`src/parser.ts:105`)
+- Reads the file as UTF-8 (`src/parser.ts:114`)
 - Accepts any file path -- does not enforce `.md` extension
 - The `filePath` value is stored in `TaskFile.path` and each `Task.file`
 
-Defined at `src/parser.ts:104-107`.
+Defined at `src/parser.ts:113-116`.
 
 ### buildTaskContext
 
@@ -158,7 +158,7 @@ kept because they provide implementation context. See
 for more detail. See also [Task Context & Lifecycle](../planning-and-dispatch/task-context-and-lifecycle.md)
 for how this filtering fits into the dispatch pipeline.
 
-Defined at `src/parser.ts:49-63`.
+Defined at `src/parser.ts:53-67`.
 
 ### markTaskComplete
 
@@ -182,11 +182,14 @@ successfully dispatched.
 
 1. Re-reads the file from disk (for freshness -- see
    [Architecture & Concurrency](./architecture-and-concurrency.md#why-marktaskcomplete-re-reads-the-file-from-disk))
-2. Splits content into lines using `\n`
-3. Validates the line number is in range
-4. Applies the regex replacement: `UNCHECKED_RE` -> `CHECKED_SUB`
-5. Validates the replacement actually changed the line
-6. Writes the full file back to disk with UTF-8 encoding
+2. Detects the original line ending style (CRLF vs LF)
+3. Normalizes content to LF for processing
+4. Splits content into lines using `\n`
+5. Validates the line number is in range
+6. Applies the regex replacement: `UNCHECKED_RE` -> `CHECKED_SUB`
+7. Validates the replacement actually changed the line
+8. Writes the full file back to disk with the original line ending style and
+   UTF-8 encoding
 
 **Errors:**
 
@@ -199,13 +202,14 @@ successfully dispatched.
 
 **Important caveats:**
 
-- Always writes LF line endings regardless of the original file's style
+- Preserves the original line ending style (CRLF or LF) through the
+  round-trip read-modify-write cycle
 - Not safe for concurrent calls on the same file without external
   synchronization
 - See [Architecture & Concurrency](./architecture-and-concurrency.md#concurrent-task-completion)
   for concurrency analysis
 
-Defined at `src/parser.ts:112-134`.
+Defined at `src/parser.ts:121-144`.
 
 ### groupTasksByMode
 
@@ -228,6 +232,21 @@ complete before starting the next one.
 execution group that the orchestrator dispatches concurrently.
 
 **Grouping algorithm:**
+
+The algorithm uses an accumulator pattern with three mode-dependent transitions:
+
+```mermaid
+stateDiagram-v2
+    state "Accumulating" as acc
+    state "Flush + New Group" as flush
+
+    [*] --> acc: start with empty current[]
+
+    acc --> acc: parallel task\n→ append to current[]
+    acc --> flush: serial task\n→ append to current[],\npush current as group,\nreset current[]
+    acc --> flush: isolated task\n→ push current[] if non-empty,\npush [task] as solo group,\nreset current[]
+    flush --> acc: continue to next task
+```
 
 The algorithm iterates through tasks in order, accumulating them into groups:
 
@@ -253,7 +272,7 @@ The algorithm iterates through tasks in order, accumulating them into groups:
 | `[I, I, I]` | `[[I], [I], [I]]` | Each isolated task forms its own group |
 | `[]` | `[]` | Empty input produces empty output |
 
-See [Parser Tests — groupTasksByMode](../testing/parser-tests.md#grouptasksbymode-10-tests)
+See [Parser Tests — groupTasksByMode](../testing/parser-tests.md#grouptasksbymode-18-tests)
 for the full test coverage of this algorithm.
 
 **Execution order guarantee:** Groups are processed sequentially (group N
@@ -265,7 +284,7 @@ in its group complete before the next group begins.
 See [Orchestrator — Concurrency Model](../cli-orchestration/orchestrator.md#concurrency-model)
 for how the orchestrator uses these groups.
 
-Defined at `src/parser.ts:146-171`.
+Defined at `src/parser.ts:160-193`.
 
 ## Internal constants
 
@@ -279,7 +298,7 @@ behavior:
 | `CHECKED_SUB` | `"$1[x] $2"` | Replacement template that converts unchecked to checked using backreferences from `UNCHECKED_RE`. |
 | `MODE_PREFIX_RE` | `/^\(([PSI])\)\s+/` | Matches a `(P)`, `(S)`, or `(I)` prefix at the start of extracted task text. Group 1 captures the mode letter. `P` maps to `"parallel"`, `S` maps to `"serial"`, `I` maps to `"isolated"`. The matched prefix is stripped from the `text` field. |
 
-Defined at `src/parser.ts:33-36`. See
+Defined at `src/parser.ts:33-40`. See
 [Markdown Syntax Reference](./markdown-syntax.md#how-the-checked_sub-replacement-works)
 for a detailed explanation of the replacement pattern and
 [Mode Prefixes](./markdown-syntax.md#parallel-serial-and-isolated-mode-prefixes) for the
@@ -291,9 +310,9 @@ The parser uses `readFile` and `writeFile` from `node:fs/promises`:
 
 | Function | Used in | Purpose |
 |---|---|---|
-| `readFile(path, "utf-8")` | `parseTaskFile` (`src/parser.ts:105`) | Read task file content |
-| `readFile(path, "utf-8")` | `markTaskComplete` (`src/parser.ts:113`) | Re-read file for freshness |
-| `writeFile(path, data, "utf-8")` | `markTaskComplete` (`src/parser.ts:133`) | Write updated file content |
+| `readFile(path, "utf-8")` | `parseTaskFile` (`src/parser.ts:114`) | Read task file content |
+| `readFile(path, "utf-8")` | `markTaskComplete` (`src/parser.ts:122`) | Re-read file for freshness |
+| `writeFile(path, data, "utf-8")` | `markTaskComplete` (`src/parser.ts:144`) | Write updated file content |
 
 **Key characteristics from the [Node.js documentation](https://nodejs.org/api/fs.html#promises-api):**
 
@@ -315,7 +334,7 @@ The parser uses `readFile` and `writeFile` from `node:fs/promises`:
   safety and race conditions
 - [Testing Guide](./testing-guide.md) -- how to run and extend tests
 - [Parser Tests (detailed)](../testing/parser-tests.md) -- comprehensive
-  breakdown of all 62 parser tests verifying these function contracts
+  breakdown of all 79 parser tests verifying these function contracts
 - [Shared Parser Types](../shared-types/parser.md) -- summary of types and
   functions from the shared-types perspective
 - [Run State Persistence](../git-and-worktree/run-state.md) -- The `buildTaskId`
@@ -328,6 +347,8 @@ The parser uses `readFile` and `writeFile` from `node:fs/promises`:
   setting that controls how `groupTasksByMode` groups are dispatched
 - [Orchestrator](../cli-orchestration/orchestrator.md) -- the primary consumer
   of `parseTaskFile`, `buildTaskContext`, and `markTaskComplete`
+- [Dispatch Pipeline](../cli-orchestration/dispatch-pipeline.md) -- The
+  execution engine that uses `groupTasksByMode` groups for batch dispatch
 - [Planning & Dispatch Overview](../planning-and-dispatch/overview.md) --
   pipeline stages that consume parser output
 - [Slugify](../shared-utilities/slugify.md) -- slug algorithm used for

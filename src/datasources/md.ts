@@ -158,7 +158,7 @@ export const datasource: Datasource = {
   async close(issueId: string, opts?: IssueFetchOptions): Promise<void> {
     const filePath = resolveFilePath(issueId, opts);
     const filename = basename(filePath);
-    const archiveDir = join(resolveDir(opts), "archive");
+    const archiveDir = join(dirname(filePath), "archive");
     await mkdir(archiveDir, { recursive: true });
     await rename(filePath, join(archiveDir, filename));
   },
@@ -178,7 +178,7 @@ export const datasource: Datasource = {
 
   async getUsername(opts: DispatchLifecycleOptions): Promise<string> {
     try {
-      const { stdout } = await exec("git", ["config", "user.name"], { cwd: opts.cwd });
+      const { stdout } = await exec("git", ["config", "user.name"], { cwd: opts.cwd, shell: process.platform === "win32" });
       const name = stdout.trim();
       if (!name) return "local";
       return slugify(name);

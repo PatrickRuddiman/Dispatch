@@ -4,6 +4,148 @@ This page documents the external dependencies and integrations used by the
 CLI & Orchestration group, answering operational questions about configuration,
 behavior, and troubleshooting.
 
+## Commander.js
+
+**Package**: `commander`
+**Used in**: `src/cli.ts:13`
+**Official docs**: [github.com/tj/commander.js](https://github.com/tj/commander.js)
+
+Commander.js is the CLI argument parsing library used by the dispatch entry
+point. It provides option declaration, validation, variadic arguments, negatable
+booleans, and option source tracking.
+
+### Imports used
+
+| Import | Usage | Location |
+|--------|-------|----------|
+| `Command` | Main program and config subcommand parser instances | `src/cli.ts:100`, `src/cli.ts:278` |
+| `Option` | Explicit option construction for `choices()` validation | `src/cli.ts:122-129` |
+| `CommanderError` | Error type thrown by `exitOverride()`, caught for custom error handling | `src/cli.ts:186` |
+
+### How `exitOverride()` works
+
+By default, Commander calls `process.exit()` when it encounters errors. The
+CLI calls `.exitOverride()` to make Commander throw a `CommanderError` instead.
+The `CommanderError` has three properties:
+
+- `exitCode` (number): The exit code Commander would have used (e.g., `1`)
+- `code` (string): A machine-readable error code (e.g., `"commander.invalidArgument"`,
+  `"commander.unknownOption"`, `"commander.missingMandatoryOptionValue"`)
+- `message` (string): Human-readable error description
+
+The CLI catches these errors at `src/cli.ts:185-191`, logs the message via
+`log.error()`, and calls `process.exit(1)`. Non-Commander errors are re-thrown.
+
+### How `configureOutput()` suppresses Commander output
+
+Commander normally writes help text and error messages to stdout/stderr. The
+CLI suppresses this with:
+
+```typescript
+.configureOutput({
+    writeOut: () => {},
+    writeErr: () => {},
+})
+```
+
+This ensures all user-facing output goes through the project's own
+[logger](../shared-types/logger.md) and custom HELP text, maintaining
+consistent formatting with chalk styling.
+
+### How `getOptionValueSource()` drives `explicitFlags`
+
+After parsing, Commander tracks where each option value came from. The CLI
+uses this to build the `explicitFlags` set that drives the
+[three-tier configuration precedence](configuration.md#three-tier-configuration-precedence):
+
+```typescript
+for (const [attr, flag] of Object.entries(SOURCE_MAP)) {
+    if (program.getOptionValueSource(attr) === "cli") {
+        explicitFlags.add(flag);
+    }
+}
+```
+
+The `SOURCE_MAP` maps Commander's camelCase attribute names to the CLI's
+internal field names (e.g., `"plan"` → `"noPlan"`, `"source"` → `"issueSource"`).
+Only options with source `"cli"` are marked as explicit — options with source
+`"default"` or `undefined` are not, ensuring config-file defaults can fill gaps.
+
+### How `choices()` validates `--provider` and `--source`
+
+The `--provider` and `--source` options use Commander's `.choices()` method
+via `new Option(...).choices(PROVIDER_NAMES)`. When an invalid value is passed,
+Commander produces an error like:
+
+```
+error: option '--provider <name>' argument 'invalid' is invalid.
+Allowed choices are opencode, copilot, claude, codex.
+```
+
+This error is thrown as a `CommanderError` (due to `exitOverride()`) and caught
+by the CLI's error handler.
+
+### Variadic option behavior
+
+The `--spec <values...>` option uses Commander's required variadic syntax
+(angle brackets + `...`). Commander collects all subsequent non-flag arguments
+into an array until another `--flag` is encountered.
+
+The `--respec [values...]` option uses optional variadic syntax (square brackets
++ `...`). When passed with no arguments, Commander sets the value to `true`
+(not an array). The CLI normalizes this to an empty array at
+`src/cli.ts:215-216`.
+
+### Negatable boolean options
+
+Commander's `--no-*` convention is used for `--no-plan`, `--no-branch`, and
+`--no-worktree`. When `.option("--no-plan", ...)` is defined, Commander:
+
+1. Creates an option named `plan` (stripping the `no-` prefix)
+2. Sets the default value to `true`
+3. Sets the value to `false` when `--no-plan` is passed on the command line
+
+The CLI inverts these when building `ParsedArgs` (`noPlan = !opts.plan`).
+
+### Custom option processing callbacks
+
+Numeric options use custom processing functions that parse, validate, and
+coerce values. For example, `--concurrency`:
+
+```typescript
+.option("--concurrency <n>", "Max parallel dispatches", (val: string): number => {
+    const n = parseInt(val, 10);
+    if (isNaN(n) || n < 1)
+        throw new CommanderError(1, "commander.invalidArgument", "...");
+    if (n > MAX_CONCURRENCY)
+        throw new CommanderError(1, "commander.invalidArgument", "...");
+    return n;
+})
+```
+
+The callback receives the raw string value, validates it, and returns the
+coerced number. Throwing a `CommanderError` triggers the standard error
+handling path.
+
+### Config subcommand Commander instance
+
+The `dispatch config` subcommand uses a separate Commander instance
+(`src/cli.ts:278-284`) with `allowUnknownOption(true)` and
+`allowExcessArguments(true)`. This allows the config subcommand to accept
+arbitrary arguments without Commander rejecting them — only `--cwd` is parsed
+from the arguments. All other arguments are passed through to
+`handleConfigCommand()`.
+
+### Troubleshooting Commander issues
+
+| Symptom | Cause | Resolution |
+|---------|-------|------------|
+| `error: unknown option '--xyz'` | Unrecognized flag | Check spelling; see [options reference](cli.md#options-reference) |
+| `argument 'foo' is invalid. Allowed choices are...` | Invalid `--provider` or `--source` value | Use one of the listed values |
+| Error message appears without chalk formatting | Commander output not fully suppressed | Ensure `configureOutput()` is set on the Command instance |
+
+---
+
 ## Chalk
 
 See [Chalk reference](../shared-types/integrations.md#chalk) for full
@@ -14,6 +156,17 @@ Chalk is used in the [logger](../shared-types/logger.md) and [TUI](tui.md)
 for terminal string styling, and in the
 [configuration wizard](configuration.md#config-wizard-flow) for colored
 output (bold headings, cyan key names, green/red provider install indicators).
+
+### Accessibility note
+
+The configuration wizard uses green (`chalk.green("●")`) and red
+(`chalk.red("●")`) dot indicators to show provider install status. These
+colors may be indistinguishable for users with red-green color vision
+deficiency (protanopia/deuteranopia). The indicators are informational only —
+the provider name is always displayed alongside the dot, and uninstalled
+providers can still be selected. In terminals that do not support color
+(e.g., `NO_COLOR=1` or `TERM=dumb`), chalk strips color codes and the dots
+appear as plain `●` characters without any visual distinction.
 
 ---
 
@@ -32,8 +185,9 @@ rather than a monolithic prompt runner.
 
 | Function | Usage | Location |
 |----------|-------|----------|
-| `select` | Provider selection (with install indicators), model selection, datasource selection | `src/config-prompts.ts:65`, `src/config-prompts.ts:80`, `src/config-prompts.ts:108` |
-| `confirm` | "Reconfigure?" prompt, "Save?" confirmation | `src/config-prompts.ts:48`, `src/config-prompts.ts:149` |
+| `select` | Provider selection (with install indicators), model selection, datasource selection | `src/config-prompts.ts:67`, `src/config-prompts.ts:82`, `src/config-prompts.ts:110` |
+| `confirm` | "Reconfigure?" prompt, "Save?" confirmation | `src/config-prompts.ts:50`, `src/config-prompts.ts:215` |
+| `input` | Azure DevOps organization URL, project name, work item type, iteration path, and area path fields | `src/config-prompts.ts:153`, `src/config-prompts.ts:159`, `src/config-prompts.ts:165`, `src/config-prompts.ts:171`, `src/config-prompts.ts:177` |
 
 ### Prompt behavior
 
@@ -42,6 +196,10 @@ rather than a monolithic prompt runner.
   value (used to pre-select the existing config value when reconfiguring).
 - **`confirm`** renders a yes/no prompt. Returns a boolean. The `default`
   option controls which value is selected when the user just presses Enter.
+- **`input`** renders a free-text input field. Returns the entered string.
+  Supports a `default` option to pre-fill the input (used for Azure DevOps
+  organization URL and project name pre-filled from the git remote). Empty
+  input is accepted and used by the wizard to indicate "skip this field."
 
 ### Non-TTY behavior
 
@@ -56,8 +214,8 @@ directly (e.g., `--provider copilot --source github`).
 When the user presses Ctrl+C during any `@inquirer/prompts` prompt, the
 library throws an `ExitPromptError`. Because the `dispatch config` subcommand
 runs before `parseArgs()` and before signal handlers are installed
-(`src/cli.ts:270-281`), this error propagates to the top-level `.catch()`
-handler (`src/cli.ts:321-324`), which logs the error and exits with code `1`.
+(`src/cli.ts:277-298`), this error propagates to the top-level `.catch()`
+handler (`src/cli.ts:339-343`), which logs the error and exits with code `1`.
 
 This means pressing Ctrl+C during the config wizard:
 1. Does **not** trigger `runCleanup()` via the SIGINT handler (handlers not
@@ -298,7 +456,7 @@ replaces every occurrence of the `__VERSION__` identifier in the source with
 the JSON-stringified version string. The global constant is declared in
 `src/globals.d.ts` as `declare const __VERSION__: string`.
 
-At `src/cli.ts:307`, the version is displayed as:
+At `src/cli.ts:325`, the version is displayed as:
 
 ```
 console.log(`dispatch v${__VERSION__}`);
@@ -407,7 +565,7 @@ locking (e.g., `flock`) would be needed.
 
 ## Node.js process (stdout, argv, exit)
 
-**Used in**: `src/cli.ts:267`, `src/cli.ts:283`, `src/tui.ts`
+**Used in**: `src/cli.ts:325`, `src/cli.ts:336`, `src/tui.ts`
 **Official docs**: [nodejs.org/api/process.html](https://nodejs.org/api/process.html)
 
 ### process.argv
@@ -430,19 +588,12 @@ The CLI calls `process.exit()` at several points:
 
 | Location | Exit code | Reason |
 |----------|-----------|--------|
-| `src/cli.ts:280` | `0` | `config` subcommand completed |
-| `src/cli.ts:303` | `0` | `--help` displayed |
-| `src/cli.ts:308` | `0` | `--version` displayed |
-| `src/cli.ts:318` | `0` or `1` | Normal completion (`1` if any task failed or fix-tests unsuccessful) |
-| `src/cli.ts:324` | `1` | Unhandled exception in `main()` |
-| `src/cli.ts:191` | `1` | Invalid `--concurrency` value |
-| `src/cli.ts:196` | `1` | `--concurrency` exceeds `MAX_CONCURRENCY` (64) |
-| `src/cli.ts:204` | `1` | Unknown `--provider` value |
-| `src/cli.ts:216` | `1` | Invalid `--plan-timeout` value |
-| `src/cli.ts:227` | `1` | Invalid `--retries` value |
-| `src/cli.ts:235` | `1` | Invalid `--plan-retries` value |
-| `src/cli.ts:245` | `1` | Invalid `--test-timeout` value |
-| `src/cli.ts:257` | `1` | Unknown CLI option |
+| `src/cli.ts:188` | `1` | Commander parse error (invalid option, unknown flag, bad choice) |
+| `src/cli.ts:298` | `0` | `config` subcommand completed |
+| `src/cli.ts:321` | `0` | `--help` displayed |
+| `src/cli.ts:326` | `0` | `--version` displayed |
+| `src/cli.ts:336` | `0` or `1` | Normal completion (`1` if any task failed or fix-tests unsuccessful) |
+| `src/cli.ts:342` | `1` | Unhandled exception in `main()` |
 
 ### Raw ANSI escape codes in non-TTY environments
 
@@ -461,7 +612,7 @@ for the full impact assessment.
 
 ### Signal handling
 
-Dispatch installs `SIGINT` and `SIGTERM` handlers at `src/cli.ts:289-299`
+Dispatch installs `SIGINT` and `SIGTERM` handlers at `src/cli.ts:307-317`
 that call `runCleanup()` from the [cleanup registry](../shared-types/cleanup.md)
 before exiting. This ensures provider server processes are stopped on Ctrl+C
 or container shutdown.
@@ -551,13 +702,14 @@ for how this interacts with the orchestrator's own error recovery.
 
 ## Related documentation
 
-- [CLI](cli.md) -- argument parsing and exit codes
+- [CLI](cli.md) -- argument parsing with Commander.js and exit codes
 - [Configuration](configuration.md) -- config file, three-tier precedence,
   `dispatch config` subcommand
 - [Orchestrator](orchestrator.md) -- glob usage and provider boot
 - [TUI](tui.md) -- ANSI rendering and TTY detection
 - [Logger](../shared-types/logger.md) -- chalk usage in logging
-- [Provider Abstraction & Backends](../provider-system/provider-overview.md) -- provider SDK details
+- [Provider Abstraction & Backends](../provider-system/overview.md) -- provider SDK details
+  and design decisions for the provider layer
 - [OpenCode Backend](../provider-system/opencode-backend.md) -- OpenCode-specific setup and troubleshooting
 - [Copilot Backend](../provider-system/copilot-backend.md) -- Copilot-specific setup and authentication
 - [Cleanup Registry](../shared-types/cleanup.md) -- Process-level cleanup mechanism
@@ -565,3 +717,7 @@ for how this interacts with the orchestrator's own error recovery.
 - [Shared Integrations](../shared-types/integrations.md) -- Chalk, fs/promises, and signal handling reference
 - [Planner Agent](../planning-and-dispatch/planner.md) -- Planning phase referenced by rate limits discussion
 - [Dispatcher](../planning-and-dispatch/dispatcher.md) -- Execution phase that consumes provider sessions
+- [Spec Generation](../spec-generation/overview.md) -- How the spec pipeline
+  uses providers for AI-driven generation
+- [Prerequisites & Safety](../prereqs-and-safety/integrations.md) -- External
+  CLI tool integrations including provider binaries

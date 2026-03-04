@@ -1,25 +1,33 @@
 # Logger
 
-The logger (`src/logger.ts`) provides a minimal structured logging facade for
-CLI output. It is a plain object with seven methods plus a `verbose` flag and
-an error-chain formatter, producing color-coded terminal output through
-[chalk](https://github.com/chalk/chalk).
+The logger (`src/helpers/logger.ts`) provides a dual-channel logging facade for
+CLI output. It is a plain object with seven output methods, a `verbose`
+property, an error-chain formatter, and an error-message extractor. Console
+output is styled via [chalk](https://github.com/chalk/chalk), and every log
+call is automatically mirrored — with ANSI codes stripped — into the active
+[file logger](./file-logger.md) context if one exists.
 
 ## What it does
 
 The `log` object is the single logging interface for non-TUI contexts in
 Dispatch. It is imported by the [CLI entry point](../cli-orchestration/cli.md)
 (`src/cli.ts`), the [orchestrator](../cli-orchestration/orchestrator.md)
-(`src/agents/orchestrator.ts`), the
+(`src/orchestrator/runner.ts`), the
 [dispatcher](../planning-and-dispatch/dispatcher.md) (`src/dispatcher.ts`),
-both [provider backends](../provider-system/provider-overview.md)
-(`src/providers/opencode.ts`, `src/providers/copilot.ts`), the
+all [provider backends](../provider-system/overview.md)
+(`src/providers/opencode.ts`, `src/providers/copilot.ts`, etc.), the
 [spec generator](../spec-generation/overview.md) (`src/spec-generator.ts`),
 and the [datasource helpers](../datasource-system/datasource-helpers.md)
 (`src/orchestrator/datasource-helpers.ts`).
 When the full [TUI](../cli-orchestration/tui.md) is active, the TUI module
 renders its own output directly; the logger is used for simpler output modes
 and for verbose debug tracing that runs alongside the TUI.
+
+Every log method simultaneously writes to the per-issue
+[file logger](./file-logger.md) when one is active in the current
+`AsyncLocalStorage` context. This dual-channel design provides both real-time
+terminal feedback and a persistent, timestamped audit trail per issue. See
+[dual-channel logging](#dual-channel-logging-console--file) for details.
 
 ## Why it exists
 
@@ -38,6 +46,10 @@ normal dispatch, but several scenarios require simpler output:
 - **Non-TTY environments**: When stdout is not a terminal, the logger's
   line-by-line output is appropriate (though the caller must opt into it via
   `--dry-run`; there is no automatic fallback).
+- **Per-issue audit trail**: When a [file logger](./file-logger.md) context
+  is active, all log output is mirrored to a per-issue `.log` file in
+  `.dispatch/logs/`, providing a complete, timestamped record for
+  post-mortem debugging.
 
 ## Usage in the codebase
 
@@ -67,36 +79,40 @@ TUI's ANSI rendering, which can produce interleaved output.
 |--------|--------|--------|-------|-------|
 | `log.info(msg)` | stdout | `ℹ` | blue | General informational messages |
 | `log.success(msg)` | stdout | `✔` | green | Completion confirmations |
-| `log.warn(msg)` | stdout | `⚠` | yellow | Non-fatal warnings |
+| `log.warn(msg)` | stderr | `⚠` | yellow | Non-fatal warnings |
 | `log.error(msg)` | stderr | `✖` | red | Error messages |
 | `log.task(index, total, msg)` | stdout | `[n/total]` | cyan | Task progress in dry-run mode |
 | `log.dim(msg)` | stdout | *(none)* | dim | Subtle hints and examples |
-| `log.debug(msg)` | stdout | `⤷` | dim | Verbose debug output (gated by `log.verbose`) |
+| `log.debug(msg)` | stdout | `⤷` | dim | Verbose debug output (gated by log level) |
+
+All seven methods mirror their output — with ANSI escape codes stripped — to
+the [file logger](./file-logger.md) if a `FileLogger` context is active in
+`AsyncLocalStorage`. This happens via
+`fileLoggerStorage.getStore()?.method(stripAnsi(msg))` at the end of each
+method body (`src/helpers/logger.ts:65-104`).
 
 ### `log.task()` -- zero-based index convention
 
 The `task()` method accepts a **zero-based** `index` parameter and displays it
-as **one-based** to the user (`src/logger.ts:27`):
+as **one-based** to the user (`src/helpers/logger.ts:96`):
 
 ```
 console.log(chalk.cyan(`[${index + 1}/${total}]`), msg);
 ```
 
 This means all callers must pass a zero-based index. The single call site in
-the current codebase (`src/agents/orchestrator.ts:326`) uses
-`allTasks.indexOf(task)`, which returns a zero-based array index -- so the
-convention is followed correctly. If you add new callers, pass the zero-based
-position from the task array, not a one-based counter.
+the current codebase (`src/orchestrator/runner.ts`) uses a zero-based array
+index — so the convention is followed correctly. If you add new callers, pass
+the zero-based position from the task array, not a one-based counter.
 
-### `log.debug()` -- verbose mode
+### `log.debug()` -- level-gated output
 
-The `debug()` method is gated by the `log.verbose` boolean property
-(`src/logger.ts:38-41`):
+The `debug()` method is gated by the current log level via the `shouldLog()`
+function (`src/helpers/logger.ts:50-52`):
 
 ```typescript
-debug(msg: string) {
-    if (!this.verbose) return;
-    console.log(chalk.dim(`  ⤷ ${msg}`));
+function shouldLog(level: LogLevel): boolean {
+    return LOG_SEVERITY[level] >= LOG_SEVERITY[currentLevel];
 }
 ```
 
@@ -105,11 +121,23 @@ visually nest them under the preceding info/error line.
 
 #### How the verbose flag is toggled
 
-The `--verbose` CLI flag sets `log.verbose = args.verbose` at
-`src/cli.ts:239`, before any other operations. This is a one-time assignment
-at startup -- the flag **cannot** be toggled mid-execution. There is no
-mechanism (environment variable, signal, or API) to enable or disable verbose
-mode while the process is running.
+The `--verbose` CLI flag sets `log.verbose = true` at startup in
+`src/cli.ts`, before any other operations. See
+[Configuration](../cli-orchestration/configuration.md) for how `--verbose`
+is persisted and merged with CLI flags. The `verbose` property is a
+getter/setter defined via `Object.defineProperty`
+(`src/helpers/logger.ts:148-157`):
+
+- **Setting `verbose = true`** overrides the current level to `"debug"`,
+  enabling all output including debug messages.
+- **Setting `verbose = false`** overrides the current level to `"info"`,
+  which suppresses debug output but allows all other methods.
+
+> **Important**: Setting `verbose` **discards** any prior `LOG_LEVEL`
+> environment variable value. For example, if `LOG_LEVEL=warn` was set, then
+> `log.verbose = false` resets the level to `"info"`, not back to `"warn"`.
+> This is by design — the verbose toggle provides a simple boolean override,
+> not a stack-based level mechanism.
 
 #### What verbose mode reveals
 
@@ -127,8 +155,8 @@ produce output including:
 
 ### `log.formatErrorChain()` -- error cause chain formatter
 
-The `formatErrorChain()` method (`src/logger.ts:48-70`) extracts the full
-`Error.cause` chain from nested Node.js errors and formats it as a
+The `formatErrorChain()` method (`src/helpers/logger.ts:108-130`) extracts the
+full `Error.cause` chain from nested Node.js errors and formats it as a
 human-readable multi-line string:
 
 ```
@@ -146,8 +174,9 @@ nested `.cause` properties. Without this formatter, only the outer
 #### Depth limit
 
 The formatter walks the `.cause` chain up to a **maximum depth of 5**
-(`src/logger.ts:53`). This prevents infinite loops if an error object has a
-circular `.cause` reference, and bounds the output length.
+(`MAX_CAUSE_CHAIN_DEPTH` at `src/helpers/logger.ts:60`). This prevents infinite
+loops if an error object has a circular `.cause` reference, and bounds the
+output length.
 
 **Could real-world error chains exceed 5 levels?** In practice, Node.js
 network error chains are typically 2-3 levels deep:
@@ -196,22 +225,22 @@ Chalk was chosen over raw ANSI escape codes or alternatives for several reasons:
 Smaller alternatives like [yoctocolors](https://github.com/sindresorhus/yoctocolors)
 exist but lack chalk's automatic color detection and composable chaining API.
 
-## Why `console.error` only for the error method
+## Why `warn` and `error` use `console.error` (stderr)
 
-The `error` method is the only one that writes to `console.error` (which outputs
-to **stderr**). All other methods use `console.log` (which outputs to
-**stdout**). This follows the Unix convention of separating normal program output
-from error diagnostics:
+The `warn` and `error` methods write to `console.error`, which outputs to
+**stderr**. All other methods use `console.log`, which outputs to **stdout**.
+This follows the Unix convention of separating normal program output from
+diagnostic messages:
 
 - **stdout** carries the program's primary output — task listings, progress
   indicators, success messages. It can be piped to other tools or redirected to
   files for processing.
 - **stderr** carries diagnostic and error output. When stdout is piped, stderr
-  still appears on the terminal so errors remain visible.
+  still appears on the terminal so warnings and errors remain visible.
 
 This separation matters for Dispatch because dry-run output (task listings) goes
-to stdout and can be captured, while errors always surface in the terminal
-regardless of redirection.
+to stdout and can be captured, while warnings and errors always surface in the
+terminal regardless of redirection.
 
 ## Behavior in non-TTY environments (CI, piped output)
 
@@ -258,20 +287,20 @@ routed differently.
     render as replacement characters. This is generally acceptable in modern CI
     systems.
 
-## Structured logging limitations
+## Console logging limitations
 
-The logger writes exclusively to `console.log` and `console.error`. There is
+The console logger writes to `console.log` and `console.error`. There is
 **no mechanism** for:
 
-- **Structured output** (JSON logging): All output is human-readable strings
-  with ANSI color codes. You cannot pipe logger output to a JSON parser.
-- **Granular log levels**: The only filtering is the `verbose` flag, which
-  gates `debug()` output. There is no way to suppress info messages while
-  keeping errors, or to enable warnings-only mode.
-- **File output**: Logs go to stdout/stderr only. There is no file transport.
-- **Timestamps**: Messages do not include timestamps.
+- **Structured output** (JSON logging): All console output is human-readable
+  strings with ANSI color codes. You cannot pipe console logger output to a
+  JSON parser.
 - **Contextual metadata**: There is no way to attach task IDs, file paths, or
   other structured data beyond what is embedded in the message string.
+
+For persistent, timestamped, plain-text logging, see the
+[file logger](./file-logger.md), which automatically captures all console log
+output per issue.
 
 For debugging and production monitoring, consider:
 
@@ -281,59 +310,141 @@ For debugging and production monitoring, consider:
   captures all output. Note that chalk will likely disable colors for piped
   output (see [Integrations](./integrations.md)), making the file more
   readable.
-- **Structured logging library**: If the project grows to need machine-readable
-  logs, libraries like [pino](https://github.com/pinojs/pino) or
-  [winston](https://github.com/winstonjs/winston) could replace or supplement
-  this module. However, for a CLI tool, human-readable output is typically
-  preferred over structured logging.
 
 ## Log-level filtering
 
-The logger implements a single level of filtering via the `verbose` flag:
+The logger supports four severity levels, resolved at module load time:
 
-- **`log.verbose = false` (default)**: The six primary methods (`info`,
-  `success`, `warn`, `error`, `task`, `dim`) emit unconditionally. `debug()`
-  is suppressed.
-- **`log.verbose = true` (`--verbose` flag)**: All methods emit, including
-  `debug()`.
+| Level | Severity | Methods gated |
+|-------|----------|---------------|
+| `debug` | 0 | None — all methods emit |
+| `info` | 1 (default) | `debug()` is suppressed |
+| `warn` | 2 | `debug()` and `info()`, `success()`, `task()`, `dim()` are suppressed |
+| `error` | 3 | Only `error()` emits |
 
-There is no finer-grained filtering (e.g., suppressing info while keeping
-errors). This is a deliberate simplicity choice: Dispatch is a focused CLI
-tool, not a long-running service, and the volume of log output is bounded by
-the number of tasks. The `--verbose` flag provides a useful "show me
-everything" escape hatch for troubleshooting without adding the complexity of
-a full log-level hierarchy.
+### Level resolution order
+
+The initial log level is determined by `resolveLogLevel()`
+(`src/helpers/logger.ts:31-40`) at module load:
+
+1. **`LOG_LEVEL` environment variable** — if set to a valid level string
+   (`"debug"`, `"info"`, `"warn"`, `"error"`), it is used directly.
+2. **`DEBUG` environment variable** — if set (to any truthy value), the level
+   is set to `"debug"`. This provides compatibility with the common `DEBUG=*`
+   convention used by many Node.js libraries.
+3. **Default** — `"info"`.
+
+### The `verbose` property override
+
+The `verbose` getter/setter (`src/helpers/logger.ts:148-157`) provides a
+simple boolean override on top of the resolved level:
+
+- `log.verbose = true` → sets level to `"debug"`
+- `log.verbose = false` → sets level to `"info"`
+
+This **discards** the previously resolved level. For example, if
+`LOG_LEVEL=warn` was set, `log.verbose = false` resets the level to `"info"`,
+not `"warn"`. The CLI sets `log.verbose` at startup based on the `--verbose`
+flag, which means the environment variable level only survives if `--verbose`
+is not passed.
+
+### `extractMessage()` utility
+
+The `extractMessage()` function (`src/helpers/logger.ts:132-146`) safely
+extracts a string message from an unknown error value. It handles:
+
+- `Error` instances → returns `error.message`
+- Strings → returns the string directly
+- Objects with a `.message` property → returns that property
+- All other values → returns `String(value)`
+
+This is used throughout error handlers to safely convert caught values
+(which may not be `Error` instances) into log-friendly strings.
+
+## Dual-channel logging (console + file)
+
+Every `log.*()` method performs two operations:
+
+1. **Console output** — styled with chalk, written to stdout or stderr
+2. **File logger mirroring** — the message (with ANSI codes stripped via
+   `stripAnsi()`) is forwarded to the active `FileLogger` if one exists in
+   the current `AsyncLocalStorage` context
+
+This dual-channel behavior is implemented at the end of each method body in
+`src/helpers/logger.ts:65-104`. The pattern is:
+
+```
+fileLoggerStorage.getStore()?.info(stripAnsi(msg));
+```
+
+The `stripAnsi()` function (`src/helpers/logger.ts:54-57`) removes ANSI escape
+sequences using a regex, ensuring file logs contain only plain text.
+
+```mermaid
+sequenceDiagram
+    participant Caller as Application Code
+    participant Logger as log.info()
+    participant ShouldLog as shouldLog("info")
+    participant Console as console.log
+    participant Strip as stripAnsi()
+    participant ALS as fileLoggerStorage.getStore()
+    participant FL as FileLogger.info()
+
+    Caller->>Logger: log.info("Processing issue #42")
+    Logger->>ShouldLog: level check
+    ShouldLog-->>Logger: true (info ≥ currentLevel)
+    Logger->>Console: chalk.blue("ℹ") + msg → stdout
+    Logger->>Strip: remove ANSI from msg
+    Strip-->>Logger: plain text
+    Logger->>ALS: getStore()
+    ALS-->>Logger: FileLogger instance (or undefined)
+    Logger->>FL: info(plainMsg)
+    FL->>FL: appendFileSync with timestamp
+```
+
+If no `FileLogger` context is active (e.g., during CLI startup before any
+pipeline runs), the `getStore()` call returns `undefined` and the optional
+chaining (`?.`) silently skips the file write. This means the dual-channel
+behavior is completely transparent to callers.
+
+For details on the file logger side of this integration, see the
+[File Logger documentation](./file-logger.md).
 
 ## Source reference
 
-- `src/logger.ts` -- Full logger implementation (71 lines)
+- `src/helpers/logger.ts` — Console logger with dual-channel output, level
+  filtering, error chain formatting, and message extraction (158 lines)
+- `src/tests/logger.test.ts` — Unit tests covering all methods, level
+  resolution, verbose override, and `formatErrorChain` depth (372 lines)
 
 ## Related documentation
 
-- [Overview](./overview.md) -- Shared Interfaces & Utilities layer
-- [Cleanup registry](./cleanup.md) -- How signal handlers use `log.debug()`
+- [File Logger](./file-logger.md) — Per-issue file logging with
+  `AsyncLocalStorage` context scoping
+- [Overview](./overview.md) — Shared Interfaces & Utilities layer
+- [Cleanup registry](./cleanup.md) — How signal handlers use `log.debug()`
   before draining cleanup
-- [Format utilities](./format.md) -- The `elapsed()` helper used alongside
+- [Format utilities](./format.md) — The `elapsed()` helper used alongside
   logger output for timing
-- [Format Tests](../testing/format-tests.md) -- Test suite covering the
+- [Format Tests](../testing/format-tests.md) — Test suite covering the
   `elapsed()` function that the logger displays
-- [Integrations reference](./integrations.md) -- Chalk color detection, CI
+- [Integrations reference](./integrations.md) — Chalk color detection, CI
   behavior, and Node.js process signal details
-- [TUI](../cli-orchestration/tui.md) -- The alternative rich output mode that
+- [TUI](../cli-orchestration/tui.md) — The alternative rich output mode that
   replaces the logger during normal dispatch
-- [CLI & Orchestration](../cli-orchestration/overview.md) -- Where the logger
+- [CLI & Orchestration](../cli-orchestration/overview.md) — Where the logger
   is consumed and verbose mode is initialized
-- [Configuration](../cli-orchestration/configuration.md) -- How `--verbose`
+- [Configuration](../cli-orchestration/configuration.md) — How `--verbose`
   is persisted and merged with CLI flags
-- [Spec Generation](../spec-generation/overview.md) -- How the spec pipeline
+- [Spec Generation](../spec-generation/overview.md) — How the spec pipeline
   uses logger for progress reporting and error diagnostics
-- [Spec Generation Integrations](../spec-generation/integrations.md) -- Chalk
+- [Spec Generation Integrations](../spec-generation/integrations.md) — Chalk
   behavior in non-TTY environments during spec generation
-- [Dispatcher](../planning-and-dispatch/dispatcher.md) -- Debug tracing of
+- [Dispatcher](../planning-and-dispatch/dispatcher.md) — Debug tracing of
   prompt dispatch and error chain formatting
-- [Provider Overview](../provider-system/provider-overview.md) -- Debug
+- [Provider Overview](../provider-system/overview.md) — Debug
   tracing of provider boot, session creation, and cleanup
-- [Provider Detection](../prereqs-and-safety/provider-detection.md) -- The
+- [Provider Detection](../prereqs-and-safety/provider-detection.md) — The
   config wizard that uses chalk-styled indicators informed by logger output
-- [Datasource Helpers](../datasource-system/datasource-helpers.md) -- How
+- [Datasource Helpers](../datasource-system/datasource-helpers.md) — How
   datasource helper functions use `log.warn()` and `log.success()`

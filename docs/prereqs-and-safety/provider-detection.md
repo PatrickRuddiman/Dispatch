@@ -28,7 +28,7 @@ The module exports two things:
 | `codex` | `codex` | `codex --version` |
 
 The mapping is defined as a `Record<ProviderName, string>` where
-`ProviderName` is the union type `"opencode" | "copilot" | "claude" | "codex"`
+[`ProviderName`](../shared-types/provider.md) is the union type `"opencode" | "copilot" | "claude" | "codex"`
 from `src/providers/interface.ts`. This ensures compile-time exhaustiveness --
 adding a new provider to the type union without updating the map will cause a
 TypeScript error.
@@ -139,16 +139,42 @@ Provider CLIs evolve independently of Dispatch. Enforcing minimum versions
 would create a maintenance burden and risk blocking users with compatible
 but slightly older versions.
 
+### Platform-specific shell behavior
+
+The `execFile` call at `src/providers/detect.ts:33-34` passes
+`{ shell: process.platform === "win32" }` as an option. This is necessary
+because:
+
+- **Windows**: Provider CLIs are often installed as `.cmd` or `.bat` wrappers
+  (e.g., `copilot.cmd`). These wrappers require shell interpretation to execute.
+  Without `shell: true`, `execFile` would look for a literal `copilot` binary
+  and fail with `ENOENT` even though `copilot.cmd` is on PATH.
+- **Unix (macOS, Linux)**: Provider binaries are typically native executables or
+  shell scripts with a shebang line. Direct execution via `execFile` works
+  without invoking a shell, which is faster and avoids shell injection risks.
+
+### Non-zero exit codes
+
+If a binary exists but exits with a non-zero code on `--version` (e.g., due to
+a broken installation or misconfiguration), `execFile` will reject with an
+error. The catch block converts this to `false`, meaning the provider will show
+as "not installed" in the config wizard. This is by design -- a binary that
+cannot report its version is treated as unavailable.
+
 ## Testing
 
-There is no dedicated test file for `providers/detect.ts`. The module's
-behavior is indirectly tested through the config wizard's integration with
-the provider selection menu. The detection logic is straightforward (a
-single try/catch around `execFile`) and the never-reject guarantee is
-inherent in the implementation.
+The detection module has a dedicated test file at `src/tests/detect.test.ts`
+(71 lines, 4 tests). The tests mock `node:child_process` and
+`process.platform` to verify:
 
-For direct unit testing, the same mock pattern used in
-`src/tests/prereqs.test.ts` (mocking `node:child_process`) would apply.
+1.  **Installed binary**: `execFile` resolves → `checkProviderInstalled` returns
+    `true`.
+2.  **Missing binary**: `execFile` rejects with `ENOENT` →
+    `checkProviderInstalled` returns `false`.
+3.  **Windows platform**: When `process.platform` is `"win32"`, `execFile` is
+    called with `{ shell: true }`.
+4.  **Non-Windows platform**: When `process.platform` is `"linux"`, `execFile`
+    is called with `{ shell: false }`.
 
 ## Related documentation
 
@@ -156,7 +182,7 @@ For direct unit testing, the same mock pattern used in
     detection fits in the CLI flow.
 -   [External Integrations](./integrations.md) -- Details on provider
     binary dependencies and installation sources.
--   [Provider System](../provider-system/provider-overview.md) -- The
+-   [Provider System](../provider-system/overview.md) -- The
     provider abstraction that these binaries implement.
 -   [Provider Tests](../testing/provider-tests.md) -- Unit tests for the
     provider backends and registry that these binaries back.
@@ -164,3 +190,5 @@ For direct unit testing, the same mock pattern used in
     wizard that uses detection results.
 -   [CLI Integrations](../cli-orchestration/integrations.md) -- Child process
     usage for provider detection via `execFile`.
+-   [Adding a Provider](../provider-system/adding-a-provider.md) -- Step-by-step
+    guide for implementing a new provider backend, including binary registration.

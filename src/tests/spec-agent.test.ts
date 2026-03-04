@@ -486,6 +486,13 @@ describe("buildSpecPrompt", () => {
     expect(prompt).toContain("## References");
     expect(prompt).toContain("## Key Guidelines");
   });
+
+  it("includes environment context section", () => {
+    const prompt = buildSpecPrompt(ISSUE_FIXTURE, "/tmp/project", "/tmp/output.md");
+    expect(prompt).toContain("## Environment");
+    expect(prompt).toContain("Operating System");
+    expect(prompt).toContain("run commands directly");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -537,6 +544,13 @@ describe("buildFileSpecPrompt", () => {
     expect(prompt).toContain("## References");
     expect(prompt).toContain("## Key Guidelines");
   });
+
+  it("includes environment context section", () => {
+    const prompt = buildFileSpecPrompt("/tmp/project/feature.md", "content", "/tmp/project");
+    expect(prompt).toContain("## Environment");
+    expect(prompt).toContain("Operating System");
+    expect(prompt).toContain("run commands directly");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -583,5 +597,12 @@ describe("buildInlineTextSpecPrompt", () => {
     expect(prompt).toContain("## Tasks");
     expect(prompt).toContain("## References");
     expect(prompt).toContain("## Key Guidelines");
+  });
+
+  it("includes environment context section", () => {
+    const prompt = buildInlineTextSpecPrompt("text", "/tmp/project", "/tmp/output.md");
+    expect(prompt).toContain("## Environment");
+    expect(prompt).toContain("Operating System");
+    expect(prompt).toContain("run commands directly");
   });
 });

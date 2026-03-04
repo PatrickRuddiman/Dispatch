@@ -318,6 +318,8 @@ documentation and the `--spec` invocation details.
   offline datasource alternative
 - [Datasource Overview](../datasource-system/overview.md) -- The current
   `Datasource` interface that supersedes `IssueFetcher`
+- [GitHub Datasource](../datasource-system/github-datasource.md) -- Current
+  GitHub implementation that supersedes the deprecated GitHub fetcher
 - [Datasource Integrations & Troubleshooting](../datasource-system/integrations.md) --
   Subprocess behavior, auto-detection, and error handling for all datasource backends
 - [Spec Generation](../spec-generation/overview.md) -- How the spec pipeline
@@ -326,9 +328,11 @@ documentation and the `--spec` invocation details.
   `--source` defaults and three-tier merge logic
 - [CLI Argument Parser](../cli-orchestration/cli.md) -- `--spec`, `--source`,
   `--org`, and `--project` flag documentation
-- [Provider Abstraction](../provider-system/provider-overview.md) -- AI provider
+- [Provider Abstraction](../provider-system/overview.md) -- AI provider
   boot and session model used by the spec pipeline
 - [Shared Types Overview](../shared-types/overview.md) -- Foundational type
   definitions shared across the pipeline
 - [Prereqs & Safety Integrations](../prereqs-and-safety/integrations.md) --
   CLI tool detection patterns for `gh`/`az` binary availability checks
+- [Prerequisite Checker](../prereqs-and-safety/prereqs.md) -- Runtime
+  validation that ensures `gh`/`az` are available before fetcher invocation

@@ -86,7 +86,7 @@ describe("github datasource — update", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "gh",
       ["issue", "edit", "42", "--title", "New Title", "--body", "New Body"],
-      { cwd: "/tmp" },
+      { cwd: "/tmp", shell: false },
     );
   });
 });
@@ -100,7 +100,7 @@ describe("github datasource — close", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "gh",
       ["issue", "close", "42"],
-      { cwd: "/tmp" },
+      { cwd: "/tmp", shell: false },
     );
   });
 });
@@ -207,7 +207,7 @@ describe("github datasource — createAndSwitchBranch", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["checkout", "-b", "dispatch/42-feat"],
-      { cwd: "/tmp" },
+      { cwd: "/tmp", shell: false },
     );
   });
 
@@ -222,7 +222,7 @@ describe("github datasource — createAndSwitchBranch", () => {
     expect(mockExecFile).toHaveBeenLastCalledWith(
       "git",
       ["checkout", "dispatch/42-feat"],
-      { cwd: "/tmp" },
+      { cwd: "/tmp", shell: false },
     );
   });
 
@@ -241,7 +241,7 @@ describe("github datasource — switchBranch", () => {
 
     await datasource.switchBranch("main", { cwd: "/tmp" });
 
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "main"], { cwd: "/tmp" });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "main"], { cwd: "/tmp", shell: false });
   });
 });
 
@@ -254,7 +254,7 @@ describe("github datasource — pushBranch", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["push", "--set-upstream", "origin", "dispatch/42-feat"],
-      { cwd: "/tmp" },
+      { cwd: "/tmp", shell: false },
     );
   });
 });
@@ -272,7 +272,7 @@ describe("github datasource — commitAllChanges", () => {
     expect(mockExecFile).toHaveBeenLastCalledWith(
       "git",
       ["commit", "-m", "feat: update"],
-      { cwd: "/tmp" },
+      { cwd: "/tmp", shell: false },
     );
   });
 

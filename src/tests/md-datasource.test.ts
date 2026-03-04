@@ -21,7 +21,7 @@ import { datasource } from "../datasources/md.js";
 import { UnsupportedOperationError } from "../helpers/errors.js";
 import { execFile } from "node:child_process";
 import { readFile, writeFile, readdir, mkdir, rename } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import { glob } from "glob";
 
 beforeEach(() => {
@@ -241,8 +241,16 @@ describe("fetch", () => {
 
   it("uses an absolute path directly without prepending specs directory", async () => {
     const absPath = "/home/user/project/.dispatch/specs/my-issue.md";
-    await datasource.fetch(absPath, { cwd: "/tmp" });
+    const result = await datasource.fetch(absPath, { cwd: "/tmp" });
     expect(vi.mocked(readFile)).toHaveBeenCalledWith(absPath, "utf-8");
+    expect(result.number).toBe("my-issue.md");
+    expect(result.url).toBe(absPath);
+  });
+
+  it("appends .md extension to absolute paths when missing", async () => {
+    const absPath = "/home/user/project/.dispatch/specs/my-issue";
+    await datasource.fetch(absPath, { cwd: "/tmp" });
+    expect(vi.mocked(readFile)).toHaveBeenCalledWith(absPath + ".md", "utf-8");
   });
 
   it("resolves a relative path with ./ against cwd", async () => {
@@ -271,7 +279,7 @@ describe("update", () => {
     expect(vi.mocked(writeFile)).toHaveBeenCalledWith(expected, "new body", "utf-8");
   });
 
-  it("uses an absolute path directly", async () => {
+  it("uses an absolute path directly without prepending specs directory", async () => {
     const absPath = "/home/user/project/.dispatch/specs/my-issue.md";
     await datasource.update(absPath, "title", "new body", { cwd: "/tmp" });
     expect(vi.mocked(writeFile)).toHaveBeenCalledWith(absPath, "new body", "utf-8");
@@ -299,17 +307,18 @@ describe("update", () => {
 describe("close", () => {
   it("resolves a plain issueId against the specs directory", async () => {
     await datasource.close("my-issue", { cwd: "/tmp" });
-    const expectedDir = join("/tmp", ".dispatch/specs");
-    const expectedFile = join(expectedDir, "my-issue.md");
-    const expectedArchive = join(expectedDir, "archive");
+    const expectedFile = join("/tmp", ".dispatch/specs", "my-issue.md");
+    const expectedArchive = join("/tmp", ".dispatch/specs", "archive");
     expect(vi.mocked(mkdir)).toHaveBeenCalledWith(expectedArchive, { recursive: true });
     expect(vi.mocked(rename)).toHaveBeenCalledWith(expectedFile, join(expectedArchive, "my-issue.md"));
   });
 
-  it("uses an absolute path directly", async () => {
+  it("uses an absolute path directly without prepending specs directory", async () => {
     const absPath = "/home/user/project/.dispatch/specs/my-issue.md";
     await datasource.close(absPath, { cwd: "/tmp" });
-    expect(vi.mocked(rename)).toHaveBeenCalledWith(absPath, expect.stringContaining("archive"));
+    const expectedArchive = join(dirname(absPath), "archive");
+    expect(vi.mocked(mkdir)).toHaveBeenCalledWith(expectedArchive, { recursive: true });
+    expect(vi.mocked(rename)).toHaveBeenCalledWith(absPath, join(expectedArchive, "my-issue.md"));
   });
 
   it("resolves a relative path with ./ against cwd", async () => {
@@ -327,7 +336,7 @@ describe("close", () => {
   it("resolves a relative path with ../ against cwd", async () => {
     await datasource.close("../specs/my-issue.md", { cwd: "/tmp/project" });
     const expected = resolve("/tmp/project", "../specs/my-issue.md");
-    const archiveDest = join("/tmp/project", ".dispatch/specs", "archive", "my-issue.md");
+    const archiveDest = join(dirname(expected), "archive", "my-issue.md");
     expect(vi.mocked(rename)).toHaveBeenCalledWith(expected, archiveDest);
   });
 });

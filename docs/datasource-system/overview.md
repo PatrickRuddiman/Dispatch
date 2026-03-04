@@ -10,11 +10,12 @@ data structure regardless of where the underlying data lives.
 
 The datasource system:
 
-1. **Defines a common interface** (`Datasource`) with thirteen operations: five
+1. **Defines a common interface** (`Datasource`) with fourteen operations: five
    CRUD methods (`list`, `fetch`, `update`, `close`, `create`), one identity
-   method (`getUsername`), and seven git lifecycle methods
-   (`getDefaultBranch`, `buildBranchName`, `createAndSwitchBranch`,
-   `switchBranch`, `pushBranch`, `commitAllChanges`, `createPullRequest`).
+   method (`getUsername`), one capability query (`supportsGit`), and seven git
+   lifecycle methods (`getDefaultBranch`, `buildBranchName`,
+   `createAndSwitchBranch`, `switchBranch`, `pushBranch`, `commitAllChanges`,
+   `createPullRequest`).
 2. **Provides three implementations**: GitHub (via the `gh` CLI), Azure DevOps
    (via the `az` CLI), and local markdown files (via Node.js `fs`).
 3. **Auto-detects the correct backend** by inspecting the git `origin` remote
@@ -252,11 +253,11 @@ sequenceDiagram
 
 ## The `Datasource` interface
 
-Every datasource implementation must satisfy a thirteen-method contract defined
-in `src/datasources/interface.ts`. The interface is split into three groups:
+Every datasource implementation must satisfy a fourteen-method contract defined
+in `src/datasources/interface.ts`. The interface is split into four groups:
 five CRUD operations for issue/spec management, one identity method
-(`getUsername`), and seven git lifecycle operations for branching, committing,
-pushing, and pull request creation.
+(`getUsername`), one capability query (`supportsGit`), and seven git lifecycle
+operations for branching, committing, pushing, and pull request creation.
 
 ### CRUD operations
 
@@ -269,11 +270,36 @@ pushing, and pull request creation.
 | `create` | `(title, body, opts?) => Promise<IssueDetails>` | Create a new issue |
 
 All CRUD methods accept an optional `IssueFetchOptions` parameter with `cwd`,
-`org`, `project`, and `workItemType` fields. The `org` and `project` fields are
-only meaningful for the Azure DevOps datasource. The `workItemType` field
-overrides the automatic work item type detection in the Azure DevOps
-datasource's `create()` method (see
-[Azure DevOps Datasource -- `create()`](./azdevops-datasource.md#create)).
+`org`, `project`, `workItemType`, `iteration`, and `area` fields. The `org` and
+`project` fields are only meaningful for the Azure DevOps datasource. The
+`workItemType` field overrides the automatic work item type detection in the
+Azure DevOps datasource's `create()` method (see
+[Azure DevOps Datasource -- `create()`](./azdevops-datasource.md#create)). The
+`iteration` and `area` fields filter Azure DevOps work items by iteration path
+(e.g., `"MyProject\\Sprint 1"` or `"@CurrentIteration"`) and area path
+(e.g., `"MyProject\\Team A"`) respectively.
+
+### Capability query
+
+| Method | Signature | Purpose |
+|--------|-----------|---------|
+| `supportsGit` | `() => boolean` | Whether this datasource supports git operations (branching, pushing, PRs) |
+
+The `supportsGit()` method controls whether the dispatch pipeline invokes git
+lifecycle methods on this datasource. When it returns `false`, the pipeline
+skips all branching, committing, pushing, and PR creation operations for that
+datasource. Currently only the markdown datasource returns `false` (it operates
+on local files without git integration). The GitHub and Azure DevOps datasources
+return `true`.
+
+The dispatch pipeline checks `supportsGit()` before each of these operations:
+
+- **Branch creation**: `createAndSwitchBranch()` is skipped
+- **Safety-net commit**: `commitAllChanges()` after task dispatch is skipped
+- **Commit agent**: squash and rewrite operations are skipped
+- **Push**: `pushBranch()` is skipped
+- **PR creation**: `createPullRequest()` is skipped
+- **Branch switch-back**: `switchBranch()` to the default branch is skipped
 
 ### Identity method
 
@@ -377,6 +403,12 @@ structure:
 | `url` | `string` | URL to the issue in the tracker's web UI |
 | `comments` | `string[]` | Discussion comments as `**author:** text` |
 | `acceptanceCriteria` | `string` | Acceptance criteria (Azure DevOps only) |
+| `iterationPath?` | `string` | Iteration path / sprint (Azure DevOps only) |
+| `areaPath?` | `string` | Area path / team (Azure DevOps only) |
+| `assignee?` | `string` | Assignee display name |
+| `priority?` | `number` | Priority (1 = Critical … 4 = Low) |
+| `storyPoints?` | `number` | Story points / effort / size |
+| `workItemType?` | `string` | Work item type (e.g. "User Story", "Bug") |
 
 ### The `DatasourceName` type
 
@@ -516,19 +548,23 @@ The `Datasource` interface is consumed by several parts of the pipeline:
 To add a new datasource (e.g., Jira, Linear, GitLab):
 
 1. Create `src/datasources/<name>.ts` exporting a `datasource` object that
-   satisfies the `Datasource` interface (all 13 methods: 5 CRUD + 1 identity
-   + 7 git lifecycle).
+   satisfies the `Datasource` interface (all 14 methods: 5 CRUD + 1 identity
+   + 1 capability query + 7 git lifecycle).
 2. Add the name to the `DatasourceName` union in `src/datasources/interface.ts`.
 3. Import and register the implementation in the `DATASOURCES` map in
    `src/datasources/index.ts`.
 4. Optionally add a URL pattern to the `SOURCE_PATTERNS` array in
    `src/datasources/index.ts` for auto-detection support.
-5. Implement git lifecycle methods. If the datasource does not support git
-   operations (like the markdown datasource), implement them as no-ops. The
-   `buildBranchName` method should still return a valid branch name using the
-   `<username>/dispatch/<number>-<slug>` convention. `createPullRequest`
-   should return `""` for no-op implementations.
-6. Add tests in `src/tests/datasource.test.ts`.
+5. Implement `supportsGit()` to return `true` if the datasource supports git
+   branching, pushing, and PR creation, or `false` if it is a local-only
+   backend. When `supportsGit()` returns `false`, the dispatch pipeline skips
+   all git lifecycle operations.
+6. Implement git lifecycle methods. If `supportsGit()` returns `false`,
+   implement them as no-ops. The `buildBranchName` method should still return
+   a valid branch name using the `<username>/dispatch/<number>-<slug>`
+   convention. `createPullRequest` should return `""` for no-op
+   implementations.
+7. Add tests in `src/tests/datasource.test.ts`.
 
 TypeScript's exhaustiveness checking on the `DatasourceName` union ensures
 that all consumers handle the new backend at compile time.

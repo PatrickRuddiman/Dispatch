@@ -1659,6 +1659,38 @@ describe("error-path handling", () => {
       expect.stringContaining("Could not sync task completion"),
     );
   });
+
+  it("falls back to issueDetailsByFile when parseIssueFilename returns null (md datasource)", async () => {
+    // Simulate md-datasource where filenames are non-numeric
+    vi.mocked(parseIssueFilename).mockReturnValue(null);
+    vi.mocked(writeItemsToTempDir).mockResolvedValue({
+      files: ["/tmp/dispatch-test/1-test.md"],
+      issueDetailsByFile: new Map([["/tmp/dispatch-test/1-test.md", {
+        number: "task-complete-md.md",
+        title: "Task Complete MD",
+        body: "# Test\n\n- [ ] Implement the feature",
+        labels: [],
+        state: "open",
+        url: ".dispatch/specs/task-complete-md.md",
+        comments: [],
+        acceptanceCriteria: "",
+      }]]),
+    });
+
+    const result = await runDispatchPipeline(
+      baseOpts({ noPlan: true }),
+      "/tmp/test",
+    );
+
+    expect(result.completed).toBe(1);
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    expect(ds.update).toHaveBeenCalledWith(
+      "task-complete-md.md",
+      "Task Complete MD",
+      expect.any(String),
+      expect.any(Object),
+    );
+  });
 });
 
 // ─── Feature branch workflow ────────────────────────────────────
@@ -2026,6 +2058,75 @@ describe("feature branch workflow", () => {
     for (const call of worktreeCalls) {
       expect(call[3]).toBe("dispatch/my-feature");
     }
+  });
+});
+
+describe("md-datasource sync fallback", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Set up md-datasource-style issue with non-numeric filename as the number
+    const mdIssue: IssueDetails = {
+      number: "task-complete-md.md",
+      title: "Task Complete Md",
+      body: "# Task\n\n- [ ] Implement the feature",
+      labels: [],
+      state: "open",
+      url: ".dispatch/specs/task-complete-md.md",
+      comments: [],
+      acceptanceCriteria: "",
+    };
+
+    vi.mocked(fetchItemsById).mockResolvedValue([mdIssue]);
+    vi.mocked(writeItemsToTempDir).mockResolvedValue({
+      files: ["/tmp/dispatch-test/task-complete-md.md"],
+      issueDetailsByFile: new Map([
+        ["/tmp/dispatch-test/task-complete-md.md", mdIssue],
+      ]),
+    });
+    vi.mocked(parseTaskFile).mockResolvedValue({
+      path: "/tmp/dispatch-test/task-complete-md.md",
+      tasks: [{
+        index: 0,
+        text: "Implement the feature",
+        line: 3,
+        raw: "- [ ] Implement the feature",
+        file: "/tmp/dispatch-test/task-complete-md.md",
+      }],
+      content: "# Task\n\n- [ ] Implement the feature",
+    });
+    // Return null to simulate non-numeric md-datasource filename
+    vi.mocked(parseIssueFilename).mockReturnValue(null);
+    mocks.mockExecute.mockResolvedValue({
+      success: true,
+      data: { dispatchResult: { task: { index: 0, text: "Implement the feature", line: 3, raw: "- [ ] Implement the feature", file: "/tmp/dispatch-test/task-complete-md.md" }, success: true } },
+      durationMs: 100,
+    });
+    mocks.mockGenerate.mockResolvedValue({
+      commitMessage: "",
+      prTitle: "",
+      prDescription: "",
+      success: false,
+      error: "mock: not configured",
+    });
+  });
+
+  it("calls datasource.update() with filename-based issue ID when parseIssueFilename returns null", async () => {
+    const result = await runDispatchPipeline(
+      baseOpts({ noPlan: true }),
+      "/tmp/test",
+    );
+
+    expect(result.completed).toBe(1);
+    expect(result.failed).toBe(0);
+
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    // datasource.update() should be called with the original md filename as issueId
+    expect(ds.update).toHaveBeenCalledWith(
+      "task-complete-md.md",
+      "Task Complete Md",
+      expect.any(String),
+      expect.any(Object),
+    );
   });
 });
 

@@ -541,12 +541,18 @@ export async function runDispatchPipeline(
                 // Sync checked-off state back to the datasource
                 try {
                   const parsed = parseIssueFilename(task.file);
+                  const updatedContent = await readFile(task.file, "utf-8");
                   if (parsed) {
-                    const updatedContent = await readFile(task.file, "utf-8");
                     const issueDetails = issueDetailsByFile.get(task.file);
                     const title = issueDetails?.title ?? parsed.slug;
                     await datasource.update(parsed.issueId, title, updatedContent, fetchOpts);
                     log.success(`Synced task completion to issue #${parsed.issueId}`);
+                  } else {
+                    const issueDetails = issueDetailsByFile.get(task.file);
+                    if (issueDetails) {
+                      await datasource.update(issueDetails.number, issueDetails.title, updatedContent, fetchOpts);
+                      log.success(`Synced task completion to issue #${issueDetails.number}`);
+                    }
                   }
                 } catch (err) {
                   log.warn(`Could not sync task completion to datasource: ${log.formatErrorChain(err)}`);
@@ -650,14 +656,14 @@ export async function runDispatchPipeline(
 
           try {
             await datasource.switchBranch(featureBranchName, lifecycleOpts);
-            await exec("git", ["merge", branchName, "--no-ff", "-m", `merge: issue #${details.number}`], { cwd });
+            await exec("git", ["merge", branchName, "--no-ff", "-m", `merge: issue #${details.number}`], { cwd, shell: process.platform === "win32" });
             log.debug(`Merged ${branchName} into ${featureBranchName}`);
           } catch (err) {
             const mergeError = `Could not merge ${branchName} into feature branch: ${log.formatErrorChain(err)}`;
             log.warn(mergeError);
             // Abort the failed merge so the repo is left in a clean state
             try {
-              await exec("git", ["merge", "--abort"], { cwd });
+              await exec("git", ["merge", "--abort"], { cwd, shell: process.platform === "win32" });
             } catch { /* merge --abort may fail if there's nothing to abort */ }
             // Record every task in this issue as failed
             for (const task of fileTasks) {
@@ -676,7 +682,7 @@ export async function runDispatchPipeline(
           }
 
           try {
-            await exec("git", ["branch", "-d", branchName], { cwd });
+            await exec("git", ["branch", "-d", branchName], { cwd, shell: process.platform === "win32" });
             log.debug(`Deleted local branch ${branchName}`);
           } catch (err) {
             log.warn(`Could not delete local branch ${branchName}: ${log.formatErrorChain(err)}`);
@@ -888,7 +894,7 @@ export async function dryRunMode(
     return { total: 0, completed: 0, failed: 0, skipped: 0, results: [] };
   }
 
-  const { files } = await writeItemsToTempDir(items);
+  const { files, issueDetailsByFile } = await writeItemsToTempDir(items);
 
   const taskFiles: TaskFile[] = [];
   for (const file of files) {
@@ -908,7 +914,9 @@ export async function dryRunMode(
   log.info(`Dry run — ${allTasks.length} task(s) across ${taskFiles.length} file(s):\n`);
   for (const task of allTasks) {
     const parsed = parseIssueFilename(task.file);
-    const details = parsed ? items.find((item) => item.number === parsed.issueId) : undefined;
+    const details = parsed
+      ? items.find((item) => item.number === parsed.issueId)
+      : issueDetailsByFile.get(task.file);
     const branchInfo = details
       ? ` [branch: ${datasource.buildBranchName(details.number, details.title, username)}]`
       : "";

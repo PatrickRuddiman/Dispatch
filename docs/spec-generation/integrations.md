@@ -82,7 +82,7 @@ datasource).
 
 **Used in:** `src/orchestrator/spec-pipeline.ts` (provider boot at line 208),
 `src/agents/spec.ts` (session creation, prompting)
-**See also:** [Provider Abstraction](../provider-system/provider-overview.md),
+**See also:** [Provider Abstraction](../provider-system/overview.md),
 [OpenCode Backend](../provider-system/opencode-backend.md),
 [Copilot Backend](../provider-system/copilot-backend.md)
 
@@ -158,6 +158,42 @@ unhandled errors.
 | AI did not write temp file | Model misunderstood instructions | Check error message (includes first 300 chars of response); retry |
 | Provider connection refused | External server not running at specified URL | Start the server first, then re-run |
 | Orphaned server process | Error before cleanup ran | Manually kill the provider process; cleanup registry should handle most cases |
+| Null response from `prompt()` | Provider returned empty/null | Spec marked as failed; retried up to `--retries` times |
+
+### What happens if the provider dies mid-prompt
+
+If the AI provider server crashes or becomes unreachable while the spec agent
+is waiting for a response (`provider.prompt(sessionId, specPrompt)`), the
+behavior depends on the provider backend:
+
+- **OpenCode:** The SSE event stream disconnects. The `prompt()` call rejects
+  with a connection error. The spec agent's outer `try/catch`
+  (`src/agents/spec.ts:179-188`) catches the error, logs it with a stack
+  trace via the file logger, and returns `{ success: false }`.
+- **Copilot:** The event listener promise rejects (either from a `session.error`
+  event or the 300-second timeout). Same catch behavior applies.
+
+In both cases:
+
+1. The failed spec is retried up to `--retries` times (default 2) via
+   `withRetry()`.
+2. If all retries fail, the item is counted as `failed` in the summary.
+3. Other items in the batch continue processing independently — a provider
+   failure for one spec does **not** abort the entire batch.
+4. The provider's cleanup function (registered via `registerCleanup()`) runs
+   at pipeline end or on signal exit.
+
+**No automatic provider restart:** If the provider server crashes permanently,
+all subsequent specs in the batch will also fail. The pipeline does not attempt
+to reboot the provider mid-run. Manual intervention (restarting the server,
+or re-running the command) is required.
+
+**No per-prompt timeout:** Unlike the 30-second fetch timeout, there is no
+timeout on `provider.prompt()` calls. A hung provider that neither responds
+nor disconnects will block the spec agent indefinitely. Use Ctrl+C to
+terminate, or set up an external watchdog. See
+[Provider Timeouts](../provider-system/overview.md#prompt-timeouts-and-cancellation)
+for details.
 
 ### Token/context limits and large prompts
 
@@ -373,6 +409,140 @@ plain-text output. The log format includes:
 See the [Chalk reference](../shared-types/integrations.md#chalk) for full
 documentation on chalk color detection and level overrides.
 
+## FileLogger and AsyncLocalStorage (per-issue logging)
+
+**Used in:** `src/orchestrator/spec-pipeline.ts` (scoped per-item logging),
+`src/agents/spec.ts` (prompt/response/event logging within agent)
+**Official docs:** [Node.js AsyncLocalStorage](https://nodejs.org/api/async_context.html#class-asynclocalstorage)
+
+The spec pipeline uses Node.js `AsyncLocalStorage` to scope a `FileLogger`
+instance to each spec generation item, providing per-issue structured logs
+that are invaluable for debugging failures in batch runs.
+
+### How it works
+
+When `--verbose` is enabled, the pipeline creates a `FileLogger` instance per
+item and wraps the generation call in `fileLoggerStorage.run()`:
+
+1. **Pipeline creates logger:** `new FileLogger(id, specCwd)` — where `id` is
+   the issue number or file identifier and `specCwd` is the working directory.
+2. **AsyncLocalStorage scopes it:** `fileLoggerStorage.run(fileLogger, () => ...)`
+   makes the logger available to all async code within the callback.
+3. **Agent accesses it:** `fileLoggerStorage.getStore()?.prompt(...)`,
+   `fileLoggerStorage.getStore()?.response(...)`, etc.
+
+### What gets logged
+
+| Method | Called by | Content |
+|--------|----------|---------|
+| `prompt("spec", prompt)` | Spec agent | Full AI prompt text (before sending) |
+| `response("spec", response)` | Spec agent | Full AI response text |
+| `agentEvent("spec", "completed", duration)` | Spec agent | Completion event with elapsed time |
+| `error(message)` | Spec agent, pipeline | Error details with stack traces |
+| `info(message)` | Pipeline | Output path, generation start, success messages |
+| `phase("Datasource sync")` | Pipeline | Phase transition markers |
+
+### Log file location and naming
+
+Log files are written to `.dispatch/logs/` within the project directory:
+
+```
+.dispatch/logs/issue-{sanitizedId}.log
+```
+
+The issue ID is sanitized by removing all characters except alphanumerics,
+`.`, `_`, and `-`. Examples:
+
+| Item ID | Log file |
+|---------|----------|
+| `42` | `.dispatch/logs/issue-42.log` |
+| `my-feature.md` | `.dispatch/logs/issue-my-feature.md.log` |
+| `Add auth` | `.dispatch/logs/issue-Add-auth.log` |
+
+### Log format
+
+Each line follows the format:
+
+```
+[2025-01-15T10:30:45.123Z] [INFO] Generating spec for #42...
+```
+
+Structured entries (prompts, responses) include separator lines (`─` for
+prompt/response boundaries, `═` for phase transitions) for readability.
+
+### Accessing logs for debugging
+
+To investigate a failed spec generation:
+
+```bash
+# List all log files
+ls .dispatch/logs/
+
+# View log for issue #42
+cat .dispatch/logs/issue-42.log
+
+# Search for errors across all logs
+grep -l "\[ERROR\]" .dispatch/logs/
+```
+
+### Log retention
+
+There is **no automatic log cleanup**. Log files persist in `.dispatch/logs/`
+indefinitely across runs. Subsequent runs for the same issue ID append to
+(or overwrite) the existing log file. To reclaim disk space, delete the
+`.dispatch/logs/` directory manually.
+
+### When logging is inactive
+
+When `--verbose` is not set, no `FileLogger` is created and no log files are
+written. The `fileLoggerStorage.getStore()` calls return `undefined`, and
+the optional chaining (`?.`) skips all logging operations with zero overhead.
+
+---
+
+## Node.js crypto (randomUUID)
+
+**Used in:** `src/agents/spec.ts` (temp file naming)
+**Official docs:** [Node.js crypto.randomUUID](https://nodejs.org/api/crypto.html#cryptorandomuuidoptions)
+
+The `randomUUID()` function from Node.js `node:crypto` generates unique
+temporary file names for the spec agent's temp-file strategy.
+
+### How it is used
+
+At `src/agents/spec.ts:96`, the agent generates a temp filename:
+
+```
+const tmpFilename = `spec-${randomUUID()}.md`;
+```
+
+This produces filenames like `spec-a1b2c3d4-e5f6-7890-abcd-ef1234567890.md`
+in the `.dispatch/tmp/` directory. Each spec generation gets a unique temp
+file, enabling safe concurrent processing.
+
+### UUID collision risk
+
+UUIDv4 (used by `randomUUID()`) generates 122 bits of randomness. The
+probability of a collision is astronomically low — even with 1 billion UUIDs,
+the collision probability is approximately 10⁻¹⁹. For practical spec
+generation batch sizes (even thousands of items), UUID collisions are not a
+concern.
+
+### Node.js version requirements
+
+`crypto.randomUUID()` was added in Node.js 19.0.0 and backported to
+Node.js 16.7.0+. Since dispatch requires Node.js >= 20.12.0 (per
+`package.json` `engines` field), `randomUUID()` is always available.
+
+### Entropy in CI/container environments
+
+`randomUUID()` uses the operating system's cryptographic random number
+generator (`/dev/urandom` on Linux, `CryptGenRandom` on Windows). Modern
+CI environments and containers provide adequate entropy. Unlike older
+`/dev/random` implementations, `/dev/urandom` does not block on low entropy
+and is suitable for non-cryptographic uniqueness guarantees like temp file
+naming.
+
 ## Related documentation
 
 - [Spec Generation Overview](./overview.md) — Pipeline architecture, input
@@ -388,17 +558,25 @@ documentation on chalk color detection and level overrides.
   abstraction, auto-detection, and `IssueDetails` interface
 - [Datasource Integrations](../datasource-system/integrations.md) — How
   datasource integrations work with spec generation
-- [Provider Abstraction](../provider-system/provider-overview.md) — Provider
+- [Provider Abstraction](../provider-system/overview.md) — Provider
   lifecycle and backend implementations
+- [Provider Timeouts](../provider-system/overview.md#prompt-timeouts-and-cancellation) —
+  Timeout limitations for provider `prompt()` calls
 - [CLI Argument Parser](../cli-orchestration/cli.md) — `--spec` mode flags
   and exit codes
 - [Configuration](../cli-orchestration/configuration.md) — Persistent config
   for `source`, `provider`, and other settings
 - [Shared Utilities — Slugify](../shared-utilities/slugify.md) — Slug
   generation used for spec output filenames
+- [Shared Utilities — Timeout](../shared-utilities/timeout.md) — `withTimeout`
+  deadline wrapper used for fetch operations
 - [Logger](../shared-types/logger.md) — Structured logging facade used for
   spec generation progress and error reporting
+- [Cleanup Registry](../shared-types/cleanup.md) — Process-level cleanup
+  safety net for provider resources
 - [Spec Generator Tests](../testing/spec-generator-tests.md) — Test suite
   covering spec generation utility functions
 - [Batch Confirmation](../prereqs-and-safety/confirm-large-batch.md) — Large
   batch threshold logic and confirmation prompt details
+- [Testing Overview](../testing/overview.md) — Project-wide test framework
+  and test coverage map including spec generator tests

@@ -162,7 +162,10 @@ handling, see
   behavior, edge cases, and CRLF handling
 - [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) --
   File I/O safety and concurrent write analysis
-- [Provider Overview](../provider-system/provider-overview.md) -- The AI
+- [Dispatch Pipeline](../cli-orchestration/dispatch-pipeline.md) -- How
+  the pipeline establishes per-issue file logger contexts using the parser's
+  task file information
+- [Provider Overview](../provider-system/overview.md) -- The AI
   provider sessions used by planner and dispatcher
 - [Run State Persistence](../git-and-worktree/run-state.md) -- Task status
   persistence that uses `Task.file` and `Task.line` for ID construction

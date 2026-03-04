@@ -470,7 +470,7 @@ credentials because all external SDK calls are mocked.
 
 - [Testing Overview](./overview.md) -- project-wide test strategy, framework,
   and coverage map
-- [Provider Overview](../provider-system/provider-overview.md) -- architecture
+- [Provider Overview](../provider-system/overview.md) -- architecture
   of the provider abstraction layer
 - [Provider Detection](../prereqs-and-safety/provider-detection.md) -- Binary
   detection module that probes the same provider binaries tested here
@@ -486,5 +486,9 @@ credentials because all external SDK calls are mocked.
   patterns vs SDK mocking patterns
 - [Shared Utilities testing](../shared-utilities/testing.md) -- comparison:
   fake timer patterns vs mock patterns
+- [Type Guards](../shared-utilities/guards.md) -- `hasProperty` function tested
+  indirectly through OpenCode provider SSE event filtering tests
 - [Timeout Utility](../shared-utilities/timeout.md) -- `withTimeout()` pattern
   referenced by the provider prompt lifecycle
+- [Dispatch Pipeline Tests](./dispatch-pipeline-tests.md) -- Pipeline test
+  suite that exercises provider boot and cleanup through the orchestrator

@@ -12,7 +12,7 @@ file I/O safety, and how the orchestrator mitigates these risks.
 2. **Modify** the target line in memory (regex replace)
 3. **Write** the entire file back to disk (`writeFile`)
 
-This pattern is used in `src/parser.ts:99-121`.
+This pattern is used in `src/parser.ts:121-144`.
 
 ### Why markTaskComplete re-reads the file from disk
 
@@ -102,7 +102,7 @@ for full details on the group-aware batch-sequential algorithm.
   window for collision on the `markTaskComplete` call is narrow.
 - **The parser detects conflicts**: If the file was modified between the read
   and the regex match, `markTaskComplete` throws an error at
-  `src/parser.ts:113-117` ("does not match expected unchecked pattern"). This
+  `src/parser.ts:137-140` ("does not match expected unchecked pattern"). This
   acts as a safety net -- a corrupted write would cause the line to no longer
   match `UNCHECKED_RE`, and the error would surface rather than silently
   corrupting data.
@@ -137,7 +137,7 @@ complete** because:
 
 1. `markTaskComplete` replaces content on a single line without adding or
    removing lines
-2. The `lines.join("\n")` at `src/parser.ts:120` preserves the line structure
+2. The `lines.join(eol)` at `src/parser.ts:144` preserves the line structure
 
 However, if the file is modified externally (e.g., a user adds or removes
 lines), the stored line numbers will be wrong. The parser's safety check at
@@ -182,7 +182,7 @@ There is no special handling for this case -- it results in a failed task.
 ### External modification detection
 
 When `markTaskComplete` re-reads the file, it checks that the target line still
-matches the unchecked pattern (`src/parser.ts:113-117`). If the file was
+matches the unchecked pattern (`src/parser.ts:134-140`). If the file was
 externally modified and the target line has changed, the function throws a
 descriptive error:
 
@@ -198,7 +198,7 @@ failed in the [TUI](../cli-orchestration/tui.md) with the error message.
 ### Encoding
 
 Both `readFile` and `writeFile` use explicit `"utf-8"` encoding
-(`src/parser.ts:92`, `src/parser.ts:100`, `src/parser.ts:120`). This means:
+(`src/parser.ts:114`, `src/parser.ts:122`, `src/parser.ts:144`). This means:
 
 - Files are assumed to be UTF-8
 - Non-UTF-8 files (e.g., UTF-16, Latin-1) will be read without error but
@@ -207,16 +207,29 @@ Both `readFile` and `writeFile` use explicit `"utf-8"` encoding
 
 ### Line endings on write
 
-`markTaskComplete` always writes LF (`\n`) line endings because it splits on
-`\n` and joins with `\n` (`src/parser.ts:120`). This means:
+`markTaskComplete` detects and preserves the original line ending style
+(`src/parser.ts:123`). Before processing, it checks whether the raw file
+content contains `\r\n` sequences:
 
-- **LF files**: Preserved as-is
-- **CRLF files**: Converted to LF on write. The original `\r\n` endings are
-  not preserved because the split/join cycle strips the `\r` characters.
+```typescript
+const eol = content.includes("\r\n") ? "\r\n" : "\n";
+```
 
-This is a known limitation. If preserving CRLF endings is important (e.g., on
-Windows repositories with `core.autocrlf = false`), the `markTaskComplete`
-function would need to detect and preserve the original line ending style.
+After modifying the target line, it rejoins with the detected EOL style
+(`src/parser.ts:144`):
+
+```typescript
+await writeFile(task.file, lines.join(eol), "utf-8");
+```
+
+This means:
+
+- **LF files**: Preserved as LF
+- **CRLF files**: Preserved as CRLF — the original `\r\n` endings are
+  maintained through the round-trip
+
+This behavior is verified by tests at `src/tests/parser.test.ts:730-770`
+which confirm both CRLF and LF round-trip correctly.
 
 ## How TaskFile.content is consumed downstream
 
@@ -315,3 +328,7 @@ modules that only need the types.
   lifecycle driven by the orchestrator batching loop
 - [Run State](../git-and-worktree/run-state.md) -- Atomic write comparison
   with the read-modify-write pattern discussed here
+- [Parser Tests](../testing/parser-tests.md) -- Comprehensive test suite
+  (62 tests) covering the parsing and mutation functions described here
+- [Testing Overview](../testing/overview.md) -- Project-wide test framework
+  and coverage map

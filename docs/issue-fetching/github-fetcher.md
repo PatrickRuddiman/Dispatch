@@ -19,7 +19,9 @@ interface.
 
 > **Note:** The [prerequisite checker](../prereqs-and-safety/prereqs.md)
 > validates `gh` availability at startup when the datasource is `github`,
-> but does not enforce a minimum version.
+> but does not enforce a minimum version. See also
+> [Prerequisites & Safety Checks](../prereqs-and-safety/overview.md) for the
+> full list of environment checks.
 
 ### Install the `gh` CLI
 
@@ -269,6 +271,8 @@ git repository with a GitHub remote, the `gh` command fails.
   that invokes issue fetchers
 - [Datasource Testing](../datasource-system/testing.md) -- Test coverage
   (note: the GitHub datasource/fetcher has no unit tests)
+- [Prerequisites & Safety Checks](../prereqs-and-safety/overview.md) --
+  How `checkPrereqs()` validates `gh` CLI availability at startup
 
 ## External references
 

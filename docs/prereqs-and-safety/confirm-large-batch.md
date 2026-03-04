@@ -162,3 +162,7 @@ without producing console noise.
     for configuration validation, which covers related threshold logic.
 -   [CLI Orchestration](../cli-orchestration/overview.md) -- The runner
     that uses this prompt in the respec path.
+-   [Runner Tests](../testing/runner-tests.md) -- Unit tests covering the
+    respec discovery flow and large batch confirmation interaction.
+-   [Testing Overview](../testing/overview.md) -- Project-wide test
+    framework and coverage map.

@@ -33,6 +33,7 @@ describe("checkProviderInstalled", () => {
     expect(result).toBe(true);
     expect(mockExecFile).toHaveBeenCalledWith("claude", ["--version"], {
       shell: process.platform === "win32",
+      timeout: 5000,
     });
   });
 
@@ -53,7 +54,7 @@ describe("checkProviderInstalled", () => {
 
     await checkProviderInstalled("claude");
 
-    expect(mockExecFile).toHaveBeenCalledWith("claude", ["--version"], { shell: true });
+    expect(mockExecFile).toHaveBeenCalledWith("claude", ["--version"], { shell: true, timeout: 5000 });
   });
 
   it("does not pass shell: true when platform is not 'win32'", async () => {
@@ -65,6 +66,39 @@ describe("checkProviderInstalled", () => {
 
     await checkProviderInstalled("copilot");
 
-    expect(mockExecFile).toHaveBeenCalledWith("copilot", ["--version"], { shell: false });
+    expect(mockExecFile).toHaveBeenCalledWith("copilot", ["--version"], { shell: false, timeout: 5000 });
+  });
+
+  it("passes a timeout option to execFile", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "1.0.0\n" });
+
+    await checkProviderInstalled("claude");
+
+    const options = mockExecFile.mock.calls[0][2];
+    expect(options).toHaveProperty("timeout");
+    expect(options.timeout).toBeGreaterThan(0);
+  });
+
+  it("returns false when execFile rejects due to timeout", async () => {
+    const error = Object.assign(new Error("Command timed out"), {
+      killed: true,
+      signal: "SIGTERM",
+    });
+    mockExecFile.mockRejectedValue(error);
+
+    const result = await checkProviderInstalled("claude");
+
+    expect(result).toBe(false);
+  });
+
+  it("returns false when the binary times out", async () => {
+    const err = Object.assign(new Error("process timed out"), {
+      killed: true,
+    });
+    mockExecFile.mockRejectedValue(err);
+
+    const result = await checkProviderInstalled("opencode");
+
+    expect(result).toBe(false);
   });
 });

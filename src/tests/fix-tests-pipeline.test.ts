@@ -192,6 +192,13 @@ describe("buildFixTestsPrompt", () => {
     expect(prompt).toContain("minimal fixes");
     expect(prompt).toContain("Do NOT commit");
   });
+
+  it("includes environment context section", () => {
+    const prompt = buildFixTestsPrompt(fixture, "/project");
+    expect(prompt).toContain("## Environment");
+    expect(prompt).toContain("Operating System");
+    expect(prompt).toContain("run commands directly");
+  });
 });
 
 describe("runFixTestsPipeline", () => {

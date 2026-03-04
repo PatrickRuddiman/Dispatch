@@ -20,7 +20,7 @@ const WORKTREE_DIR = ".dispatch/worktrees";
 
 /** Execute a git command in the given working directory and return stdout. */
 async function git(args: string[], cwd: string): Promise<string> {
-  const { stdout } = await exec("git", args, { cwd });
+  const { stdout } = await exec("git", args, { cwd, shell: process.platform === "win32" });
   return stdout;
 }
 

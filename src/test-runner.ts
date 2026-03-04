@@ -66,7 +66,7 @@ export async function runTests(cwd: string, timeoutMs = 300_000): Promise<TestRu
 
   log.debug(`Running test command: ${command} in ${cwd}`);
 
-  const child = spawn("npm", ["test"], { cwd, shell: false });
+  const child = spawn("npm", ["test"], { cwd, shell: process.platform === "win32" });
 
   const spawnPromise = new Promise<TestRunResult>((resolve, reject) => {
     let stdout = "";

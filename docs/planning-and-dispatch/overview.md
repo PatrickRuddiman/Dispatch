@@ -106,8 +106,10 @@ only the task metadata and working directory.
 | `git.ts` | Stage changes and create conventional commits | `src/git.ts` — see [Git Operations](./git.md) |
 
 See the [Testing Guide](../task-parsing/testing-guide.md) for how the parser
-functions are tested, and the [Parser Tests](../testing/parser-tests.md) for
-a detailed breakdown of all 62 test cases.
+functions are tested, the [Parser Tests](../testing/parser-tests.md) for
+a detailed breakdown of all 62 test cases, and the
+[Planner & Executor Tests](../testing/planner-executor-tests.md) for the
+agent test suites.
 
 ## Key design decisions
 
@@ -125,7 +127,8 @@ See [Planner Agent](./planner.md) for details on when to use `--no-plan`.
 
 Every task -- whether in the planning or execution phase -- gets a fresh
 provider session via `createSession()`. This prevents context rot and ensures
-one task's conversation history cannot influence another.
+one task's conversation history cannot influence another. See also the
+[Provider Abstraction Layer](../provider-system/overview.md#session-isolation-model).
 
 See [Dispatcher](./dispatcher.md#session-isolation) for details on isolation
 guarantees.
@@ -189,7 +192,7 @@ concurrency-related concerns.
   `--concurrency`, and `--dry-run` flag documentation
 - [Configuration System](../cli-orchestration/configuration.md) -- Persistent
   defaults for `--concurrency`, `--provider`, and other pipeline options
-- [Provider Abstraction](../provider-system/provider-overview.md) -- Provider interface and backends
+- [Provider Abstraction](../provider-system/overview.md) -- Provider interface and backends
 - [OpenCode Backend](../provider-system/opencode-backend.md) -- OpenCode
   provider setup and async prompt model
 - [Copilot Backend](../provider-system/copilot-backend.md) -- Copilot
@@ -203,6 +206,8 @@ concurrency-related concerns.
 - [Task Parsing API Reference](../task-parsing/api-reference.md) --
   `parseTaskFile`, `buildTaskContext`, `markTaskComplete`, and `groupTasksByMode`
   function contracts
+- [Markdown Syntax Reference](../task-parsing/markdown-syntax.md) -- Checkbox
+  syntax and `(P)`/`(S)`/`(I)` mode prefixes that determine task execution order
 - [Task Parsing Testing Guide](../task-parsing/testing-guide.md) -- How to
   run and extend parser tests
 - [Spec Generation](../spec-generation/overview.md) -- How the spec pipeline
@@ -213,12 +218,17 @@ concurrency-related concerns.
 - [Datasource Helpers](../datasource-system/datasource-helpers.md) -- Temp file
   writing, issue ID extraction, and auto-close logic bridging the datasource
   layer with the orchestrator
-- [Testing Overview](../testing/overview.md) -- Test suite structure (note:
-  planner, dispatcher, and git modules are not currently unit-tested)
+- [Testing Overview](../testing/overview.md) -- Test suite structure
+- [Planner & Executor Tests](../testing/planner-executor-tests.md) -- Unit
+  tests for the planner and executor agents
 - [Parser Tests](../testing/parser-tests.md) -- Detailed breakdown of all 62
   parser tests covering the functions this pipeline depends on
+- [Dispatch Pipeline Tests](../testing/dispatch-pipeline-tests.md) -- Tests
+  for the dispatch pipeline lifecycle, retry mechanics, and worktree mode
 - [Prerequisites & Safety Checks](../prereqs-and-safety/overview.md) --
   Environment validation (Node.js, git, CLI tools) that runs before this
   pipeline starts
 - [Git & Worktree Management](../git-and-worktree/overview.md) -- Worktree
   lifecycle and isolation model used by `(I)` mode tasks in this pipeline
+- [Run State Persistence](../git-and-worktree/run-state.md) -- Task execution
+  state tracking designed to complement this pipeline

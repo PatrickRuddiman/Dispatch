@@ -3,13 +3,19 @@
 The GitHub datasource reads and writes issues using the `gh` CLI. It is
 implemented in `src/datasources/github.ts` and registered under the name
 `"github"` in the [datasource registry](./overview.md#the-datasource-registry).
+The `gh` CLI must be available on PATH; see the
+[Prerequisite Checker](../prereqs-and-safety/prereqs.md) for how this is
+validated at startup.
 
 ## What it does
 
 The GitHub datasource translates the [`Datasource` interface](./overview.md#the-datasource-interface) operations
 into `gh` CLI and `git` commands. It provides five CRUD operations for issue
-management, one identity method (`getUsername`), and seven git lifecycle
-operations for branching, committing, pushing, and pull request creation.
+management, one identity method (`getUsername`), seven git lifecycle operations
+for branching, committing, pushing, and pull request creation, and one
+capability query method (`supportsGit`). It also exports a standalone
+`getCommitMessages()` utility function used by the
+[datasource helpers](./datasource-helpers.md) for PR body construction.
 
 ### CRUD operations
 
@@ -189,6 +195,43 @@ match (unexpected output format), the issue number defaults to `"0"`.
 `create()` rather than re-fetching from GitHub. Labels, comments, and
 acceptanceCriteria are empty.
 
+## Capability query
+
+### `supportsGit()`
+
+Returns `true`. This signals to the dispatch pipeline that the GitHub
+datasource supports all git lifecycle operations (branching, committing,
+pushing, PR creation). The pipeline checks this method to determine whether
+to invoke git lifecycle methods after task completion. The
+[markdown datasource](./markdown-datasource.md) returns `false`, which causes
+the pipeline to skip branch creation, commits, pushes, and PR creation.
+
+## `getCommitMessages()` export
+
+The GitHub datasource module exports a standalone `getCommitMessages()` function
+(not part of the `Datasource` interface) that retrieves commit message subject
+lines from the current branch relative to a given default branch:
+
+```
+getCommitMessages(defaultBranch: string, cwd: string): Promise<string[]>
+```
+
+**How it works:** Runs `git log origin/<defaultBranch>..HEAD --pretty=format:%s`
+to list commits on the current branch that are not on the default branch. Each
+line of output is one commit subject.
+
+**Error handling:** If `git log` fails (e.g., the branch has not been pushed,
+or the default branch does not exist on the remote), the function silently
+returns an empty array. It never throws.
+
+**Used by:** The [`buildPrTitle()`](./datasource-helpers.md) and
+[`buildPrBody()`](./datasource-helpers.md) helper functions in
+`src/orchestrator/datasource-helpers.ts` call `getCommitMessages()` to
+construct PR titles and bodies from the actual commits on the branch. When a
+single commit exists, the PR title is that commit's subject. When multiple
+commits exist, the PR title is the oldest commit's subject with a
+`(+N more)` suffix.
+
 ## Git lifecycle operation details
 
 The GitHub datasource implements all seven git lifecycle methods using the `git`
@@ -201,15 +244,63 @@ skipping the branch lifecycle.
 
 ### `getDefaultBranch()`
 
-Detects the repository's default branch name using a two-step fallback:
+Detects the repository's default branch name using a three-tier fallback chain
+with branch name validation as a security measure against command injection:
+
+```mermaid
+flowchart TD
+    A["getDefaultBranch(cwd)"] --> B["git symbolic-ref<br/>refs/remotes/origin/HEAD"]
+    B -->|Success| C["Strip refs/remotes/origin/ prefix"]
+    C --> D{"isValidBranchName(branch)?"}
+    D -->|Valid| E["Return branch name"]
+    D -->|Invalid| F["Throw InvalidBranchNameError"]
+
+    B -->|Failure| G{"Is InvalidBranchNameError?"}
+    G -->|Yes| F
+    G -->|No| H["git rev-parse<br/>--verify main"]
+    H -->|Success| I["Return 'main'"]
+    H -->|Failure| J["Return 'master'"]
+
+    style F fill:#f66,stroke:#333,color:#fff
+    style E fill:#6f6,stroke:#333
+    style I fill:#6f6,stroke:#333
+    style J fill:#ff6,stroke:#333
+```
 
 1. Tries `git symbolic-ref refs/remotes/origin/HEAD` to read the remote HEAD
    reference. If this succeeds, extracts the branch name from the last path
-   segment (e.g., `refs/remotes/origin/main` yields `"main"`).
+   segment (e.g., `refs/remotes/origin/main` yields `"main"`). The extracted
+   branch name is then validated using `isValidBranchName()` from
+   `src/helpers/branch-validation.ts`.
 2. If step 1 fails (common when `origin/HEAD` is not set, e.g., after a
    `git clone --bare` or when the remote HEAD has never been fetched), tries
    `git rev-parse --verify main` to check if a `main` branch exists.
 3. If both fail, falls back to `"master"`.
+
+**Repositories with neither `main` nor `master`:** If the repository uses a
+non-standard default branch name (e.g., `develop`, `trunk`), step 1
+(`symbolic-ref`) will detect it correctly as long as `origin/HEAD` is set.
+If `origin/HEAD` is not set, the function will incorrectly fall back to
+`"master"`, which may cause subsequent git operations to fail. Run
+`git remote set-head origin --auto` to fix this (see
+[troubleshooting](#troubleshooting) below).
+
+**Branch name validation (security):** The `isValidBranchName()` function
+enforces strict git refname rules to prevent command injection via crafted
+remote HEAD references. A branch name must:
+
+- Be 1–255 characters long
+- Contain only `[a-zA-Z0-9._\-/]` characters
+- Not start or end with `/`
+- Not contain `..` (parent traversal), `@{` (reflog syntax), or `//`
+- Not end with `.lock`
+
+If validation fails, an `InvalidBranchNameError` is thrown. This error is
+**not** caught by the fallback chain — it propagates to the caller, preventing
+potentially dangerous branch names (e.g., `$(whoami)`, names with spaces)
+from being used in subsequent shell commands. This is a defense-in-depth
+measure since `execFile` already prevents shell injection by passing arguments
+as an argv array rather than through a shell.
 
 **Troubleshooting `symbolic-ref` failures:** Run
 `git remote set-head origin --auto` to set `origin/HEAD` from the remote,
@@ -255,7 +346,7 @@ not require explicit remote/branch arguments.
 
 ### `commitAllChanges()`
 
-Three-step process (`src/datasources/github.ts:209-217`):
+Three-step process (`src/datasources/github.ts:269-277`):
 
 1. `git add -A` -- stages all changes (new, modified, deleted files).
 2. `git diff --cached --stat` -- checks if anything is actually staged.
@@ -263,6 +354,22 @@ Three-step process (`src/datasources/github.ts:209-217`):
    is staged, the method returns without committing (no-op).
 
 This prevents empty commits when tasks produce no file changes.
+
+**Interaction with `.gitignore`:** The `git add -A` command respects the
+repository's `.gitignore` rules. Files matching `.gitignore` patterns are not
+staged. However, `git add -A` stages **everything** that is not gitignored,
+including files created by other concurrent tasks or processes. This means:
+
+- Files created by the AI agent that should not be committed (e.g., build
+  artifacts, temp files) must be covered by `.gitignore` rules.
+- When running with `--concurrency > 1`, one task's `commitAllChanges()` call
+  can stage uncommitted changes from another task that is still in progress.
+  See [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md)
+  for details on this cross-contamination risk.
+- The dispatch pipeline calls
+  [`ensureGitignoreEntry()`](../git-and-worktree/gitignore-helper.md) to add
+  `.dispatch/worktrees/` to `.gitignore` at startup, preventing worktree
+  metadata from being staged.
 
 ### `createPullRequest()`
 
@@ -280,6 +387,26 @@ If the `gh pr create` command fails with an "already exists" error (a PR
 already exists for this branch), the method falls back to
 `gh pr view <branchName> --json url --jq .url` to retrieve and return the
 existing PR's URL.
+
+## The `GITHUB_REPOSITORY` environment variable
+
+The module's docblock mentions `GITHUB_REPOSITORY` as an alternative to
+working-directory-based repository detection. This is a **`gh` CLI convention**,
+not a dispatch-specific feature. The `gh` CLI uses `GITHUB_REPOSITORY` (format:
+`owner/repo`) to determine the target repository when the current working
+directory is not inside a git repository.
+
+This environment variable is automatically set by
+[GitHub Actions](https://docs.github.com/en/actions/learn-github-actions/variables#default-environment-variables)
+in all workflow runs (e.g., `GITHUB_REPOSITORY=octocat/Hello-World`). It allows
+dispatch to operate correctly in CI/CD environments where the checkout directory
+may not have a full git history or the remote URL may not be configured.
+
+**In dispatch's code**, the variable is never read directly — it is consumed
+entirely by the `gh` CLI binary through environment variable inheritance (the
+`execFile` calls inherit the parent process environment). When `gh` detects
+`GITHUB_REPOSITORY` in the environment, it uses it as the default repository
+context for all operations, making `--repo` flags unnecessary.
 
 ## Rate limits
 
@@ -305,16 +432,50 @@ All errors from the `gh` CLI propagate as-is:
 |-------------|-----------|---------|
 | `gh` not installed | `ENOENT` from `execFile` | `Error: spawn gh ENOENT` |
 | Not authenticated | Non-zero exit code | `gh: Not logged in` |
+| Token expired or revoked | Non-zero exit code | `Your token has expired` or `Bad credentials` |
 | Issue not found | Non-zero exit code | `issue not found` |
 | Malformed JSON output | `Error` with truncated context | `Failed to parse GitHub CLI output: <first 200 chars>` |
 | Network failure | Non-zero exit code | Connection timeout |
+| Branch name injection | `InvalidBranchNameError` | `Invalid branch name: "$(whoami)"` |
+
+### Token expiry and revocation mid-operation
+
+The `gh` CLI does not refresh tokens automatically during a long-running
+dispatch session. If a token expires or is revoked while tasks are being
+processed:
+
+- The next `gh` command will fail with an authentication error (e.g.,
+  `"Bad credentials"` or `"Your token has expired"`).
+- The error propagates unhandled — there is no retry or token-refresh logic
+  in the datasource layer.
+- The affected task is marked as failed, and the pipeline continues with
+  remaining tasks (see the orchestrator's
+  [catch-and-continue pattern](../architecture.md#error-handling-strategy)).
+- All subsequent `gh` operations for other tasks will also fail if they use
+  the same expired token.
+
+**Mitigation:** Use long-lived tokens (PATs with no expiration) for batch
+operations, or ensure the `gh` CLI's OAuth token has sufficient remaining
+lifetime before starting a large dispatch run. In GitHub Actions, the
+`GITHUB_TOKEN` is automatically refreshed per-job, so expiry is not a concern
+for CI/CD workflows.
+
+### JSON parsing guards
 
 The `JSON.parse(stdout)` calls in `list()` and `fetch()`
-(`src/datasources/github.ts:105-108` and `src/datasources/github.ts:148-151`)
+(`src/datasources/github.ts:122-126` and `src/datasources/github.ts:164-169`)
 are wrapped in `try/catch` blocks. If the `gh` CLI produces non-JSON output
 (e.g., an HTML error page or a warning message), the catch block throws a
 descriptive `Error` that includes the first 200 characters of the unexpected
 output for debugging context.
+
+### Minimum `gh` CLI version
+
+No minimum `gh` CLI version is enforced by the datasource. The commands used
+(`issue list`, `issue view`, `issue edit`, `issue close`, `issue create`,
+`pr create`, `pr view`) are stable across all modern `gh` CLI versions (2.x+).
+The `--json` output flag used by `list()` and `fetch()` was introduced in
+`gh` 2.0.0 (August 2021).
 
 There is no subprocess timeout on any `gh` command. A hung `gh` process will
 block the pipeline indefinitely.
@@ -360,7 +521,7 @@ uses only the `origin` remote. Use `--source github` to force GitHub.
 - [Integrations & Troubleshooting](./integrations.md) -- Cross-cutting
   subprocess and error-handling concerns
 - [Datasource Testing](./testing.md) -- Test coverage for the datasource
-  system (note: the GitHub datasource has no unit tests)
+  system including the GitHub datasource test suites
 - [GitHub Fetcher (deprecated)](../issue-fetching/github-fetcher.md) -- The
   legacy fetcher shim that delegates to this datasource
 - [Deprecated Compatibility Layer](../deprecated-compat/overview.md) -- How
@@ -369,14 +530,23 @@ uses only the `origin` remote. Use `--source github` to force GitHub.
   `--no-branch` flag documentation
 - [Slugify Utility](../shared-utilities/slugify.md) -- The `slugify()` function
   used by `buildBranchName()` to sanitize titles
+- [Branch Validation](../git-and-worktree/branch-validation.md) -- The
+  `isValidBranchName()` function and `InvalidBranchNameError` class used by
+  `getDefaultBranch()` for security validation
+- [Dispatch Pipeline](../cli-orchestration/dispatch-pipeline.md) -- The
+  execution engine that invokes datasource list, fetch, update, and git
+  lifecycle operations
 - [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) -- The
   pipeline that consumes datasource git lifecycle operations
 - [Spec Generation](../spec-generation/overview.md) -- The `--spec` pipeline
   that fetches issues via datasources
 - [Testing Overview](../testing/overview.md) -- Project-wide test suite
-  (note: the GitHub datasource has no unit tests)
 - [Prerequisites & Safety Checks](../prereqs-and-safety/overview.md) -- The
   `checkPrereqs()` function that validates `gh` CLI availability
 - [Prerequisite Checker Details](../prereqs-and-safety/prereqs.md) --
   Detailed validation logic for the `gh` binary check that gates GitHub
   datasource operations
+- [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) --
+  Concurrent write safety concerns relevant to `commitAllChanges()`
+- [Gitignore Helper](../git-and-worktree/gitignore-helper.md) -- How
+  `.dispatch/worktrees/` is added to `.gitignore` at startup

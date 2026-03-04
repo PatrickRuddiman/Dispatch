@@ -65,6 +65,7 @@ export async function detectWorkItemType(
 
     const { stdout } = await exec("az", args, {
       cwd: opts.cwd || process.cwd(),
+      shell: process.platform === "win32",
     });
 
     const types: { name: string }[] = JSON.parse(stdout);
@@ -100,6 +101,7 @@ export async function detectDoneState(
 
     const { stdout } = await exec("az", args, {
       cwd: opts.cwd || process.cwd(),
+      shell: process.platform === "win32",
     });
 
     const states: { name: string; category?: string }[] = JSON.parse(stdout);
@@ -170,6 +172,7 @@ export const datasource: Datasource = {
 
     const { stdout } = await exec("az", args, {
       cwd: opts.cwd || process.cwd(),
+      shell: process.platform === "win32",
     });
 
     let data;
@@ -198,6 +201,7 @@ export const datasource: Datasource = {
 
       const { stdout: batchStdout } = await exec("az", batchArgs, {
         cwd: opts.cwd || process.cwd(),
+        shell: process.platform === "win32",
       });
 
       let batchItems;
@@ -256,6 +260,7 @@ export const datasource: Datasource = {
 
     const { stdout } = await exec("az", args, {
       cwd: opts.cwd || process.cwd(),
+      shell: process.platform === "win32",
     });
 
     let item;
@@ -288,7 +293,7 @@ export const datasource: Datasource = {
     ];
     if (opts.org) args.push("--org", opts.org);
     if (opts.project) args.push("--project", opts.project);
-    await exec("az", args, { cwd: opts.cwd || process.cwd() });
+    await exec("az", args, { cwd: opts.cwd || process.cwd(), shell: process.platform === "win32" });
   },
 
   async close(
@@ -310,6 +315,7 @@ export const datasource: Datasource = {
       if (opts.project) showArgs.push("--project", opts.project);
       const { stdout } = await exec("az", showArgs, {
         cwd: opts.cwd || process.cwd(),
+        shell: process.platform === "win32",
       });
       try {
         const item = JSON.parse(stdout);
@@ -334,7 +340,7 @@ export const datasource: Datasource = {
     ];
     if (opts.org) args.push("--org", opts.org);
     if (opts.project) args.push("--project", opts.project);
-    await exec("az", args, { cwd: opts.cwd || process.cwd() });
+    await exec("az", args, { cwd: opts.cwd || process.cwd(), shell: process.platform === "win32" });
   },
 
   async create(
@@ -369,6 +375,7 @@ export const datasource: Datasource = {
 
     const { stdout } = await exec("az", args, {
       cwd: opts.cwd || process.cwd(),
+      shell: process.platform === "win32",
     });
 
     let item;
@@ -387,7 +394,7 @@ export const datasource: Datasource = {
 
   async getDefaultBranch(opts: DispatchLifecycleOptions): Promise<string> {
     try {
-      const { stdout } = await exec("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], { cwd: opts.cwd });
+      const { stdout } = await exec("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], { cwd: opts.cwd, shell: process.platform === "win32" });
       const parts = stdout.trim().split("/");
       const branch = parts[parts.length - 1];
       if (!isValidBranchName(branch)) {
@@ -399,7 +406,7 @@ export const datasource: Datasource = {
         throw err;
       }
       try {
-        await exec("git", ["rev-parse", "--verify", "main"], { cwd: opts.cwd });
+        await exec("git", ["rev-parse", "--verify", "main"], { cwd: opts.cwd, shell: process.platform === "win32" });
         return "main";
       } catch {
         return "master";
@@ -409,7 +416,7 @@ export const datasource: Datasource = {
 
   async getUsername(opts: DispatchLifecycleOptions): Promise<string> {
     try {
-      const { stdout } = await exec("git", ["config", "user.name"], { cwd: opts.cwd });
+      const { stdout } = await exec("git", ["config", "user.name"], { cwd: opts.cwd, shell: process.platform === "win32" });
       const name = slugify(stdout.trim());
       if (name) return name;
     } catch {
@@ -417,7 +424,7 @@ export const datasource: Datasource = {
     }
 
     try {
-      const { stdout } = await exec("az", ["account", "show", "--query", "user.name", "-o", "tsv"], { cwd: opts.cwd });
+      const { stdout } = await exec("az", ["account", "show", "--query", "user.name", "-o", "tsv"], { cwd: opts.cwd, shell: process.platform === "win32" });
       const name = slugify(stdout.trim());
       if (name) return name;
     } catch {
@@ -425,7 +432,7 @@ export const datasource: Datasource = {
     }
 
     try {
-      const { stdout } = await exec("az", ["account", "show", "--query", "user.principalName", "-o", "tsv"], { cwd: opts.cwd });
+      const { stdout } = await exec("az", ["account", "show", "--query", "user.principalName", "-o", "tsv"], { cwd: opts.cwd, shell: process.platform === "win32" });
       const principal = stdout.trim();
       const prefix = principal.split("@")[0];
       const name = slugify(prefix);
@@ -451,11 +458,11 @@ export const datasource: Datasource = {
       throw new InvalidBranchNameError(branchName);
     }
     try {
-      await exec("git", ["checkout", "-b", branchName], { cwd: opts.cwd });
+      await exec("git", ["checkout", "-b", branchName], { cwd: opts.cwd, shell: process.platform === "win32" });
     } catch (err) {
       const message = log.extractMessage(err);
       if (message.includes("already exists")) {
-        await exec("git", ["checkout", branchName], { cwd: opts.cwd });
+        await exec("git", ["checkout", branchName], { cwd: opts.cwd, shell: process.platform === "win32" });
       } else {
         throw err;
       }
@@ -463,20 +470,20 @@ export const datasource: Datasource = {
   },
 
   async switchBranch(branchName: string, opts: DispatchLifecycleOptions): Promise<void> {
-    await exec("git", ["checkout", branchName], { cwd: opts.cwd });
+    await exec("git", ["checkout", branchName], { cwd: opts.cwd, shell: process.platform === "win32" });
   },
 
   async pushBranch(branchName: string, opts: DispatchLifecycleOptions): Promise<void> {
-    await exec("git", ["push", "--set-upstream", "origin", branchName], { cwd: opts.cwd });
+    await exec("git", ["push", "--set-upstream", "origin", branchName], { cwd: opts.cwd, shell: process.platform === "win32" });
   },
 
   async commitAllChanges(message: string, opts: DispatchLifecycleOptions): Promise<void> {
-    await exec("git", ["add", "-A"], { cwd: opts.cwd });
-    const { stdout } = await exec("git", ["diff", "--cached", "--stat"], { cwd: opts.cwd });
+    await exec("git", ["add", "-A"], { cwd: opts.cwd, shell: process.platform === "win32" });
+    const { stdout } = await exec("git", ["diff", "--cached", "--stat"], { cwd: opts.cwd, shell: process.platform === "win32" });
     if (!stdout.trim()) {
       return; // nothing to commit
     }
-    await exec("git", ["commit", "-m", message], { cwd: opts.cwd });
+    await exec("git", ["commit", "-m", message], { cwd: opts.cwd, shell: process.platform === "win32" });
   },
 
   async createPullRequest(
@@ -504,7 +511,7 @@ export const datasource: Datasource = {
           "--output",
           "json",
         ],
-        { cwd: opts.cwd },
+        { cwd: opts.cwd, shell: process.platform === "win32" },
       );
       let pr;
       try {
@@ -530,7 +537,7 @@ export const datasource: Datasource = {
             "--output",
             "json",
           ],
-          { cwd: opts.cwd },
+          { cwd: opts.cwd, shell: process.platform === "win32" },
         );
         let prs;
         try {
@@ -577,6 +584,7 @@ async function fetchComments(
 
     const { stdout } = await exec("az", args, {
       cwd: opts.cwd || process.cwd(),
+      shell: process.platform === "win32",
     });
 
     const data = JSON.parse(stdout);

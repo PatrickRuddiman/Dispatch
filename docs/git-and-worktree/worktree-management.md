@@ -30,34 +30,41 @@ not configurable at runtime.
 
 1. Extract the basename (strip any leading path components via `path.basename`).
 2. Remove the `.md` extension (case-insensitive regex `\.md$`).
-3. Pass the result through [`slugify()`](../shared-utilities/slugify.md), which
-   lowercases, replaces non-alphanumeric runs with hyphens, and trims edge
-   hyphens.
+3. Check for a leading numeric ID (regex `/^\d+/`).
+    - **If found**: Return `issue-<id>` (e.g., `123-fix-auth-bug.md` → `issue-123`).
+    - **If not found**: Pass the extension-stripped name through
+      [`slugify()`](../shared-utilities/slugify.md) and return the result.
+
+The slugify fallback applies when issue filenames lack a leading numeric ID
+(e.g., `feature-request.md` → `feature-request`). The `slugify()` function
+lowercases the input, replaces non-alphanumeric character runs with hyphens,
+and trims leading/trailing hyphens. The call does **not** pass a `maxLength`
+argument, so the default `MAX_SLUG_LENGTH` of 60 from `slugify.ts` is **not**
+applied — the slug is unbounded. In practice, issue filenames are short enough
+that this does not cause filesystem path-length issues.
 
 Examples:
 
-| Input | After basename | After .md strip | After slugify |
-|-------|---------------|-----------------|---------------|
-| `123-fix-auth-bug.md` | `123-fix-auth-bug.md` | `123-fix-auth-bug` | `123-fix-auth-bug` |
-| `path/to/456-Add Search!.MD` | `456-Add Search!.MD` | `456-Add Search!` | `456-add-search` |
-| `no-extension` | `no-extension` | `no-extension` | `no-extension` |
-
-The slugify call does **not** pass a `maxLength` argument, so the default
-`MAX_SLUG_LENGTH` of 60 from `slugify.ts` is **not** applied. The slug is
-unbounded. In practice, issue filenames are short enough that this does not
-cause filesystem path-length issues.
+| Input | Derivation | Output |
+|-------|-----------|--------|
+| `123-fix-auth-bug.md` | Leading digits `123` found | `issue-123` |
+| `/tmp/dispatch-abc/123-fix.md` | basename → `123-fix.md`, digits `123` | `issue-123` |
+| `456-Add Search!.MD` | basename → `456-Add Search!.MD`, digits `456` | `issue-456` |
+| `no-number-here.md` | No leading digits → slugify | `no-number-here` |
+| `Feature Request!.md` | No leading digits → slugify | `feature-request` |
 
 ## Creating a worktree
 
-`createWorktree(repoRoot, issueFilename, branchName)` creates a worktree and
-returns its absolute path.
+`createWorktree(repoRoot, issueFilename, branchName, startPoint?)` creates a
+worktree and returns its absolute path.
 
 ### Normal path
 
-Executes `git worktree add <path> -b <branchName>` in the repository root.
-The `-b` flag tells git to create a new branch at `HEAD` and check it out in
-the worktree. On success, the worktree directory is created and the branch
-points to the same commit as the current `HEAD` of the main working tree.
+Executes `git worktree add <path> -b <branchName> [startPoint]` in the
+repository root. The `-b` flag tells git to create a new branch and check it
+out in the worktree. When `startPoint` is provided, the new branch is created
+at that commit instead of `HEAD`. When omitted, the branch points to the
+current `HEAD` of the main working tree.
 
 ### Branch-exists fallback
 
@@ -193,14 +200,100 @@ worktree operations because each worktree has its own index and working
 directory. However, operations that modify shared refs (e.g., branch creation)
 use git's internal locking (`$GIT_DIR/refs/` lock files) to serialize access.
 
+## Generating feature branch names
+
+`generateFeatureBranchName()` produces a branch name for tasks that do not
+originate from an issue tracker (e.g., the `--feature` CLI flag):
+
+```
+dispatch/feature-<8-hex-chars>
+```
+
+The 8 hex characters are the first segment of a `crypto.randomUUID()` output,
+split on the first hyphen. This provides 32 bits of entropy (4.3 billion
+possible values), which is sufficient to avoid collisions in practice. A
+typical Dispatch session creates at most a handful of feature branches.
+
+The generated name always passes [`isValidBranchName()`](./branch-validation.md)
+because it contains only lowercase hex characters, hyphens, and a single slash.
+
+### UUID entropy considerations
+
+Using only the first 8 hex characters of a UUID (32 bits) rather than the full
+128 bits is a deliberate tradeoff:
+
+- **Readability**: Short branch names are easier to read in `git log` and
+  `git branch` output.
+- **Collision probability**: With 32 bits, collisions become likely around
+  ~65,000 branches (birthday bound). Since Dispatch branches are cleaned up
+  regularly, the active set is typically under 100.
+- **Runtime requirement**: `crypto.randomUUID()` is available in Node.js 19+
+  and is a built-in API — no polyfill is needed. The project's minimum Node.js
+  version requirement covers this.
+
+## Worktree lifecycle state diagram
+
+The following diagram shows the states a worktree passes through from creation
+to removal, including all error recovery paths:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Creating: createWorktree() called
+    
+    Creating --> TryNewBranch: git worktree add -b
+    TryNewBranch --> Active: Success
+    TryNewBranch --> BranchExists: "already exists" error
+    TryNewBranch --> Failed: Other error (thrown)
+    
+    BranchExists --> TryExistingBranch: git worktree add (no -b)
+    TryExistingBranch --> Active: Success (checks out at branch HEAD)
+    TryExistingBranch --> Failed: Error (thrown)
+    
+    Active --> Removing: removeWorktree() called
+    
+    Removing --> TryNormalRemove: git worktree remove
+    TryNormalRemove --> Pruning: Success
+    TryNormalRemove --> TryForceRemove: Failure
+    
+    TryForceRemove --> Pruning: git worktree remove --force succeeds
+    TryForceRemove --> Stale: Both removals failed (log.warn)
+    
+    Pruning --> Cleaned: git worktree prune succeeds
+    Pruning --> Cleaned: prune fails (log.warn, non-fatal)
+    
+    Cleaned --> [*]
+    Stale --> [*]: Manual cleanup required
+    Failed --> [*]
+```
+
+**Key observations:**
+
+- **Branch-exists fallback**: When the `-b` flag fails because the branch
+  already exists, the retry uses `git worktree add <path> <branch>` which
+  checks out the existing branch at **its current HEAD** — not at the commit
+  where `createWorktree` was called. If the branch has been advanced by a
+  previous run, the worktree will reflect those changes.
+
+- **Non-fatal removal**: Both removal paths (normal and force) catch errors
+  and log warnings rather than throwing. This ensures that a removal failure
+  never masks a successful task execution result.
+
+- **Branch persistence**: Neither `removeWorktree` nor `git worktree remove`
+  deletes the branch. Branches accumulate across runs and require manual
+  cleanup (see [branch cleanup](#what-happens-to-the-branch-after-removal)).
+
 ## Related documentation
 
 - [Overview](./overview.md) — Group-level summary and worktree lifecycle
   flowchart
+- [Branch Validation](./branch-validation.md) — Validation rules applied to
+  branch names before worktree creation
 - [Integrations](./integrations.md) — Git CLI and `child_process.execFile`
   details
 - [Gitignore Helper](./gitignore-helper.md) — Keeps `.dispatch/worktrees/`
   out of version control
+- [Testing](./testing.md) — 25 worktree tests covering creation, removal,
+  naming, and feature branch generation
 - [Shared Utilities — Slugify](../shared-utilities/slugify.md) — The slug
   algorithm used by `worktreeName`
 - [Planning and Dispatch — Git](../planning-and-dispatch/git.md) — Post-task
@@ -210,3 +303,7 @@ use git's internal locking (`$GIT_DIR/refs/` lock files) to serialize access.
   worktree concurrency
 - [Cleanup Registry](../shared-types/cleanup.md) — Safety-net cleanup on
   signals and errors
+- [Dispatch Pipeline](../cli-orchestration/dispatch-pipeline.md) — The execution
+  engine that creates and removes worktrees during parallel issue processing
+- [Run State Persistence](./run-state.md) — Task status persistence that
+  complements the worktree lifecycle
