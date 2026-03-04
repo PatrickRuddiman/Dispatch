@@ -12,6 +12,7 @@ export default defineConfig({
       "**/node_modules/**",
       "**/dist/**",
       ".worktrees/**",
+      ".dispatch/worktrees/**",
     ],
     coverage: {
       provider: "v8",

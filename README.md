@@ -181,7 +181,6 @@ Config is stored at `.dispatch/config.json` (project-local):
   "provider": "copilot",
   "model": "claude-sonnet-4-5",
   "source": "github",
-  "model": "claude-sonnet-4-5",
   "testTimeout": 60
 }
 ```

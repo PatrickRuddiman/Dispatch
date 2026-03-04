@@ -37,6 +37,7 @@ export interface OrchestrateRunOptions {
   planTimeout?: number;
   planRetries?: number;
   retries?: number;
+  feature?: boolean;
 }
 
 /** Raw CLI arguments before config resolution. */
@@ -65,6 +66,7 @@ export interface RawCliArgs {
   planRetries?: number;
   testTimeout?: number;
   retries?: number;
+  feature?: boolean;
   outputDir?: string;
   explicitFlags: Set<string>;
 }
@@ -155,10 +157,17 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
         m.spec !== undefined && "--spec",
         m.respec !== undefined && "--respec",
         m.fixTests && "--fix-tests",
+        m.feature && "--feature",
       ].filter(Boolean) as string[];
 
       if (modeFlags.length > 1) {
         log.error(`${modeFlags.join(" and ")} are mutually exclusive`);
+        process.exit(1);
+      }
+
+      // --feature requires branching — mutually exclusive with --no-branch
+      if (m.feature && m.noBranch) {
+        log.error("--feature and --no-branch are mutually exclusive");
         process.exit(1);
       }
 
@@ -225,7 +234,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
         dryRun: m.dryRun, noPlan: m.noPlan, noBranch: m.noBranch, noWorktree: m.noWorktree, provider: m.provider,
         model: m.model, serverUrl: m.serverUrl, source: m.issueSource, org: m.org, project: m.project,
         workItemType: m.workItemType, planTimeout: m.planTimeout, planRetries: m.planRetries, retries: m.retries,
-        force: m.force,
+        force: m.force, feature: m.feature,
       });
     },
   };

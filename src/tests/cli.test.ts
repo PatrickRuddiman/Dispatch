@@ -204,6 +204,62 @@ describe("parseArgs --force", () => {
   });
 });
 
+describe("parseArgs --feature", () => {
+  it("sets feature to true when --feature is passed", () => {
+    const [args, flags] = parseArgs(["--feature"]);
+    expect(args.feature).toBe(true);
+    expect(flags.has("feature")).toBe(true);
+  });
+
+  it("leaves feature undefined when --feature is not provided", () => {
+    const [args, flags] = parseArgs([]);
+    expect(args.feature).toBeUndefined();
+    expect(flags.has("feature")).toBe(false);
+  });
+
+  it("combines --feature with --verbose correctly", () => {
+    const [args] = parseArgs(["--feature", "--verbose"]);
+    expect(args.feature).toBe(true);
+    expect(args.verbose).toBe(true);
+  });
+
+  it("combines --feature with --provider correctly", () => {
+    const [args] = parseArgs(["--feature", "--provider", "copilot"]);
+    expect(args.feature).toBe(true);
+    expect(args.provider).toBe("copilot");
+  });
+
+  it("combines --feature with --dry-run correctly", () => {
+    const [args] = parseArgs(["--feature", "--dry-run"]);
+    expect(args.feature).toBe(true);
+    expect(args.dryRun).toBe(true);
+  });
+});
+
+describe("parseArgs --feature mutual exclusion (at parser level)", () => {
+  it("allows --feature and --no-branch to both be set (mutual exclusion is enforced by orchestrator)", () => {
+    const [args, flags] = parseArgs(["--feature", "--no-branch"]);
+    expect(args.feature).toBe(true);
+    expect(args.noBranch).toBe(true);
+    expect(flags.has("feature")).toBe(true);
+    expect(flags.has("noBranch")).toBe(true);
+  });
+
+  it("allows --feature and --spec to both be set (mutual exclusion is enforced by orchestrator)", () => {
+    const [args, flags] = parseArgs(["--feature", "--spec", "42"]);
+    expect(args.feature).toBe(true);
+    expect(args.spec).toBe("42");
+    expect(flags.has("feature")).toBe(true);
+    expect(flags.has("spec")).toBe(true);
+  });
+
+  it("does not set feature when only positional issue IDs are provided", () => {
+    const [args] = parseArgs(["42"]);
+    expect(args.feature).toBeUndefined();
+    expect(args.issueIds).toContain("42");
+  });
+});
+
 // ─── parseArgs basic flags ──────────────────────────────────────────
 
 describe("parseArgs basic flags", () => {
