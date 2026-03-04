@@ -8,6 +8,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile } from "node:fs/promises";
+import { glob } from "glob";
 import { parseTaskFile, buildTaskContext, groupTasksByMode, type TaskFile, type Task } from "../parser.js";
 import type { DispatchResult } from "../dispatcher.js";
 import { boot as bootPlanner, type PlannerAgent } from "../agents/planner.js";
@@ -37,11 +38,52 @@ import {
 } from "./datasource-helpers.js";
 import { withTimeout, TimeoutError } from "../helpers/timeout.js";
 import { withRetry } from "../helpers/retry.js";
+import { isGlobOrFilePath } from "../spec-generator.js";
+import { extractTitle } from "../datasources/md.js";
 import chalk from "chalk";
 import { elapsed, renderHeaderLines } from "../helpers/format.js";
 import { FileLogger, fileLoggerStorage } from "../helpers/file-logger.js";
 
 const exec = promisify(execFile);
+
+/**
+ * Expand glob patterns / file paths into IssueDetails[].
+ * Mirrors resolveFileItems() from the spec pipeline.
+ */
+async function resolveGlobItems(
+  patterns: string[],
+  cwd: string,
+): Promise<IssueDetails[]> {
+  const files = await glob(patterns, { cwd, absolute: true });
+
+  if (files.length === 0) {
+    log.warn(`No files matched the pattern(s): ${patterns.join(", ")}`);
+    return [];
+  }
+
+  log.info(`Matched ${files.length} file(s) from glob pattern(s)`);
+
+  const items: IssueDetails[] = [];
+  for (const filePath of files) {
+    try {
+      const content = await readFile(filePath, "utf-8");
+      const title = extractTitle(content, filePath);
+      items.push({
+        number: filePath,
+        title,
+        body: content,
+        labels: [],
+        state: "open",
+        url: filePath,
+        comments: [],
+        acceptanceCriteria: "",
+      });
+    } catch (err) {
+      log.warn(`Could not read file ${filePath}: ${log.formatErrorChain(err)}`);
+    }
+  }
+  return items;
+}
 
 /** Default planning timeout in minutes when not specified by the user. */
 const DEFAULT_PLAN_TIMEOUT_MIN = 10;
@@ -133,9 +175,14 @@ export async function runDispatchPipeline(
 
     const datasource = getDatasource(source);
     const fetchOpts: IssueFetchOptions = { cwd, org, project, workItemType, iteration, area };
-    const items = issueIds.length > 0
-      ? await fetchItemsById(issueIds, datasource, fetchOpts)
-      : await datasource.list(fetchOpts);
+    let items: IssueDetails[];
+    if (issueIds.length > 0 && source === "md" && issueIds.some(id => isGlobOrFilePath(id))) {
+      items = await resolveGlobItems(issueIds, cwd);
+    } else if (issueIds.length > 0) {
+      items = await fetchItemsById(issueIds, datasource, fetchOpts);
+    } else {
+      items = await datasource.list(fetchOpts);
+    }
 
     if (items.length === 0) {
       tui.state.phase = "done";
@@ -832,9 +879,14 @@ export async function dryRunMode(
     // Fall back to empty prefix if username resolution fails
   }
 
-  const items = issueIds.length > 0
-    ? await fetchItemsById(issueIds, datasource, fetchOpts)
-    : await datasource.list(fetchOpts);
+  let items: IssueDetails[];
+  if (issueIds.length > 0 && source === "md" && issueIds.some(id => isGlobOrFilePath(id))) {
+    items = await resolveGlobItems(issueIds, cwd);
+  } else if (issueIds.length > 0) {
+    items = await fetchItemsById(issueIds, datasource, fetchOpts);
+  } else {
+    items = await datasource.list(fetchOpts);
+  }
 
   if (items.length === 0) {
     const label = issueIds.length > 0 ? `issue(s) ${issueIds.join(", ")}` : `datasource: ${source}`;

@@ -63,6 +63,8 @@ export interface IssueFetchOptions {
   iteration?: string;
   /** Area path filter (e.g. "MyProject\\Team A") */
   area?: string;
+  /** Glob pattern(s) for filtering items in list() */
+  pattern?: string | string[];
 }
 
 /**

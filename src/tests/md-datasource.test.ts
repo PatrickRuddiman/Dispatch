@@ -13,14 +13,121 @@ vi.mock("node:fs/promises", () => ({
   rename: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("glob", () => ({
+  glob: vi.fn().mockResolvedValue([]),
+}));
+
 import { datasource } from "../datasources/md.js";
 import { UnsupportedOperationError } from "../helpers/errors.js";
 import { execFile } from "node:child_process";
-import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { readFile, writeFile, readdir, mkdir, rename } from "node:fs/promises";
+import { join, dirname, resolve } from "node:path";
+import { glob } from "glob";
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+describe("list", () => {
+  it("returns md files from default specs directory when no pattern given", async () => {
+    vi.mocked(readdir).mockResolvedValue(["b.md", "a.md", "readme.txt"] as any);
+    vi.mocked(readFile).mockImplementation(async (filePath) => {
+      if (String(filePath).endsWith("a.md")) return "# Alpha\nContent A";
+      if (String(filePath).endsWith("b.md")) return "# Beta\nContent B";
+      return "";
+    });
+
+    const results = await datasource.list({ cwd: "/tmp/project" });
+
+    expect(readdir).toHaveBeenCalledWith(expect.stringContaining(".dispatch/specs"));
+    expect(results).toHaveLength(2);
+    expect(results[0].number).toBe("a.md");
+    expect(results[0].title).toBe("Alpha");
+    expect(results[1].number).toBe("b.md");
+    expect(results[1].title).toBe("Beta");
+  });
+
+  it("uses glob to expand pattern when opts.pattern is provided", async () => {
+    vi.mocked(glob).mockResolvedValue(["/tmp/project/docs/one.md", "/tmp/project/docs/two.md"] as any);
+    vi.mocked(readFile).mockImplementation(async (filePath) => {
+      if (String(filePath).endsWith("one.md")) return "# One\nContent 1";
+      if (String(filePath).endsWith("two.md")) return "# Two\nContent 2";
+      return "";
+    });
+
+    const results = await datasource.list({ cwd: "/tmp/project", pattern: "docs/**/*.md" });
+
+    expect(glob).toHaveBeenCalledWith("docs/**/*.md", { cwd: "/tmp/project", absolute: true });
+    expect(results).toHaveLength(2);
+    expect(results[0].number).toBe("one.md");
+    expect(results[0].title).toBe("One");
+    expect(results[1].number).toBe("two.md");
+    expect(results[1].title).toBe("Two");
+  });
+
+  it("filters out non-.md files from glob results", async () => {
+    vi.mocked(glob).mockResolvedValue(["/tmp/a.md", "/tmp/b.txt"] as any);
+    vi.mocked(readFile).mockResolvedValue("# Doc\nBody");
+
+    const results = await datasource.list({ cwd: "/tmp", pattern: "*.{md,txt}" });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].number).toBe("a.md");
+  });
+
+  it("returns empty array when glob matches no files", async () => {
+    vi.mocked(glob).mockResolvedValue([] as any);
+
+    const results = await datasource.list({ cwd: "/tmp", pattern: "nothing/*.md" });
+
+    expect(results).toHaveLength(0);
+  });
+
+  it("returns empty array when default specs directory does not exist", async () => {
+    vi.mocked(readdir).mockRejectedValue(new Error("ENOENT"));
+
+    const results = await datasource.list({ cwd: "/tmp" });
+
+    expect(results).toHaveLength(0);
+  });
+
+  it("expands an absolute glob pattern", async () => {
+    vi.mocked(glob).mockResolvedValue(["/home/user/docs/one.md", "/home/user/docs/two.md"] as any);
+    vi.mocked(readFile).mockImplementation(async (filePath) => {
+      if (String(filePath).endsWith("one.md")) return "# One\nContent 1";
+      if (String(filePath).endsWith("two.md")) return "# Two\nContent 2";
+      return "";
+    });
+
+    const results = await datasource.list({ cwd: "/tmp/project", pattern: "/home/user/docs/*.md" });
+
+    expect(glob).toHaveBeenCalledWith("/home/user/docs/*.md", { cwd: "/tmp/project", absolute: true });
+    expect(results).toHaveLength(2);
+    expect(results[0].number).toBe("one.md");
+    expect(results[1].number).toBe("two.md");
+  });
+
+  it("expands a parent-relative glob pattern", async () => {
+    vi.mocked(glob).mockResolvedValue(["/tmp/shared-specs/task.md"] as any);
+    vi.mocked(readFile).mockResolvedValue("# Shared Task\nBody");
+
+    const results = await datasource.list({ cwd: "/tmp/project", pattern: "../shared-specs/*.md" });
+
+    expect(glob).toHaveBeenCalledWith("../shared-specs/*.md", { cwd: "/tmp/project", absolute: true });
+    expect(results).toHaveLength(1);
+    expect(results[0].number).toBe("task.md");
+    expect(results[0].title).toBe("Shared Task");
+  });
+
+  it("accepts an array of glob patterns", async () => {
+    vi.mocked(glob).mockResolvedValue(["/tmp/a.md", "/tmp/b.md"] as any);
+    vi.mocked(readFile).mockResolvedValue("# Doc\nBody");
+
+    const results = await datasource.list({ cwd: "/tmp", pattern: ["docs/*.md", "specs/*.md"] });
+
+    expect(glob).toHaveBeenCalledWith(["docs/*.md", "specs/*.md"], { cwd: "/tmp", absolute: true });
+    expect(results).toHaveLength(2);
+  });
 });
 
 describe("getUsername", () => {
@@ -113,20 +220,20 @@ describe("git lifecycle", () => {
 });
 
 describe("fetch", () => {
-  it("resolves a relative issueId against the specs directory", async () => {
+  it("resolves a plain issueId against the specs directory", async () => {
     const result = await datasource.fetch("my-issue", { cwd: "/tmp" });
     const expected = join("/tmp", ".dispatch/specs", "my-issue.md");
     expect(vi.mocked(readFile)).toHaveBeenCalledWith(expected, "utf-8");
     expect(result.number).toBe("my-issue.md");
   });
 
-  it("appends .md extension when missing for relative paths", async () => {
+  it("appends .md extension when missing", async () => {
     await datasource.fetch("task-name", { cwd: "/tmp" });
     const expected = join("/tmp", ".dispatch/specs", "task-name.md");
     expect(vi.mocked(readFile)).toHaveBeenCalledWith(expected, "utf-8");
   });
 
-  it("does not double .md extension for relative paths", async () => {
+  it("does not double .md extension", async () => {
     await datasource.fetch("task-name.md", { cwd: "/tmp" });
     const expected = join("/tmp", ".dispatch/specs", "task-name.md");
     expect(vi.mocked(readFile)).toHaveBeenCalledWith(expected, "utf-8");
@@ -145,10 +252,28 @@ describe("fetch", () => {
     await datasource.fetch(absPath, { cwd: "/tmp" });
     expect(vi.mocked(readFile)).toHaveBeenCalledWith(absPath + ".md", "utf-8");
   });
+
+  it("resolves a relative path with ./ against cwd", async () => {
+    await datasource.fetch("./my-issue.md", { cwd: "/tmp" });
+    const expected = resolve("/tmp", "./my-issue.md");
+    expect(vi.mocked(readFile)).toHaveBeenCalledWith(expected, "utf-8");
+  });
+
+  it("resolves a relative path with ../ against cwd", async () => {
+    await datasource.fetch("../specs/my-issue.md", { cwd: "/tmp/project" });
+    const expected = resolve("/tmp/project", "../specs/my-issue.md");
+    expect(vi.mocked(readFile)).toHaveBeenCalledWith(expected, "utf-8");
+  });
+
+  it("resolves a subfolder relative path against cwd", async () => {
+    await datasource.fetch("subfolder/task.md", { cwd: "/tmp" });
+    const expected = resolve("/tmp", "subfolder/task.md");
+    expect(vi.mocked(readFile)).toHaveBeenCalledWith(expected, "utf-8");
+  });
 });
 
 describe("update", () => {
-  it("resolves a relative issueId against the specs directory", async () => {
+  it("resolves a plain issueId against the specs directory", async () => {
     await datasource.update("my-issue", "title", "new body", { cwd: "/tmp" });
     const expected = join("/tmp", ".dispatch/specs", "my-issue.md");
     expect(vi.mocked(writeFile)).toHaveBeenCalledWith(expected, "new body", "utf-8");
@@ -159,14 +284,31 @@ describe("update", () => {
     await datasource.update(absPath, "title", "new body", { cwd: "/tmp" });
     expect(vi.mocked(writeFile)).toHaveBeenCalledWith(absPath, "new body", "utf-8");
   });
+
+  it("resolves a relative path with ./ against cwd", async () => {
+    await datasource.update("./my-issue.md", "title", "new body", { cwd: "/tmp" });
+    const expected = resolve("/tmp", "./my-issue.md");
+    expect(vi.mocked(writeFile)).toHaveBeenCalledWith(expected, "new body", "utf-8");
+  });
+
+  it("resolves a subfolder relative path against cwd", async () => {
+    await datasource.update("subfolder/task.md", "title", "new body", { cwd: "/tmp" });
+    const expected = resolve("/tmp", "subfolder/task.md");
+    expect(vi.mocked(writeFile)).toHaveBeenCalledWith(expected, "new body", "utf-8");
+  });
+
+  it("resolves a relative path with ../ against cwd", async () => {
+    await datasource.update("../specs/my-issue.md", "title", "new body", { cwd: "/tmp/project" });
+    const expected = resolve("/tmp/project", "../specs/my-issue.md");
+    expect(vi.mocked(writeFile)).toHaveBeenCalledWith(expected, "new body", "utf-8");
+  });
 });
 
 describe("close", () => {
-  it("resolves a relative issueId against the specs directory", async () => {
+  it("resolves a plain issueId against the specs directory", async () => {
     await datasource.close("my-issue", { cwd: "/tmp" });
-    const expectedDir = join("/tmp", ".dispatch/specs");
-    const expectedFile = join(expectedDir, "my-issue.md");
-    const expectedArchive = join(expectedDir, "archive");
+    const expectedFile = join("/tmp", ".dispatch/specs", "my-issue.md");
+    const expectedArchive = join("/tmp", ".dispatch/specs", "archive");
     expect(vi.mocked(mkdir)).toHaveBeenCalledWith(expectedArchive, { recursive: true });
     expect(vi.mocked(rename)).toHaveBeenCalledWith(expectedFile, join(expectedArchive, "my-issue.md"));
   });
@@ -177,5 +319,24 @@ describe("close", () => {
     const expectedArchive = join(dirname(absPath), "archive");
     expect(vi.mocked(mkdir)).toHaveBeenCalledWith(expectedArchive, { recursive: true });
     expect(vi.mocked(rename)).toHaveBeenCalledWith(absPath, join(expectedArchive, "my-issue.md"));
+  });
+
+  it("resolves a relative path with ./ against cwd", async () => {
+    await datasource.close("./my-issue.md", { cwd: "/tmp" });
+    const expected = resolve("/tmp", "./my-issue.md");
+    expect(vi.mocked(rename)).toHaveBeenCalledWith(expected, expect.stringContaining("archive"));
+  });
+
+  it("resolves a subfolder relative path against cwd", async () => {
+    await datasource.close("subfolder/task.md", { cwd: "/tmp" });
+    const expected = resolve("/tmp", "subfolder/task.md");
+    expect(vi.mocked(rename)).toHaveBeenCalledWith(expected, expect.stringContaining("archive"));
+  });
+
+  it("resolves a relative path with ../ against cwd", async () => {
+    await datasource.close("../specs/my-issue.md", { cwd: "/tmp/project" });
+    const expected = resolve("/tmp/project", "../specs/my-issue.md");
+    const archiveDest = join(dirname(expected), "archive", "my-issue.md");
+    expect(vi.mocked(rename)).toHaveBeenCalledWith(expected, archiveDest);
   });
 });

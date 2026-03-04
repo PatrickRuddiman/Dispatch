@@ -10,8 +10,9 @@
 
 import { execFile } from "node:child_process";
 import { readFile, writeFile, readdir, mkdir, rename } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, parse as parsePath } from "node:path";
+import { basename, dirname, isAbsolute, join, parse as parsePath, resolve } from "node:path";
 import { promisify } from "node:util";
+import { glob } from "glob";
 import type { Datasource, IssueDetails, IssueFetchOptions, DispatchLifecycleOptions } from "./interface.js";
 import { slugify } from "../helpers/slugify.js";
 import { UnsupportedOperationError } from "../helpers/errors.js";
@@ -33,12 +34,18 @@ function resolveDir(opts?: IssueFetchOptions): string {
 
 /**
  * Normalize an issue ID to a `.md` filename and resolve its full path.
- * Absolute paths are returned as-is; relative paths are joined with the
- * specs directory.
+ * - Absolute paths → returned as-is
+ * - Relative paths (contain `/`, `\`, or start with `./` / `../`) → resolved
+ *   relative to `opts.cwd` (or `process.cwd()`)
+ * - Plain filenames → joined with the specs directory (existing behavior)
  */
 function resolveFilePath(issueId: string, opts?: IssueFetchOptions): string {
   const filename = issueId.endsWith(".md") ? issueId : `${issueId}.md`;
   if (isAbsolute(filename)) return filename;
+  if (/[/\\]/.test(filename)) {
+    const cwd = opts?.cwd ?? process.cwd();
+    return resolve(cwd, filename);
+  }
   return join(resolveDir(opts), filename);
 }
 
@@ -99,6 +106,22 @@ export const datasource: Datasource = {
   },
 
   async list(opts?: IssueFetchOptions): Promise<IssueDetails[]> {
+    if (opts?.pattern) {
+      const cwd = opts.cwd ?? process.cwd();
+      const files = await glob(opts.pattern, { cwd, absolute: true });
+      const mdFiles = files.filter((f) => f.endsWith(".md")).sort();
+      const results: IssueDetails[] = [];
+
+      for (const filePath of mdFiles) {
+        const content = await readFile(filePath, "utf-8");
+        const filename = basename(filePath);
+        const dir = dirname(filePath);
+        results.push(toIssueDetails(filename, content, dir));
+      }
+
+      return results;
+    }
+
     const dir = resolveDir(opts);
     let entries: string[];
     try {
@@ -123,7 +146,7 @@ export const datasource: Datasource = {
     const filePath = resolveFilePath(issueId, opts);
     const content = await readFile(filePath, "utf-8");
     const filename = basename(filePath);
-    const dir = isAbsolute(issueId) ? dirname(filePath) : resolveDir(opts);
+    const dir = dirname(filePath);
     return toIssueDetails(filename, content, dir);
   },
 
@@ -135,7 +158,7 @@ export const datasource: Datasource = {
   async close(issueId: string, opts?: IssueFetchOptions): Promise<void> {
     const filePath = resolveFilePath(issueId, opts);
     const filename = basename(filePath);
-    const archiveDir = join(isAbsolute(issueId) ? dirname(filePath) : resolveDir(opts), "archive");
+    const archiveDir = join(dirname(filePath), "archive");
     await mkdir(archiveDir, { recursive: true });
     await rename(filePath, join(archiveDir, filename));
   },

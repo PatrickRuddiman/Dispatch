@@ -42,9 +42,10 @@ const { mocks, TASK_FIXTURE, TASK_FILE_FIXTURE, TASK_FIXTURE_2, TASK_FILE_FIXTUR
   const mockCreateSession = vi.fn<ProviderInstance["createSession"]>().mockResolvedValue("sess-1");
   const mockPrompt = vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("done");
   const mockCleanup = vi.fn().mockResolvedValue(undefined);
+  const mockGlob = vi.fn();
 
   return {
-    mocks: { mockPlan, mockExecute, mockGenerate, mockCreateSession, mockPrompt, mockCleanup },
+    mocks: { mockPlan, mockExecute, mockGenerate, mockCreateSession, mockPrompt, mockCleanup, mockGlob },
     TASK_FIXTURE,
     TASK_FILE_FIXTURE,
     TASK_FIXTURE_2,
@@ -202,6 +203,10 @@ vi.mock("node:child_process", () => ({
   }),
 }));
 
+vi.mock("glob", () => ({
+  glob: mocks.mockGlob,
+}));
+
 // ─── Import function under test (after mocks) ──────────────────────
 
 import { runDispatchPipeline, dryRunMode } from "../orchestrator/dispatch-pipeline.js";
@@ -217,6 +222,8 @@ import { bootProvider } from "../providers/index.js";
 import { boot as bootPlannerBoot } from "../agents/planner.js";
 import { boot as bootExecutorBoot } from "../agents/executor.js";
 import { isValidBranchName } from "../helpers/branch-validation.js";
+import { glob } from "glob";
+import { readFile } from "node:fs/promises";
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
@@ -2120,6 +2127,205 @@ describe("md-datasource sync fallback", () => {
       expect.any(String),
       expect.any(Object),
     );
+  });
+});
+
+describe("glob expansion in dispatch pipeline", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    mocks.mockExecute.mockResolvedValue({
+      success: true,
+      data: { dispatchResult: { task: TASK_FIXTURE, success: true } },
+      durationMs: 100,
+    });
+    mocks.mockGenerate.mockResolvedValue({
+      commitMessage: "",
+      prTitle: "",
+      prDescription: "",
+      success: false,
+      error: "mock: not configured",
+    });
+    mocks.mockPlan.mockImplementation(() =>
+      new Promise<AgentResult<PlannerData>>((resolve) => {
+        setTimeout(() => resolve({ data: { prompt: "Execute step 1" }, success: true, durationMs: 100 }), 100);
+      }),
+    );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("uses resolveGlobItems when source is md and issueIds contain glob patterns", async () => {
+    mocks.mockGlob.mockResolvedValue(["/tmp/specs/feature.md"]);
+    vi.mocked(readFile).mockResolvedValue("# Feature\n\n- [ ] Implement the feature");
+    vi.mocked(writeItemsToTempDir).mockResolvedValue({
+      files: ["/tmp/dispatch-test/feature.md"],
+      issueDetailsByFile: new Map([["/tmp/dispatch-test/feature.md", {
+        number: "/tmp/specs/feature.md",
+        title: "Feature",
+        body: "# Feature\n\n- [ ] Implement the feature",
+        labels: [],
+        state: "open",
+        url: "/tmp/specs/feature.md",
+        comments: [],
+        acceptanceCriteria: "",
+      }]]),
+    });
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ issueIds: ["./specs/*.md"], source: "md" }),
+      "/tmp/test",
+    );
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(vi.mocked(glob)).toHaveBeenCalledWith(["./specs/*.md"], { cwd: "/tmp/test", absolute: true });
+    expect(vi.mocked(fetchItemsById)).not.toHaveBeenCalled();
+    expect(result.completed).toBe(1);
+  });
+
+  it("processes multiple matched files from glob as separate task items", async () => {
+    mocks.mockGlob.mockResolvedValue(["/tmp/specs/one.md", "/tmp/specs/two.md"]);
+    vi.mocked(readFile).mockResolvedValue("# Task\n\n- [ ] Do something");
+    vi.mocked(writeItemsToTempDir).mockResolvedValue({
+      files: ["/tmp/dispatch-test/one.md", "/tmp/dispatch-test/two.md"],
+      issueDetailsByFile: new Map([
+        ["/tmp/dispatch-test/one.md", {
+          number: "/tmp/specs/one.md",
+          title: "Task",
+          body: "# Task\n\n- [ ] Do something",
+          labels: [],
+          state: "open",
+          url: "/tmp/specs/one.md",
+          comments: [],
+          acceptanceCriteria: "",
+        }],
+        ["/tmp/dispatch-test/two.md", {
+          number: "/tmp/specs/two.md",
+          title: "Task",
+          body: "# Task\n\n- [ ] Do something",
+          labels: [],
+          state: "open",
+          url: "/tmp/specs/two.md",
+          comments: [],
+          acceptanceCriteria: "",
+        }],
+      ]),
+    });
+    vi.mocked(parseTaskFile)
+      .mockResolvedValueOnce({
+        path: "/tmp/dispatch-test/one.md",
+        tasks: [{ index: 0, text: "Do something", line: 3, raw: "- [ ] Do something", file: "/tmp/dispatch-test/one.md" }],
+        content: "# Task\n\n- [ ] Do something",
+      })
+      .mockResolvedValueOnce({
+        path: "/tmp/dispatch-test/two.md",
+        tasks: [{ index: 0, text: "Do something", line: 3, raw: "- [ ] Do something", file: "/tmp/dispatch-test/two.md" }],
+        content: "# Task\n\n- [ ] Do something",
+      });
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ issueIds: ["docs/**/*.md"], source: "md" }),
+      "/tmp/test",
+    );
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(vi.mocked(glob)).toHaveBeenCalledWith(["docs/**/*.md"], { cwd: "/tmp/test", absolute: true });
+    expect(result.total).toBe(2);
+  });
+
+  it("returns empty summary when glob matches no files", async () => {
+    mocks.mockGlob.mockResolvedValue([]);
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ issueIds: ["nonexistent/*.md"], source: "md" }),
+      "/tmp/test",
+    );
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result).toEqual({ total: 0, completed: 0, failed: 0, skipped: 0, results: [] });
+    expect(vi.mocked(log.warn)).toHaveBeenCalledWith(expect.stringContaining("No files matched"));
+  });
+
+  it("falls back to fetchItemsById when source is md but issueIds are plain numbers", async () => {
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ issueIds: ["42"], source: "md" }),
+      "/tmp/test",
+    );
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.runAllTimersAsync();
+
+    await resultPromise;
+
+    expect(vi.mocked(glob)).not.toHaveBeenCalled();
+    expect(vi.mocked(fetchItemsById)).toHaveBeenCalled();
+  });
+
+  it("does not use glob when source is not md even with glob-like issueIds", async () => {
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    vi.mocked(getDatasource).mockReturnValue(ds);
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ issueIds: ["*.md"], source: "github" as any }),
+      "/tmp/test",
+    );
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.runAllTimersAsync();
+
+    await resultPromise;
+
+    expect(vi.mocked(glob)).not.toHaveBeenCalled();
+    expect(vi.mocked(fetchItemsById)).toHaveBeenCalled();
+  });
+
+  it("uses resolveGlobItems in dryRunMode when source is md with glob patterns", async () => {
+    mocks.mockGlob.mockResolvedValue(["/tmp/specs/task.md"]);
+    vi.mocked(readFile).mockResolvedValue("# Dry Run Task\n\n- [ ] Check something");
+
+    const result = await dryRunMode(["./specs/*.md"], "/tmp/test", "md");
+
+    expect(vi.mocked(glob)).toHaveBeenCalledWith(["./specs/*.md"], { cwd: "/tmp/test", absolute: true });
+    expect(vi.mocked(fetchItemsById)).not.toHaveBeenCalled();
+    expect(result.skipped).toBe(result.total);
+  });
+
+  it("handles relative path issueIds as glob input", async () => {
+    mocks.mockGlob.mockResolvedValue(["/tmp/test/my-specs/task.md"]);
+    vi.mocked(readFile).mockResolvedValue("# Relative Task\n\n- [ ] Implement it");
+    vi.mocked(writeItemsToTempDir).mockResolvedValue({
+      files: ["/tmp/dispatch-test/task.md"],
+      issueDetailsByFile: new Map([["/tmp/dispatch-test/task.md", {
+        number: "/tmp/test/my-specs/task.md",
+        title: "Relative Task",
+        body: "# Relative Task\n\n- [ ] Implement it",
+        labels: [],
+        state: "open",
+        url: "/tmp/test/my-specs/task.md",
+        comments: [],
+        acceptanceCriteria: "",
+      }]]),
+    });
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ issueIds: ["./my-specs/task.md"], source: "md" }),
+      "/tmp/test",
+    );
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(vi.mocked(glob)).toHaveBeenCalledWith(["./my-specs/task.md"], { cwd: "/tmp/test", absolute: true });
+    expect(result.completed).toBe(1);
   });
 });
 
