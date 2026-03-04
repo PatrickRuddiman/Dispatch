@@ -69,6 +69,7 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
 
     async generate(genOpts: SpecGenerateOptions): Promise<AgentResult<SpecData>> {
       const { issue, filePath, fileContent, inlineText, cwd: workingDir, outputPath } = genOpts;
+      const startTime = Date.now();
 
       try {
         // 0. Normalize cwd and validate outputPath stays within it
@@ -82,6 +83,7 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
             data: null,
             success: false,
             error: `Output path "${outputPath}" escapes the working directory "${workingDir}"`,
+            durationMs: Date.now() - startTime,
           };
         }
 
@@ -106,6 +108,7 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
             data: null,
             success: false,
             error: "Either issue, inlineText, or filePath+fileContent must be provided",
+            durationMs: Date.now() - startTime,
           };
         }
 
@@ -119,6 +122,7 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
             data: null,
             success: false,
             error: "AI agent returned no response",
+            durationMs: Date.now() - startTime,
           };
         }
 
@@ -133,6 +137,7 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
             data: null,
             success: false,
             error: `Spec agent did not write the file to ${tmpPath}. Agent response: ${response.slice(0, 300)}`,
+            durationMs: Date.now() - startTime,
           };
         }
 
@@ -164,6 +169,7 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
             validationReason: validation.reason,
           },
           success: true,
+          durationMs: Date.now() - startTime,
         };
       } catch (err) {
         const message = log.extractMessage(err);
@@ -171,6 +177,7 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
           data: null,
           success: false,
           error: message,
+          durationMs: Date.now() - startTime,
         };
       }
     },
