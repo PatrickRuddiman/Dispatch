@@ -550,7 +550,7 @@ export async function runDispatchPipeline(
             log.debug(`Merged ${branchName} into ${featureBranchName}`);
           } catch (err) {
             const mergeError = `Could not merge ${branchName} into feature branch: ${log.formatErrorChain(err)}`;
-            log.error(mergeError);
+            log.warn(mergeError);
             // Abort the failed merge so the repo is left in a clean state
             try {
               await exec("git", ["merge", "--abort"], { cwd });
