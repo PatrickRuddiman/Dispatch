@@ -46,8 +46,9 @@ describe("plan", () => {
       expect.stringContaining("Implement the widget")
     );
     expect(result.success).toBe(true);
-    expect(result.prompt).toBe("Step 1: do X");
+    expect(result.data?.prompt).toBe("Step 1: do X");
     expect(result.error).toBeUndefined();
+    expect(result.durationMs).toBeGreaterThanOrEqual(0);
   });
 
   it("includes task metadata in the prompt sent to the provider", async () => {
@@ -99,8 +100,9 @@ describe("plan", () => {
     const result = await agent.plan(TASK_FIXTURE);
 
     expect(result.success).toBe(false);
-    expect(result.prompt).toBe("");
+    expect(result.data).toBeNull();
     expect(result.error).toBe("Planner returned empty plan");
+    expect(result.durationMs).toBeGreaterThanOrEqual(0);
   });
 
   it("returns failure when provider returns whitespace-only string", async () => {
@@ -112,8 +114,9 @@ describe("plan", () => {
     const result = await agent.plan(TASK_FIXTURE);
 
     expect(result.success).toBe(false);
-    expect(result.prompt).toBe("");
+    expect(result.data).toBeNull();
     expect(result.error).toBe("Planner returned empty plan");
+    expect(result.durationMs).toBeGreaterThanOrEqual(0);
   });
 
   it("returns failure when provider returns null", async () => {
@@ -125,8 +128,9 @@ describe("plan", () => {
     const result = await agent.plan(TASK_FIXTURE);
 
     expect(result.success).toBe(false);
-    expect(result.prompt).toBe("");
+    expect(result.data).toBeNull();
     expect(result.error).toBe("Planner returned empty plan");
+    expect(result.durationMs).toBeGreaterThanOrEqual(0);
   });
 
   it("catches provider exceptions and returns failure", async () => {
@@ -140,8 +144,9 @@ describe("plan", () => {
     const result = await agent.plan(TASK_FIXTURE);
 
     expect(result.success).toBe(false);
-    expect(result.prompt).toBe("");
+    expect(result.data).toBeNull();
     expect(result.error).toBe("Connection refused");
+    expect(result.durationMs).toBeGreaterThanOrEqual(0);
   });
 
   it("catches prompt exceptions and returns failure", async () => {
@@ -155,8 +160,9 @@ describe("plan", () => {
     const result = await agent.plan(TASK_FIXTURE);
 
     expect(result.success).toBe(false);
-    expect(result.prompt).toBe("");
+    expect(result.data).toBeNull();
     expect(result.error).toBe("Timeout exceeded");
+    expect(result.durationMs).toBeGreaterThanOrEqual(0);
   });
 
   it("handles non-Error exceptions", async () => {
@@ -171,6 +177,21 @@ describe("plan", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("raw string error");
+  });
+
+  it("tracks elapsed time in milliseconds", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockImplementation(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        return "plan output";
+      }),
+    });
+
+    const agent = await boot({ cwd: "/tmp/test", provider });
+    const result = await agent.plan(TASK_FIXTURE);
+
+    expect(result.durationMs).toBeGreaterThanOrEqual(20);
+    expect(result.durationMs).toBeLessThan(2000);
   });
 
   it("uses cwd override in prompt when provided", async () => {

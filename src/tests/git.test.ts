@@ -23,6 +23,7 @@ import { buildPrBody, buildPrTitle } from "../orchestrator/datasource-helpers.js
 import type { Task } from "../parser.js";
 import type { DispatchResult } from "../dispatcher.js";
 import type { IssueDetails } from "../datasources/interface.js";
+import { UnsupportedOperationError } from "../helpers/errors.js";
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -764,48 +765,48 @@ describe("MD datasource — no-op dispatch lifecycle methods", () => {
     expect(mockExecFile).not.toHaveBeenCalled();
   });
 
-  it("createAndSwitchBranch resolves without error (no-op)", async () => {
-    await md.createAndSwitchBranch("dispatch/42-feature", { cwd: "/tmp" });
-    expect(mockExecFile).not.toHaveBeenCalled();
+  it("createAndSwitchBranch throws UnsupportedOperationError", async () => {
+    await expect(
+      md.createAndSwitchBranch("dispatch/42-feature", { cwd: "/tmp" }),
+    ).rejects.toThrow(UnsupportedOperationError);
   });
 
-  it("switchBranch resolves without error (no-op)", async () => {
-    await md.switchBranch("main", { cwd: "/tmp" });
-    expect(mockExecFile).not.toHaveBeenCalled();
+  it("switchBranch throws UnsupportedOperationError", async () => {
+    await expect(
+      md.switchBranch("main", { cwd: "/tmp" }),
+    ).rejects.toThrow(UnsupportedOperationError);
   });
 
-  it("pushBranch resolves without error (no-op)", async () => {
-    await md.pushBranch("dispatch/42-feature", { cwd: "/tmp" });
-    expect(mockExecFile).not.toHaveBeenCalled();
+  it("pushBranch throws UnsupportedOperationError", async () => {
+    await expect(
+      md.pushBranch("dispatch/42-feature", { cwd: "/tmp" }),
+    ).rejects.toThrow(UnsupportedOperationError);
   });
 
-  it("commitAllChanges resolves without error (no-op)", async () => {
-    await md.commitAllChanges("feat: test", { cwd: "/tmp" });
-    expect(mockExecFile).not.toHaveBeenCalled();
+  it("commitAllChanges throws UnsupportedOperationError", async () => {
+    await expect(
+      md.commitAllChanges("feat: test", { cwd: "/tmp" }),
+    ).rejects.toThrow(UnsupportedOperationError);
   });
 
-  it("createPullRequest resolves to empty string (no-op)", async () => {
-    const result = await md.createPullRequest(
-      "dispatch/42-feature",
-      "42",
-      "title",
-      "",
-      { cwd: "/tmp" },
-    );
-    expect(result).toBe("");
-    expect(mockExecFile).not.toHaveBeenCalled();
+  it("createPullRequest throws UnsupportedOperationError", async () => {
+    await expect(
+      md.createPullRequest("dispatch/42-feature", "42", "title", "", {
+        cwd: "/tmp",
+      }),
+    ).rejects.toThrow(UnsupportedOperationError);
   });
 
-  it("createPullRequest with custom body still returns empty string (no-op)", async () => {
-    const result = await md.createPullRequest(
-      "dispatch/42-feature",
-      "42",
-      "feat: add auth",
-      "## Summary\n\nCustom body content\n\nCloses #42",
-      { cwd: "/tmp" },
-    );
-    expect(result).toBe("");
-    expect(mockExecFile).not.toHaveBeenCalled();
+  it("createPullRequest with custom body throws UnsupportedOperationError", async () => {
+    await expect(
+      md.createPullRequest(
+        "dispatch/42-feature",
+        "42",
+        "feat: add auth",
+        "## Summary\n\nCustom body content\n\nCloses #42",
+        { cwd: "/tmp" },
+      ),
+    ).rejects.toThrow(UnsupportedOperationError);
   });
 });
 

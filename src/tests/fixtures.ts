@@ -20,6 +20,7 @@ export function createMockProvider(overrides?: Partial<ProviderInstance>): Provi
 export function createMockDatasource(name?: DatasourceName, overrides?: Partial<Datasource>): Datasource {
   return {
     name: name ?? "github",
+    supportsGit: vi.fn<Datasource["supportsGit"]>().mockReturnValue(true),
     list: vi.fn<Datasource["list"]>().mockResolvedValue([]),
     fetch: vi.fn<Datasource["fetch"]>().mockResolvedValue({
       number: "42",

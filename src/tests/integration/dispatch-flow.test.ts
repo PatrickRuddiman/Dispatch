@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import type { ProviderInstance } from "../../providers/interface.js";
-import type { PlannerAgent, PlanResult } from "../../agents/planner.js";
-import type { ExecuteResult } from "../../agents/executor.js";
+import type { PlannerAgent } from "../../agents/planner.js";
+import type { AgentResult, PlannerData, ExecutorData } from "../../agents/types.js";
 import type { Task } from "../../parser.js";
 import { markTaskComplete } from "../../parser.js";
 
@@ -17,9 +17,10 @@ const { mocks } = vi.hoisted(() => {
   const mockProviderCleanup = vi.fn().mockResolvedValue(undefined);
 
   const mockPlan = vi.fn().mockResolvedValue({
-    prompt: "Execute the task as described.",
+    data: { prompt: "Execute the task as described." },
     success: true,
-  } satisfies PlanResult);
+    durationMs: 100,
+  } satisfies AgentResult<PlannerData>);
   const mockPlannerCleanup = vi.fn().mockResolvedValue(undefined);
 
   const mockExecute = vi.fn();
@@ -122,12 +123,12 @@ describe("integration: dispatch pipeline with md datasource", () => {
     // It must call markTaskComplete to update the file (checking off the task),
     // mimicking what the real executor does.
     mocks.mockExecute.mockImplementation(
-      async (input: { task: Task; cwd: string; plan: string | null }): Promise<ExecuteResult> => {
+      async (input: { task: Task; cwd: string; plan: string | null }): Promise<AgentResult<ExecutorData>> => {
         await markTaskComplete(input.task);
         return {
-          dispatchResult: { task: input.task, success: true },
+          data: { dispatchResult: { task: input.task, success: true } },
           success: true,
-          elapsedMs: 50,
+          durationMs: 50,
         };
       },
     );

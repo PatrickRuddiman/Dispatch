@@ -148,8 +148,8 @@ describe("generate", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.valid).toBe(true);
-    expect(result.content).toContain("# My Feature (#42)");
+    expect(result.data!.valid).toBe(true);
+    expect(result.data!.content).toContain("# My Feature (#42)");
     expect(result.error).toBeUndefined();
 
     expect(mkdir).toHaveBeenCalledWith(
@@ -186,7 +186,7 @@ describe("generate", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.valid).toBe(true);
+    expect(result.data!.valid).toBe(true);
   });
 
   it("generates a spec from inline text", async () => {
@@ -217,7 +217,7 @@ describe("generate", () => {
     expect(result.error).toContain(
       "Either issue, inlineText, or filePath+fileContent must be provided",
     );
-    expect(result.valid).toBe(false);
+    expect(result.data).toBeNull();
   });
 
   it("returns failure when only filePath is provided without fileContent", async () => {
@@ -233,7 +233,7 @@ describe("generate", () => {
     expect(result.error).toContain(
       "Either issue, inlineText, or filePath+fileContent must be provided",
     );
-    expect(result.valid).toBe(false);
+    expect(result.data).toBeNull();
   });
 
   it("returns failure when AI returns null response", async () => {
@@ -250,7 +250,7 @@ describe("generate", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("AI agent returned no response");
-    expect(result.valid).toBe(false);
+    expect(result.data).toBeNull();
   });
 
   it("returns failure when AI does not write the temp file", async () => {
@@ -268,7 +268,7 @@ describe("generate", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("Spec agent did not write the file");
-    expect(result.valid).toBe(false);
+    expect(result.data).toBeNull();
   });
 
   it("returns failure when provider.createSession throws", async () => {
@@ -285,7 +285,7 @@ describe("generate", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("Connection refused");
-    expect(result.valid).toBe(false);
+    expect(result.data).toBeNull();
   });
 
   it("returns failure when provider.prompt throws", async () => {
@@ -302,7 +302,7 @@ describe("generate", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("Model overloaded");
-    expect(result.valid).toBe(false);
+    expect(result.data).toBeNull();
   });
 
   it("handles non-Error exceptions gracefully", async () => {
@@ -335,7 +335,7 @@ describe("generate", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("escapes the working directory");
-    expect(result.valid).toBe(false);
+    expect(result.data).toBeNull();
     expect(writeFile).not.toHaveBeenCalled();
     expect(provider.createSession).not.toHaveBeenCalled();
   });
@@ -354,7 +354,7 @@ describe("generate", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.valid).toBe(true);
+    expect(result.data!.valid).toBe(true);
   });
 
   it("reports validation warnings for structurally invalid specs", async () => {
@@ -374,8 +374,8 @@ describe("generate", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.valid).toBe(false);
-    expect(result.validationReason).toBeDefined();
+    expect(result.data!.valid).toBe(false);
+    expect(result.data!.validationReason).toBeDefined();
   });
 
   it("uses unique temp file paths per generation via randomUUID", async () => {

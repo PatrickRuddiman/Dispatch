@@ -1099,9 +1099,9 @@ describe("SpecAgent generate", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.valid).toBe(true);
-    expect(result.content).toContain("# My Feature (#42)");
-    expect(result.content).toContain("## Tasks");
+    expect(result.data!.valid).toBe(true);
+    expect(result.data!.content).toContain("# My Feature (#42)");
+    expect(result.data!.content).toContain("## Tasks");
     expect(result.error).toBeUndefined();
 
     // Verify temp dir was created
@@ -1149,7 +1149,7 @@ describe("SpecAgent generate", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.valid).toBe(true);
+    expect(result.data!.valid).toBe(true);
   });
 
   it("returns failure when AI returns null response", async () => {
@@ -1166,8 +1166,7 @@ describe("SpecAgent generate", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("AI agent returned no response");
-    expect(result.valid).toBe(false);
-    expect(result.content).toBe("");
+    expect(result.data).toBeNull();
   });
 
   it("returns failure when neither issue nor filePath+fileContent is provided", async () => {
@@ -1180,7 +1179,7 @@ describe("SpecAgent generate", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("Either issue, inlineText, or filePath+fileContent must be provided");
-    expect(result.valid).toBe(false);
+    expect(result.data).toBeNull();
   });
 
   it("returns failure when the AI does not write the temp file", async () => {
@@ -1200,7 +1199,7 @@ describe("SpecAgent generate", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain("Spec agent did not write the file");
     expect(result.error).toContain("Some response");
-    expect(result.valid).toBe(false);
+    expect(result.data).toBeNull();
   });
 
   it("returns failure when provider.createSession throws", async () => {
@@ -1217,7 +1216,7 @@ describe("SpecAgent generate", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("Connection refused");
-    expect(result.valid).toBe(false);
+    expect(result.data).toBeNull();
   });
 
   it("returns failure when provider.prompt throws", async () => {
@@ -1234,7 +1233,7 @@ describe("SpecAgent generate", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("Model overloaded");
-    expect(result.valid).toBe(false);
+    expect(result.data).toBeNull();
   });
 
   it("cleans up temp file on successful generation", async () => {
@@ -1273,7 +1272,7 @@ describe("SpecAgent generate", () => {
 
     // Should still succeed despite cleanup failure
     expect(result.success).toBe(true);
-    expect(result.valid).toBe(true);
+    expect(result.data!.valid).toBe(true);
   });
 
   it("reports validation warnings for structurally invalid specs", async () => {
@@ -1293,8 +1292,8 @@ describe("SpecAgent generate", () => {
 
     // Generation succeeds but validation reports invalid
     expect(result.success).toBe(true);
-    expect(result.valid).toBe(false);
-    expect(result.validationReason).toBeDefined();
+    expect(result.data!.valid).toBe(false);
+    expect(result.data!.validationReason).toBeDefined();
   });
 
   it("uses unique temp file paths per generation via randomUUID", async () => {

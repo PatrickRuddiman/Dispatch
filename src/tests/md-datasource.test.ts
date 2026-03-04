@@ -6,6 +6,7 @@ vi.mock("node:child_process", () => ({
 }));
 
 import { datasource } from "../datasources/md.js";
+import { UnsupportedOperationError } from "../helpers/errors.js";
 import { execFile } from "node:child_process";
 
 beforeEach(() => {
@@ -57,37 +58,46 @@ describe("getDefaultBranch", () => {
   });
 });
 
-describe("git lifecycle no-ops", () => {
-  it("createAndSwitchBranch resolves to undefined", async () => {
-    const result = await datasource.createAndSwitchBranch("branch", {
-      cwd: "/tmp",
-    });
-    expect(result).toBeUndefined();
+describe("supportsGit", () => {
+  it("returns false", () => {
+    expect(datasource.supportsGit()).toBe(false);
+  });
+});
+
+describe("git lifecycle", () => {
+  it("createAndSwitchBranch throws UnsupportedOperationError", async () => {
+    await expect(
+      datasource.createAndSwitchBranch("branch", { cwd: "/tmp" }),
+    ).rejects.toThrow(UnsupportedOperationError);
   });
 
-  it("switchBranch resolves to undefined", async () => {
-    const result = await datasource.switchBranch("branch", { cwd: "/tmp" });
-    expect(result).toBeUndefined();
+  it("switchBranch throws UnsupportedOperationError", async () => {
+    await expect(
+      datasource.switchBranch("branch", { cwd: "/tmp" }),
+    ).rejects.toThrow(UnsupportedOperationError);
   });
 
-  it("pushBranch resolves to undefined", async () => {
-    const result = await datasource.pushBranch("branch", { cwd: "/tmp" });
-    expect(result).toBeUndefined();
+  it("pushBranch throws UnsupportedOperationError", async () => {
+    await expect(
+      datasource.pushBranch("branch", { cwd: "/tmp" }),
+    ).rejects.toThrow(UnsupportedOperationError);
   });
 
-  it("commitAllChanges resolves to undefined", async () => {
-    const result = await datasource.commitAllChanges("msg", { cwd: "/tmp" });
-    expect(result).toBeUndefined();
+  it("commitAllChanges throws UnsupportedOperationError", async () => {
+    await expect(
+      datasource.commitAllChanges("msg", { cwd: "/tmp" }),
+    ).rejects.toThrow(UnsupportedOperationError);
   });
 
-  it('createPullRequest resolves to ""', async () => {
-    const result = await datasource.createPullRequest(
-      "branch",
-      "42",
-      "title",
-      "body",
-      { cwd: "/tmp" },
-    );
-    expect(result).toBe("");
+  it("createPullRequest throws UnsupportedOperationError", async () => {
+    await expect(
+      datasource.createPullRequest(
+        "branch",
+        "42",
+        "title",
+        "body",
+        { cwd: "/tmp" },
+      ),
+    ).rejects.toThrow(UnsupportedOperationError);
   });
 });

@@ -80,9 +80,9 @@ describe("execute", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.dispatchResult).toBe(dispatchResult);
+    expect(result.data?.dispatchResult).toBe(dispatchResult);
     expect(result.error).toBeUndefined();
-    expect(result.elapsedMs).toBeGreaterThanOrEqual(0);
+    expect(result.durationMs).toBeGreaterThanOrEqual(0);
 
     // dispatchTask called with provider, task, cwd, and plan string
     expect(mockDispatch).toHaveBeenCalledOnce();
@@ -120,8 +120,8 @@ describe("execute", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("No response from agent");
-    expect(result.dispatchResult).toBe(dispatchResult);
-    expect(result.elapsedMs).toBeGreaterThanOrEqual(0);
+    expect(result.data).toBeNull();
+    expect(result.durationMs).toBeGreaterThanOrEqual(0);
 
     // markTaskComplete should NOT be called when dispatch fails
     expect(mockMarkComplete).not.toHaveBeenCalled();
@@ -143,9 +143,8 @@ describe("execute", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("Session creation failed");
-    expect(result.dispatchResult.success).toBe(false);
-    expect(result.dispatchResult.task).toBe(TASK_FIXTURE);
-    expect(result.elapsedMs).toBeGreaterThanOrEqual(0);
+    expect(result.data).toBeNull();
+    expect(result.durationMs).toBeGreaterThanOrEqual(0);
 
     expect(mockMarkComplete).not.toHaveBeenCalled();
   });
@@ -207,7 +206,7 @@ describe("execute", () => {
     const mockDispatch = vi.mocked(dispatchTask);
     const mockMarkComplete = vi.mocked(markTaskComplete);
 
-    // Add a small delay to ensure elapsedMs > 0
+    // Add a small delay to ensure durationMs > 0
     mockDispatch.mockImplementation(async () => {
       await new Promise((resolve) => setTimeout(resolve, 25));
       return { task: TASK_FIXTURE, success: true };
@@ -221,8 +220,8 @@ describe("execute", () => {
       plan: "plan",
     });
 
-    expect(result.elapsedMs).toBeGreaterThanOrEqual(20);
-    expect(result.elapsedMs).toBeLessThan(2000);
+    expect(result.durationMs).toBeGreaterThanOrEqual(20);
+    expect(result.durationMs).toBeLessThan(2000);
   });
 
   it("passes worktreeRoot to dispatchTask when provided in input", async () => {

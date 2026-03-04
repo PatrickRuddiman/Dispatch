@@ -45,6 +45,10 @@ export async function detectWorkItemType(
 export const datasource: Datasource = {
   name: "azdevops",
 
+  supportsGit(): boolean {
+    return true;
+  },
+
   async list(opts: IssueFetchOptions = {}): Promise<IssueDetails[]> {
     const wiql =
       "SELECT [System.Id] FROM workitems WHERE [System.State] <> 'Closed' AND [System.State] <> 'Removed' ORDER BY [System.CreatedDate] DESC";

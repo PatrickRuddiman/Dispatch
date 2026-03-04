@@ -10,16 +10,8 @@
 
 import type { Agent, AgentBootOptions } from "./interface.js";
 import type { Task } from "../parser.js";
+import type { AgentResult, PlannerData } from "./types.js";
 import { log } from "../helpers/logger.js";
-
-export interface PlanResult {
-  /** The system prompt for the executor agent */
-  prompt: string;
-  /** Whether planning succeeded */
-  success: boolean;
-  /** Error message if planning failed */
-  error?: string;
-}
 
 /**
  * A booted planner agent that can produce execution plans for tasks.
@@ -44,7 +36,7 @@ export interface PlannerAgent extends Agent {
    * When `worktreeRoot` is provided, the prompt includes directory-restriction
    * instructions that confine the agent to that worktree directory.
    */
-  plan(task: Task, fileContext?: string, cwd?: string, worktreeRoot?: string): Promise<PlanResult>;
+  plan(task: Task, fileContext?: string, cwd?: string, worktreeRoot?: string): Promise<AgentResult<PlannerData>>;
 }
 
 /**
@@ -63,7 +55,8 @@ export async function boot(opts: AgentBootOptions): Promise<PlannerAgent> {
   return {
     name: "planner",
 
-    async plan(task: Task, fileContext?: string, cwdOverride?: string, worktreeRoot?: string): Promise<PlanResult> {
+    async plan(task: Task, fileContext?: string, cwdOverride?: string, worktreeRoot?: string): Promise<AgentResult<PlannerData>> {
+      const startTime = Date.now();
       try {
         const sessionId = await provider.createSession();
         const prompt = buildPlannerPrompt(task, cwdOverride ?? cwd, fileContext, worktreeRoot);
@@ -71,13 +64,13 @@ export async function boot(opts: AgentBootOptions): Promise<PlannerAgent> {
         const plan = await provider.prompt(sessionId, prompt);
 
         if (!plan?.trim()) {
-          return { prompt: "", success: false, error: "Planner returned empty plan" };
+          return { data: null, success: false, error: "Planner returned empty plan", durationMs: Date.now() - startTime };
         }
 
-        return { prompt: plan, success: true };
+        return { data: { prompt: plan }, success: true, durationMs: Date.now() - startTime };
       } catch (err) {
         const message = log.extractMessage(err);
-        return { prompt: "", success: false, error: message };
+        return { data: null, success: false, error: message, durationMs: Date.now() - startTime };
       }
     },
 

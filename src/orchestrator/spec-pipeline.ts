@@ -356,7 +356,7 @@ async function generateSpecsBatch(
           }
 
           if (isTrackerMode || isInlineText) {
-            const h1Title = extractTitle(result.content, filepath);
+            const h1Title = extractTitle(result.data.content, filepath);
             const h1Slug = slugify(h1Title, MAX_SLUG_LENGTH);
             const finalFilename = isTrackerMode ? `${id}-${h1Slug}.md` : `${h1Slug}.md`;
             const finalFilepath = join(outputDir, finalFilename);
@@ -374,14 +374,14 @@ async function generateSpecsBatch(
 
           try {
             if (isTrackerMode) {
-              await datasource.update(id, details.title, result.content, fetchOpts);
+              await datasource.update(id, details.title, result.data.content, fetchOpts);
               log.success(`Updated issue #${id} with spec content`);
               await unlink(filepath);
               log.success(`Deleted local spec ${filepath} (now tracked as issue #${id})`);
               identifier = id;
               issueNumbers.push(id);
             } else if (datasource.name !== "md") {
-              const created = await datasource.create(details.title, result.content, fetchOpts);
+              const created = await datasource.create(details.title, result.data.content, fetchOpts);
               log.success(`Created issue #${created.number} from ${filepath}`);
               await unlink(filepath);
               log.success(`Deleted local spec ${filepath} (now tracked as issue #${created.number})`);

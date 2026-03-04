@@ -172,9 +172,11 @@ describe("runSpecPipeline", () => {
 
     // Default: spec generation succeeds
     mocks.mockGenerate.mockResolvedValue({
-      content: "# Generated Spec\n\n## Tasks\n\n- [ ] Do something",
+      data: {
+        content: "# Generated Spec\n\n## Tasks\n\n- [ ] Do something",
+        valid: true,
+      },
       success: true,
-      valid: true,
     });
 
     // Default: datasource operations succeed
@@ -268,10 +270,9 @@ describe("runSpecPipeline", () => {
 
     it("handles spec generation failure", async () => {
       mocks.mockGenerate.mockResolvedValue({
+        data: null,
         success: false,
         error: "Generation failed",
-        content: "",
-        valid: false,
       });
 
       const result = await runSpecPipeline(baseOpts({ issues: "1", concurrency: 1 }));
@@ -757,9 +758,11 @@ describe("runSpecPipeline", () => {
       mocks.mockGenerate
         .mockRejectedValueOnce(new Error("Transient API error"))
         .mockResolvedValueOnce({
-          content: "# Generated Spec\n\n## Tasks\n\n- [ ] Do something",
+          data: {
+            content: "# Generated Spec\n\n## Tasks\n\n- [ ] Do something",
+            valid: true,
+          },
           success: true,
-          valid: true,
         });
 
       const result = await runSpecPipeline(baseOpts({ issues: "1", concurrency: 1, retries: 1 }));

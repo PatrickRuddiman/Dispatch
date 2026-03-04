@@ -68,6 +68,7 @@ import {
 function createMockDatasource(overrides?: Partial<Datasource>): Datasource {
   return {
     name: "github",
+    supportsGit: vi.fn<Datasource["supportsGit"]>().mockReturnValue(true),
     list: vi.fn<Datasource["list"]>().mockResolvedValue([]),
     fetch: vi.fn<Datasource["fetch"]>().mockResolvedValue({} as IssueDetails),
     update: vi.fn<Datasource["update"]>().mockResolvedValue(undefined),
@@ -777,6 +778,7 @@ describe("closeCompletedSpecIssues", () => {
   function createCloseDatasource(overrides?: Partial<Datasource>): Datasource {
     return {
       name: "github",
+      supportsGit: vi.fn<Datasource["supportsGit"]>().mockReturnValue(true),
       list: vi.fn<Datasource["list"]>().mockResolvedValue([]),
       fetch: vi.fn<Datasource["fetch"]>().mockResolvedValue({} as IssueDetails),
       update: vi.fn<Datasource["update"]>().mockResolvedValue(undefined),

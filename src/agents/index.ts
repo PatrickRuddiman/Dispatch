@@ -52,3 +52,10 @@ export async function bootAgent(
 export { bootPlanner, bootExecutor, bootSpec, bootCommit };
 export type { PlannerAgent, ExecutorAgent, SpecAgent, CommitAgent };
 export type { AgentName, Agent, AgentBootOptions } from "./interface.js";
+export type {
+  AgentResult,
+  AgentErrorCode,
+  PlannerData,
+  ExecutorData,
+  SpecData,
+} from "./types.js";
