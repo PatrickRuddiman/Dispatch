@@ -494,12 +494,18 @@ export async function runDispatchPipeline(
                 // Sync checked-off state back to the datasource
                 try {
                   const parsed = parseIssueFilename(task.file);
+                  const updatedContent = await readFile(task.file, "utf-8");
                   if (parsed) {
-                    const updatedContent = await readFile(task.file, "utf-8");
                     const issueDetails = issueDetailsByFile.get(task.file);
                     const title = issueDetails?.title ?? parsed.slug;
                     await datasource.update(parsed.issueId, title, updatedContent, fetchOpts);
                     log.success(`Synced task completion to issue #${parsed.issueId}`);
+                  } else {
+                    const issueDetails = issueDetailsByFile.get(task.file);
+                    if (issueDetails) {
+                      await datasource.update(issueDetails.number, issueDetails.title, updatedContent, fetchOpts);
+                      log.success(`Synced task completion to issue #${issueDetails.number}`);
+                    }
                   }
                 } catch (err) {
                   log.warn(`Could not sync task completion to datasource: ${log.formatErrorChain(err)}`);
@@ -836,7 +842,7 @@ export async function dryRunMode(
     return { total: 0, completed: 0, failed: 0, skipped: 0, results: [] };
   }
 
-  const { files } = await writeItemsToTempDir(items);
+  const { files, issueDetailsByFile } = await writeItemsToTempDir(items);
 
   const taskFiles: TaskFile[] = [];
   for (const file of files) {
@@ -856,7 +862,9 @@ export async function dryRunMode(
   log.info(`Dry run — ${allTasks.length} task(s) across ${taskFiles.length} file(s):\n`);
   for (const task of allTasks) {
     const parsed = parseIssueFilename(task.file);
-    const details = parsed ? items.find((item) => item.number === parsed.issueId) : undefined;
+    const details = parsed
+      ? items.find((item) => item.number === parsed.issueId)
+      : issueDetailsByFile.get(task.file);
     const branchInfo = details
       ? ` [branch: ${datasource.buildBranchName(details.number, details.title, username)}]`
       : "";
