@@ -10,6 +10,7 @@
  */
 
 import { resolve, join } from "node:path";
+import { Command, Option, CommanderError } from "commander";
 import { boot as bootOrchestrator, type RawCliArgs } from "./orchestrator/runner.js";
 import { log } from "./helpers/logger.js";
 import { runCleanup } from "./helpers/cleanup.js";
@@ -96,177 +97,174 @@ export interface ParsedArgs extends Omit<RawCliArgs, "explicitFlags"> {
 }
 
 export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
-  const args: ParsedArgs = {
-    issueIds: [],
-    dryRun: false,
-    noPlan: false,
-    noBranch: false,
-    noWorktree: false,
-    force: false,
-    provider: "opencode",
-    cwd: process.cwd(),
-    help: false,
-    version: false,
-    verbose: false,
-  };
+  const program = new Command();
 
-  const explicitFlags = new Set<string>();
+  program
+    .exitOverride()
+    .configureOutput({
+      writeOut: () => {},
+      writeErr: () => {},
+    })
+    .helpOption(false)
+    .argument("[issueIds...]")
+    .option("-h, --help", "Show help")
+    .option("-v, --version", "Show version")
+    .option("--dry-run", "List tasks without dispatching")
+    .option("--no-plan", "Skip the planner agent")
+    .option("--no-branch", "Skip branch creation")
+    .option("--no-worktree", "Skip git worktree isolation")
+    .option("--feature", "Group issues into a single feature branch")
+    .option("--force", "Ignore prior run state")
+    .option("--verbose", "Show detailed debug output")
+    .option("--fix-tests", "Run tests and fix failures")
+    .option("--spec <values...>", "Spec mode: issue numbers, glob, or text")
+    .option("--respec [values...]", "Regenerate specs")
+    .addOption(
+      new Option("--provider <name>", "Agent backend").choices(PROVIDER_NAMES),
+    )
+    .addOption(
+      new Option("--source <name>", "Issue source").choices(
+        DATASOURCE_NAMES as string[],
+      ),
+    )
+    .option(
+      "--concurrency <n>",
+      "Max parallel dispatches",
+      (val: string): number => {
+        const n = parseInt(val, 10);
+        if (isNaN(n) || n < 1) throw new CommanderError(1, "commander.invalidArgument", "--concurrency must be a positive integer");
+        if (n > MAX_CONCURRENCY) throw new CommanderError(1, "commander.invalidArgument", `--concurrency must not exceed ${MAX_CONCURRENCY}`);
+        return n;
+      },
+    )
+    .option(
+      "--plan-timeout <min>",
+      "Planning timeout in minutes",
+      (val: string): number => {
+        const n = parseFloat(val);
+        if (isNaN(n) || n < CONFIG_BOUNDS.planTimeout.min) throw new CommanderError(1, "commander.invalidArgument", "--plan-timeout must be a positive number (minutes)");
+        if (n > CONFIG_BOUNDS.planTimeout.max) throw new CommanderError(1, "commander.invalidArgument", `--plan-timeout must not exceed ${CONFIG_BOUNDS.planTimeout.max}`);
+        return n;
+      },
+    )
+    .option(
+      "--retries <n>",
+      "Retry attempts",
+      (val: string): number => {
+        const n = parseInt(val, 10);
+        if (isNaN(n) || n < 0) throw new CommanderError(1, "commander.invalidArgument", "--retries must be a non-negative integer");
+        return n;
+      },
+    )
+    .option(
+      "--plan-retries <n>",
+      "Planner retry attempts",
+      (val: string): number => {
+        const n = parseInt(val, 10);
+        if (isNaN(n) || n < 0) throw new CommanderError(1, "commander.invalidArgument", "--plan-retries must be a non-negative integer");
+        return n;
+      },
+    )
+    .option(
+      "--test-timeout <min>",
+      "Test timeout in minutes",
+      (val: string): number => {
+        const n = parseFloat(val);
+        if (isNaN(n) || n <= 0) throw new CommanderError(1, "commander.invalidArgument", "--test-timeout must be a positive number (minutes)");
+        return n;
+      },
+    )
+    .option("--cwd <dir>", "Working directory", (val: string) => resolve(val))
+    .option("--output-dir <dir>", "Output directory", (val: string) => resolve(val))
+    .option("--org <url>", "Azure DevOps organization URL")
+    .option("--project <name>", "Azure DevOps project name")
+    .option("--server-url <url>", "Provider server URL");
 
-  let i = 0;
-  while (i < argv.length) {
-    const arg = argv[i];
-
-    if (arg === "--help" || arg === "-h") {
-      args.help = true;
-      explicitFlags.add("help");
-    } else if (arg === "--version" || arg === "-v") {
-      args.version = true;
-      explicitFlags.add("version");
-    } else if (arg === "--dry-run") {
-      args.dryRun = true;
-      explicitFlags.add("dryRun");
-    } else if (arg === "--no-plan") {
-      args.noPlan = true;
-      explicitFlags.add("noPlan");
-    } else if (arg === "--no-branch") {
-      args.noBranch = true;
-      explicitFlags.add("noBranch");
-    } else if (arg === "--no-worktree") {
-      args.noWorktree = true;
-      explicitFlags.add("noWorktree");
-    } else if (arg === "--feature") {
-      args.feature = true;
-      explicitFlags.add("feature");
-    } else if (arg === "--force") {
-      args.force = true;
-      explicitFlags.add("force");
-    } else if (arg === "--verbose") {
-      args.verbose = true;
-      explicitFlags.add("verbose");
-    } else if (arg === "--spec") {
-      i++;
-      const specs: string[] = [];
-      while (i < argv.length && !argv[i].startsWith("--")) {
-        specs.push(argv[i]);
-        i++;
-      }
-      i--; // outer loop will i++
-      args.spec = specs.length === 1 ? specs[0] : specs;
-      explicitFlags.add("spec");
-    } else if (arg === "--respec") {
-      i++;
-      const respecs: string[] = [];
-      while (i < argv.length && !argv[i].startsWith("--")) {
-        respecs.push(argv[i]);
-        i++;
-      }
-      i--; // outer loop will i++
-      args.respec = respecs.length === 1 ? respecs[0] : respecs;
-      explicitFlags.add("respec");
-    } else if (arg === "--fix-tests") {
-      args.fixTests = true;
-      explicitFlags.add("fixTests");
-    } else if (arg === "--source") {
-      i++;
-      const val = argv[i];
-      if (!DATASOURCE_NAMES.includes(val as DatasourceName)) {
-        log.error(
-          `Unknown source "${val}". Available: ${DATASOURCE_NAMES.join(", ")}`
-        );
-        process.exit(1);
-      }
-      args.issueSource = val as DatasourceName;
-      explicitFlags.add("issueSource");
-    } else if (arg === "--org") {
-      i++;
-      args.org = argv[i];
-      explicitFlags.add("org");
-    } else if (arg === "--project") {
-      i++;
-      args.project = argv[i];
-      explicitFlags.add("project");
-    } else if (arg === "--output-dir") {
-      i++;
-      args.outputDir = resolve(argv[i]);
-      explicitFlags.add("outputDir");
-    } else if (arg === "--concurrency") {
-      i++;
-      const val = parseInt(argv[i], 10);
-      if (isNaN(val) || val < 1) {
-        log.error("--concurrency must be a positive integer");
-        process.exit(1);
-      }
-      if (val > MAX_CONCURRENCY) {
-        log.error(`--concurrency must not exceed ${MAX_CONCURRENCY}`);
-        process.exit(1);
-      }
-      args.concurrency = val;
-      explicitFlags.add("concurrency");
-    } else if (arg === "--provider") {
-      i++;
-      const val = argv[i];
-      if (!PROVIDER_NAMES.includes(val as ProviderName)) {
-        log.error(`Unknown provider "${val}". Available: ${PROVIDER_NAMES.join(", ")}`);
-        process.exit(1);
-      }
-      args.provider = val as ProviderName;
-      explicitFlags.add("provider");
-    } else if (arg === "--server-url") {
-      i++;
-      args.serverUrl = argv[i];
-      explicitFlags.add("serverUrl");
-    } else if (arg === "--plan-timeout") {
-      i++;
-      const val = parseFloat(argv[i]);
-      if (isNaN(val) || val < CONFIG_BOUNDS.planTimeout.min) {
-        log.error("--plan-timeout must be a positive number (minutes)");
-        process.exit(1);
-      }
-      if (val > CONFIG_BOUNDS.planTimeout.max) {
-        log.error(`--plan-timeout must not exceed ${CONFIG_BOUNDS.planTimeout.max}`);
-        process.exit(1);
-      }
-      args.planTimeout = val;
-      explicitFlags.add("planTimeout");
-    } else if (arg === "--retries") {
-      i++;
-      const val = parseInt(argv[i], 10);
-      if (isNaN(val) || val < 0) {
-        log.error("--retries must be a non-negative integer");
-        process.exit(1);
-      }
-      args.retries = val;
-      explicitFlags.add("retries");
-    } else if (arg === "--plan-retries") {
-      i++;
-      const val = parseInt(argv[i], 10);
-      if (isNaN(val) || val < 0) {
-        log.error("--plan-retries must be a non-negative integer");
-        process.exit(1);
-      }
-      args.planRetries = val;
-      explicitFlags.add("planRetries");
-    } else if (arg === "--test-timeout") {
-      i++;
-      const val = parseFloat(argv[i]);
-      if (isNaN(val) || val <= 0) {
-        log.error("--test-timeout must be a positive number (minutes)");
-        process.exit(1);
-      }
-      args.testTimeout = val;
-      explicitFlags.add("testTimeout");
-    } else if (arg === "--cwd") {
-      i++;
-      args.cwd = resolve(argv[i]);
-      explicitFlags.add("cwd");
-    } else if (!arg.startsWith("-")) {
-      args.issueIds.push(arg);
-    } else {
-      log.error(`Unknown option: ${arg}`);
+  try {
+    program.parse(argv, { from: "user" });
+  } catch (err) {
+    if (err instanceof CommanderError) {
+      log.error(err.message);
       process.exit(1);
     }
+    throw err;
+  }
 
-    i++;
+  const opts = program.opts();
+
+  // ── Build ParsedArgs ────────────────────────────────────────
+  const args: ParsedArgs = {
+    issueIds: program.args,
+    dryRun: opts.dryRun ?? false,
+    noPlan: !opts.plan,
+    noBranch: !opts.branch,
+    noWorktree: !opts.worktree,
+    force: opts.force ?? false,
+    provider: opts.provider ?? "opencode",
+    cwd: opts.cwd ?? process.cwd(),
+    help: opts.help ?? false,
+    version: opts.version ?? false,
+    verbose: opts.verbose ?? false,
+  };
+
+  // Optional fields — only set when explicitly provided
+  if (opts.spec !== undefined) {
+    args.spec = opts.spec.length === 1 ? opts.spec[0] : opts.spec;
+  }
+  if (opts.respec !== undefined) {
+    if (opts.respec === true) {
+      args.respec = [];
+    } else {
+      args.respec = opts.respec.length === 1 ? opts.respec[0] : opts.respec;
+    }
+  }
+  if (opts.fixTests) args.fixTests = true;
+  if (opts.feature) args.feature = true;
+  if (opts.source !== undefined) args.issueSource = opts.source;
+  if (opts.concurrency !== undefined) args.concurrency = opts.concurrency;
+  if (opts.serverUrl !== undefined) args.serverUrl = opts.serverUrl;
+  if (opts.planTimeout !== undefined) args.planTimeout = opts.planTimeout;
+  if (opts.retries !== undefined) args.retries = opts.retries;
+  if (opts.planRetries !== undefined) args.planRetries = opts.planRetries;
+  if (opts.testTimeout !== undefined) args.testTimeout = opts.testTimeout;
+  if (opts.org !== undefined) args.org = opts.org;
+  if (opts.project !== undefined) args.project = opts.project;
+  if (opts.outputDir !== undefined) args.outputDir = opts.outputDir;
+
+  // ── Derive explicitFlags from Commander option sources ─────
+  const explicitFlags = new Set<string>();
+
+  const SOURCE_MAP: Record<string, string> = {
+    help: "help",
+    version: "version",
+    dryRun: "dryRun",
+    plan: "noPlan",
+    branch: "noBranch",
+    worktree: "noWorktree",
+    force: "force",
+    verbose: "verbose",
+    spec: "spec",
+    respec: "respec",
+    fixTests: "fixTests",
+    feature: "feature",
+    source: "issueSource",
+    provider: "provider",
+    concurrency: "concurrency",
+    serverUrl: "serverUrl",
+    planTimeout: "planTimeout",
+    retries: "retries",
+    planRetries: "planRetries",
+    testTimeout: "testTimeout",
+    cwd: "cwd",
+    org: "org",
+    project: "project",
+    outputDir: "outputDir",
+  };
+
+  for (const [attr, flag] of Object.entries(SOURCE_MAP)) {
+    if (program.getOptionValueSource(attr) === "cli") {
+      explicitFlags.add(flag);
+    }
   }
 
   return [args, explicitFlags];
@@ -275,16 +273,27 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
 async function main() {
   const rawArgv = process.argv.slice(2);
 
-  // ── Config subcommand — must run before parseArgs ──────────
+  // ── Config subcommand via Commander ────────────────────────
   if (rawArgv[0] === "config") {
-    let cwd = process.cwd();
-    for (let i = 1; i < rawArgv.length; i++) {
-      if (rawArgv[i] === "--cwd" && i + 1 < rawArgv.length) {
-        cwd = resolve(rawArgv[i + 1]);
-        break;
+    const configProgram = new Command("dispatch-config")
+      .exitOverride()
+      .configureOutput({ writeOut: () => {}, writeErr: () => {} })
+      .helpOption(false)
+      .allowUnknownOption(true)
+      .allowExcessArguments(true)
+      .option("--cwd <dir>", "Working directory", (v: string) => resolve(v));
+
+    try {
+      configProgram.parse(rawArgv.slice(1), { from: "user" });
+    } catch (err) {
+      if (err instanceof CommanderError) {
+        log.error(err.message);
+        process.exit(1);
       }
+      throw err;
     }
-    const configDir = join(cwd, ".dispatch");
+
+    const configDir = join(configProgram.opts().cwd ?? process.cwd(), ".dispatch");
     await handleConfigCommand(rawArgv.slice(1), configDir);
     process.exit(0);
   }
