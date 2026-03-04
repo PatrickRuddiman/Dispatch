@@ -15,6 +15,7 @@ import { slugify } from "../helpers/slugify.js";
 import { log } from "../helpers/logger.js";
 
 const exec = promisify(execFile);
+const doneStateCache = new Map<string, string>();
 
 export async function detectWorkItemType(
   opts: IssueFetchOptions = {}
@@ -42,6 +43,55 @@ export async function detectWorkItemType(
   }
 }
 
+export async function detectDoneState(
+  workItemType: string,
+  opts: IssueFetchOptions = {}
+): Promise<string> {
+  const cacheKey = `${opts.org ?? ""}|${opts.project ?? ""}|${workItemType}`;
+  const cached = doneStateCache.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const args = [
+      "boards", "work-item", "type", "state", "list",
+      "--type", workItemType,
+      "--output", "json",
+    ];
+    if (opts.project) args.push("--project", opts.project);
+    if (opts.org) args.push("--org", opts.org);
+
+    const { stdout } = await exec("az", args, {
+      cwd: opts.cwd || process.cwd(),
+    });
+
+    const states: { name: string; category?: string }[] = JSON.parse(stdout);
+
+    // Primary: find state with "Completed" category
+    if (Array.isArray(states)) {
+      const completed = states.find((s) => s.category === "Completed");
+      if (completed) {
+        doneStateCache.set(cacheKey, completed.name);
+        return completed.name;
+      }
+
+      // Fallback: check for known terminal states in priority order
+      const names = states.map((s) => s.name);
+      const fallbacks = ["Done", "Closed", "Resolved", "Completed"];
+      for (const f of fallbacks) {
+        if (names.includes(f)) {
+          doneStateCache.set(cacheKey, f);
+          return f;
+        }
+      }
+    }
+  } catch {
+    // Fall through to default
+  }
+
+  doneStateCache.set(cacheKey, "Closed");
+  return "Closed";
+}
+
 export const datasource: Datasource = {
   name: "azdevops",
 
@@ -51,7 +101,7 @@ export const datasource: Datasource = {
 
   async list(opts: IssueFetchOptions = {}): Promise<IssueDetails[]> {
     const wiql =
-      "SELECT [System.Id] FROM workitems WHERE [System.State] <> 'Closed' AND [System.State] <> 'Removed' ORDER BY [System.CreatedDate] DESC";
+      "SELECT [System.Id] FROM workitems WHERE [System.State] <> 'Closed' AND [System.State] <> 'Done' AND [System.State] <> 'Removed' ORDER BY [System.CreatedDate] DESC";
 
     const args = ["boards", "query", "--wiql", wiql, "--output", "json"];
     if (opts.org) args.push("--org", opts.org);
@@ -159,6 +209,30 @@ export const datasource: Datasource = {
     issueId: string,
     opts: IssueFetchOptions = {}
   ): Promise<void> {
+    let workItemType = opts.workItemType;
+    if (!workItemType) {
+      const showArgs = [
+        "boards",
+        "work-item",
+        "show",
+        "--id",
+        issueId,
+        "--output",
+        "json",
+      ];
+      if (opts.org) showArgs.push("--org", opts.org);
+      if (opts.project) showArgs.push("--project", opts.project);
+      const { stdout } = await exec("az", showArgs, {
+        cwd: opts.cwd || process.cwd(),
+      });
+      const item = JSON.parse(stdout);
+      workItemType = item.fields?.["System.WorkItemType"] ?? undefined;
+    }
+
+    const state = workItemType
+      ? await detectDoneState(workItemType, opts)
+      : "Closed";
+
     const args = [
       "boards",
       "work-item",
@@ -166,7 +240,7 @@ export const datasource: Datasource = {
       "--id",
       issueId,
       "--state",
-      "Closed",
+      state,
     ];
     if (opts.org) args.push("--org", opts.org);
     if (opts.project) args.push("--project", opts.project);

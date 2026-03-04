@@ -5,7 +5,7 @@ const { mockExecFile } = vi.hoisted(() => ({ mockExecFile: vi.fn() }));
 vi.mock("node:child_process", () => ({ execFile: mockExecFile }));
 vi.mock("node:util", () => ({ promisify: () => mockExecFile }));
 
-import { datasource, detectWorkItemType } from "../datasources/azdevops.js";
+import { datasource, detectWorkItemType, detectDoneState } from "../datasources/azdevops.js";
 
 beforeEach(() => {
   mockExecFile.mockReset();
@@ -162,16 +162,150 @@ describe("azdevops datasource — update", () => {
 });
 
 describe("azdevops datasource — close", () => {
-  it("updates state to Closed", async () => {
-    mockExecFile.mockResolvedValue({ stdout: "" });
+  it("detects done state dynamically via work item type", async () => {
+    // 1st call: az boards work-item show (fetch work item to get type)
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        id: 42,
+        fields: { "System.WorkItemType": "User Story" },
+      }),
+    });
+    // 2nd call: az boards work-item type state list (detect done state)
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        { name: "New", category: "Proposed" },
+        { name: "Active", category: "InProgress" },
+        { name: "Closed", category: "Completed" },
+      ]),
+    });
+    // 3rd call: az boards work-item update
+    mockExecFile.mockResolvedValueOnce({ stdout: "" });
 
-    await datasource.close("42", { cwd: "/tmp" });
+    await datasource.close("42", { cwd: "/tmp", org: "close-org1", project: "close-proj1" });
 
-    expect(mockExecFile).toHaveBeenCalledWith(
-      "az",
+    // Verify the update used the detected state
+    const updateArgs = mockExecFile.mock.calls[2][1] as string[];
+    expect(updateArgs).toEqual(
       expect.arrayContaining(["boards", "work-item", "update", "--id", "42", "--state", "Closed"]),
-      { cwd: "/tmp" },
     );
+  });
+
+  it("resolves to Done for Scrum process template", async () => {
+    // 1st call: az boards work-item show (fetch work item to get type)
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        id: 42,
+        fields: { "System.WorkItemType": "Product Backlog Item" },
+      }),
+    });
+    // 2nd call: az boards work-item type state list (detect done state)
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        { name: "New", category: "Proposed" },
+        { name: "Approved", category: "InProgress" },
+        { name: "Committed", category: "InProgress" },
+        { name: "Done", category: "Completed" },
+      ]),
+    });
+    // 3rd call: az boards work-item update
+    mockExecFile.mockResolvedValueOnce({ stdout: "" });
+
+    await datasource.close("42", { cwd: "/tmp", org: "scrum-org", project: "scrum-proj" });
+
+    // Verify the update used "Done" (Scrum terminal state)
+    const updateArgs = mockExecFile.mock.calls[2][1] as string[];
+    expect(updateArgs).toEqual(
+      expect.arrayContaining(["boards", "work-item", "update", "--id", "42", "--state", "Done"]),
+    );
+  });
+
+  it("uses opts.workItemType to skip fetching work item", async () => {
+    // 1st call: az boards work-item type state list
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        { name: "New", category: "Proposed" },
+        { name: "Done", category: "Completed" },
+      ]),
+    });
+    // 2nd call: az boards work-item update
+    mockExecFile.mockResolvedValueOnce({ stdout: "" });
+
+    await datasource.close("42", { cwd: "/tmp", workItemType: "Product Backlog Item", org: "close-org2", project: "close-proj2" });
+
+    // Should NOT have called work-item show — only 2 exec calls
+    expect(mockExecFile).toHaveBeenCalledTimes(2);
+    const updateArgs = mockExecFile.mock.calls[1][1] as string[];
+    expect(updateArgs).toEqual(
+      expect.arrayContaining(["--state", "Done"]),
+    );
+  });
+
+  it("falls back to Closed when state detection fails", async () => {
+    // 1st call: az boards work-item show
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        id: 42,
+        fields: { "System.WorkItemType": "Bug" },
+      }),
+    });
+    // 2nd call: az boards work-item type state list — fails
+    mockExecFile.mockRejectedValueOnce(new Error("az error"));
+    // 3rd call: az boards work-item update
+    mockExecFile.mockResolvedValueOnce({ stdout: "" });
+
+    await datasource.close("42", { cwd: "/tmp", org: "close-org3", project: "close-proj3" });
+
+    const updateArgs = mockExecFile.mock.calls[2][1] as string[];
+    expect(updateArgs).toEqual(
+      expect.arrayContaining(["--state", "Closed"]),
+    );
+  });
+
+  it("falls back to Closed when work item has no type", async () => {
+    // 1st call: az boards work-item show — returns item without type
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify({ id: 42, fields: {} }),
+    });
+    // 2nd call: az boards work-item update (should use "Closed" default)
+    mockExecFile.mockResolvedValueOnce({ stdout: "" });
+
+    await datasource.close("42", { cwd: "/tmp", org: "close-org4", project: "close-proj4" });
+
+    expect(mockExecFile).toHaveBeenCalledTimes(2);
+    const updateArgs = mockExecFile.mock.calls[1][1] as string[];
+    expect(updateArgs).toEqual(
+      expect.arrayContaining(["--state", "Closed"]),
+    );
+  });
+
+  it("passes org and project when provided", async () => {
+    // 1st call: work-item show
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        id: 42,
+        fields: { "System.WorkItemType": "User Story" },
+      }),
+    });
+    // 2nd call: state list
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        { name: "Closed", category: "Completed" },
+      ]),
+    });
+    // 3rd call: update
+    mockExecFile.mockResolvedValueOnce({ stdout: "" });
+
+    await datasource.close("42", { cwd: "/tmp", org: "close-org5", project: "close-proj5" });
+
+    const showArgs = mockExecFile.mock.calls[0][1] as string[];
+    expect(showArgs).toContain("--org");
+    expect(showArgs).toContain("close-org5");
+    expect(showArgs).toContain("--project");
+    expect(showArgs).toContain("close-proj5");
+
+    const updateArgs = mockExecFile.mock.calls[2][1] as string[];
+    expect(updateArgs).toContain("--org");
+    expect(updateArgs).toContain("--project");
   });
 });
 
@@ -340,6 +474,175 @@ describe("detectWorkItemType", () => {
 
     const result = await detectWorkItemType({ cwd: "/tmp" });
     expect(result).toBeNull();
+  });
+});
+
+describe("detectDoneState", () => {
+  it("returns the state with Completed category", async () => {
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        { name: "New", category: "Proposed" },
+        { name: "Active", category: "InProgress" },
+        { name: "Done", category: "Completed" },
+      ]),
+    });
+
+    const result = await detectDoneState("Product Backlog Item", {
+      cwd: "/tmp",
+      org: "org1",
+      project: "proj1",
+    });
+
+    expect(result).toBe("Done");
+    const args = mockExecFile.mock.calls[0][1] as string[];
+    expect(args).toContain("--type");
+    expect(args[args.indexOf("--type") + 1]).toBe("Product Backlog Item");
+    expect(args).toContain("--project");
+    expect(args).toContain("--org");
+  });
+
+  it("returns Closed when category is Completed for Agile template", async () => {
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        { name: "New", category: "Proposed" },
+        { name: "Active", category: "InProgress" },
+        { name: "Closed", category: "Completed" },
+      ]),
+    });
+
+    const result = await detectDoneState("User Story", {
+      cwd: "/tmp",
+      org: "org2",
+      project: "proj2",
+    });
+
+    expect(result).toBe("Closed");
+  });
+
+  it("falls back to Done when no Completed category exists", async () => {
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        { name: "New" },
+        { name: "Active" },
+        { name: "Done" },
+      ]),
+    });
+
+    const result = await detectDoneState("Product Backlog Item", {
+      cwd: "/tmp",
+      org: "org3",
+      project: "proj3",
+    });
+
+    expect(result).toBe("Done");
+  });
+
+  it("falls back to Closed when Done is not available", async () => {
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        { name: "New" },
+        { name: "Active" },
+        { name: "Closed" },
+      ]),
+    });
+
+    const result = await detectDoneState("User Story", {
+      cwd: "/tmp",
+      org: "org4",
+      project: "proj4",
+    });
+
+    expect(result).toBe("Closed");
+  });
+
+  it("falls back to Resolved when Done and Closed are not available", async () => {
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        { name: "New" },
+        { name: "Active" },
+        { name: "Resolved" },
+      ]),
+    });
+
+    const result = await detectDoneState("Requirement", {
+      cwd: "/tmp",
+      org: "org5",
+      project: "proj5",
+    });
+
+    expect(result).toBe("Resolved");
+  });
+
+  it("falls back to Completed when only Completed state exists", async () => {
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        { name: "New" },
+        { name: "Active" },
+        { name: "Completed" },
+      ]),
+    });
+
+    const result = await detectDoneState("Custom Item", {
+      cwd: "/tmp",
+      org: "org6",
+      project: "proj6",
+    });
+
+    expect(result).toBe("Completed");
+  });
+
+  it("defaults to Closed when no known terminal states exist", async () => {
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        { name: "New" },
+        { name: "Active" },
+        { name: "Custom Final" },
+      ]),
+    });
+
+    const result = await detectDoneState("Custom Item", {
+      cwd: "/tmp",
+      org: "org7",
+      project: "proj7",
+    });
+
+    expect(result).toBe("Closed");
+  });
+
+  it("defaults to Closed on CLI error", async () => {
+    mockExecFile.mockRejectedValueOnce(new Error("az not found"));
+
+    const result = await detectDoneState("User Story", {
+      cwd: "/tmp",
+      org: "org8",
+      project: "proj8",
+    });
+
+    expect(result).toBe("Closed");
+  });
+
+  it("returns cached result on subsequent calls", async () => {
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        { name: "Done", category: "Completed" },
+      ]),
+    });
+
+    const first = await detectDoneState("PBI", {
+      cwd: "/tmp",
+      org: "cached-org",
+      project: "cached-proj",
+    });
+    const second = await detectDoneState("PBI", {
+      cwd: "/tmp",
+      org: "cached-org",
+      project: "cached-proj",
+    });
+
+    expect(first).toBe("Done");
+    expect(second).toBe("Done");
+    // Only one CLI call should have been made
+    expect(mockExecFile).toHaveBeenCalledTimes(1);
   });
 });
 
