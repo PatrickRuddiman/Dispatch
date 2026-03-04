@@ -188,7 +188,7 @@ Config is stored at `.dispatch/config.json` (relative to the working directory w
 | Key | Description |
 |-----|-------------|
 | `provider` | AI backend: `opencode` (default), `copilot`, `claude`, or `codex` |
-| `model` | Model name to use with the chosen provider |
+| `model` | Model to use when spawning agents (provider-specific format) |
 | `source` | Issue tracker: `github`, `azdevops`, or `md` |
 | `testTimeout` | Test execution timeout in seconds (default: 60) |
 
