@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ─── Hoisted mock references ────────────────────────────────────────
 
@@ -45,6 +45,7 @@ vi.mock("../helpers/logger.js", () => ({
 }));
 
 import { boot } from "../providers/copilot.js";
+import { TimeoutError } from "../helpers/timeout.js";
 import { CopilotClient } from "@github/copilot-sdk";
 import { log } from "../helpers/logger.js";
 
@@ -231,6 +232,57 @@ describe("prompt", () => {
     await expect(instance.prompt(sessionId, "hello")).rejects.toThrow(
       "Copilot session error: session boom",
     );
+  });
+
+  describe("timeout", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("rejects with TimeoutError when neither idle nor error fires within 5 minutes", async () => {
+      const unsubIdle = vi.fn();
+      const unsubErr = vi.fn();
+      mockSession.on.mockImplementation((eventName: string) => {
+        return eventName === "session.idle" ? unsubIdle : unsubErr;
+      });
+
+      const instance = await boot();
+      const sessionId = await instance.createSession();
+      const resultPromise = instance.prompt(sessionId, "hello");
+      // Prevent unhandled rejection warning during timer advancement
+      resultPromise.catch(() => {});
+
+      await vi.advanceTimersByTimeAsync(300_000);
+
+      await expect(resultPromise).rejects.toBeInstanceOf(TimeoutError);
+      await expect(resultPromise).rejects.toThrow("copilot session ready");
+    });
+
+    it("calls both unsubscribe functions on timeout", async () => {
+      const unsubIdle = vi.fn();
+      const unsubErr = vi.fn();
+      mockSession.on.mockImplementation((eventName: string) => {
+        return eventName === "session.idle" ? unsubIdle : unsubErr;
+      });
+
+      const instance = await boot();
+      const sessionId = await instance.createSession();
+      const resultPromise = instance.prompt(sessionId, "hello");
+      // Prevent unhandled rejection warning during timer advancement
+      resultPromise.catch(() => {});
+
+      await vi.advanceTimersByTimeAsync(300_000);
+
+      // Let the rejection settle
+      await resultPromise.catch(() => {});
+
+      expect(unsubIdle).toHaveBeenCalled();
+      expect(unsubErr).toHaveBeenCalled();
+    });
   });
 });
 
