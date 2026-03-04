@@ -120,6 +120,7 @@ import { extractTitle } from "../datasources/md.js";
 import { confirmLargeBatch } from "../helpers/confirm-large-batch.js";
 import { bootProvider } from "../providers/index.js";
 import type { SpecOptions } from "../spec-generator.js";
+import { createMockDatasource } from "./fixtures.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
@@ -144,12 +145,13 @@ describe("runSpecPipeline", () => {
     consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
     // Default: datasource returns github
-    vi.mocked(getDatasource).mockReturnValue({
-      name: "github",
-      fetch: mocks.mockFetch,
-      update: mocks.mockUpdate,
-      create: mocks.mockCreate,
-    } as any);
+    vi.mocked(getDatasource).mockReturnValue(
+      createMockDatasource("github", {
+        fetch: mocks.mockFetch,
+        update: mocks.mockUpdate,
+        create: mocks.mockCreate,
+      }),
+    );
 
     // Default: tracker mode
     vi.mocked(isIssueNumbers).mockReturnValue(true);
@@ -372,12 +374,13 @@ describe("runSpecPipeline", () => {
     });
 
     it("does not create issue or delete file when datasource is md", async () => {
-      vi.mocked(getDatasource).mockReturnValue({
-        name: "md",
-        fetch: mocks.mockFetch,
-        update: mocks.mockUpdate,
-        create: mocks.mockCreate,
-      } as any);
+      vi.mocked(getDatasource).mockReturnValue(
+        createMockDatasource("md", {
+          fetch: mocks.mockFetch,
+          update: mocks.mockUpdate,
+          create: mocks.mockCreate,
+        }),
+      );
       mocks.mockGlob.mockResolvedValue(["/tmp/test-cwd/spec1.md"]);
       vi.mocked(readFile).mockResolvedValue("# File Content\n\nBody");
 
@@ -604,6 +607,65 @@ describe("runSpecPipeline", () => {
       expect(result.files.length).toBe(1);
       expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
         expect.stringContaining("Provider cleanup failed"),
+      );
+    });
+  });
+
+  // ── Batch partial-failure ──────────────────────────────────
+
+  describe("batch partial-failure", () => {
+    it("succeeds for some items and fails for others in a concurrent batch", async () => {
+      mocks.mockFetch
+        .mockResolvedValueOnce({
+          number: "1",
+          title: "Test Issue 1",
+          body: "Issue body 1",
+          labels: [],
+          state: "open",
+          url: "https://example.com/1",
+          comments: [],
+          acceptanceCriteria: "",
+        })
+        .mockResolvedValueOnce({
+          number: "2",
+          title: "Test Issue 2",
+          body: "Issue body 2",
+          labels: [],
+          state: "open",
+          url: "https://example.com/2",
+          comments: [],
+          acceptanceCriteria: "",
+        })
+        .mockResolvedValueOnce({
+          number: "3",
+          title: "Test Issue 3",
+          body: "Issue body 3",
+          labels: [],
+          state: "open",
+          url: "https://example.com/3",
+          comments: [],
+          acceptanceCriteria: "",
+        })
+        .mockRejectedValueOnce(new Error("timeout"))
+        .mockRejectedValueOnce(new Error("timeout"));
+
+      const result = await runSpecPipeline(baseOpts({ issues: "1,2,3,4,5", concurrency: 2 }));
+
+      expect(result.total).toBe(5);
+      expect(result.generated).toBe(3);
+      expect(result.failed).toBe(2);
+    });
+
+    it("returns error result without throwing when all items fail concurrently", async () => {
+      mocks.mockFetch.mockRejectedValue(new Error("service down"));
+
+      const result = await runSpecPipeline(baseOpts({ issues: "1,2,3,4,5", concurrency: 3 }));
+
+      expect(result.total).toBe(5);
+      expect(result.generated).toBe(0);
+      expect(result.failed).toBe(5);
+      expect(vi.mocked(log.error)).toHaveBeenCalledWith(
+        expect.stringContaining("No issues could be loaded"),
       );
     });
   });

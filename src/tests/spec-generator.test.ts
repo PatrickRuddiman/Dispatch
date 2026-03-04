@@ -3,7 +3,8 @@ import { isIssueNumbers, isGlobOrFilePath, validateSpecStructure, extractSpecCon
 import { buildFileSpecPrompt, boot } from "../agents/spec.js";
 import * as datasourcesIndex from "../datasources/index.js";
 import type { ProviderInstance } from "../providers/interface.js";
-import type { IssueDetails } from "../datasources/interface.js";
+import type { Datasource, IssueDetails } from "../datasources/interface.js";
+import { createMockDatasource } from "./fixtures.js";
 
 vi.mock("node:fs/promises", () => ({
   mkdir: vi.fn().mockResolvedValue(undefined),
@@ -1364,36 +1365,6 @@ describe("spec output formatting", () => {
     "- [ ] (S) Second task",
   ].join("\n");
 
-  function createMockDatasource(name: "github" | "azdevops" | "md", overrides?: Record<string, unknown>) {
-    return {
-      name,
-      list: vi.fn().mockResolvedValue([]),
-      fetch: vi.fn().mockResolvedValue({
-        number: "42",
-        title: "My Feature",
-        body: "Feature body",
-        labels: [],
-        state: "open",
-        url: "https://github.com/org/repo/issues/42",
-        comments: [],
-        acceptanceCriteria: "",
-      }),
-      update: vi.fn().mockResolvedValue(undefined),
-      close: vi.fn().mockResolvedValue(undefined),
-      create: vi.fn().mockResolvedValue({
-        number: "99",
-        title: "My Feature",
-        body: "Spec content",
-        labels: [],
-        state: "open",
-        url: "https://github.com/org/repo/issues/99",
-        comments: [],
-        acceptanceCriteria: "",
-      }),
-      ...overrides,
-    };
-  }
-
   beforeEach(() => {
     vi.mocked(mkdir).mockResolvedValue(undefined);
     vi.mocked(writeFile).mockResolvedValue(undefined);
@@ -1419,7 +1390,7 @@ describe("spec output formatting", () => {
 
   it("shows issue numbers in dispatch command for tracker mode (github)", async () => {
     const mockDs = createMockDatasource("github");
-    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue("github");
 
     await runSpecPipeline({
@@ -1442,7 +1413,7 @@ describe("spec output formatting", () => {
 
   it("shows issue numbers in dispatch command for tracker mode (azdevops)", async () => {
     const mockDs = createMockDatasource("azdevops");
-    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue("azdevops");
 
     await runSpecPipeline({
@@ -1463,8 +1434,7 @@ describe("spec output formatting", () => {
 
   it("shows created issue numbers in dispatch command for file/glob mode with tracker datasource", async () => {
     const mockDs = createMockDatasource("github", {
-      create: vi.fn()
-        .mockResolvedValueOnce({
+      create: vi.fn<Datasource["create"]>()        .mockResolvedValueOnce({
           number: "55",
           title: "Feature A",
           body: "content",
@@ -1485,7 +1455,7 @@ describe("spec output formatting", () => {
           acceptanceCriteria: "",
         }),
     });
-    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue("github");
     vi.mocked(globFn).mockResolvedValue(["/tmp/test-project/drafts/a.md", "/tmp/test-project/drafts/b.md"] as any);
 
@@ -1511,7 +1481,7 @@ describe("spec output formatting", () => {
 
   it("shows file paths in dispatch command for file/glob mode with md datasource", async () => {
     const mockDs = createMockDatasource("md");
-    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
     vi.mocked(globFn).mockResolvedValue(["/tmp/test-project/drafts/feature.md"] as any);
 
@@ -1534,7 +1504,7 @@ describe("spec output formatting", () => {
 
   it("shows single issue number for tracker mode with one issue", async () => {
     const mockDs = createMockDatasource("github");
-    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
 
     await runSpecPipeline({
       issues: "42",
@@ -1574,36 +1544,6 @@ describe("inline text pipeline", () => {
     "- [ ] (S) Second task",
   ].join("\n");
 
-  function createMockDatasource(name: "github" | "azdevops" | "md", overrides?: Record<string, unknown>) {
-    return {
-      name,
-      list: vi.fn().mockResolvedValue([]),
-      fetch: vi.fn().mockResolvedValue({
-        number: "42",
-        title: "My Feature",
-        body: "Feature body",
-        labels: [],
-        state: "open",
-        url: "https://github.com/org/repo/issues/42",
-        comments: [],
-        acceptanceCriteria: "",
-      }),
-      update: vi.fn().mockResolvedValue(undefined),
-      close: vi.fn().mockResolvedValue(undefined),
-      create: vi.fn().mockResolvedValue({
-        number: "99",
-        title: "My Feature",
-        body: "Spec content",
-        labels: [],
-        state: "open",
-        url: "https://github.com/org/repo/issues/99",
-        comments: [],
-        acceptanceCriteria: "",
-      }),
-      ...overrides,
-    };
-  }
-
   beforeEach(() => {
     vi.mocked(mkdir).mockResolvedValue(undefined);
     vi.mocked(writeFile).mockResolvedValue(undefined);
@@ -1627,7 +1567,7 @@ describe("inline text pipeline", () => {
 
   it("generates a spec file for inline text input", async () => {
     const mockDs = createMockDatasource("md");
-    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
 
     const result = await runSpecPipeline({
@@ -1647,7 +1587,7 @@ describe("inline text pipeline", () => {
 
   it("shows file path in dispatch command for inline text with md datasource", async () => {
     const mockDs = createMockDatasource("md");
-    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
 
     await runSpecPipeline({
@@ -1669,7 +1609,7 @@ describe("inline text pipeline", () => {
 
   it("truncates long inline text in spec title", async () => {
     const mockDs = createMockDatasource("md");
-    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
 
     const longInput = "implement a comprehensive user authentication system with oauth2 support and multi-factor authentication for the admin panel";
@@ -1692,7 +1632,7 @@ describe("inline text pipeline", () => {
 
   it("slugifies inline text into the output filename", async () => {
     const mockDs = createMockDatasource("md");
-    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
 
     const result = await runSpecPipeline({
@@ -1710,7 +1650,7 @@ describe("inline text pipeline", () => {
 
   it("passes inline text as fileContent to spec agent", async () => {
     const mockDs = createMockDatasource("md");
-    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
 
     const mockProvider = {
@@ -1754,7 +1694,7 @@ describe("inline text pipeline", () => {
 
   it("returns spec summary with identifiers for inline text", async () => {
     const mockDs = createMockDatasource("md");
-    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
 
     const result = await runSpecPipeline({
@@ -1779,36 +1719,6 @@ describe("inline text pipeline", () => {
 describe("H1-to-filename derivation", () => {
   const CWD = "/tmp/test-project";
   const OUTPUT_DIR = "/tmp/test-project/.dispatch/specs";
-
-  function createMockDatasource(name: "github" | "azdevops" | "md", overrides?: Record<string, unknown>) {
-    return {
-      name,
-      list: vi.fn().mockResolvedValue([]),
-      fetch: vi.fn().mockResolvedValue({
-        number: "42",
-        title: "Original Tracker Title",
-        body: "Feature body",
-        labels: [],
-        state: "open",
-        url: "https://github.com/org/repo/issues/42",
-        comments: [],
-        acceptanceCriteria: "",
-      }),
-      update: vi.fn().mockResolvedValue(undefined),
-      close: vi.fn().mockResolvedValue(undefined),
-      create: vi.fn().mockResolvedValue({
-        number: "99",
-        title: "Created Issue",
-        body: "Spec content",
-        labels: [],
-        state: "open",
-        url: "https://github.com/org/repo/issues/99",
-        comments: [],
-        acceptanceCriteria: "",
-      }),
-      ...overrides,
-    };
-  }
 
   beforeEach(() => {
     vi.mocked(mkdir).mockResolvedValue(undefined);
@@ -1848,7 +1758,7 @@ describe("H1-to-filename derivation", () => {
     vi.mocked(readFile).mockResolvedValue(specWithCustomH1);
 
     const mockDs = createMockDatasource("github");
-    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue("github");
 
     const result = await runSpecPipeline({
@@ -1882,7 +1792,7 @@ describe("H1-to-filename derivation", () => {
     vi.mocked(readFile).mockResolvedValue(specMatchingTitle);
 
     const mockDs = createMockDatasource("github", {
-      fetch: vi.fn().mockResolvedValue({
+      fetch: vi.fn<Datasource["fetch"]>().mockResolvedValue({
         number: "10",
         title: "My Feature",
         body: "body",
@@ -1893,7 +1803,7 @@ describe("H1-to-filename derivation", () => {
         acceptanceCriteria: "",
       }),
     });
-    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue("github");
 
     const result = await runSpecPipeline({
@@ -1925,7 +1835,7 @@ describe("H1-to-filename derivation", () => {
     vi.mocked(readFile).mockResolvedValue(specWithH1);
 
     const mockDs = createMockDatasource("md");
-    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
 
     const result = await runSpecPipeline({
@@ -1957,7 +1867,7 @@ describe("H1-to-filename derivation", () => {
     vi.mocked(globFn).mockResolvedValue(["/tmp/test-project/drafts/original.md"] as any);
 
     const mockDs = createMockDatasource("md");
-    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs as any);
+    vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
 
     const result = await runSpecPipeline({

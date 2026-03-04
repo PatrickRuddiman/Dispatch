@@ -5,8 +5,10 @@
  * cleans up resources.
  */
 
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { readFile } from "node:fs/promises";
-import { parseTaskFile, buildTaskContext, groupTasksByMode, type TaskFile } from "../parser.js";
+import { parseTaskFile, buildTaskContext, groupTasksByMode, type TaskFile, type Task } from "../parser.js";
 import type { DispatchResult } from "../dispatcher.js";
 import { boot as bootPlanner, type PlannerAgent } from "../agents/planner.js";
 import type { AgentResult, PlannerData, ExecutorData } from "../agents/types.js";
@@ -14,7 +16,7 @@ import { boot as bootExecutor, type ExecutorAgent } from "../agents/executor.js"
 import { boot as bootCommit, type CommitAgent } from "../agents/commit.js";
 import { log } from "../helpers/logger.js";
 import { registerCleanup } from "../helpers/cleanup.js";
-import { createWorktree, removeWorktree, worktreeName } from "../helpers/worktree.js";
+import { createWorktree, removeWorktree, worktreeName, generateFeatureBranchName } from "../helpers/worktree.js";
 import { createTui, type TuiState } from "../tui.js";
 import type { ProviderName, ProviderInstance } from "../providers/interface.js";
 import { bootProvider } from "../providers/index.js";
@@ -28,6 +30,8 @@ import {
   parseIssueFilename,
   buildPrBody,
   buildPrTitle,
+  buildFeaturePrTitle,
+  buildFeaturePrBody,
   getBranchDiff,
   squashBranchCommits,
 } from "./datasource-helpers.js";
@@ -35,6 +39,8 @@ import { withTimeout, TimeoutError } from "../helpers/timeout.js";
 import { withRetry } from "../helpers/retry.js";
 import chalk from "chalk";
 import { elapsed, renderHeaderLines } from "../helpers/format.js";
+
+const exec = promisify(execFile);
 
 /** Default planning timeout in minutes when not specified by the user. */
 const DEFAULT_PLAN_TIMEOUT_MIN = 10;
@@ -59,6 +65,7 @@ export async function runDispatchPipeline(
     noPlan,
     noBranch,
     noWorktree,
+    feature,
     provider = "opencode",
     model,
     source,
@@ -184,7 +191,7 @@ export async function runDispatchPipeline(
     // Worktrees are used when: not opted out, branching is enabled, and
     // there are multiple issues to process (single-issue runs use serial
     // mode to avoid unnecessary worktree overhead).
-    const useWorktrees = !noWorktree && !noBranch && tasksByFile.size > 1;
+    const useWorktrees = !noWorktree && (feature || (!noBranch && tasksByFile.size > 1));
 
     // ── 3. Boot provider ────────────────────────────────────────
     tui.state.phase = "booting";
@@ -224,6 +231,40 @@ export async function runDispatchPipeline(
 
     const lifecycleOpts: DispatchLifecycleOptions = { cwd };
 
+    // ── Feature-branch setup (when --feature) ──────────────────────
+    let featureBranchName: string | undefined;
+    let featureDefaultBranch: string | undefined;
+
+    if (feature) {
+      try {
+        featureDefaultBranch = await datasource.getDefaultBranch(lifecycleOpts);
+
+        // Ensure we are on the default branch so the feature branch starts from the correct commit
+        await datasource.switchBranch(featureDefaultBranch, lifecycleOpts);
+        featureBranchName = generateFeatureBranchName();
+
+        // Create the feature branch from the default branch
+        await datasource.createAndSwitchBranch(featureBranchName, lifecycleOpts);
+        log.debug(`Created feature branch ${featureBranchName} from ${featureDefaultBranch}`);
+
+        // Register cleanup for the feature branch
+        registerCleanup(async () => {
+          try {
+            await datasource.switchBranch(featureDefaultBranch!, lifecycleOpts);
+          } catch { /* swallow */ }
+        });
+
+        // Switch back to default branch so worktrees can be created from the main repo
+        await datasource.switchBranch(featureDefaultBranch, lifecycleOpts);
+        log.debug(`Switched back to ${featureDefaultBranch} for worktree creation`);
+      } catch (err) {
+        log.error(`Feature branch creation failed: ${log.extractMessage(err)}`);
+        tui.state.phase = "done";
+        tui.stop();
+        return { total: allTasks.length, completed: 0, failed: allTasks.length, skipped: 0, results: [] };
+      }
+    }
+
     // Resolve git username once for branch naming
     let username = "";
     try {
@@ -244,11 +285,11 @@ export async function runDispatchPipeline(
       // ── Branch / worktree setup (unless --no-branch) ────────────
       if (!noBranch && details) {
         try {
-          defaultBranch = await datasource.getDefaultBranch(lifecycleOpts);
+          defaultBranch = feature ? featureBranchName! : await datasource.getDefaultBranch(lifecycleOpts);
           branchName = datasource.buildBranchName(details.number, details.title, username);
 
           if (useWorktrees) {
-            worktreePath = await createWorktree(cwd, file, branchName);
+            worktreePath = await createWorktree(cwd, file, branchName, ...(feature && featureBranchName ? [featureBranchName] : []));
             registerCleanup(async () => { await removeWorktree(cwd, file); });
             issueCwd = worktreePath;
             log.debug(`Created worktree for issue #${details.number} at ${worktreePath}`);
@@ -503,16 +544,67 @@ export async function runDispatchPipeline(
 
       // ── Branch teardown (push, PR, cleanup) ──────────────────
       if (!noBranch && branchName && defaultBranch && details) {
-        if (datasource.supportsGit()) {
-          try {
-            await datasource.pushBranch(branchName, issueLifecycleOpts);
-            log.debug(`Pushed branch ${branchName}`);
-          } catch (err) {
-            log.warn(`Could not push branch ${branchName}: ${log.formatErrorChain(err)}`);
+        if (feature && featureBranchName) {
+          // ── Feature mode: merge working branch into feature branch ──
+          if (worktreePath) {
+            try {
+              await removeWorktree(cwd, file);
+            } catch (err) {
+              log.warn(`Could not remove worktree for issue #${details.number}: ${log.formatErrorChain(err)}`);
+            }
           }
-        }
 
-        if (datasource.supportsGit()) {
+          try {
+            await datasource.switchBranch(featureBranchName, lifecycleOpts);
+            await exec("git", ["merge", branchName, "--no-ff", "-m", `merge: issue #${details.number}`], { cwd });
+            log.debug(`Merged ${branchName} into ${featureBranchName}`);
+          } catch (err) {
+            const mergeError = `Could not merge ${branchName} into feature branch: ${log.formatErrorChain(err)}`;
+            log.warn(mergeError);
+            // Abort the failed merge so the repo is left in a clean state
+            try {
+              await exec("git", ["merge", "--abort"], { cwd });
+            } catch { /* merge --abort may fail if there's nothing to abort */ }
+            // Record every task in this issue as failed
+            for (const task of fileTasks) {
+              const tuiTask = tui.state.tasks.find((t) => t.task === task);
+              if (tuiTask) {
+                tuiTask.status = "failed";
+                tuiTask.error = mergeError;
+              }
+              const existingResult = results.find((r) => r.task === task);
+              if (existingResult) {
+                existingResult.success = false;
+                existingResult.error = mergeError;
+              }
+            }
+            return;
+          }
+
+          try {
+            await exec("git", ["branch", "-d", branchName], { cwd });
+            log.debug(`Deleted local branch ${branchName}`);
+          } catch (err) {
+            log.warn(`Could not delete local branch ${branchName}: ${log.formatErrorChain(err)}`);
+          }
+
+          try {
+            await datasource.switchBranch(featureDefaultBranch!, lifecycleOpts);
+          } catch (err) {
+            log.warn(`Could not switch back to ${featureDefaultBranch}: ${log.formatErrorChain(err)}`);
+          }
+        } else {
+          // ── Normal mode: push and create per-issue PR ──
+          if (datasource.supportsGit()) {
+            try {
+              await datasource.pushBranch(branchName, issueLifecycleOpts);
+              log.debug(`Pushed branch ${branchName}`);
+            } catch (err) {
+              log.warn(`Could not push branch ${branchName}: ${log.formatErrorChain(err)}`);
+            }
+          }
+
+          if (datasource.supportsGit()) {
           try {
             const prTitle = commitAgentResult?.prTitle
               || await buildPrTitle(details.title, defaultBranch, issueLifecycleOpts.cwd);
@@ -538,21 +630,21 @@ export async function runDispatchPipeline(
           } catch (err) {
             log.warn(`Could not create PR for issue #${details.number}: ${log.formatErrorChain(err)}`);
           }
-        }
-
-        if (useWorktrees && worktreePath) {
-          // Remove worktree (cleanup handler is also registered for crash safety)
-          try {
-            await removeWorktree(cwd, file);
-          } catch (err) {
-            log.warn(`Could not remove worktree for issue #${details.number}: ${log.formatErrorChain(err)}`);
           }
-        } else if (!useWorktrees && datasource.supportsGit()) {
-          try {
-            await datasource.switchBranch(defaultBranch, lifecycleOpts);
-            log.debug(`Switched back to ${defaultBranch}`);
-          } catch (err) {
-            log.warn(`Could not switch back to ${defaultBranch}: ${log.formatErrorChain(err)}`);
+
+          if (useWorktrees && worktreePath) {
+            try {
+              await removeWorktree(cwd, file);
+            } catch (err) {
+              log.warn(`Could not remove worktree for issue #${details.number}: ${log.formatErrorChain(err)}`);
+            }
+          } else if (!useWorktrees && datasource.supportsGit()) {
+            try {
+              await datasource.switchBranch(defaultBranch, lifecycleOpts);
+              log.debug(`Switched back to ${defaultBranch}`);
+            } catch (err) {
+              log.warn(`Could not switch back to ${defaultBranch}: ${log.formatErrorChain(err)}`);
+            }
           }
         }
       }
@@ -566,7 +658,8 @@ export async function runDispatchPipeline(
     };
 
     // Execute issues: parallel via worktrees, or serial fallback
-    if (useWorktrees) {
+    // Feature mode forces serial execution to avoid merge conflicts
+    if (useWorktrees && !feature) {
       await Promise.all(
         Array.from(tasksByFile).map(([file, fileTasks]) =>
           processIssueFile(file, fileTasks)
@@ -575,6 +668,48 @@ export async function runDispatchPipeline(
     } else {
       for (const [file, fileTasks] of tasksByFile) {
         await processIssueFile(file, fileTasks);
+      }
+    }
+
+    // ── Feature branch finalization (push + aggregated PR) ──────
+    if (feature && featureBranchName && featureDefaultBranch) {
+      try {
+        await datasource.switchBranch(featureBranchName, lifecycleOpts);
+        log.debug(`Switched to feature branch ${featureBranchName}`);
+      } catch (err) {
+        log.warn(`Could not switch to feature branch: ${log.formatErrorChain(err)}`);
+      }
+
+      try {
+        await datasource.pushBranch(featureBranchName, lifecycleOpts);
+        log.debug(`Pushed feature branch ${featureBranchName}`);
+      } catch (err) {
+        log.warn(`Could not push feature branch: ${log.formatErrorChain(err)}`);
+      }
+
+      try {
+        const allIssueDetails = Array.from(issueDetailsByFile.values());
+        const prTitle = buildFeaturePrTitle(featureBranchName, allIssueDetails);
+        const prBody = buildFeaturePrBody(allIssueDetails, allTasks, results, source!);
+        const primaryIssue = allIssueDetails[0]?.number ?? "";
+        const prUrl = await datasource.createPullRequest(
+          featureBranchName,
+          primaryIssue,
+          prTitle,
+          prBody,
+          lifecycleOpts,
+        );
+        if (prUrl) {
+          log.success(`Created feature PR: ${prUrl}`);
+        }
+      } catch (err) {
+        log.warn(`Could not create feature PR: ${log.formatErrorChain(err)}`);
+      }
+
+      try {
+        await datasource.switchBranch(featureDefaultBranch, lifecycleOpts);
+      } catch (err) {
+        log.warn(`Could not switch back to ${featureDefaultBranch}: ${log.formatErrorChain(err)}`);
       }
     }
 

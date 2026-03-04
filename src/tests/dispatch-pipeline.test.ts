@@ -128,6 +128,7 @@ vi.mock("../helpers/worktree.js", () => ({
   createWorktree: vi.fn().mockResolvedValue("/tmp/test/.dispatch/worktrees/1-test"),
   removeWorktree: vi.fn().mockResolvedValue(undefined),
   worktreeName: vi.fn().mockReturnValue("1-test"),
+  generateFeatureBranchName: vi.fn().mockReturnValue("dispatch/feature-abcd1234"),
 }));
 
 vi.mock("../helpers/logger.js", () => ({
@@ -181,10 +182,21 @@ vi.mock("../orchestrator/datasource-helpers.js", () => ({
   buildPrTitle: vi.fn().mockResolvedValue("PR title"),
   getBranchDiff: vi.fn().mockResolvedValue("diff --git a/file.ts b/file.ts\n+added line"),
   squashBranchCommits: vi.fn().mockResolvedValue(undefined),
+  buildFeaturePrTitle: vi.fn().mockReturnValue("feat: dispatch/feature-abcd1234 (#1, #2)"),
+  buildFeaturePrBody: vi.fn().mockReturnValue("Feature PR body"),
 }));
 
 vi.mock("node:fs/promises", () => ({
   readFile: vi.fn().mockResolvedValue("- [x] Implement the feature"),
+}));
+
+vi.mock("node:child_process", () => ({
+  execFile: vi.fn((...args: any[]) => {
+    const cb = args[args.length - 1];
+    if (typeof cb === "function") {
+      cb(null, "", "");
+    }
+  }),
 }));
 
 // ─── Import function under test (after mocks) ──────────────────────
@@ -193,10 +205,11 @@ import { runDispatchPipeline, dryRunMode } from "../orchestrator/dispatch-pipeli
 import { getDatasource } from "../datasources/index.js";
 import { log } from "../helpers/logger.js";
 import { createTui } from "../tui.js";
-import { createWorktree, removeWorktree, worktreeName } from "../helpers/worktree.js";
+import { createWorktree, removeWorktree, worktreeName, generateFeatureBranchName } from "../helpers/worktree.js";
 import { registerCleanup } from "../helpers/cleanup.js";
 import { parseTaskFile } from "../parser.js";
-import { fetchItemsById, writeItemsToTempDir, parseIssueFilename, closeCompletedSpecIssues, getBranchDiff, squashBranchCommits } from "../orchestrator/datasource-helpers.js";
+import { fetchItemsById, writeItemsToTempDir, parseIssueFilename, closeCompletedSpecIssues, getBranchDiff, squashBranchCommits, buildFeaturePrTitle, buildFeaturePrBody } from "../orchestrator/datasource-helpers.js";
+import { execFile } from "node:child_process";
 import { bootProvider } from "../providers/index.js";
 import { boot as bootPlannerBoot } from "../agents/planner.js";
 import { boot as bootExecutorBoot } from "../agents/executor.js";
@@ -1650,6 +1663,286 @@ describe("error-path handling", () => {
     expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
       expect.stringContaining("Could not sync task completion"),
     );
+  });
+});
+
+// ─── Feature branch workflow ────────────────────────────────────
+
+describe("feature branch workflow", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupMultiIssueScenario();
+    mocks.mockExecute.mockImplementation(async ({ task }: any) => ({
+      success: true,
+      dispatchResult: { task, success: true },
+      elapsedMs: 100,
+    }));
+    mocks.mockGenerate.mockResolvedValue({
+      commitMessage: "",
+      prTitle: "",
+      prDescription: "",
+      success: false,
+      error: "mock: not configured",
+    });
+    // Reset datasource mocks
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    vi.mocked(ds.createAndSwitchBranch).mockReset().mockResolvedValue(undefined);
+    vi.mocked(ds.switchBranch).mockReset().mockResolvedValue(undefined);
+    vi.mocked(ds.pushBranch).mockReset().mockResolvedValue(undefined);
+    vi.mocked(ds.createPullRequest).mockReset().mockResolvedValue("https://example.com/pr/feature");
+    vi.mocked(ds.getDefaultBranch).mockReset().mockResolvedValue("main");
+  });
+
+  function featureOpts(overrides?: Partial<Parameters<typeof runDispatchPipeline>[0]>) {
+    return multiIssueOpts({ feature: true, noPlan: true, ...overrides });
+  }
+
+  it("creates a feature branch from the default branch", async () => {
+    await runDispatchPipeline(featureOpts(), "/tmp/test");
+
+    expect(vi.mocked(generateFeatureBranchName)).toHaveBeenCalledOnce();
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    expect(ds.getDefaultBranch).toHaveBeenCalled();
+    expect(ds.createAndSwitchBranch).toHaveBeenCalledWith(
+      "dispatch/feature-abcd1234",
+      expect.any(Object),
+    );
+    // switchBranch must be called before createAndSwitchBranch to ensure the correct base
+    const switchOrder = vi.mocked(ds.switchBranch).mock.invocationCallOrder[0];
+    const createOrder = vi.mocked(ds.createAndSwitchBranch).mock.invocationCallOrder[0];
+    expect(switchOrder).toBeLessThan(createOrder);
+  });
+
+  it("switches back to default branch after creating feature branch", async () => {
+    await runDispatchPipeline(featureOpts(), "/tmp/test");
+
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    const switchInvocationOrders = vi.mocked(ds.switchBranch).mock.invocationCallOrder;
+    const createOrder = vi.mocked(ds.createAndSwitchBranch).mock.invocationCallOrder[0];
+    // First switchBranch call switches TO the default branch (so feature branch has correct base)
+    expect(switchInvocationOrders[0]).toBeLessThan(createOrder);
+    // Second switchBranch call switches back to the default branch after creating feature branch
+    expect(switchInvocationOrders[1]).toBeGreaterThan(createOrder);
+  });
+
+  it("creates worktrees with feature branch as start point", async () => {
+    await runDispatchPipeline(featureOpts(), "/tmp/test");
+
+    expect(vi.mocked(createWorktree)).toHaveBeenCalledTimes(2);
+    // Verify startPoint parameter is the feature branch name
+    for (const call of vi.mocked(createWorktree).mock.calls) {
+      expect(call[3]).toBe("dispatch/feature-abcd1234");
+    }
+  });
+
+  it("merges working branches into feature branch via git merge", async () => {
+    await runDispatchPipeline(featureOpts(), "/tmp/test");
+
+    const execCalls = vi.mocked(execFile).mock.calls;
+    const mergeCalls = execCalls.filter((call: any[]) =>
+      call[0] === "git" && call[1]?.[0] === "merge"
+    );
+
+    expect(mergeCalls.length).toBe(2);
+    for (const call of mergeCalls) {
+      expect(call[1]).toContain("--no-ff");
+    }
+  });
+
+  it("deletes working branches after merge via git branch -d", async () => {
+    await runDispatchPipeline(featureOpts(), "/tmp/test");
+
+    const execCalls = vi.mocked(execFile).mock.calls;
+    const deleteCalls = execCalls.filter((call: any[]) =>
+      call[0] === "git" && call[1]?.[0] === "branch" && call[1]?.[1] === "-d"
+    );
+
+    expect(deleteCalls.length).toBe(2);
+  });
+
+  it("removes worktrees before merging in feature mode", async () => {
+    await runDispatchPipeline(featureOpts(), "/tmp/test");
+
+    expect(vi.mocked(removeWorktree)).toHaveBeenCalledTimes(2);
+  });
+
+  it("pushes the feature branch after all issues are processed", async () => {
+    await runDispatchPipeline(featureOpts(), "/tmp/test");
+
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    expect(ds.pushBranch).toHaveBeenCalledWith(
+      "dispatch/feature-abcd1234",
+      expect.any(Object),
+    );
+  });
+
+  it("creates a single aggregated PR for the feature branch", async () => {
+    await runDispatchPipeline(featureOpts(), "/tmp/test");
+
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    // Should create exactly one PR (the feature PR), not per-issue PRs
+    expect(ds.createPullRequest).toHaveBeenCalledOnce();
+    expect(ds.createPullRequest).toHaveBeenCalledWith(
+      "dispatch/feature-abcd1234",
+      expect.any(String),
+      expect.any(String),
+      expect.any(String),
+      expect.any(Object),
+    );
+  });
+
+  it("uses buildFeaturePrTitle and buildFeaturePrBody for the aggregated PR", async () => {
+    await runDispatchPipeline(featureOpts(), "/tmp/test");
+
+    expect(vi.mocked(buildFeaturePrTitle)).toHaveBeenCalledWith(
+      "dispatch/feature-abcd1234",
+      expect.any(Array),
+    );
+    expect(vi.mocked(buildFeaturePrBody)).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.any(Array),
+      expect.any(Array),
+      "md",
+    );
+  });
+
+  it("does not push individual working branches", async () => {
+    await runDispatchPipeline(featureOpts(), "/tmp/test");
+
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    const pushCalls = vi.mocked(ds.pushBranch).mock.calls;
+    // Only the feature branch should be pushed, not individual issue branches
+    expect(pushCalls.length).toBe(1);
+    expect(pushCalls[0][0]).toBe("dispatch/feature-abcd1234");
+  });
+
+  it("switches back to default branch after feature PR creation", async () => {
+    await runDispatchPipeline(featureOpts(), "/tmp/test");
+
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    const switchCalls = vi.mocked(ds.switchBranch).mock.calls;
+    // Last switchBranch call should be switching back to default branch
+    const lastCall = switchCalls[switchCalls.length - 1];
+    expect(lastCall[0]).toBe("main");
+  });
+
+  it("returns correct summary with completed count", async () => {
+    const result = await runDispatchPipeline(featureOpts(), "/tmp/test");
+
+    expect(result.completed).toBe(2);
+    expect(result.failed).toBe(0);
+    expect(result.total).toBe(2);
+  });
+
+  it("fails all tasks when feature branch creation fails", async () => {
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    vi.mocked(ds.createAndSwitchBranch).mockRejectedValueOnce(
+      new Error("branch creation failed"),
+    );
+
+    const result = await runDispatchPipeline(featureOpts(), "/tmp/test");
+
+    expect(result.failed).toBe(2);
+    expect(result.completed).toBe(0);
+    expect(vi.mocked(log.error)).toHaveBeenCalledWith(
+      expect.stringContaining("Feature branch creation failed"),
+    );
+  });
+
+  it("does not create worktrees or process issues when feature branch creation fails", async () => {
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    vi.mocked(ds.createAndSwitchBranch).mockRejectedValueOnce(
+      new Error("branch creation failed"),
+    );
+
+    await runDispatchPipeline(featureOpts(), "/tmp/test");
+
+    expect(vi.mocked(createWorktree)).not.toHaveBeenCalled();
+    expect(mocks.mockExecute).not.toHaveBeenCalled();
+  });
+
+  it("registers cleanup handler for feature branch", async () => {
+    await runDispatchPipeline(featureOpts(), "/tmp/test");
+
+    // registerCleanup should be called for: feature branch + 2 worktrees + 2 providers = 5
+    expect(vi.mocked(registerCleanup)).toHaveBeenCalled();
+  });
+
+  it("continues gracefully when merge fails", async () => {
+    vi.mocked(execFile).mockImplementation(((...args: any[]) => {
+      const cb = args[args.length - 1];
+      if (typeof cb === "function") {
+        // Fail git merge calls
+        const gitArgs = args[1] as string[];
+        if (gitArgs?.[0] === "merge") {
+          cb(new Error("merge conflict"), "", "");
+          return;
+        }
+        cb(null, "", "");
+      }
+    }) as any);
+
+    const result = await runDispatchPipeline(featureOpts(), "/tmp/test");
+
+    // Should continue despite merge failure
+    expect(result.completed).toBe(2);
+    expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
+      expect.stringContaining("Could not merge"),
+    );
+  });
+
+  it("continues gracefully when working branch deletion fails", async () => {
+    vi.mocked(execFile).mockImplementation(((...args: any[]) => {
+      const cb = args[args.length - 1];
+      if (typeof cb === "function") {
+        const gitArgs = args[1] as string[];
+        if (gitArgs?.[0] === "branch" && gitArgs?.[1] === "-d") {
+          cb(new Error("branch not found"), "", "");
+          return;
+        }
+        cb(null, "", "");
+      }
+    }) as any);
+
+    const result = await runDispatchPipeline(featureOpts(), "/tmp/test");
+
+    expect(result.completed).toBe(2);
+    expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
+      expect.stringContaining("Could not delete local branch"),
+    );
+  });
+
+  it("processes issues serially in feature mode (not in parallel)", async () => {
+    const executionOrder: string[] = [];
+    mocks.mockExecute.mockImplementation(async ({ task }: any) => {
+      executionOrder.push(task.text);
+      return {
+        success: true,
+        dispatchResult: { task, success: true },
+        elapsedMs: 100,
+      };
+    });
+
+    await runDispatchPipeline(featureOpts(), "/tmp/test");
+
+    // In serial mode, tasks are processed one issue at a time
+    expect(executionOrder).toHaveLength(2);
+    // The first issue's task should come before the second
+    expect(executionOrder[0]).toBe("Implement the feature");
+    expect(executionOrder[1]).toBe("Fix the bug");
+  });
+
+  it("uses feature branch as defaultBranch for per-issue branch creation", async () => {
+    await runDispatchPipeline(featureOpts(), "/tmp/test");
+
+    // In feature mode, the working branches are based on the feature branch.
+    // The defaultBranch resolved inside processIssueFile should be featureBranchName.
+    // This is verified by checking that createWorktree is called with the feature branch start point.
+    const worktreeCalls = vi.mocked(createWorktree).mock.calls;
+    for (const call of worktreeCalls) {
+      // Fourth arg is startPoint, should be the feature branch
+      expect(call[3]).toBe("dispatch/feature-abcd1234");
+    }
   });
 });
 

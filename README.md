@@ -170,11 +170,11 @@ Tasks are marked `[x]` when complete. Rerunning dispatch skips already-completed
 Dispatch uses three-tier configuration: CLI flags override config file values, which override hardcoded defaults.
 
 ```sh
-# Interactive wizard — guided setup for all options
+# Interactive wizard — guided setup for core AI settings (provider/model/source)
 dispatch config
 ```
 
-Config is stored at `.dispatch/config.json` (project-local):
+Config is stored at `.dispatch/config.json` (relative to the working directory where you run `dispatch`):
 
 ```json
 {
@@ -188,7 +188,7 @@ Config is stored at `.dispatch/config.json` (project-local):
 | Key | Description |
 |-----|-------------|
 | `provider` | AI backend: `opencode` (default), `copilot`, `claude`, or `codex` |
-| `model` | Model to use (provider-specific format, e.g. `claude-sonnet-4-5`) |
+| `model` | Model to use when spawning agents (provider-specific format) |
 | `source` | Issue tracker: `github`, `azdevops`, or `md` |
 | `testTimeout` | Test execution timeout in seconds (default: 60) |
 
