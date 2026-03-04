@@ -259,7 +259,7 @@ export const datasource: Datasource = {
       const { stdout } = await exec("git", ["config", "user.name"], { cwd: opts.cwd });
       const name = stdout.trim();
       if (!name) return "unknown";
-      return slugify(name);
+      return slugify(name) || "unknown";
     } catch {
       return "unknown";
     }

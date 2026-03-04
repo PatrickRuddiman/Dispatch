@@ -595,7 +595,7 @@ describe("azdevops datasource — buildBranchName validation", () => {
     ).toBe("user/dispatch/42-fix-upstream-issue");
   });
 
-  it("handles title that slugifies to contain dots", () => {
+  it("handles title with dots by replacing them with hyphens", () => {
     expect(datasource.buildBranchName("42", "Update v1.2.3", "user")).toBe(
       "user/dispatch/42-update-v1-2-3"
     );
