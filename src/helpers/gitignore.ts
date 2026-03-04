@@ -26,7 +26,7 @@ export async function ensureGitignoreEntry(repoRoot: string, entry: string): Pro
     // File doesn't exist — will be created below
   }
 
-  const lines = contents.split("\n").map((l) => l.trim());
+  const lines = contents.replace(/\r\n/g, "\n").split("\n").map((l) => l.trim());
   // Match with or without trailing slash to avoid adding a duplicate when
   // the user already has the bare form (e.g. `.dispatch/worktrees`).
   const bare = entry.replace(/\/$/, "");
