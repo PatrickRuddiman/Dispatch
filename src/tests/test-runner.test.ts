@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { join } from "node:path";
 
 vi.mock("../helpers/logger.js", () => ({
   log: {
@@ -44,7 +45,7 @@ describe("detectTestCommand", () => {
     const result = await detectTestCommand("/some/dir");
 
     expect(result).toBe("npm test");
-    expect(readFile).toHaveBeenCalledWith("/some/dir/package.json", "utf-8");
+    expect(readFile).toHaveBeenCalledWith(join("/some/dir", "package.json"), "utf-8");
   });
 
   it("throws when package.json does not exist", async () => {

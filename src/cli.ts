@@ -40,7 +40,7 @@ const HELP = `
     --no-plan              Skip the planner agent, dispatch directly
     --no-branch            Skip branch creation, push, and PR lifecycle
     --no-worktree          Skip git worktree isolation for parallel issues
-    --feature              Group issues into a single feature branch and PR
+    --feature [name]       Group issues into a single feature branch and PR
     --force              Ignore prior run state and re-run all tasks
     --concurrency <n>      Max parallel dispatches (default: min(cpus, freeMB/500), max: ${MAX_CONCURRENCY})
     --provider <name>      Agent backend: ${PROVIDER_NAMES.join(", ")} (default: opencode)
@@ -86,6 +86,8 @@ const HELP = `
     dispatch --respec "specs/*.md"
     dispatch --spec "add dark mode toggle to settings page"
     dispatch --spec "feature A should do x" --provider copilot
+    dispatch --feature
+    dispatch --feature my-feature
     dispatch config
 `.trimStart();
 
@@ -93,7 +95,7 @@ const HELP = `
 export interface ParsedArgs extends Omit<RawCliArgs, "explicitFlags"> {
   help: boolean;
   version: boolean;
-  feature?: boolean;
+  feature?: string | boolean;
 }
 
 export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
@@ -113,7 +115,7 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
     .option("--no-plan", "Skip the planner agent")
     .option("--no-branch", "Skip branch creation")
     .option("--no-worktree", "Skip git worktree isolation")
-    .option("--feature", "Group issues into a single feature branch")
+    .option("--feature [name]", "Group issues into a single feature branch")
     .option("--force", "Ignore prior run state")
     .option("--verbose", "Show detailed debug output")
     .option("--fix-tests", "Run tests and fix failures")
@@ -219,7 +221,7 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
     }
   }
   if (opts.fixTests) args.fixTests = true;
-  if (opts.feature) args.feature = true;
+  if (opts.feature) args.feature = opts.feature;
   if (opts.source !== undefined) args.issueSource = opts.source;
   if (opts.concurrency !== undefined) args.concurrency = opts.concurrency;
   if (opts.serverUrl !== undefined) args.serverUrl = opts.serverUrl;

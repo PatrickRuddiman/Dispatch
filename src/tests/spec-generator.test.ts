@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { join, resolve } from "node:path";
 import { isIssueNumbers, isGlobOrFilePath, validateSpecStructure, extractSpecContent, resolveSource } from "../spec-generator.js";
 import { buildFileSpecPrompt, boot } from "../agents/spec.js";
 import * as datasourcesIndex from "../datasources/index.js";
@@ -1122,7 +1123,7 @@ describe("SpecAgent generate", () => {
 
     // Verify temp dir was created
     expect(mkdir).toHaveBeenCalledWith(
-      expect.stringContaining(".dispatch/tmp"),
+      expect.stringContaining(join(".dispatch", "tmp")),
       { recursive: true }
     );
 
@@ -1138,7 +1139,7 @@ describe("SpecAgent generate", () => {
 
     // Verify final output was written
     expect(writeFile).toHaveBeenCalledWith(
-      "/tmp/project/.dispatch/specs/42-my-feature.md",
+      resolve("/tmp/project/.dispatch/specs/42-my-feature.md"),
       expect.any(String),
       "utf-8"
     );

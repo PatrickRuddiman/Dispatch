@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { join } from "node:path";
 
 vi.mock("../helpers/logger.js", () => ({
   log: {
@@ -220,6 +221,12 @@ describe("parseArgs --feature", () => {
     expect(flags.has("feature")).toBe(true);
   });
 
+  it("sets feature to the string value when --feature is followed by a name", () => {
+    const [args, flags] = parseArgs(["--feature", "my-branch"]);
+    expect(args.feature).toBe("my-branch");
+    expect(flags.has("feature")).toBe(true);
+  });
+
   it("leaves feature undefined when --feature is not provided", () => {
     const [args, flags] = parseArgs([]);
     expect(args.feature).toBeUndefined();
@@ -243,6 +250,24 @@ describe("parseArgs --feature", () => {
     expect(args.feature).toBe(true);
     expect(args.dryRun).toBe(true);
   });
+
+  it("preserves string value when --feature is followed by a name and --verbose", () => {
+    const [args] = parseArgs(["--feature", "my-branch", "--verbose"]);
+    expect(args.feature).toBe("my-branch");
+    expect(args.verbose).toBe(true);
+  });
+
+  it("preserves string value when --feature is followed by a name and --dry-run", () => {
+    const [args] = parseArgs(["--feature", "my-branch", "--dry-run"]);
+    expect(args.feature).toBe("my-branch");
+    expect(args.dryRun).toBe(true);
+  });
+
+  it("preserves string value when --feature is followed by a name and --provider", () => {
+    const [args] = parseArgs(["--feature", "my-branch", "--provider", "copilot"]);
+    expect(args.feature).toBe("my-branch");
+    expect(args.provider).toBe("copilot");
+  });
 });
 
 describe("parseArgs --feature mutual exclusion (at parser level)", () => {
@@ -257,6 +282,14 @@ describe("parseArgs --feature mutual exclusion (at parser level)", () => {
   it("allows --feature and --spec to both be set (mutual exclusion is enforced by orchestrator)", () => {
     const [args, flags] = parseArgs(["--feature", "--spec", "42"]);
     expect(args.feature).toBe(true);
+    expect(args.spec).toBe("42");
+    expect(flags.has("feature")).toBe(true);
+    expect(flags.has("spec")).toBe(true);
+  });
+
+  it("allows --feature with a name and --spec to both be set", () => {
+    const [args, flags] = parseArgs(["--feature", "my-branch", "--spec", "42"]);
+    expect(args.feature).toBe("my-branch");
     expect(args.spec).toBe("42");
     expect(flags.has("feature")).toBe(true);
     expect(flags.has("spec")).toBe(true);
@@ -353,7 +386,7 @@ describe("parseArgs value flags", () => {
 
   it("parses --output-dir <dir>", () => {
     const [args, flags] = parseArgs(["--output-dir", "/tmp/out"]);
-    expect(args.outputDir).toContain("tmp/out");
+    expect(args.outputDir).toContain(join("tmp", "out"));
     expect(flags.has("outputDir")).toBe(true);
   });
 
@@ -432,7 +465,7 @@ describe("parseArgs value flags", () => {
 
   it("parses --cwd <dir>", () => {
     const [args, flags] = parseArgs(["--cwd", "/tmp/work"]);
-    expect(args.cwd).toContain("tmp/work");
+    expect(args.cwd).toContain(join("tmp", "work"));
     expect(flags.has("cwd")).toBe(true);
   });
 

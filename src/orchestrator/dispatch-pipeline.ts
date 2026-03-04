@@ -17,6 +17,7 @@ import { boot as bootCommit, type CommitAgent } from "../agents/commit.js";
 import { log } from "../helpers/logger.js";
 import { registerCleanup } from "../helpers/cleanup.js";
 import { createWorktree, removeWorktree, worktreeName, generateFeatureBranchName } from "../helpers/worktree.js";
+import { isValidBranchName } from "../helpers/branch-validation.js";
 import { createTui, type TuiState } from "../tui.js";
 import type { ProviderName, ProviderInstance } from "../providers/interface.js";
 import { bootProvider } from "../providers/index.js";
@@ -238,16 +239,38 @@ export async function runDispatchPipeline(
     let featureDefaultBranch: string | undefined;
 
     if (feature) {
+      // Resolve the feature branch name
+      if (typeof feature === "string") {
+        if (!isValidBranchName(feature)) {
+          log.error(`Invalid feature branch name: "${feature}"`);
+          tui.state.phase = "done";
+          tui.stop();
+          return { total: allTasks.length, completed: 0, failed: allTasks.length, skipped: 0, results: [] };
+        }
+        featureBranchName = feature.includes("/") ? feature : `dispatch/${feature}`;
+      } else {
+        featureBranchName = generateFeatureBranchName();
+      }
+
       try {
         featureDefaultBranch = await datasource.getDefaultBranch(lifecycleOpts);
 
         // Ensure we are on the default branch so the feature branch starts from the correct commit
         await datasource.switchBranch(featureDefaultBranch, lifecycleOpts);
-        featureBranchName = generateFeatureBranchName();
 
-        // Create the feature branch from the default branch
-        await datasource.createAndSwitchBranch(featureBranchName, lifecycleOpts);
-        log.debug(`Created feature branch ${featureBranchName} from ${featureDefaultBranch}`);
+        // Create the feature branch from the default branch (or switch to it if it already exists)
+        try {
+          await datasource.createAndSwitchBranch(featureBranchName, lifecycleOpts);
+          log.debug(`Created feature branch ${featureBranchName} from ${featureDefaultBranch}`);
+        } catch (createErr) {
+          const message = log.extractMessage(createErr);
+          if (message.includes("already exists")) {
+            await datasource.switchBranch(featureBranchName, lifecycleOpts);
+            log.debug(`Switched to existing feature branch ${featureBranchName}`);
+          } else {
+            throw createErr;
+          }
+        }
 
         // Register cleanup for the feature branch
         registerCleanup(async () => {
