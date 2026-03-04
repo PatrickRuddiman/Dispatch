@@ -10,7 +10,7 @@
 
 import { execFile } from "node:child_process";
 import { readFile, writeFile, readdir, mkdir, rename } from "node:fs/promises";
-import { isAbsolute, join, parse as parsePath } from "node:path";
+import { basename, dirname, isAbsolute, join, parse as parsePath } from "node:path";
 import { promisify } from "node:util";
 import type { Datasource, IssueDetails, IssueFetchOptions, DispatchLifecycleOptions } from "./interface.js";
 import { slugify } from "../helpers/slugify.js";
@@ -122,8 +122,9 @@ export const datasource: Datasource = {
   async fetch(issueId: string, opts?: IssueFetchOptions): Promise<IssueDetails> {
     const filePath = resolveFilePath(issueId, opts);
     const content = await readFile(filePath, "utf-8");
-    const filename = issueId.endsWith(".md") ? issueId : `${issueId}.md`;
-    return toIssueDetails(filename, content, resolveDir(opts));
+    const filename = basename(filePath);
+    const dir = isAbsolute(issueId) ? dirname(filePath) : resolveDir(opts);
+    return toIssueDetails(filename, content, dir);
   },
 
   async update(issueId: string, _title: string, body: string, opts?: IssueFetchOptions): Promise<void> {
@@ -133,8 +134,8 @@ export const datasource: Datasource = {
 
   async close(issueId: string, opts?: IssueFetchOptions): Promise<void> {
     const filePath = resolveFilePath(issueId, opts);
-    const filename = issueId.endsWith(".md") ? issueId : `${issueId}.md`;
-    const archiveDir = join(resolveDir(opts), "archive");
+    const filename = basename(filePath);
+    const archiveDir = join(isAbsolute(issueId) ? dirname(filePath) : resolveDir(opts), "archive");
     await mkdir(archiveDir, { recursive: true });
     await rename(filePath, join(archiveDir, filename));
   },

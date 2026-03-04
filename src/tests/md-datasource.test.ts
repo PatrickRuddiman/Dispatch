@@ -17,7 +17,7 @@ import { datasource } from "../datasources/md.js";
 import { UnsupportedOperationError } from "../helpers/errors.js";
 import { execFile } from "node:child_process";
 import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -134,8 +134,10 @@ describe("fetch", () => {
 
   it("uses an absolute path directly without prepending specs directory", async () => {
     const absPath = "/home/user/project/.dispatch/specs/my-issue.md";
-    await datasource.fetch(absPath, { cwd: "/tmp" });
+    const result = await datasource.fetch(absPath, { cwd: "/tmp" });
     expect(vi.mocked(readFile)).toHaveBeenCalledWith(absPath, "utf-8");
+    expect(result.number).toBe("my-issue.md");
+    expect(result.url).toBe(absPath);
   });
 
   it("appends .md extension to absolute paths when missing", async () => {
@@ -172,6 +174,8 @@ describe("close", () => {
   it("uses an absolute path directly without prepending specs directory", async () => {
     const absPath = "/home/user/project/.dispatch/specs/my-issue.md";
     await datasource.close(absPath, { cwd: "/tmp" });
-    expect(vi.mocked(rename)).toHaveBeenCalledWith(absPath, expect.stringContaining("archive"));
+    const expectedArchive = join(dirname(absPath), "archive");
+    expect(vi.mocked(mkdir)).toHaveBeenCalledWith(expectedArchive, { recursive: true });
+    expect(vi.mocked(rename)).toHaveBeenCalledWith(absPath, join(expectedArchive, "my-issue.md"));
   });
 });
