@@ -201,7 +201,6 @@ export async function runFixTestsPipeline(
   } catch (err) {
     const message = log.extractMessage(err);
     log.error(`Fix-tests pipeline failed: ${log.formatErrorChain(err)}`);
-    log.debug(log.formatErrorChain(err));
     return { mode: "fix-tests", success: false, error: message };
   }
 }
