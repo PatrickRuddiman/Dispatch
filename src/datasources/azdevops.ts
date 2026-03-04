@@ -88,7 +88,8 @@ export async function detectDoneState(
     // Fall through to default
   }
 
-  doneStateCache.set(cacheKey, "Closed");
+  // Don't cache the default — a transient CLI/parse error should not
+  // prevent subsequent calls from retrying the detection.
   return "Closed";
 }
 
@@ -225,8 +226,12 @@ export const datasource: Datasource = {
       const { stdout } = await exec("az", showArgs, {
         cwd: opts.cwd || process.cwd(),
       });
-      const item = JSON.parse(stdout);
-      workItemType = item.fields?.["System.WorkItemType"] ?? undefined;
+      try {
+        const item = JSON.parse(stdout);
+        workItemType = item.fields?.["System.WorkItemType"] ?? undefined;
+      } catch {
+        workItemType = undefined;
+      }
     }
 
     const state = workItemType
