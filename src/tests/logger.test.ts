@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { log } from "../helpers/logger.js";
+import { log, getLogLevel } from "../helpers/logger.js";
 
 describe("log", () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
@@ -8,6 +8,8 @@ describe("log", () => {
   beforeEach(() => {
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    delete process.env.LOG_LEVEL;
+    delete process.env.DEBUG;
     log.verbose = false;
   });
 
@@ -50,16 +52,21 @@ describe("log", () => {
   // ─── warn ───────────────────────────────────────────────────────────
 
   describe("warn", () => {
-    it("prints the message to console.log", () => {
+    it("prints the message to console.error", () => {
       log.warn("careful");
-      expect(logSpy).toHaveBeenCalledOnce();
-      expect(logSpy.mock.calls[0][1]).toBe("careful");
+      expect(errorSpy).toHaveBeenCalledOnce();
+      expect(errorSpy.mock.calls[0][1]).toBe("careful");
     });
 
     it("prefixes with the warning icon", () => {
       log.warn("test");
-      const prefix = logSpy.mock.calls[0][0] as string;
+      const prefix = errorSpy.mock.calls[0][0] as string;
       expect(prefix).toContain("⚠");
+    });
+
+    it("does not use console.log", () => {
+      log.warn("careful");
+      expect(logSpy).not.toHaveBeenCalled();
     });
   });
 
@@ -248,6 +255,117 @@ describe("log", () => {
     it('returns "" for undefined', () => {
       const result = log.extractMessage(undefined);
       expect(result).toBe("");
+    });
+  });
+
+  // ─── verbose getter/setter ─────────────────────────────────────────
+
+  describe("verbose getter/setter", () => {
+    it("returns false by default", () => {
+      log.verbose = false;
+      expect(log.verbose).toBe(false);
+    });
+
+    it("returns true after setting to true", () => {
+      log.verbose = true;
+      expect(log.verbose).toBe(true);
+    });
+
+    it("setting verbose true sets level to debug", () => {
+      log.verbose = true;
+      expect(getLogLevel()).toBe("debug");
+    });
+
+    it("setting verbose false sets level to info", () => {
+      log.verbose = true;
+      log.verbose = false;
+      expect(getLogLevel()).toBe("info");
+    });
+  });
+
+  // ─── getLogLevel ──────────────────────────────────────────────────
+
+  describe("getLogLevel", () => {
+    it("returns info by default", () => {
+      log.verbose = false;
+      expect(getLogLevel()).toBe("info");
+    });
+
+    it("returns debug when verbose is true", () => {
+      log.verbose = true;
+      expect(getLogLevel()).toBe("debug");
+    });
+  });
+
+  // ─── level resolution from environment ────────────────────────────
+
+  describe("level resolution from environment", () => {
+    beforeEach(() => {
+      vi.resetModules();
+      delete process.env.LOG_LEVEL;
+      delete process.env.DEBUG;
+    });
+
+    it("defaults to info level", async () => {
+      const { getLogLevel } = await import("../helpers/logger.js");
+      expect(getLogLevel()).toBe("info");
+    });
+
+    it("respects LOG_LEVEL=debug", async () => {
+      process.env.LOG_LEVEL = "debug";
+      const { getLogLevel } = await import("../helpers/logger.js");
+      expect(getLogLevel()).toBe("debug");
+    });
+
+    it("respects LOG_LEVEL=warn", async () => {
+      process.env.LOG_LEVEL = "warn";
+      const { getLogLevel } = await import("../helpers/logger.js");
+      expect(getLogLevel()).toBe("warn");
+    });
+
+    it("respects LOG_LEVEL=error", async () => {
+      process.env.LOG_LEVEL = "error";
+      const { getLogLevel } = await import("../helpers/logger.js");
+      expect(getLogLevel()).toBe("error");
+    });
+
+    it("LOG_LEVEL is case-insensitive", async () => {
+      process.env.LOG_LEVEL = "DEBUG";
+      const { getLogLevel } = await import("../helpers/logger.js");
+      expect(getLogLevel()).toBe("debug");
+    });
+
+    it("falls back to debug when DEBUG is set", async () => {
+      process.env.DEBUG = "1";
+      const { getLogLevel } = await import("../helpers/logger.js");
+      expect(getLogLevel()).toBe("debug");
+    });
+
+    it("LOG_LEVEL takes priority over DEBUG", async () => {
+      process.env.LOG_LEVEL = "warn";
+      process.env.DEBUG = "1";
+      const { getLogLevel } = await import("../helpers/logger.js");
+      expect(getLogLevel()).toBe("warn");
+    });
+
+    it("ignores invalid LOG_LEVEL values", async () => {
+      process.env.LOG_LEVEL = "verbose";
+      const { getLogLevel } = await import("../helpers/logger.js");
+      expect(getLogLevel()).toBe("info");
+    });
+
+    it("ignores prototype LOG_LEVEL keys like toString", async () => {
+      process.env.LOG_LEVEL = "toString";
+      const { getLogLevel } = await import("../helpers/logger.js");
+      expect(getLogLevel()).toBe("info");
+    });
+
+    it("verbose setter overrides env-var-resolved level", async () => {
+      process.env.LOG_LEVEL = "warn";
+      const { log, getLogLevel } = await import("../helpers/logger.js");
+      expect(getLogLevel()).toBe("warn");
+      log.verbose = true;
+      expect(getLogLevel()).toBe("debug");
     });
   });
 });
