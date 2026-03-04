@@ -22,15 +22,22 @@ export async function ensureGitignoreEntry(repoRoot: string, entry: string): Pro
   let contents = "";
   try {
     contents = await readFile(gitignorePath, "utf8");
-  } catch {
-    // File doesn't exist — will be created below
+  } catch (err: unknown) {
+    if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+      // File doesn't exist — will be created below
+    } else {
+      log.warn(`Could not read .gitignore: ${String(err)}`);
+      return;
+    }
   }
 
-  const lines = contents.replace(/\r\n/g, "\n").split("\n").map((l) => l.trim());
+  const lines = contents.split(/\r?\n/);
   // Match with or without trailing slash to avoid adding a duplicate when
-  // the user already has the bare form (e.g. `.dispatch/worktrees`).
+  // the user already has the bare form (e.g. `.dispatch/worktrees`) or the
+  // slash form (e.g. `.dispatch/worktrees/`).
   const bare = entry.replace(/\/$/, "");
-  if (lines.includes(entry) || lines.includes(bare)) {
+  const withSlash = bare + "/";
+  if (lines.includes(entry) || lines.includes(bare) || lines.includes(withSlash)) {
     return;
   }
 

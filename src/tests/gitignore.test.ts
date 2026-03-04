@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ─── Mock setup ────────────────────────────────────────────────────────────────
@@ -68,14 +69,23 @@ describe("ensureGitignoreEntry", () => {
     expect(mockWriteFile).not.toHaveBeenCalled();
   });
 
+  it("no-ops when trailing-slash form already exists but bare form is requested", async () => {
+    mockReadFile.mockResolvedValueOnce("node_modules\n.dispatch/worktrees/\n");
+
+    await ensureGitignoreEntry("/repo", ".dispatch/worktrees");
+
+    expect(mockWriteFile).not.toHaveBeenCalled();
+  });
+
   it("creates .gitignore when file does not exist", async () => {
-    mockReadFile.mockRejectedValueOnce(new Error("ENOENT"));
+    const enoent = Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    mockReadFile.mockRejectedValueOnce(enoent);
     mockWriteFile.mockResolvedValueOnce(undefined);
 
     await ensureGitignoreEntry("/repo", ".dispatch/worktrees/");
 
     expect(mockWriteFile).toHaveBeenCalledWith(
-      "/repo/.gitignore",
+      join("/repo", ".gitignore"),
       ".dispatch/worktrees/\n",
       "utf8",
     );
@@ -89,7 +99,7 @@ describe("ensureGitignoreEntry", () => {
     await ensureGitignoreEntry("/repo", ".dispatch/worktrees/");
 
     expect(mockWriteFile).toHaveBeenCalledWith(
-      "/repo/.gitignore",
+      join("/repo", ".gitignore"),
       "node_modules\n.dispatch/worktrees/\n",
       "utf8",
     );
@@ -102,5 +112,14 @@ describe("ensureGitignoreEntry", () => {
     await expect(ensureGitignoreEntry("/repo", ".dispatch/worktrees/")).resolves.toBeUndefined();
 
     expect(log.warn).toHaveBeenCalledWith(expect.stringContaining("EACCES"));
+  });
+
+  it("logs warning and returns without writing when readFile fails with non-ENOENT error", async () => {
+    mockReadFile.mockRejectedValueOnce(Object.assign(new Error("EACCES"), { code: "EACCES" }));
+
+    await expect(ensureGitignoreEntry("/repo", ".dispatch/worktrees/")).resolves.toBeUndefined();
+
+    expect(log.warn).toHaveBeenCalledWith(expect.stringContaining("EACCES"));
+    expect(mockWriteFile).not.toHaveBeenCalled();
   });
 });
