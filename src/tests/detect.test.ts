@@ -92,8 +92,9 @@ describe("checkProviderInstalled", () => {
   });
 
   it("returns false when the binary times out", async () => {
-    const err = new Error("process timed out");
-    (err as NodeJS.ErrnoException).killed = true;
+    const err = Object.assign(new Error("process timed out"), {
+      killed: true,
+    });
     mockExecFile.mockRejectedValue(err);
 
     const result = await checkProviderInstalled("opencode");
