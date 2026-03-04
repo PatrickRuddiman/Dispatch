@@ -119,8 +119,8 @@ export function isGlobOrFilePath(input: string | string[]): boolean {
   // Path separators (forward slash or backslash)
   if (/[/\\]/.test(input)) return true;
 
-  // Dot-prefix relative paths (./something or ../something)
-  if (/^\.\.?\//.test(input)) return true;
+  // Dot-prefix relative paths (./something, ../something, .\something, ..\something)
+  if (/^\.\.?[\/\\]/.test(input)) return true;
 
   // Common file extensions at end of string
   if (/\.(md|txt|yaml|yml|json|ts|js|tsx|jsx)$/i.test(input)) return true;
