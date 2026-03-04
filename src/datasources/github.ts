@@ -11,20 +11,11 @@ import { promisify } from "node:util";
 import type { Datasource, IssueDetails, IssueFetchOptions, DispatchLifecycleOptions } from "./interface.js";
 import { slugify } from "../helpers/slugify.js";
 import { log } from "../helpers/logger.js";
+import { InvalidBranchNameError, isValidBranchName } from "../helpers/branch-validation.js";
+
+export { InvalidBranchNameError } from "../helpers/branch-validation.js";
 
 const exec = promisify(execFile);
-
-/**
- * Thrown when a branch name fails validation.
- * Provides reliable `instanceof` detection instead of brittle message-string checks.
- */
-export class InvalidBranchNameError extends Error {
-  constructor(branch: string, reason?: string) {
-    const detail = reason ? ` (${reason})` : "";
-    super(`Invalid branch name: "${branch}"${detail}`);
-    this.name = "InvalidBranchNameError";
-  }
-}
 
 /** Execute a git command and return stdout. */
 async function git(args: string[], cwd: string): Promise<string> {
@@ -36,30 +27,6 @@ async function git(args: string[], cwd: string): Promise<string> {
 async function gh(args: string[], cwd: string): Promise<string> {
   const { stdout } = await exec("gh", args, { cwd });
   return stdout;
-}
-
-/** Strict pattern for valid git branch name character set. */
-const VALID_BRANCH_NAME_RE = /^[a-zA-Z0-9._\-/]+$/;
-
-/**
- * Check whether a branch name is safe to use in git/gh commands.
- * Enforces git refname rules beyond simple character validation:
- *  - Must be 1–255 characters of allowed characters
- *  - Cannot start or end with "/"
- *  - Cannot contain ".." (parent traversal)
- *  - Cannot end with ".lock"
- *  - Cannot contain "@{" (reflog syntax)
- *  - Cannot contain "//" (empty path component)
- */
-function isValidBranchName(name: string): boolean {
-  if (name.length === 0 || name.length > 255) return false;
-  if (!VALID_BRANCH_NAME_RE.test(name)) return false;
-  if (name.startsWith("/") || name.endsWith("/")) return false;
-  if (name.includes("..")) return false;
-  if (name.endsWith(".lock")) return false;
-  if (name.includes("@{")) return false;
-  if (name.includes("//")) return false;
-  return true;
 }
 
 /**

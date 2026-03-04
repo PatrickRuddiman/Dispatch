@@ -6,6 +6,7 @@ vi.mock("node:child_process", () => ({ execFile: mockExecFile }));
 vi.mock("node:util", () => ({ promisify: () => mockExecFile }));
 
 import { datasource, detectWorkItemType, detectDoneState } from "../datasources/azdevops.js";
+import { InvalidBranchNameError } from "../helpers/branch-validation.js";
 
 beforeEach(() => {
   mockExecFile.mockReset();
@@ -17,27 +18,25 @@ describe("azdevops datasource — list", () => {
     mockExecFile.mockResolvedValueOnce({
       stdout: JSON.stringify([{ id: 1 }, { id: 2 }]),
     });
-    // Second call: fetch item 1
+    // Second call: batch az boards work-item show --id 1 2
     mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        id: 1,
-        fields: { "System.Title": "Bug", "System.Description": "fix", "System.Tags": "bug", "System.State": "Active" },
-        _links: { html: { href: "https://dev.azure.com/1" } },
-      }),
+      stdout: JSON.stringify([
+        {
+          id: 1,
+          fields: { "System.Title": "Bug", "System.Description": "fix", "System.Tags": "bug", "System.State": "Active" },
+          _links: { html: { href: "https://dev.azure.com/1" } },
+        },
+        {
+          id: 2,
+          fields: { "System.Title": "Feature", "System.Description": "add", "System.Tags": "", "System.State": "New" },
+          url: "https://dev.azure.com/2",
+        },
+      ]),
     });
-    // Third call: fetchComments for item 1
+    // Third + Fourth calls: fetchComments for item 1 and item 2 (parallel)
     mockExecFile.mockResolvedValueOnce({
       stdout: JSON.stringify({ comments: [] }),
     });
-    // Fourth call: fetch item 2
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        id: 2,
-        fields: { "System.Title": "Feature", "System.Description": "add", "System.Tags": "", "System.State": "New" },
-        url: "https://dev.azure.com/2",
-      }),
-    });
-    // Fifth call: fetchComments for item 2
     mockExecFile.mockResolvedValueOnce({
       stdout: JSON.stringify({ comments: [] }),
     });
@@ -48,6 +47,40 @@ describe("azdevops datasource — list", () => {
     expect(result[0].number).toBe("1");
     expect(result[0].title).toBe("Bug");
     expect(result[1].number).toBe("2");
+
+    // Verify batch call args
+    const batchArgs = mockExecFile.mock.calls[1][1] as string[];
+    expect(batchArgs).toContain("show");
+    expect(batchArgs).toContain("--id");
+    expect(batchArgs).toContain("1");
+    expect(batchArgs).toContain("2");
+  });
+
+  it("falls back to individual fetches when batch call fails", async () => {
+    // First call: az boards query
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([{ id: 1 }]),
+    });
+    // Second call: batch show fails
+    mockExecFile.mockRejectedValueOnce(new Error("batch not supported"));
+    // Fallback: individual fetch for item 1
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        id: 1,
+        fields: { "System.Title": "Bug", "System.Description": "fix", "System.Tags": "", "System.State": "Active" },
+        _links: { html: { href: "https://dev.azure.com/1" } },
+      }),
+    });
+    // fetchComments for item 1
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify({ comments: [] }),
+    });
+
+    const result = await datasource.list({ cwd: "/tmp" });
+
+    expect(result).toHaveLength(1);
+    expect(result[0].number).toBe("1");
+    expect(result[0].title).toBe("Bug");
   });
 
   it("passes org and project to az command", async () => {
@@ -60,6 +93,48 @@ describe("azdevops datasource — list", () => {
     expect(args).toContain("https://dev.azure.com/myorg");
     expect(args).toContain("--project");
     expect(args).toContain("MyProj");
+  });
+
+  it("returns early when WIQL result is empty", async () => {
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([]),
+    });
+
+    const result = await datasource.list({ cwd: "/tmp" });
+
+    expect(result).toEqual([]);
+    // Only the WIQL query should have been called — no batch show call
+    expect(mockExecFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes org and project through on batch call", async () => {
+    // First call: WIQL query
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([{ id: 1 }]),
+    });
+    // Second call: batch show
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        {
+          id: 1,
+          fields: { "System.Title": "T", "System.Description": "D", "System.Tags": "", "System.State": "Active" },
+          _links: { html: { href: "https://dev.azure.com/1" } },
+        },
+      ]),
+    });
+    // Third call: fetchComments
+    mockExecFile.mockResolvedValueOnce({
+      stdout: JSON.stringify({ comments: [] }),
+    });
+
+    await datasource.list({ cwd: "/tmp", org: "https://dev.azure.com/myorg", project: "MyProj" });
+
+    // Verify batch call (second call) includes --org and --project
+    const batchArgs = mockExecFile.mock.calls[1][1] as string[];
+    expect(batchArgs).toContain("--org");
+    expect(batchArgs).toContain("https://dev.azure.com/myorg");
+    expect(batchArgs).toContain("--project");
+    expect(batchArgs).toContain("MyProj");
   });
 
   it("appends iteration filter to WIQL query", async () => {
@@ -1126,5 +1201,130 @@ describe("azdevops datasource — createPullRequest", () => {
     await expect(
       datasource.createPullRequest("b", "1", "T", "B", { cwd: "/tmp" })
     ).rejects.toThrow("Failed to parse Azure CLI output");
+  });
+});
+
+describe("azdevops datasource — getDefaultBranch validation", () => {
+  it("rejects symbolic-ref output containing spaces", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/my branch\n" });
+    await expect(datasource.getDefaultBranch({ cwd: "/tmp" })).rejects.toThrow(
+      "Invalid branch name"
+    );
+  });
+
+  it("rejects symbolic-ref output containing shell metacharacters", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/$(whoami)\n" });
+    await expect(datasource.getDefaultBranch({ cwd: "/tmp" })).rejects.toThrow(
+      "Invalid branch name"
+    );
+  });
+
+  it("rejects symbolic-ref output with @{ reflog syntax", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/main@{0}\n" });
+    await expect(datasource.getDefaultBranch({ cwd: "/tmp" })).rejects.toThrow(
+      "Invalid branch name"
+    );
+  });
+
+  it("rejects symbolic-ref output containing ..", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/a..b\n" });
+    await expect(datasource.getDefaultBranch({ cwd: "/tmp" })).rejects.toThrow(
+      "Invalid branch name"
+    );
+  });
+
+  it("rejects symbolic-ref output ending with .lock", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/branch.lock\n" });
+    await expect(datasource.getDefaultBranch({ cwd: "/tmp" })).rejects.toThrow(
+      "Invalid branch name"
+    );
+  });
+
+  it("rejects empty branch name from symbolic-ref", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/\n" });
+    await expect(datasource.getDefaultBranch({ cwd: "/tmp" })).rejects.toThrow(
+      "Invalid branch name"
+    );
+  });
+
+  it("rejects branch name exceeding 255 characters", async () => {
+    mockExecFile.mockResolvedValue({
+      stdout: "refs/remotes/origin/" + "a".repeat(256) + "\n",
+    });
+    await expect(datasource.getDefaultBranch({ cwd: "/tmp" })).rejects.toThrow(
+      "Invalid branch name"
+    );
+  });
+
+  it("throws InvalidBranchNameError specifically", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/bad name\n" });
+    await expect(
+      datasource.getDefaultBranch({ cwd: "/tmp" })
+    ).rejects.toBeInstanceOf(InvalidBranchNameError);
+  });
+});
+
+describe("azdevops datasource — buildBranchName validation", () => {
+  it("handles title with square brackets", () => {
+    expect(datasource.buildBranchName("42", "[Bug] Fix login", "user")).toBe(
+      "user/dispatch/42-bug-fix-login"
+    );
+  });
+
+  it("handles title with colons", () => {
+    expect(datasource.buildBranchName("42", "feat: add endpoint", "user")).toBe(
+      "user/dispatch/42-feat-add-endpoint"
+    );
+  });
+
+  it("handles title with mixed special characters", () => {
+    expect(
+      datasource.buildBranchName("42", "Fix @{upstream} issue", "user")
+    ).toBe("user/dispatch/42-fix-upstream-issue");
+  });
+
+  it("handles title with dots by replacing them with hyphens", () => {
+    expect(datasource.buildBranchName("42", "Update v1.2.3", "user")).toBe(
+      "user/dispatch/42-update-v1-2-3"
+    );
+  });
+});
+
+describe("azdevops datasource — createAndSwitchBranch validation", () => {
+  it("rejects branch names with spaces", async () => {
+    await expect(
+      datasource.createAndSwitchBranch("bad branch", { cwd: "/tmp" })
+    ).rejects.toThrow("Invalid branch name");
+  });
+
+  it("rejects branch names with @{", async () => {
+    await expect(
+      datasource.createAndSwitchBranch("main@{0}", { cwd: "/tmp" })
+    ).rejects.toThrow("Invalid branch name");
+  });
+
+  it("rejects branch names containing ..", async () => {
+    await expect(
+      datasource.createAndSwitchBranch("a..b", { cwd: "/tmp" })
+    ).rejects.toThrow("Invalid branch name");
+  });
+
+  it("rejects branch names ending with .lock", async () => {
+    await expect(
+      datasource.createAndSwitchBranch("branch.lock", { cwd: "/tmp" })
+    ).rejects.toThrow("Invalid branch name");
+  });
+
+  it("throws InvalidBranchNameError specifically", async () => {
+    await expect(
+      datasource.createAndSwitchBranch("bad name", { cwd: "/tmp" })
+    ).rejects.toBeInstanceOf(InvalidBranchNameError);
+  });
+
+  it("does not call git when branch name is invalid", async () => {
+    await expect(
+      datasource.createAndSwitchBranch("bad name", { cwd: "/tmp" })
+    ).rejects.toThrow("Invalid branch name");
+    expect(mockExecFile).not.toHaveBeenCalled();
   });
 });
