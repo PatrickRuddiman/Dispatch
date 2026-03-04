@@ -333,6 +333,60 @@ describe("fetchItemsById", () => {
     expect(result).toHaveLength(0);
     expect(ds.fetch).not.toHaveBeenCalled();
   });
+
+  it("omits # prefix in warning for file path IDs containing /", async () => {
+    const ds = createMockDatasource({
+      fetch: vi.fn<Datasource["fetch"]>().mockRejectedValue(new Error("Not found")),
+    });
+
+    await fetchItemsById(["/home/user/specs/task.md"], ds, { cwd: "/tmp" });
+
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.stringContaining("Could not fetch issue /home/user/specs/task.md:"),
+    );
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.not.stringContaining("#/home/user/specs/task.md"),
+    );
+  });
+
+  it("omits # prefix in warning for file path IDs containing backslash", async () => {
+    const ds = createMockDatasource({
+      fetch: vi.fn<Datasource["fetch"]>().mockRejectedValue(new Error("Not found")),
+    });
+
+    await fetchItemsById(["C:\\Users\\specs\\task.md"], ds, { cwd: "/tmp" });
+
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.stringContaining("Could not fetch issue C:\\Users\\specs\\task.md:"),
+    );
+  });
+
+  it("omits # prefix in warning for IDs ending with .md", async () => {
+    const ds = createMockDatasource({
+      fetch: vi.fn<Datasource["fetch"]>().mockRejectedValue(new Error("Not found")),
+    });
+
+    await fetchItemsById(["task-name.md"], ds, { cwd: "/tmp" });
+
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.stringContaining("Could not fetch issue task-name.md:"),
+    );
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.not.stringContaining("#task-name.md"),
+    );
+  });
+
+  it("keeps # prefix in warning for numeric IDs", async () => {
+    const ds = createMockDatasource({
+      fetch: vi.fn<Datasource["fetch"]>().mockRejectedValue(new Error("Not found")),
+    });
+
+    await fetchItemsById(["42"], ds, { cwd: "/tmp" });
+
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.stringContaining("Could not fetch issue #42:"),
+    );
+  });
 });
 
 // ─── writeItemsToTempDir ────────────────────────────────────────────
