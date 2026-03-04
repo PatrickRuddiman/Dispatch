@@ -6,6 +6,7 @@ vi.mock("node:child_process", () => ({ execFile: mockExecFile }));
 vi.mock("node:util", () => ({ promisify: () => mockExecFile }));
 
 import { datasource, detectWorkItemType } from "../datasources/azdevops.js";
+import { InvalidBranchNameError } from "../helpers/branch-validation.js";
 
 beforeEach(() => {
   mockExecFile.mockReset();
@@ -512,5 +513,130 @@ describe("azdevops datasource — createPullRequest", () => {
     await expect(
       datasource.createPullRequest("b", "1", "T", "B", { cwd: "/tmp" })
     ).rejects.toThrow("Failed to parse Azure CLI output");
+  });
+});
+
+describe("azdevops datasource — getDefaultBranch validation", () => {
+  it("rejects symbolic-ref output containing spaces", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/my branch\n" });
+    await expect(datasource.getDefaultBranch({ cwd: "/tmp" })).rejects.toThrow(
+      "Invalid branch name"
+    );
+  });
+
+  it("rejects symbolic-ref output containing shell metacharacters", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/$(whoami)\n" });
+    await expect(datasource.getDefaultBranch({ cwd: "/tmp" })).rejects.toThrow(
+      "Invalid branch name"
+    );
+  });
+
+  it("rejects symbolic-ref output with @{ reflog syntax", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/main@{0}\n" });
+    await expect(datasource.getDefaultBranch({ cwd: "/tmp" })).rejects.toThrow(
+      "Invalid branch name"
+    );
+  });
+
+  it("rejects symbolic-ref output containing ..", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/a..b\n" });
+    await expect(datasource.getDefaultBranch({ cwd: "/tmp" })).rejects.toThrow(
+      "Invalid branch name"
+    );
+  });
+
+  it("rejects symbolic-ref output ending with .lock", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/branch.lock\n" });
+    await expect(datasource.getDefaultBranch({ cwd: "/tmp" })).rejects.toThrow(
+      "Invalid branch name"
+    );
+  });
+
+  it("rejects empty branch name from symbolic-ref", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/\n" });
+    await expect(datasource.getDefaultBranch({ cwd: "/tmp" })).rejects.toThrow(
+      "Invalid branch name"
+    );
+  });
+
+  it("rejects branch name exceeding 255 characters", async () => {
+    mockExecFile.mockResolvedValue({
+      stdout: "refs/remotes/origin/" + "a".repeat(256) + "\n",
+    });
+    await expect(datasource.getDefaultBranch({ cwd: "/tmp" })).rejects.toThrow(
+      "Invalid branch name"
+    );
+  });
+
+  it("throws InvalidBranchNameError specifically", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/bad name\n" });
+    await expect(
+      datasource.getDefaultBranch({ cwd: "/tmp" })
+    ).rejects.toBeInstanceOf(InvalidBranchNameError);
+  });
+});
+
+describe("azdevops datasource — buildBranchName validation", () => {
+  it("handles title with square brackets", () => {
+    expect(datasource.buildBranchName("42", "[Bug] Fix login", "user")).toBe(
+      "user/dispatch/42-bug-fix-login"
+    );
+  });
+
+  it("handles title with colons", () => {
+    expect(datasource.buildBranchName("42", "feat: add endpoint", "user")).toBe(
+      "user/dispatch/42-feat-add-endpoint"
+    );
+  });
+
+  it("handles title with mixed special characters", () => {
+    expect(
+      datasource.buildBranchName("42", "Fix @{upstream} issue", "user")
+    ).toBe("user/dispatch/42-fix-upstream-issue");
+  });
+
+  it("handles title that slugifies to contain dots", () => {
+    expect(datasource.buildBranchName("42", "Update v1.2.3", "user")).toBe(
+      "user/dispatch/42-update-v1-2-3"
+    );
+  });
+});
+
+describe("azdevops datasource — createAndSwitchBranch validation", () => {
+  it("rejects branch names with spaces", async () => {
+    await expect(
+      datasource.createAndSwitchBranch("bad branch", { cwd: "/tmp" })
+    ).rejects.toThrow("Invalid branch name");
+  });
+
+  it("rejects branch names with @{", async () => {
+    await expect(
+      datasource.createAndSwitchBranch("main@{0}", { cwd: "/tmp" })
+    ).rejects.toThrow("Invalid branch name");
+  });
+
+  it("rejects branch names containing ..", async () => {
+    await expect(
+      datasource.createAndSwitchBranch("a..b", { cwd: "/tmp" })
+    ).rejects.toThrow("Invalid branch name");
+  });
+
+  it("rejects branch names ending with .lock", async () => {
+    await expect(
+      datasource.createAndSwitchBranch("branch.lock", { cwd: "/tmp" })
+    ).rejects.toThrow("Invalid branch name");
+  });
+
+  it("throws InvalidBranchNameError specifically", async () => {
+    await expect(
+      datasource.createAndSwitchBranch("bad name", { cwd: "/tmp" })
+    ).rejects.toBeInstanceOf(InvalidBranchNameError);
+  });
+
+  it("does not call git when branch name is invalid", async () => {
+    await expect(
+      datasource.createAndSwitchBranch("bad name", { cwd: "/tmp" })
+    ).rejects.toThrow("Invalid branch name");
+    expect(mockExecFile).not.toHaveBeenCalled();
   });
 });

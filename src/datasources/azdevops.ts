@@ -13,6 +13,7 @@ import { promisify } from "node:util";
 import type { Datasource, IssueDetails, IssueFetchOptions, DispatchLifecycleOptions } from "./interface.js";
 import { slugify } from "../helpers/slugify.js";
 import { log } from "../helpers/logger.js";
+import { InvalidBranchNameError, isValidBranchName } from "../helpers/branch-validation.js";
 
 const exec = promisify(execFile);
 
@@ -235,8 +236,15 @@ export const datasource: Datasource = {
     try {
       const { stdout } = await exec("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], { cwd: opts.cwd });
       const parts = stdout.trim().split("/");
-      return parts[parts.length - 1];
-    } catch {
+      const branch = parts[parts.length - 1];
+      if (!isValidBranchName(branch)) {
+        throw new InvalidBranchNameError(branch, "from symbolic-ref output");
+      }
+      return branch;
+    } catch (err) {
+      if (err instanceof InvalidBranchNameError) {
+        throw err;
+      }
       try {
         await exec("git", ["rev-parse", "--verify", "main"], { cwd: opts.cwd });
         return "main";
@@ -259,10 +267,17 @@ export const datasource: Datasource = {
 
   buildBranchName(issueNumber: string, title: string, username: string): string {
     const slug = slugify(title, 50);
-    return `${username}/dispatch/${issueNumber}-${slug}`;
+    const branch = `${username}/dispatch/${issueNumber}-${slug}`;
+    if (!isValidBranchName(branch)) {
+      throw new InvalidBranchNameError(branch);
+    }
+    return branch;
   },
 
   async createAndSwitchBranch(branchName: string, opts: DispatchLifecycleOptions): Promise<void> {
+    if (!isValidBranchName(branchName)) {
+      throw new InvalidBranchNameError(branchName);
+    }
     try {
       await exec("git", ["checkout", "-b", branchName], { cwd: opts.cwd });
     } catch (err) {
