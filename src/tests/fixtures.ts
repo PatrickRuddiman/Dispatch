@@ -67,10 +67,11 @@ export interface MockChildProcess extends EventEmitter {
 }
 
 export function createMockChildProcess(): MockChildProcess {
-  const child = new EventEmitter() as MockChildProcess;
-  child.stdout = new EventEmitter();
-  child.stderr = new EventEmitter();
-  child.kill = vi.fn();
+  const child = Object.assign(new EventEmitter(), {
+    stdout: new EventEmitter(),
+    stderr: new EventEmitter(),
+    kill: vi.fn(),
+  }) satisfies MockChildProcess;
   return child;
 }
 

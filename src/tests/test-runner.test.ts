@@ -27,7 +27,7 @@ import { detectTestCommand, runTests } from "../test-runner.js";
 import { readFile } from "node:fs/promises";
 import { spawn, type ChildProcess } from "node:child_process";
 import { TimeoutError } from "../helpers/timeout.js";
-import { createMockChildProcess, type MockChildProcess } from "./fixtures.js";
+import { createMockChildProcess } from "./fixtures.js";
 
 beforeEach(() => {
   vi.resetAllMocks();

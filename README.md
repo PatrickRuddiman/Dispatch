@@ -174,28 +174,23 @@ Dispatch uses three-tier configuration: CLI flags override config file values, w
 dispatch config
 ```
 
-Config is stored at `~/.dispatch/config.json`:
+Config is stored at `.dispatch/config.json` (project-local):
 
 ```json
 {
   "provider": "copilot",
   "source": "github",
-  "concurrency": 3,
-  "planTimeout": 10,
-  "planRetries": 1
+  "model": "claude-sonnet-4",
+  "testTimeout": 300000
 }
 ```
 
 | Key | Description |
 |-----|-------------|
 | `provider` | AI backend: `opencode` (default), `copilot`, `claude`, or `codex` |
+| `model` | Model name to use with the chosen provider |
 | `source` | Issue tracker: `github`, `azdevops`, or `md` |
-| `concurrency` | Max parallel task dispatches |
-| `planTimeout` | Planning timeout in minutes (default: 10) |
-| `planRetries` | Retry attempts after planning timeout (default: 1) |
-| `org` | Azure DevOps organization URL |
-| `project` | Azure DevOps project name |
-| `serverUrl` | URL of a running provider server |
+| `testTimeout` | Test runner timeout in milliseconds (default: 300000) |
 
 ## Options reference
 
