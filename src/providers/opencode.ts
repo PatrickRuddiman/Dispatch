@@ -153,6 +153,8 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
     async prompt(sessionId: string, text: string): Promise<string | null> {
       log.debug(`Sending async prompt to session ${sessionId} (${text.length} chars)...`);
 
+      let controller: AbortController | undefined;
+
       try {
         // ── 1. Fire-and-forget: start the LLM processing ──────────
         const { error: promptError } = await client.session.promptAsync({
@@ -170,7 +172,7 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
         log.debug("Async prompt accepted, subscribing to events...");
 
         // ── 2. Subscribe to SSE events ────────────────────────────
-        const controller = new AbortController();
+        controller = new AbortController();
         const { stream } = await client.event.subscribe({
           signal: controller.signal,
         });
@@ -204,7 +206,7 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
             }
           }
         } finally {
-          controller.abort();
+          if (controller && !controller.signal.aborted) controller.abort();
         }
 
         // ── 4. Fetch the completed message ────────────────────────
