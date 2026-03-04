@@ -26,7 +26,6 @@ import type { OrchestrateRunOptions, DispatchSummary } from "./runner.js";
 import {
   fetchItemsById,
   writeItemsToTempDir,
-  closeCompletedSpecIssues,
   parseIssueFilename,
   buildPrBody,
   buildPrTitle,
@@ -713,14 +712,7 @@ export async function runDispatchPipeline(
       }
     }
 
-    // ── 6. Close originating issues for completed spec files ────
-    try {
-      await closeCompletedSpecIssues(taskFiles, results, cwd, source, org, project, workItemType);
-    } catch (err) {
-      log.warn(`Could not close completed spec issues: ${log.formatErrorChain(err)}`);
-    }
-
-    // ── 7. Cleanup ──────────────────────────────────────────────
+    // ── 6. Cleanup ──────────────────────────────────────────────
     // Per-worktree resources are cleaned up inside processIssueFile.
     // Shared resources (when !useWorktrees) are cleaned up here.
     await commitAgent?.cleanup();
