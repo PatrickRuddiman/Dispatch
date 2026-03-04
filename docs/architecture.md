@@ -64,7 +64,7 @@ C4Context
     Rel(dev, cli, "invokes")
     Rel(cli, config, "config subcommand")
     Rel(cli, runner, "delegates pipeline execution")
-    Rel(runner, spec_pipe, "--spec / --respec")
+    Rel(runner, spec_pipe, "--spec")
     Rel(runner, dispatch_pipe, "default mode")
     Rel(runner, fix_pipe, "--fix-tests (dynamic import)")
     Rel(spec_pipe, ds_layer, "fetch, update, create")
@@ -92,7 +92,7 @@ enforced by the orchestrator, not the argument parser.
 
 | Mode | Trigger | Purpose | Detail page |
 |------|---------|---------|-------------|
-| **Spec generation** | `--spec` or `--respec` | Convert issues into structured markdown specs | [Spec generation](spec-generation/overview.md) |
+| **Spec generation** | `--spec` | Convert issues into structured markdown specs | [Spec generation](spec-generation/overview.md) |
 | **Dispatch** | Default (no mode flag) | Plan and execute tasks, commit, push, open PRs | [Planning & dispatch](planning-and-dispatch/overview.md) |
 | **Fix tests** | `--fix-tests` | Detect failing tests and prompt AI to fix them | [CLI orchestration](cli-orchestration/overview.md) |
 
