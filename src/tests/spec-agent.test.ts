@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { ProviderInstance } from "../providers/interface.js";
 import type { IssueDetails } from "../datasources/interface.js";
 
@@ -164,7 +164,7 @@ describe("generate", () => {
       "utf-8",
     );
     expect(writeFile).toHaveBeenCalledWith(
-      "/tmp/project/.dispatch/specs/42-my-feature.md",
+      resolve("/tmp/project/.dispatch/specs/42-my-feature.md"),
       expect.any(String),
       "utf-8",
     );
