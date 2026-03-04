@@ -60,7 +60,7 @@ export async function checkPrereqs(context?: PrereqContext): Promise<string[]> {
 
   // Check git availability
   try {
-    await exec("git", ["--version"]);
+    await exec("git", ["--version"], { shell: process.platform === "win32" });
   } catch {
     failures.push("git is required but was not found on PATH. Install it from https://git-scm.com");
   }
@@ -76,7 +76,7 @@ export async function checkPrereqs(context?: PrereqContext): Promise<string[]> {
   // Datasource-specific CLI tool checks
   if (context?.datasource === "github") {
     try {
-      await exec("gh", ["--version"]);
+      await exec("gh", ["--version"], { shell: process.platform === "win32" });
     } catch {
       failures.push(
         "gh (GitHub CLI) is required for the github datasource but was not found on PATH. Install it from https://cli.github.com/",
@@ -86,7 +86,7 @@ export async function checkPrereqs(context?: PrereqContext): Promise<string[]> {
 
   if (context?.datasource === "azdevops") {
     try {
-      await exec("az", ["--version"]);
+      await exec("az", ["--version"], { shell: process.platform === "win32" });
     } catch {
       failures.push(
         "az (Azure CLI) is required for the azdevops datasource but was not found on PATH. Install it from https://learn.microsoft.com/en-us/cli/azure/",
