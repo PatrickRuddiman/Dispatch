@@ -125,16 +125,22 @@ export const datasource: Datasource = {
 
       const itemsArray = Array.isArray(batchItems) ? batchItems : [batchItems];
 
-      const commentsArray = await Promise.all(
-        itemsArray.map((item) =>
-          fetchComments(String(item.id), opts)
-        )
-      );
+      // Fetch comments with bounded concurrency (batches of 5)
+      const commentsArray: string[][] = [];
+      const CONCURRENCY = 5;
+      for (let i = 0; i < itemsArray.length; i += CONCURRENCY) {
+        const batch = itemsArray.slice(i, i + CONCURRENCY);
+        const batchResults = await Promise.all(
+          batch.map((item) => fetchComments(String(item.id), opts))
+        );
+        commentsArray.push(...batchResults);
+      }
 
       return itemsArray.map((item, i) =>
         mapWorkItemToIssueDetails(item, String(item.id), commentsArray[i])
       );
-    } catch {
+    } catch (err) {
+      log.debug(`Batch work-item show failed, falling back to individual fetches: ${log.extractMessage(err)}`);
       // Fallback: fetch items individually in parallel
       const results = await Promise.all(
         ids.map((id) => datasource.fetch(id, opts))
