@@ -102,7 +102,6 @@ export function createMockChildProcess(overrides?: Partial<Pick<ChildProcess, "p
     disconnect: vi.fn(),
     ref: vi.fn(),
     unref: vi.fn(),
-    [Symbol.dispose]: vi.fn(),
     ...overrides,
   });
 
