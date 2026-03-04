@@ -76,10 +76,15 @@ export function createMockChildProcess(): MockChildProcess {
 }
 
 /**
- * Callback-style implementation for an execFile mock used with util.promisify.
- * When the real execFile is replaced by vi.fn() and wrapped with promisify,
- * the default promisify convention passes (error, value) to the callback,
- * where value is the single resolved result object.
+ * Callback-style implementation for an execFile mock intended to be wrapped with util.promisify.
+ *
+ * util.promisify does not create a `{ stdout, stderr }` object by itself; it simply resolves
+ * with whatever non-error arguments are passed to the callback. In this test helper, the mock
+ * implementation is expected to call `cb(null, { stdout, stderr })`, so the promisified wrapper
+ * resolves to that single result object.
+ *
+ * Note: the real `child_process.execFile` callback has the shape `(error, stdout, stderr)`.
+ * This helper uses a different, test-only callback shape for convenience.
  */
 export type ExecFileMockImpl = (
   cmd: string,
