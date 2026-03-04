@@ -12,6 +12,7 @@
  */
 
 import chalk from "chalk";
+import { fileLoggerStorage } from "./file-logger.js";
 
 /** Supported log levels, ordered from most to least verbose. */
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -50,6 +51,11 @@ function shouldLog(level: LogLevel): boolean {
   return LOG_LEVEL_SEVERITY[level] >= LOG_LEVEL_SEVERITY[currentLevel];
 }
 
+/** Strip ANSI escape codes from a string for plain-text file logging. */
+function stripAnsi(str: string): string {
+  return str.replace(/\x1B\[[0-9;]*m/g, "");
+}
+
 /** Maximum depth to traverse when unwinding nested error `.cause` chains. */
 const MAX_CAUSE_CHAIN_DEPTH = 5;
 
@@ -59,26 +65,32 @@ export const log = {
   info(msg: string) {
     if (!shouldLog("info")) return;
     console.log(chalk.blue("ℹ"), msg);
+    fileLoggerStorage.getStore()?.info(stripAnsi(msg));
   },
   success(msg: string) {
     if (!shouldLog("info")) return;
     console.log(chalk.green("✔"), msg);
+    fileLoggerStorage.getStore()?.success(stripAnsi(msg));
   },
   warn(msg: string) {
     if (!shouldLog("warn")) return;
     console.error(chalk.yellow("⚠"), msg);
+    fileLoggerStorage.getStore()?.warn(stripAnsi(msg));
   },
   error(msg: string) {
     if (!shouldLog("error")) return;
     console.error(chalk.red("✖"), msg);
+    fileLoggerStorage.getStore()?.error(stripAnsi(msg));
   },
   task(index: number, total: number, msg: string) {
     if (!shouldLog("info")) return;
     console.log(chalk.cyan(`[${index + 1}/${total}]`), msg);
+    fileLoggerStorage.getStore()?.task(stripAnsi(`[${index + 1}/${total}] ${msg}`));
   },
   dim(msg: string) {
     if (!shouldLog("info")) return;
     console.log(chalk.dim(msg));
+    fileLoggerStorage.getStore()?.dim(stripAnsi(msg));
   },
 
   /**
@@ -89,6 +101,7 @@ export const log = {
   debug(msg: string) {
     if (!shouldLog("debug")) return;
     console.log(chalk.dim(`  ⤷ ${msg}`));
+    fileLoggerStorage.getStore()?.debug(stripAnsi(msg));
   },
 
   /**

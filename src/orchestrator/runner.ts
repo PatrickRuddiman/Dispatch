@@ -34,6 +34,8 @@ export interface OrchestrateRunOptions {
   org?: string;
   project?: string;
   workItemType?: string;
+  iteration?: string;
+  area?: string;
   planTimeout?: number;
   planRetries?: number;
   retries?: number;
@@ -62,6 +64,8 @@ export interface RawCliArgs {
   org?: string;
   project?: string;
   workItemType?: string;
+  iteration?: string;
+  area?: string;
   planTimeout?: number;
   planRetries?: number;
   testTimeout?: number;
@@ -186,7 +190,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
         return this.generateSpecs({
           issues: m.spec, issueSource: m.issueSource, provider: m.provider,
           model: m.model, serverUrl: m.serverUrl, cwd: m.cwd, outputDir: m.outputDir,
-          org: m.org, project: m.project, workItemType: m.workItemType, concurrency: m.concurrency,
+          org: m.org, project: m.project, workItemType: m.workItemType, iteration: m.iteration, area: m.area, concurrency: m.concurrency,
           dryRun: m.dryRun,
         });
       }
@@ -203,7 +207,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
             process.exit(1);
           }
           const datasource = getDatasource(source);
-          const existing = await datasource.list({ cwd: m.cwd, org: m.org, project: m.project, workItemType: m.workItemType });
+          const existing = await datasource.list({ cwd: m.cwd, org: m.org, project: m.project, workItemType: m.workItemType, iteration: m.iteration, area: m.area });
           if (existing.length === 0) {
             log.error("No existing specs found to regenerate");
             process.exit(1);
@@ -224,7 +228,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
         return this.generateSpecs({
           issues, issueSource: m.issueSource, provider: m.provider,
           model: m.model, serverUrl: m.serverUrl, cwd: m.cwd, outputDir: m.outputDir,
-          org: m.org, project: m.project, workItemType: m.workItemType, concurrency: m.concurrency,
+          org: m.org, project: m.project, workItemType: m.workItemType, iteration: m.iteration, area: m.area, concurrency: m.concurrency,
           dryRun: m.dryRun,
         });
       }
@@ -233,7 +237,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
         issueIds: m.issueIds, concurrency: m.concurrency ?? defaultConcurrency(),
         dryRun: m.dryRun, noPlan: m.noPlan, noBranch: m.noBranch, noWorktree: m.noWorktree, provider: m.provider,
         model: m.model, serverUrl: m.serverUrl, source: m.issueSource, org: m.org, project: m.project,
-        workItemType: m.workItemType, planTimeout: m.planTimeout, planRetries: m.planRetries, retries: m.retries,
+        workItemType: m.workItemType, iteration: m.iteration, area: m.area, planTimeout: m.planTimeout, planRetries: m.planRetries, retries: m.retries,
         force: m.force, feature: m.feature,
       });
     },

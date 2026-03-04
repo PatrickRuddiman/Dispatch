@@ -124,6 +124,7 @@ production code imports from them.
 ## Quick navigation
 
 - [Architecture Overview](./architecture.md) — High-level system design and component interactions
+- [Windows Guide](./windows.md) — Prerequisites, setup, and known limitations for Windows users
 
 ## Cli Orchestration
 

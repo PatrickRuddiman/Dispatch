@@ -176,7 +176,6 @@ vi.mock("../orchestrator/datasource-helpers.js", () => ({
       acceptanceCriteria: "",
     }]]),
   }),
-  closeCompletedSpecIssues: vi.fn().mockResolvedValue(undefined),
   parseIssueFilename: vi.fn().mockReturnValue({ issueId: "1", slug: "test" }),
   buildPrBody: vi.fn().mockResolvedValue("PR body"),
   buildPrTitle: vi.fn().mockResolvedValue("PR title"),
@@ -208,7 +207,7 @@ import { createTui } from "../tui.js";
 import { createWorktree, removeWorktree, worktreeName, generateFeatureBranchName } from "../helpers/worktree.js";
 import { registerCleanup } from "../helpers/cleanup.js";
 import { parseTaskFile } from "../parser.js";
-import { fetchItemsById, writeItemsToTempDir, parseIssueFilename, closeCompletedSpecIssues, getBranchDiff, squashBranchCommits, buildFeaturePrTitle, buildFeaturePrBody } from "../orchestrator/datasource-helpers.js";
+import { fetchItemsById, writeItemsToTempDir, parseIssueFilename, getBranchDiff, squashBranchCommits, buildFeaturePrTitle, buildFeaturePrBody } from "../orchestrator/datasource-helpers.js";
 import { execFile } from "node:child_process";
 import { bootProvider } from "../providers/index.js";
 import { boot as bootPlannerBoot } from "../agents/planner.js";
@@ -1631,23 +1630,6 @@ describe("error-path handling", () => {
     await expect(
       runDispatchPipeline(baseOpts({ noPlan: true }), "/tmp/test"),
     ).rejects.toThrow("network failure");
-  });
-
-  it("continues and logs warning when closeCompletedSpecIssues rejects", async () => {
-    vi.mocked(closeCompletedSpecIssues).mockRejectedValueOnce(
-      new Error("close failed"),
-    );
-
-    const result = await runDispatchPipeline(
-      baseOpts({ noPlan: true }),
-      "/tmp/test",
-    );
-
-    expect(result.completed).toBe(1);
-    expect(result.failed).toBe(0);
-    expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
-      expect.stringContaining("close completed spec issues"),
-    );
   });
 
   it("logs warning and continues when datasource.update() fails in post-execution sync", async () => {

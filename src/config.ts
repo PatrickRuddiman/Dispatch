@@ -29,6 +29,11 @@ export interface DispatchConfig {
   testTimeout?: number;
   planTimeout?: number;
   concurrency?: number;
+  org?: string;
+  project?: string;
+  workItemType?: string;
+  iteration?: string;
+  area?: string;
 }
 
 /** Minimum and maximum bounds for numeric configuration values. */
@@ -39,7 +44,7 @@ export const CONFIG_BOUNDS = {
 } as const;
 
 /** Valid configuration key names. */
-export const CONFIG_KEYS = ["provider", "model", "source", "testTimeout", "planTimeout", "concurrency"] as const;
+export const CONFIG_KEYS = ["provider", "model", "source", "testTimeout", "planTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area"] as const;
 
 /** A valid configuration key name. */
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -129,6 +134,16 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
       }
       return null;
     }
+
+    case "org":
+    case "project":
+    case "workItemType":
+    case "iteration":
+    case "area":
+      if (!value || value.trim() === "") {
+        return `Invalid ${key}: value must not be empty`;
+      }
+      return null;
 
     default:
       return `Unknown config key "${key}"`;

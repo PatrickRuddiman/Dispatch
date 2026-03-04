@@ -30,7 +30,9 @@ export async function checkProviderInstalled(
   name: ProviderName,
 ): Promise<boolean> {
   try {
-    await exec(PROVIDER_BINARIES[name], ["--version"]);
+    await exec(PROVIDER_BINARIES[name], ["--version"], {
+      shell: process.platform === "win32",
+    });
     return true;
   } catch {
     return false;

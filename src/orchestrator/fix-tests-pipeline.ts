@@ -12,6 +12,7 @@ import type { ProviderName } from "../providers/interface.js";
 import { bootProvider } from "../providers/index.js";
 import { registerCleanup } from "../helpers/cleanup.js";
 import { log } from "../helpers/logger.js";
+import { FileLogger, fileLoggerStorage } from "../helpers/file-logger.js";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -152,55 +153,77 @@ export async function runFixTestsPipeline(
     return { mode: "fix-tests", success: false };
   }
 
-  try {
-    // Run the test suite
-    log.info("Running test suite...");
-    const testResult = await runTestCommand(testCommand, cwd);
+  const fileLogger = opts.verbose ? new FileLogger("fix-tests", cwd) : null;
 
-    // Check if tests already pass
-    if (testResult.exitCode === 0) {
-      log.success("All tests pass — nothing to fix.");
-      return { mode: "fix-tests", success: true };
-    }
-    log.warn(
-      `Tests failed (exit code ${testResult.exitCode}). Dispatching AI to fix...`,
-    );
+  const pipelineBody = async (): Promise<FixTestsSummary> => {
+    try {
+      // Run the test suite
+      log.info("Running test suite...");
+      const testResult = await runTestCommand(testCommand, cwd);
+      fileLoggerStorage.getStore()?.info(`Test run complete (exit code: ${testResult.exitCode})`);
 
-    // Boot the provider
-    const provider = (opts.provider ?? "opencode") as ProviderName;
-    const instance = await bootProvider(provider, { url: opts.serverUrl, cwd });
-    registerCleanup(() => instance.cleanup());
+      // Check if tests already pass
+      if (testResult.exitCode === 0) {
+        log.success("All tests pass — nothing to fix.");
+        return { mode: "fix-tests", success: true };
+      }
+      log.warn(
+        `Tests failed (exit code ${testResult.exitCode}). Dispatching AI to fix...`,
+      );
 
-    // Build prompt and dispatch
-    const prompt = buildFixTestsPrompt(testResult, cwd);
-    log.debug(`Prompt built (${prompt.length} chars)`);
-    const sessionId = await instance.createSession();
-    const response = await instance.prompt(sessionId, prompt);
+      // Boot the provider
+      const provider = (opts.provider ?? "opencode") as ProviderName;
+      const instance = await bootProvider(provider, { url: opts.serverUrl, cwd });
+      registerCleanup(() => instance.cleanup());
 
-    if (response === null) {
-      log.error("No response from AI agent.");
+      // Build prompt and dispatch
+      const prompt = buildFixTestsPrompt(testResult, cwd);
+      log.debug(`Prompt built (${prompt.length} chars)`);
+      fileLoggerStorage.getStore()?.prompt("fix-tests", prompt);
+      const sessionId = await instance.createSession();
+      const response = await instance.prompt(sessionId, prompt);
+
+      if (response === null) {
+        fileLoggerStorage.getStore()?.error("No response from AI agent.");
+        log.error("No response from AI agent.");
+        await instance.cleanup();
+        return { mode: "fix-tests", success: false, error: "No response from agent" };
+      }
+      if (response) fileLoggerStorage.getStore()?.response("fix-tests", response);
+      log.success("AI agent completed fixes.");
+
+      // Re-run tests to verify
+      fileLoggerStorage.getStore()?.phase("Verification");
+      log.info("Re-running tests to verify fixes...");
+      const verifyResult = await runTestCommand(testCommand, cwd);
       await instance.cleanup();
-      return { mode: "fix-tests", success: false, error: "No response from agent" };
+      fileLoggerStorage.getStore()?.info(`Verification result: exit code ${verifyResult.exitCode}`);
+
+      if (verifyResult.exitCode === 0) {
+        log.success("All tests pass after fixes!");
+        return { mode: "fix-tests", success: true };
+      }
+
+      log.warn(
+        `Tests still failing after fix attempt (exit code ${verifyResult.exitCode}).`,
+      );
+      return { mode: "fix-tests", success: false, error: "Tests still failing after fix attempt" };
+    } catch (err) {
+      const message = log.extractMessage(err);
+      fileLoggerStorage.getStore()?.error(`Fix-tests pipeline failed: ${message}${err instanceof Error && err.stack ? `\n${err.stack}` : ""}`);
+      log.error(`Fix-tests pipeline failed: ${log.formatErrorChain(err)}`);
+      return { mode: "fix-tests", success: false, error: message };
     }
-    log.success("AI agent completed fixes.");
+  };
 
-    // Re-run tests to verify
-    log.info("Re-running tests to verify fixes...");
-    const verifyResult = await runTestCommand(testCommand, cwd);
-    await instance.cleanup();
-
-    if (verifyResult.exitCode === 0) {
-      log.success("All tests pass after fixes!");
-      return { mode: "fix-tests", success: true };
-    }
-
-    log.warn(
-      `Tests still failing after fix attempt (exit code ${verifyResult.exitCode}).`,
-    );
-    return { mode: "fix-tests", success: false, error: "Tests still failing after fix attempt" };
-  } catch (err) {
-    const message = log.extractMessage(err);
-    log.error(`Fix-tests pipeline failed: ${log.formatErrorChain(err)}`);
-    return { mode: "fix-tests", success: false, error: message };
+  if (fileLogger) {
+    return fileLoggerStorage.run(fileLogger, async () => {
+      try {
+        return await pipelineBody();
+      } finally {
+        fileLogger.close();
+      }
+    });
   }
+  return pipelineBody();
 }

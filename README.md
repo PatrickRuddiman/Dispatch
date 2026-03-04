@@ -99,6 +99,8 @@ az extension add --name azure-devops
 
 **Local markdown** (`--source md`): No external tools or authentication required.
 
+> **Windows users:** See [Windows prerequisites and setup](docs/windows.md) for platform-specific installation commands, recommended configuration, and known limitations.
+
 ## Installation
 
 ```sh
@@ -140,7 +142,7 @@ dispatch --spec 42,43
 | Mode | Flag | Description |
 |------|------|-------------|
 | **Dispatch** | *(default)* | Plan and execute tasks; manage full git lifecycle |
-| **Spec generation** | `--spec` / `--respec` | Convert issues into structured markdown spec files |
+| **Spec generation** | `--spec` | Convert issues into structured markdown spec files |
 | **Fix tests** | `--fix-tests` | Detect and auto-fix failing tests via AI |
 
 ## Task files
@@ -215,8 +217,7 @@ Config is stored at `.dispatch/config.json` (relative to the working directory w
 
 | Option | Description |
 |--------|-------------|
-| `--spec <values...>` | Issue numbers, glob pattern, or description. Activates spec mode. |
-| `--respec [values...]` | Regenerate existing specs. Pass no args to regenerate all. |
+| `--spec [values...]` | Issue numbers, glob pattern, or description. Activates spec mode. Pass no args to regenerate all existing specs. |
 | `--source <name>` | Datasource override (auto-detected if omitted) |
 | `--output-dir <dir>` | Output directory for spec files (default: `.dispatch/specs`) |
 | `--org <url>` | Azure DevOps organization URL (required for `azdevops`) |
@@ -255,6 +256,7 @@ Full documentation is in the [`docs/`](docs/) directory:
 - [Planning & Dispatch](docs/planning-and-dispatch/overview.md)
 - [Spec Generation](docs/spec-generation/overview.md)
 - [Testing](docs/testing/overview.md)
+- [Windows](docs/windows.md)
 
 ## License
 
