@@ -232,7 +232,7 @@ Both `readFile` and `writeFile` are called with `"utf-8"` encoding. This means:
 ## Node.js Process Signals (SIGINT, SIGTERM)
 
 - **Module:** `node:process` (built-in)
-- **Used in:** `src/cli.ts:242-252`
+- **Used in:** `src/cli.ts:307-317`
 - **Official docs:** [nodejs.org/api/process.html#signal-events](https://nodejs.org/api/process.html#signal-events)
 
 Dispatch installs signal handlers for `SIGINT` and `SIGTERM` to ensure
@@ -242,7 +242,7 @@ provider server processes ([OpenCode](../provider-system/opencode-backend.md) or
 
 ### How signal handlers work
 
-The handlers are registered in `main()` at `src/cli.ts:242-252`, after
+The handlers are registered in `main()` at `src/cli.ts:307-317`, after
 verbose logging is enabled but before any business logic runs:
 
 1. `process.on("SIGINT", ...)` — Fires when the user presses Ctrl+C or
@@ -270,7 +270,7 @@ signal-terminated processes and typically mark the job as failed.
 
 ### Error-path cleanup
 
-In addition to signal handlers, `src/cli.ts:304-307` installs a `.catch()`
+In addition to signal handlers, `src/cli.ts:339-343` installs a `.catch()`
 on the `main()` promise that also calls `runCleanup()` before
 `process.exit(1)`. This ensures provider processes are cleaned up even when
 an unhandled exception escapes the main function.
@@ -311,13 +311,13 @@ runs. This is a fundamental OS constraint, not a Dispatch limitation.
   handlers
 - [Logger](./logger.md) -- How chalk is used in the logger
 - [Parser utilities](./parser.md) -- How fs/promises is used in the parser
+- [Provider Interface](./provider.md) -- Provider lifecycle contract relevant
+  to cleanup on signal
 - [TUI](../cli-orchestration/tui.md) -- How chalk is used in the TUI display
 - [CLI & Orchestration Integrations](../cli-orchestration/integrations.md) --
   Signal handling section in the CLI context
 - [Configuration](../cli-orchestration/configuration.md) -- Config file I/O
   that also uses fs/promises
-- [Provider Interface](./provider.md) -- Provider lifecycle contract relevant
-  to cleanup on signal
 - [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) --
   File I/O safety, race conditions, and the read-modify-write pattern
 - [Datasource Integrations](../datasource-system/integrations.md) --
@@ -326,3 +326,7 @@ runs. This is a fundamental OS constraint, not a Dispatch limitation.
   strategy using write-to-temp-then-rename
 - [Testing Overview](../testing/overview.md) -- Test infrastructure for the
   modules that depend on these integrations
+- [Markdown Datasource](../datasource-system/markdown-datasource.md) --
+  fs/promises usage patterns for local file operations
+- [Prerequisites & Safety Integrations](../prereqs-and-safety/integrations.md) --
+  chalk and child_process usage in the prereq subsystem

@@ -1,14 +1,16 @@
 # Git Worktree and Repository Helpers
 
-The git-and-worktree group provides three helper modules that manage filesystem
-isolation, run-state persistence, and repository hygiene for the Dispatch CLI.
-Together they allow the orchestrator to execute multiple issue files in parallel
-— each in its own git worktree — and to resume interrupted runs without
+The git-and-worktree group provides four helper modules that manage filesystem
+isolation, branch name safety, run-state persistence, and repository hygiene
+for the Dispatch CLI. Together they allow the orchestrator to execute multiple
+issue files in parallel — each in its own git worktree — without polluting the
+user's main working directory, and to resume interrupted runs without
 re-executing already-successful tasks.
 
 | File | Purpose |
 |------|---------|
 | [`src/helpers/worktree.ts`](../../src/helpers/worktree.ts) | Create, remove, and list git worktrees under `.dispatch/worktrees/` |
+| [`src/helpers/branch-validation.ts`](../../src/helpers/branch-validation.ts) | Validate branch names against git refname rules; prevent command injection |
 | [`src/helpers/run-state.ts`](../../src/helpers/run-state.ts) | Persist and query per-run task status in `.dispatch/run-state.json` |
 | [`src/helpers/gitignore.ts`](../../src/helpers/gitignore.ts) | Ensure the `.gitignore` file contains a given entry |
 
@@ -124,6 +126,8 @@ interrupted run), it falls back to `git worktree add <path> <branch>` without
 
 ## Detailed documentation
 
+- [Branch Validation](./branch-validation.md) — Branch name validation rules,
+  security properties, and cross-datasource usage
 - [Worktree Management](./worktree-management.md) — Worktree creation, removal,
   listing, slug derivation, and Git CLI interactions
 - [Run State Persistence](./run-state.md) — State file format, task lifecycle
@@ -132,6 +136,7 @@ interrupted run), it falls back to `git worktree add <path> <branch>` without
   and race condition analysis
 - [Integrations](./integrations.md) — Git CLI subprocess management,
   `child_process.execFile`, and `fs/promises` usage patterns
+- [Testing](./testing.md) — Test coverage across 74 tests in three test files
 
 ## Related documentation
 
@@ -152,4 +157,8 @@ interrupted run), it falls back to `git worktree add <path> <branch>` without
 - [Prerequisites & Safety Checks](../prereqs-and-safety/overview.md) — The
   pre-flight validation that runs before worktree operations begin
 - [Testing Overview](../testing/overview.md) — Project-wide test suite
-  (note: worktree helpers have no unit tests)
+- [Testing](./testing.md) — 74 unit tests across branch-validation,
+  gitignore, and worktree modules
+- [Datasource Integrations](../datasource-system/integrations.md) — Git CLI
+  subprocess patterns, branch naming conventions, and lifecycle operations
+  used by datasource implementations

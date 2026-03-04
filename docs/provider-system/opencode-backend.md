@@ -61,7 +61,7 @@ the SDK with `port: 0` (`src/providers/opencode.ts:43`), which:
 The SDK's `createOpencode()` has a default startup timeout of 5000ms. If the
 OpenCode binary is not found or the server fails to bind, the promise rejects
 and the dispatch run aborts (see
-[error recovery](./provider-overview.md#error-recovery-on-boot-failure)).
+[error recovery](./overview.md#error-recovery-on-boot-failure)).
 
 ### Why port 0 instead of the default 4096
 
@@ -104,6 +104,20 @@ handles both cases via an optional `cliUrl` option. The OpenCode SDK separates
 these concerns into distinct functions because the spawned server requires
 lifecycle management (the `server` handle), while connecting to an existing
 server does not.
+
+### Working directory limitation
+
+The `@opencode-ai/sdk`'s `createOpencodeServer` function spawns the `opencode`
+process via `child_process.spawn()` without a `cwd` option — the server
+inherits `process.cwd()`. There is no `ServerOptions.cwd` or configuration
+field to control the working directory at spawn time
+(`src/providers/opencode.ts:83-88`).
+
+**Workaround:** When worktree isolation requires a specific working directory,
+the prompt-level `cwd` (set by the executor/dispatcher in the prompt text)
+ensures the AI agent operates in the correct directory. If a `cwd` option is
+passed to `bootProvider`, the OpenCode provider logs a debug message noting
+the limitation and relies on the prompt-level approach instead.
 
 ## Session management
 
@@ -213,6 +227,8 @@ newlines. If no text parts exist, `null` is returned
 
 ### SSE event filtering: the isSessionEvent helper
 
+> The `isSessionEvent` helper uses the [`hasProperty`](../shared-utilities/guards.md) type guard for safe property access on unknown SSE payloads.
+
 The SSE stream from `GET /global/event` delivers events for **all** sessions on
 the server, not just the one being prompted. The `isSessionEvent()` function
 (`src/providers/opencode.ts:182-207`) filters events to the target session by
@@ -256,6 +272,31 @@ also checks for errors on the assistant message itself
 property, the provider throws rather than returning potentially incomplete
 content.
 
+## Model override format
+
+When a model override is provided via `--model`, the OpenCode provider expects
+the format `"providerID/modelID"` (e.g., `"anthropic/claude-sonnet-4"`). This
+differs from the Copilot provider, which uses bare model IDs (e.g.,
+`"claude-sonnet-4-5"`).
+
+The validation logic at `src/providers/opencode.ts:107-116` checks for a `/`
+character in the model string:
+
+- **Valid format** (`"anthropic/claude-sonnet-4"`): The string is split into
+  `providerID` and `modelID`, which are passed to `client.session.create()`.
+- **Invalid format** (no `/`, e.g., `"claude-sonnet-4"`): The model override is
+  **silently ignored** with a debug-level log warning. The session is created
+  without a model override, defaulting to the OpenCode server's configured model.
+
+This silent fallback means a user who passes a Copilot-style model name to an
+OpenCode provider will not see an error -- the override simply won't take effect.
+Check debug logs (`dispatch --verbose`) if a model override appears to be
+ignored.
+
+See the [Copilot backend](./copilot-backend.md) for the Copilot model format,
+and `src/providers/interface.ts:22-28` for the `ProviderBootOptions.model`
+documentation.
+
 ## Cleanup behavior
 
 The `cleanup()` method (`src/providers/opencode.ts:166-171`) calls
@@ -278,7 +319,7 @@ This guard is important because cleanup can be triggered from two paths:
 1. **Explicit call**: The orchestrator calls `instance.cleanup()` on the success
    path after all tasks complete (`src/agents/orchestrator.ts:165`).
 2. **Safety net**: The orchestrator registers `instance.cleanup()` with the
-   process-level [cleanup registry](../shared-types/cleanup.md) (`src/cleanup.ts`) at boot time
+   process-level [cleanup registry](../shared-types/cleanup.md) (`src/helpers/cleanup.ts`) at boot time
    (`src/agents/orchestrator.ts:151`). Signal handlers (SIGINT, SIGTERM) drain
    this registry on exit.
 
@@ -287,7 +328,7 @@ twice -- once explicitly and once via the cleanup registry. The guard prevents
 this. Note that the [Copilot provider](./copilot-backend.md#cleanup-behavior)
 does **not** have this guard, which is a minor inconsistency between the two
 backends. See the
-[provider overview](./provider-overview.md#cleanup-idempotency-comparison) for a
+[provider overview](./overview.md#cleanup-idempotency-comparison) for a
 comparison.
 
 ## Troubleshooting
@@ -341,7 +382,7 @@ delivers a `session.idle` or `session.error` event.
 **Resolution**: Kill the dispatch process (Ctrl+C). There is no per-prompt
 timeout. The [timeout utility](../shared-utilities/timeout.md) is only applied
 to the planning phase, not to executor prompts. See
-[prompt timeouts](./provider-overview.md#prompt-timeouts-and-cancellation) for
+[prompt timeouts](./overview.md#prompt-timeouts-and-cancellation) for
 the broader discussion of timeout limitations.
 
 ### Monitoring sessions
@@ -376,7 +417,7 @@ reference.
 
 ## Related documentation
 
-- [Provider Overview](./provider-overview.md) -- how the provider abstraction
+- [Provider Overview](./overview.md) -- how the provider abstraction
   layer works
 - [GitHub Copilot Backend](./copilot-backend.md) -- the alternative provider
   backend
@@ -402,3 +443,7 @@ reference.
   coverage
 - [Provider Tests](../testing/provider-tests.md) -- detailed breakdown of the
   OpenCode provider unit tests (`opencode.test.ts`)
+- [Type Guards](../shared-utilities/guards.md) -- `hasProperty` function used
+  for SSE event filtering in `isSessionEvent`
+- [Timeout Utility](../shared-utilities/timeout.md) -- deadline enforcement
+  applied to planning calls (note: executor prompts are not timeout-bounded)

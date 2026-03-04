@@ -269,3 +269,9 @@ corresponding datasource is selected).
 -   [Adding a Fetcher](../issue-fetching/adding-a-fetcher.md) -- Guide for
     adding new issue tracker integrations; new fetchers that shell out to CLI
     tools should follow the same prerequisite detection pattern.
+-   [Provider Abstraction](../provider-system/overview.md) -- Provider
+    system that consumes the detected provider binaries.
+-   [Azure DevOps Datasource](../datasource-system/azdevops-datasource.md) --
+    Datasource requiring the `az` CLI validated by these integrations.
+-   [GitHub Datasource](../datasource-system/github-datasource.md) --
+    Datasource requiring the `gh` CLI validated by these integrations.

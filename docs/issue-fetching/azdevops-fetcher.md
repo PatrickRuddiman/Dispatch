@@ -40,3 +40,5 @@ documentation.
   DevOps work item fetching in the context of spec generation
 - [Testing Overview](../testing/overview.md) -- Project-wide test suite
   (note: deprecated fetcher shims have no unit tests)
+- [Prerequisites & Safety](../prereqs-and-safety/overview.md) -- Prereq
+  validation including `az` CLI checks for Azure DevOps datasource

@@ -109,7 +109,7 @@ write-to-temp-then-rename pattern used by
 
 ## When it is called
 
-The orchestrator calls `ensureGitignoreEntry` in `src/orchestrator/runner.ts:151`
+The [orchestrator](../cli-orchestration/orchestrator.md) calls `ensureGitignoreEntry` in `src/orchestrator/runner.ts:151`
 during early startup, before any worktrees are created:
 
 ```
@@ -134,13 +134,33 @@ write-to-temp-then-rename pattern. The tradeoff is:
 The atomic write pattern would be a strict improvement but has not been
 prioritized given the low risk profile.
 
+## Encoding and platform considerations
+
+### File encoding
+
+The module reads and writes `.gitignore` with explicit `"utf-8"` encoding
+(at the `readFile` and `writeFile` calls). This matches git's own assumption
+that `.gitignore` files are UTF-8 encoded.
+
+### Windows paths
+
+On Windows, `path.join(repoRoot, ".gitignore")` produces a path with
+backslashes (e.g., `C:\repo\.gitignore`), which is correct for the `readFile`
+and `writeFile` calls. The `entry` parameter (e.g., `.dispatch/worktrees/`)
+uses forward slashes regardless of platform, which is correct for `.gitignore`
+content — git always interprets `.gitignore` patterns with forward slashes,
+even on Windows.
+
 ## Related documentation
 
 - [Overview](./overview.md) — Group-level summary and design decisions
+- [Branch Validation](./branch-validation.md) — Branch name validation module
 - [Worktree Management](./worktree-management.md) — The worktree module that
   creates the directories this helper keeps gitignored
 - [Integrations](./integrations.md) — `fs/promises` usage details for read
   and write operations
+- [Testing](./testing.md) — 8 tests covering deduplication, ENOENT handling,
+  CRLF line endings, and write failures
 - [Shared Types — Integrations](../shared-types/integrations.md) — Broader
   discussion of `fs/promises` patterns including atomicity and `ENOENT`
   handling
@@ -148,3 +168,5 @@ prioritized given the low risk profile.
   referenced as a potential improvement for this module
 - [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) —
   Read-modify-write patterns and file I/O race conditions
+- [Configuration](../cli-orchestration/configuration.md) — Persistent config
+  stored in `.dispatch/config.json` alongside the gitignored worktree directory

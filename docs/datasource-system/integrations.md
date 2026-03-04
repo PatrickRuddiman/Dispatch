@@ -221,6 +221,58 @@ changes that conflict with the target branch, `git checkout -b` or
 should ensure the working directory is clean before calling branching
 operations.
 
+## Git CLI integration for datasource helpers
+
+The [datasource helpers](./datasource-helpers.md) module
+(`src/orchestrator/datasource-helpers.ts`) uses the `git` CLI for additional
+operations beyond the datasource interface's lifecycle methods. These
+operations support commit analysis, history rewriting, and PR metadata
+assembly.
+
+### Git commands used by helpers
+
+| Operation | Git command(s) | `maxBuffer` | Error handling |
+|-----------|---------------|-------------|----------------|
+| Commit summaries | `git log <default>..HEAD --pretty=format:%s` | 1 MB (default) | Caught; returns `[]` |
+| Branch diff | `git diff <default>..HEAD` | **10 MB** | Caught; returns `""` |
+| Amend commit | `git commit --amend -m <msg>` | 1 MB (default) | **Propagated** to caller |
+| Find merge-base | `git merge-base <default> HEAD` | 1 MB (default) | **Propagated** to caller |
+| Soft reset | `git reset --soft <sha>` | 1 MB (default) | **Propagated** to caller |
+| Fresh commit | `git commit -m <msg>` | 1 MB (default) | **Propagated** to caller |
+
+### Buffer limits and overflow behavior
+
+The `getBranchDiff()` function sets `maxBuffer` to 10 MB because branch diffs
+can be significantly larger than other git outputs. The Node.js default
+`maxBuffer` of 1 MB (1,048,576 bytes) is used for all other git calls.
+
+When `maxBuffer` is exceeded, Node.js terminates the child process and throws
+`ERR_CHILD_PROCESS_STDIO_MAXBUFFER`. The handling differs by function:
+
+| Function | Overflow behavior | Pipeline impact |
+|----------|------------------|-----------------|
+| `getBranchDiff()` | Caught; returns `""` | PR body and commit agent lose diff context; pipeline continues |
+| `getCommitSummaries()` | Caught; returns `[]` | PR title falls back to issue title; PR body omits summary section |
+| `squashBranchCommits()` | Error propagated | Squash fails; caller must handle the error |
+
+### Subprocess timeout handling
+
+None of the datasource helper git calls configure a `timeout` option. A hung
+`git` process will block the pipeline indefinitely. There is no cancellation
+mechanism — the only way to terminate a stuck subprocess is to kill the
+dispatch process itself (e.g., via Ctrl+C / SIGINT). This is consistent with
+the [datasource CRUD subprocess behavior](#no-subprocess-timeout) above.
+
+### What happens when `git` is not installed
+
+If `git` is not on PATH, all `execFile("git", ...)` calls throw an `ENOENT`
+error. For functions that catch errors (`getBranchDiff`, `getCommitSummaries`),
+this is handled gracefully (empty return values). For functions that propagate
+errors (`amendCommitMessage`, `squashBranchCommits`), the `ENOENT` error
+reaches the caller. The [prerequisite checker](../prereqs-and-safety/prereqs.md)
+validates `git` availability at startup, so this scenario only occurs if `git`
+is removed from PATH between startup and pipeline execution.
+
 ## Branch naming convention
 
 All three datasource implementations use a consistent branch naming convention:
@@ -483,3 +535,6 @@ for migration guidance and removal assessment.
   used at the orchestrator level (not applied to datasource subprocess calls)
 - [Shared Types: Integrations](../shared-types/integrations.md) -- Node.js
   fs/promises and child_process operational details
+- [Git Worktree Helpers](../git-and-worktree/overview.md) -- Worktree
+  isolation model that consumes datasource branch naming and lifecycle
+  operations

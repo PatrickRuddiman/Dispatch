@@ -30,7 +30,7 @@ Regardless of input mode, the pipeline:
    auto-detection, or fallback heuristics. See
    [Datasource Auto-Detection](../datasource-system/overview.md#auto-detection).
 3. **Boots an AI provider** (OpenCode or Copilot) through the
-   [provider abstraction](../provider-system/provider-overview.md).
+   [provider abstraction](../provider-system/overview.md).
 4. **Boots a spec agent** that wraps the provider with spec-specific prompt
    construction, temp-file orchestration, and post-processing.
 5. **Generates specs concurrently** in batches, with retry on failure.
@@ -377,6 +377,40 @@ On a machine with 8 CPUs and 4 GB free memory:
 On a machine with 8 CPUs and 2 GB free memory:
 `Math.min(8, Math.floor(2048 / 500))` = `Math.min(8, 4)` = 4.
 
+### Throughput and latency expectations
+
+Spec generation throughput depends on the AI provider's response latency,
+which dominates the overall time per spec. Typical ranges:
+
+| Factor | Estimate |
+|--------|----------|
+| AI prompt + response (per spec) | 30 seconds – 5 minutes (model- and issue-complexity-dependent) |
+| Datasource fetch (per issue) | < 5 seconds (30-second timeout enforced) |
+| Post-processing + file I/O | Negligible (< 100 ms) |
+| Provider boot (one-time) | 5–30 seconds |
+
+**Batch throughput formula:**
+With concurrency `C` and `N` items, the pipeline processes `ceil(N / C)`
+sequential batches. Total wall-clock time is approximately:
+
+```
+boot_time + (ceil(N / C) × average_spec_time) + cleanup_time
+```
+
+**Large batch interaction:** For batches exceeding 100 items, the
+[large batch confirmation](#large-batch-safety) prompt adds an interactive
+gate. Beyond the confirmation, there is no special handling — the same
+batch-sequential loop runs. Very large batches (500+ items) may encounter:
+
+- **Memory pressure:** Each concurrent AI session consumes memory. The
+  `defaultConcurrency()` formula accounts for this, but explicit
+  `--concurrency` values that exceed available memory can cause swap thrashing.
+- **Provider rate limits:** Some providers throttle concurrent sessions or
+  per-minute prompt volume. Rate-limited requests surface as generation
+  failures (retried up to `--retries` times).
+- **Long running times:** At 2 minutes per spec with concurrency 4, a batch
+  of 200 specs takes approximately 100 minutes.
+
 ### Retry strategy
 
 Each spec generation is wrapped in `withRetry()` (`src/helpers/retry.ts`) with
@@ -387,6 +421,17 @@ Each spec generation is wrapped in `withRetry()` (`src/helpers/retry.ts`) with
   `retries = 2`).
 - The last error is re-thrown if all attempts fail.
 - Applies to each individual spec, not the entire batch.
+- Configurable via the `--retries` CLI flag or `retries` option.
+- Retry attempts are logged with a `[specAgent.generate(...)]` label for
+  diagnostics.
+
+### Fetch timeout
+
+Datasource fetch operations in tracker mode are wrapped in [`withTimeout()`](../shared-utilities/timeout.md)
+with a hardcoded `FETCH_TIMEOUT_MS = 30000` (30 seconds). This prevents a
+single slow or hung datasource call from blocking the entire pipeline. If a
+fetch exceeds 30 seconds, it is aborted and the item is marked as failed.
+This timeout is **not configurable** via CLI flags.
 
 ## Dry-run mode
 
@@ -402,7 +447,8 @@ committing to a full generation run.
 
 ## Large batch safety
 
-The `confirmLargeBatch()` function (`src/helpers/confirm-large-batch.ts`)
+The `confirmLargeBatch()` function (`src/helpers/confirm-large-batch.ts`,
+see also [Batch Confirmation](../prereqs-and-safety/confirm-large-batch.md))
 provides a safety gate for large batches:
 
 - **Threshold:** `LARGE_BATCH_THRESHOLD = 100` items.
@@ -419,12 +465,29 @@ and re-slugifies it. If the resulting filename differs from the original
 (which was based on the issue title or input slug), the file is renamed:
 
 1. Read the generated spec file.
-2. Extract the first H1 heading (`# Title`).
-3. Generate a new slug from the H1 title.
+2. Extract the first H1 heading (`# Title`) using the [`extractTitle()`](../datasource-system/markdown-datasource.md#title-extraction) function.
+3. Generate a new slug from the H1 title using [`slugify()`](../shared-utilities/slugify.md).
 4. If the new path differs from the original path, rename the file.
 
 This ensures filenames reflect the AI-generated title (which may be more
 descriptive than the original issue title).
+
+### Filename collision risk
+
+The pipeline does **not** check for existing files before writing or renaming.
+Collisions can occur in two scenarios:
+
+1. **Tracker mode:** Two issues with different IDs but identical AI-generated
+   H1 titles would produce the same renamed filename. The second rename
+   overwrites the first. In practice this is unlikely because the issue ID
+   prefix (`{id}-`) is part of the original name, and the rename only changes
+   the slug portion.
+2. **Inline text mode:** Two inline text inputs that slugify to the same
+   string (e.g., `"Add auth"` and `"add auth!"`) would produce the same
+   filename. The second write overwrites the first.
+
+**Mitigation:** Use distinct input text, or use tracker mode where issue IDs
+provide natural uniqueness. The `--output-dir` flag can also separate runs.
 
 ## Content extraction and validation
 
@@ -485,6 +548,20 @@ To change the output location, use `--output-dir`:
 ```bash
 dispatch --spec 42,43 --output-dir ./my-specs
 ```
+
+### Directory structure created by spec generation
+
+Spec generation creates and uses up to three subdirectories within
+`.dispatch/`:
+
+| Directory | Purpose | Lifecycle |
+|-----------|---------|-----------|
+| `.dispatch/specs/` | Final generated spec files (default output) | Persists until consumed by `dispatch` or manually deleted |
+| `.dispatch/tmp/` | Temporary AI-written files (UUID-named, e.g., `spec-a1b2c3d4.md`) | Cleaned per-spec by `rm()`; directory removed by `cleanup()` at pipeline end |
+| `.dispatch/logs/` | Per-issue log files (e.g., `issue-42.log`) when `--verbose` is set | Persists indefinitely; no automatic cleanup |
+
+The `.dispatch/tmp/` directory may accumulate orphaned files if the process
+crashes before cleanup runs. These can be safely deleted manually.
 
 ### File naming convention
 
@@ -670,18 +747,28 @@ attacks but means the project directory must be writable.
   auth, and troubleshooting for the spec pipeline
 - [Issue Fetching](../issue-fetching/overview.md) — How issues are retrieved
   and normalized from GitHub and Azure DevOps
+- [Azure DevOps Fetcher (Deprecated)](../issue-fetching/azdevops-fetcher.md) —
+  Legacy shim for Azure DevOps work item fetching
 - [Datasource System](../datasource-system/overview.md) — Datasource
   interface, registry, and auto-detection
+- [Azure DevOps Datasource](../datasource-system/azdevops-datasource.md) —
+  Azure DevOps work item CRUD operations consumed by spec generation
+- [Markdown Datasource](../datasource-system/markdown-datasource.md) —
+  Local-first datasource for managing generated spec files
 - [Datasource Integrations](../datasource-system/integrations.md) — How
   datasource integrations consume generated specs
-- [Provider Abstraction & Backends](../provider-system/provider-overview.md) —
+- [Provider Abstraction & Backends](../provider-system/overview.md) —
   AI provider setup and session model
+- [Adding a Provider](../provider-system/adding-a-provider.md) — How new
+  providers integrate with the spec pipeline
 - [Cleanup Registry](../shared-types/cleanup.md) — How provider cleanup is
   registered and drained on exit
 - [CLI Argument Parser](../cli-orchestration/cli.md) — Full CLI option reference
   including `--spec` mode
 - [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) — How
   generated spec files are consumed downstream
+- [Dispatcher](../planning-and-dispatch/dispatcher.md) — How the dispatcher
+  executes tasks from generated specs
 - [Slugify Utility](../shared-utilities/slugify.md) — The `slugify()` function
   used for spec filename generation
 - [Timeout Utility](../shared-utilities/timeout.md) — `withTimeout` deadline
@@ -690,6 +777,8 @@ attacks but means the project directory must be writable.
   used by the spec pipeline (provider, cleanup, logger, format)
 - [Task Parsing & Markdown](../task-parsing/overview.md) — How the generated
   `- [ ]` task items are parsed by the dispatch pipeline
+- [Markdown Syntax Reference](../task-parsing/markdown-syntax.md) — Exact
+  checkbox syntax and `(P)`/`(S)`/`(I)` mode prefixes produced by spec generation
 - [Configuration](../cli-orchestration/configuration.md) — Persistent config
   defaults that affect `--spec` mode (provider, source)
 - [Architecture Overview](../architecture.md) — System-wide design and

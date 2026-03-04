@@ -1,7 +1,7 @@
 # Cleanup Registry
 
-The cleanup registry (`src/cleanup.ts`) implements a process-level callback
-registry that ensures AI [provider](../provider-system/provider-overview.md) resources are properly released before the
+The cleanup registry (`src/helpers/cleanup.ts`) implements a process-level callback
+registry that ensures AI [provider](../provider-system/overview.md) resources are properly released before the
 Dispatch process exits. Sub-modules register their provider's `cleanup()`
 function at boot time, and the [CLI's](../cli-orchestration/cli.md) signal handlers and error handler drain
 the registry before calling `process.exit()`.
@@ -165,7 +165,7 @@ abandoned when `process.exit(130)` fires from the second handler invocation.
 ## Why cleanup errors are swallowed
 
 The `try/catch` block in `runCleanup()` has an empty `catch` clause
-(`src/cleanup.ts:31-33`). This is a deliberate design choice:
+(`src/helpers/cleanup.ts:31-33`). This is a deliberate design choice:
 
 - **Cleanup runs in exit paths where the original error matters more.** If the
   process is shutting down because of a fatal error, a secondary error from
@@ -269,7 +269,7 @@ This would give each cleanup function 5 seconds before the loop moves on.
 
 ## Source reference
 
-- `src/cleanup.ts` -- Full cleanup registry implementation (35 lines)
+- `src/helpers/cleanup.ts` -- Full cleanup registry implementation (35 lines)
 - `src/cli.ts:242-252` -- Signal handler installation
 - `src/cli.ts:304-307` -- Error handler with cleanup drain
 - `src/agents/orchestrator.ts:151` -- Dispatch-mode cleanup registration
@@ -287,7 +287,7 @@ This would give each cleanup function 5 seconds before the loop moves on.
   dispatch-mode cleanup is registered
 - [Spec Generation](../spec-generation/overview.md) -- Where spec-mode
   cleanup is registered
-- [Provider Abstraction](../provider-system/provider-overview.md) -- The
+- [Provider Abstraction](../provider-system/overview.md) -- The
   `cleanup()` method on ProviderInstance
 - [Provider Interface](./provider.md) -- The `ProviderInstance` type that
   defines the `cleanup()` method
@@ -297,5 +297,9 @@ This would give each cleanup function 5 seconds before the loop moves on.
   The `execFile` patterns and external CLI tool detection that run before cleanup
   registration; understanding the pipeline startup sequence helps contextualize
   when cleanup is registered
-- [Testing Overview](../testing/overview.md) -- Test coverage (note: the
-  cleanup registry is not unit tested)
+- [Testing Overview](../testing/overview.md) -- Test coverage map including
+  `cleanup.test.ts`
+- [Test Fixtures & Cleanup Tests](../testing/test-fixtures.md) -- Dedicated
+  documentation for the cleanup registry test suite (10 tests covering
+  registration, execution order, error handling, re-entrancy, and signal
+  integration) and shared mock factories

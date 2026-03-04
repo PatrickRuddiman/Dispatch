@@ -54,7 +54,7 @@ via `mkdir(dirname(configPath), { recursive: true })` when it does not exist.
 
 The `dispatch config` subcommand respects the `--cwd` flag. The CLI
 pre-parses `--cwd` from raw argv before calling `handleConfigCommand()`
-(`src/cli.ts:271-278`), computes `configDir = join(cwd, ".dispatch")`, and
+(`src/cli.ts:277-297`), computes `configDir = join(cwd, ".dispatch")`, and
 passes it through to the wizard. This means `dispatch config --cwd /other/project`
 reads and writes `/other/project/.dispatch/config.json`.
 
@@ -67,12 +67,28 @@ The config file is a plain JSON object with optional fields:
   "provider": "copilot",
   "model": "claude-sonnet-4-5",
   "source": "github",
-  "testTimeout": 10
+  "testTimeout": 10,
+  "planTimeout": 15,
+  "concurrency": 4
 }
 ```
 
 All fields are optional. The file is written as pretty-printed JSON with
 2-space indentation and a trailing newline (`JSON.stringify(config, null, 2) + "\n"`).
+
+For Azure DevOps projects, the config file may also include:
+
+```json
+{
+  "provider": "copilot",
+  "source": "azdevops",
+  "org": "https://dev.azure.com/myorg",
+  "project": "MyProject",
+  "workItemType": "User Story",
+  "iteration": "MyProject\\Sprint 1",
+  "area": "MyProject\\Team A"
+}
+```
 
 ### What happens when the config file is corrupted or contains invalid JSON
 
@@ -98,7 +114,7 @@ is created with the default `mkdir` permissions (typically `0755`).
 
 ### Is the config file format versioned?
 
-No. The `DispatchConfig` interface (`src/config.ts:19-30`) defines the schema,
+No. The `DispatchConfig` interface (`src/config.ts:19-37`) defines the schema,
 but there is no version field, no migration logic, and no schema validation
 beyond per-key type checks. When new keys are added to `DispatchConfig` in
 future releases:
@@ -113,18 +129,52 @@ If forward/backward compatibility becomes a concern, a `version` field and
 migration function could be added, but the current optional-fields design
 handles the common cases without explicit versioning.
 
+### What happens when the config file contains unknown or extra keys
+
+Because `loadConfig()` casts the parsed JSON to `DispatchConfig` via a type
+assertion (`as DispatchConfig`), there is no runtime schema stripping or
+rejection of unrecognized keys. Unknown keys are silently preserved in the
+returned object but never read by the merge logic, which only iterates
+`CONFIG_KEYS`. When `saveConfig()` is called (e.g., by the wizard), the entire
+config object is replaced — so unknown keys from a manually edited config file
+are preserved through `loadConfig()` but dropped when the wizard rewrites the
+file.
+
+### Should the config file be committed to version control?
+
+The `.dispatch/` directory is automatically added to `.gitignore` by the
+dispatch tool (via `helpers/gitignore.ts`). This means:
+
+- **By default, the config file is NOT committed** to version control. Each
+  developer maintains their own local configuration.
+- **This is intentional**: the config file stores per-developer preferences
+  (preferred provider, model) that may differ across team members.
+
+If your team wants a shared baseline configuration, consider documenting the
+recommended settings in your project's README or contributing guide rather
+than committing the config file. Alternatively, you can manually remove the
+`.dispatch/` entry from `.gitignore` to share configuration, but be aware that
+different developers may need different provider or model settings.
+
 ## Configurable keys
 
 | Key | Type | Valid values | Description |
 |-----|------|-------------|-------------|
-| `provider` | string | `"opencode"`, `"copilot"`, `"claude"`, `"codex"` | AI agent backend (see [Provider System](../provider-system/provider-overview.md)) |
+| `provider` | string | `"opencode"`, `"copilot"`, `"claude"`, `"codex"` | AI agent backend (see [Provider System](../provider-system/overview.md)) |
 | `model` | string | Any non-empty string (provider-specific format) | Model to use when spawning agents. Copilot uses bare model IDs (e.g., `"claude-sonnet-4-5"`), OpenCode uses `"provider/model"` format (e.g., `"anthropic/claude-sonnet-4"`). When omitted, the provider uses its auto-detected default. |
 | `source` | string | `"github"`, `"azdevops"`, `"md"` | Default datasource for issue fetching (see [Datasource System](../datasource-system/overview.md)) |
-| `testTimeout` | number | Positive number (e.g., 5, 10, 0.5) | Test timeout in minutes for the `--fix-tests` mode. Parsed via `Number()`. |
+| `testTimeout` | number | 1–120 (minutes) | Test timeout in minutes for the `--fix-tests` mode. |
+| `planTimeout` | number | 1–120 (minutes) | Planning timeout in minutes for the planner agent (see [Timeout Utility](../shared-utilities/timeout.md)). |
+| `concurrency` | number | 1–64 (integer) | Maximum parallel dispatches per batch. |
+| `org` | string | Any non-empty string | Azure DevOps organization URL (e.g., `"https://dev.azure.com/myorg"`). See [Azure DevOps Datasource](../datasource-system/azdevops-datasource.md). |
+| `project` | string | Any non-empty string | Azure DevOps project name. |
+| `workItemType` | string | Any non-empty string | Azure DevOps work item type filter (e.g., `"User Story"`, `"Bug"`). |
+| `iteration` | string | Any non-empty string | Azure DevOps iteration path (e.g., `"MyProject\\Sprint 1"`, `"@CurrentIteration"`). |
+| `area` | string | Any non-empty string | Azure DevOps area path (e.g., `"MyProject\\Team A"`). |
 
 ### Validation rules
 
-`validateConfigValue()` (`src/config.ts:80-111`) enforces type-specific rules:
+`validateConfigValue()` (`src/config.ts:94-151`) enforces type-specific rules:
 
 - **`provider`** must be in `PROVIDER_NAMES` (currently `"opencode"`,
   `"copilot"`, `"claude"`, `"codex"`). Invalid values produce:
@@ -134,14 +184,38 @@ handles the common cases without explicit versioning.
 - **`source`** must be in `DATASOURCE_NAMES` (currently `"github"`,
   `"azdevops"`, `"md"`). Invalid values produce:
   `Invalid source "<value>". Available: github, azdevops, md`
-- **`testTimeout`** must parse to a positive finite number via `Number()`.
-  Values like `"0"`, `"-5"`, `"abc"`, and `""` are rejected. The error
+- **`testTimeout`** must be a finite number between 1 and 120 (inclusive).
+  Values outside the range, non-numeric strings, `Infinity`, and `NaN` are
+  rejected. The error message is:
+  `Invalid testTimeout "<value>". Must be a number between 1 and 120 (minutes)`
+- **`planTimeout`** must be a finite number between 1 and 120 (inclusive).
+  Uses the same validation logic as `testTimeout`. The error message is:
+  `Invalid planTimeout "<value>". Must be a number between 1 and 120 (minutes)`
+- **`concurrency`** must be an integer between 1 and 64 (inclusive).
+  Non-integers (e.g., `"1.5"`) are rejected even if within range. The error
   message is:
-  `Invalid testTimeout "<value>". Must be a positive number (minutes)`
+  `Invalid concurrency "<value>". Must be an integer between 1 and 64`
+- **`org`**, **`project`**, **`workItemType`**, **`iteration`**, **`area`**
+  must be non-empty strings. Empty or whitespace-only values produce:
+  `Invalid <key>: value must not be empty`
+
+### Numeric bounds (`CONFIG_BOUNDS`)
+
+The `CONFIG_BOUNDS` constant (`src/config.ts:40-44`) defines the valid range
+for numeric configuration values:
+
+| Key | Min | Max | Type | Description |
+|-----|-----|-----|------|-------------|
+| `testTimeout` | 1 | 120 | number | Minutes |
+| `planTimeout` | 1 | 120 | number | Minutes |
+| `concurrency` | 1 | 64 | integer | Parallel tasks |
+
+These bounds are used by `validateConfigValue()` and also imported by the
+[CLI entry point](cli.md) for argument validation.
 
 ### Config key to CLI field mapping
 
-The config system uses different key names than the CLI in one case:
+The config system uses different key names than the CLI in some cases:
 
 | Config key | CLI flag | CLI args field |
 |------------|----------|----------------|
@@ -149,6 +223,13 @@ The config system uses different key names than the CLI in one case:
 | `model` | `--model` | `model` |
 | `source` | `--source` | `issueSource` |
 | `testTimeout` | `--test-timeout` | `testTimeout` |
+| `planTimeout` | `--plan-timeout` | `planTimeout` |
+| `concurrency` | `--concurrency` | `concurrency` |
+| `org` | `--org` | `org` |
+| `project` | `--project` | `project` |
+| `workItemType` | `--work-item-type` | `workItemType` |
+| `iteration` | `--iteration` | `iteration` |
+| `area` | `--area` | `area` |
 
 The `source` to `issueSource` mapping (`src/orchestrator/cli-config.ts:28`)
 is the only field where the config key differs from the CLI field name. This
@@ -213,6 +294,25 @@ sequenceDiagram
     Wizard->>User: select("Datasource") with "auto" option
     User-->>Wizard: selected source (or "auto")
 
+    alt selected source is azdevops (or auto-detected as azdevops)
+        Wizard->>DS: getGitRemoteUrl(cwd)
+        DS-->>Wizard: remote URL (or null)
+        Wizard->>DS: parseAzDevOpsRemoteUrl(url)
+        DS-->>Wizard: { orgUrl, project } (or null)
+        Note over Wizard: Pre-fill org/project from git remote
+
+        Wizard->>User: input("Organization URL:") with pre-filled default
+        User-->>Wizard: org value (or empty to skip)
+        Wizard->>User: input("Project name:") with pre-filled default
+        User-->>Wizard: project value (or empty to skip)
+        Wizard->>User: input("Work item type:")
+        User-->>Wizard: workItemType (or empty to skip)
+        Wizard->>User: input("Iteration path:")
+        User-->>Wizard: iteration (or empty to skip)
+        Wizard->>User: input("Area path:")
+        User-->>Wizard: area (or empty to skip)
+    end
+
     Wizard->>User: Display summary
     Wizard->>User: confirm("Save?")
     User-->>Wizard: yes / no
@@ -248,7 +348,24 @@ sequenceDiagram
    to runtime. Selecting "auto" stores `undefined` for `source` in the config
    file, which causes runtime auto-detection on each invocation.
 
-5. **Summary and save**: Displays the full configuration summary and asks for
+5. **Azure DevOps fields** (conditional): If the effective datasource is
+   `azdevops` (either explicitly selected or auto-detected), the wizard
+   presents five additional `input` prompts for Azure DevOps-specific
+   settings:
+    - **Organization URL**: Pre-filled from the git remote URL if available
+      (via `getGitRemoteUrl()` → `parseAzDevOpsRemoteUrl()`).
+    - **Project name**: Pre-filled from the git remote URL if available.
+    - **Work item type**: Optional filter (e.g., `"User Story"`, `"Bug"`).
+    - **Iteration path**: Optional (e.g., `"MyProject\\Sprint 1"`,
+      `"@CurrentIteration"`).
+    - **Area path**: Optional (e.g., `"MyProject\\Team A"`).
+
+   All five fields are optional — leaving an input empty omits the key from
+   the config file. The pre-fill logic is best-effort: if `getGitRemoteUrl()`
+   returns `null` or `parseAzDevOpsRemoteUrl()` cannot parse the URL, the
+   fields default to their existing config values (if any) or remain empty.
+
+6. **Summary and save**: Displays the full configuration summary and asks for
    confirmation. On "yes", writes the config via `saveConfig()`. On "no",
    exits without saving.
 
@@ -256,7 +373,7 @@ sequenceDiagram
 
 If the user presses Ctrl+C during any prompt, `@inquirer/prompts` throws an
 `ExitPromptError`. This error propagates up to the CLI's top-level `.catch()`
-handler (`src/cli.ts:321-324`), which logs the error and exits with code `1`.
+handler (`src/cli.ts:339-343`), which logs the error and exits with code `1`.
 Because the config subcommand runs before `parseArgs()`, the signal handlers
 for `SIGINT`/`SIGTERM` are not yet installed at that point.
 
@@ -308,14 +425,17 @@ configuration system.
 
 ### How the `explicitFlags` set prevents config overrides
 
-The `parseArgs()` function in `src/cli.ts:96-263` builds a `Set<string>` of
-CLI flag names that were explicitly provided by the user. Every time a flag
-is parsed, its corresponding field name is added to the set:
+The `parseArgs()` function in `src/cli.ts:99-271` uses Commander.js
+`getOptionValueSource()` to build a `Set<string>` of CLI flag names that were
+explicitly provided by the user. After Commander parses the arguments, the CLI
+iterates over a `SOURCE_MAP` and checks each option's value source:
 
 ```
-// Example: user passes --provider copilot
-args.provider = val as ProviderName;
-explicitFlags.add("provider");  // marks "provider" as explicit
+for (const [attr, flag] of Object.entries(SOURCE_MAP)) {
+    if (program.getOptionValueSource(attr) === "cli") {
+        explicitFlags.add(flag);
+    }
+}
 ```
 
 During the merge step in `resolveCliConfig()` (`src/orchestrator/cli-config.ts:65-71`),
@@ -350,23 +470,30 @@ even if the config file says `"provider": "copilot"`.
 
 ### Why the config command runs before `parseArgs`
 
-The `config` command is intercepted at `src/cli.ts:270` before `parseArgs()`
-is called:
+The `config` command is intercepted at `src/cli.ts:277` before `parseArgs()`
+is called. A separate Commander instance with `allowUnknownOption()` and
+`allowExcessArguments()` is used to pre-parse the `--cwd` flag:
 
 ```
 if (rawArgv[0] === "config") {
-    let cwd = process.cwd();
-    // ... pre-parse --cwd from raw argv ...
-    const configDir = join(cwd, ".dispatch");
+    const configProgram = new Command("dispatch-config")
+      .exitOverride()
+      .configureOutput({ writeOut: () => {}, writeErr: () => {} })
+      .helpOption(false)
+      .allowUnknownOption(true)
+      .allowExcessArguments(true)
+      .option("--cwd <dir>", "Working directory", (v: string) => resolve(v));
+    // ...parse and extract cwd...
+    const configDir = join(configProgram.opts().cwd ?? process.cwd(), ".dispatch");
     await handleConfigCommand(rawArgv.slice(1), configDir);
     process.exit(0);
 }
 ```
 
 This early interception is necessary because `parseArgs()` would reject
-`"config"` as an unknown option. By checking for `config` first and delegating
-to `handleConfigCommand()` before any argument parsing occurs, the config
-command operates independently of the dispatch argument grammar.
+`"config"` as an unknown positional. By checking for `config` first and
+delegating to `handleConfigCommand()` before any argument parsing occurs, the
+config command operates independently of the dispatch argument grammar.
 
 ## Mandatory configuration validation
 
@@ -387,8 +514,22 @@ Missing required configuration: provider
 
 The process exits with code `1`.
 
+### Cleanup behavior during config resolution
+
+The `resolveCliConfig()` function calls `process.exit(1)` directly on
+validation failures (`src/orchestrator/cli-config.ts:88,99,118`). Because
+`process.exit()` triggers `'exit'` event handlers but **not** signal handlers,
+and because the [cleanup registry](../shared-types/cleanup.md) is drained only
+by signal handlers and the top-level `.catch()` handler, the `process.exit(1)`
+calls in config resolution **do not trigger cleanup**.
+
+In practice, this is safe because config resolution runs before any AI
+provider has been booted — there are no provider server processes to clean up
+at this point. The provider boot occurs later in the pipeline, after config
+resolution succeeds.
+
 Note that `provider` has a hardcoded default of `"opencode"` in `parseArgs()`
-(`src/cli.ts:104`), so in practice the provider validation only fails if the
+(`src/cli.ts:203`), so in practice the provider validation only fails if the
 user has not set a provider in the config file AND the hardcoded default is
 somehow cleared. The validation checks `explicitFlags.has("provider") ||
 config.provider !== undefined` (`src/orchestrator/cli-config.ts:74-75`), which
@@ -463,7 +604,7 @@ time, so it reflects the system's resource availability when the pipeline
 actually starts.
 
 The `--concurrency` flag is enforced to not exceed `MAX_CONCURRENCY` (64),
-which is exported from `src/cli.ts:22`.
+which is derived from `CONFIG_BOUNDS.concurrency.max` in `src/cli.ts:23`.
 
 | System | CPUs | Free memory | Default concurrency |
 |--------|------|-------------|-------------------|
@@ -484,8 +625,8 @@ Four AI agent backends are currently registered in `src/providers/index.ts`:
 | `codex` | `src/providers/codex.ts` | OpenAI Codex agent backend. |
 
 Provider names are validated at two points:
-1. **CLI level** (`src/cli.ts:200-206`): `--provider` is checked against
-   `PROVIDER_NAMES` at parse time.
+1. **CLI level** (`src/cli.ts:122-124`): `--provider` is checked against
+   `PROVIDER_NAMES` via Commander's `choices()` API.
 2. **Config level** (`src/config.ts:82-86`): The validation function checks
    provider names against the same list.
 
@@ -503,8 +644,8 @@ Three datasource backends are currently registered in `src/datasources/index.ts`
 | `md` | Local filesystem | Local markdown files. See [Markdown Datasource](../datasource-system/markdown-datasource.md). |
 
 Datasource names are validated at two points:
-1. **CLI level** (`src/cli.ts:164-172`): `--source` is checked against
-   `DATASOURCE_NAMES` at parse time.
+1. **CLI level** (`src/cli.ts:126-129`): `--source` is checked against
+   `DATASOURCE_NAMES` via Commander's `choices()` API.
 2. **Config level** (`src/config.ts:94-98`): The validation function checks
    datasource names against the same list.
 
@@ -578,11 +719,14 @@ between partial failure and total failure.
 ## Graceful shutdown and cleanup
 
 The CLI installs signal handlers for `SIGINT` and `SIGTERM` at
-`src/cli.ts:289-299`. Both handlers follow the same pattern:
+`src/cli.ts:307-317`. Both handlers follow the same pattern:
 
 1. Log a debug message (visible with `--verbose`).
 2. Call `runCleanup()` from the [cleanup registry](../shared-types/cleanup.md).
 3. Exit with the conventional `128 + signal` code.
+
+See the [cleanup registry documentation](../shared-types/cleanup.md) for
+details on how `runCleanup()` drains registered functions.
 
 ### What `runCleanup()` releases
 
@@ -615,7 +759,7 @@ to force termination.
 ## Orchestrator boot process
 
 The CLI delegates to the orchestrator via a two-step process
-(`src/cli.ts:312-314`):
+(`src/cli.ts:330-332`):
 
 1. **`bootOrchestrator({ cwd })`**: Creates an `OrchestratorAgent` instance
    bound to the working directory. This is a lightweight operation that does
@@ -674,7 +818,8 @@ If the config file is deleted between `loadConfig()` and a subsequent
 ### Config keys reference
 
 The interactive wizard supports the following config keys: `provider`,
-`model`, `source`, `testTimeout`.
+`model`, `source`, `testTimeout`, `planTimeout`, `concurrency`, `org`,
+`project`, `workItemType`, `iteration`, `area`.
 Keys like `dryRun`, `noPlan`, `noBranch`, `noWorktree`, `force`, and
 `verbose` are CLI-only flags and cannot be persisted via `dispatch config`.
 See [the --no-branch flag](cli.md#the---no-branch-flag) for details on that
@@ -690,7 +835,7 @@ flag's behavior, and the
   dispatch pipeline
 - [TUI](tui.md) -- terminal dashboard that reflects configuration-driven
   concurrency and phase state
-- [Provider Abstraction](../provider-system/provider-overview.md) -- provider
+- [Provider Abstraction](../provider-system/overview.md) -- provider
   selection and `--server-url` semantics
 - [Datasource System](../datasource-system/overview.md) -- datasource
   detection and `--source` options
@@ -708,3 +853,9 @@ flag's behavior, and the
   boot and session management
 - [Configuration Tests](../testing/config-tests.md) -- test suite for config
   I/O, validation, and merge precedence
+- [Logger](../shared-types/logger.md) -- how `--verbose` sets `log.verbose`
+  and debug output is toggled via configuration
+- [Copilot Backend](../provider-system/copilot-backend.md) -- how `--server-url`
+  connects to an existing Copilot CLI server
+- [Planner Agent](../planning-and-dispatch/planner.md) -- how `--no-plan` and
+  `--plan-timeout` affect the planning phase

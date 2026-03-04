@@ -23,7 +23,7 @@ Each task in a run is tracked by a `RunStateTask` record:
 |-------|------|-------------|
 | `id` | `string` | Unique identifier in the format `<filename>:<line>` |
 | `status` | `"pending" \| "running" \| "success" \| "failed"` | Current lifecycle state |
-| `branch` | `string?` | Optional branch name associated with the task |
+| `branch` | `string?` | Optional branch name associated with the task (validated by [branch validation](./branch-validation.md)) |
 
 ### RunState
 
@@ -219,3 +219,7 @@ by any decision logic.
   whose task results drive state transitions
 - [Configuration System](../cli-orchestration/configuration.md) — CLI flag and
   config file resolution that precedes pipeline execution
+- [Testing Overview](../testing/overview.md) — Project-wide test suite
+  including run-state tests
+- [Dispatch Pipeline Tests](../testing/dispatch-pipeline-tests.md) — Tests
+  for the pipeline that will integrate with run-state

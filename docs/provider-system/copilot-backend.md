@@ -124,65 +124,130 @@ Unlike the [OpenCode provider](./opencode-backend.md) (which uses separate `crea
 `CopilotClient` class that handles both cases through the optional `cliUrl`
 constructor option.
 
-### Synchronous prompt model
+### Event-based prompt model
 
-The Copilot provider uses a **synchronous blocking** prompt model. When
-`session.sendAndWait({ prompt: text })` is called, it blocks until the Copilot
-backend produces a complete response. There is no SSE streaming or event-based
-coordination -- the entire request-response cycle happens within a single call.
+The Copilot provider uses an **event-based** prompt model with a 3-step flow:
 
-This contrasts with the [OpenCode provider](./opencode-backend.md#asynchronous-prompt-model),
-which uses an async `promptAsync` + SSE pattern to avoid HTTP timeout issues.
-The Copilot SDK's `sendAndWait()` handles timeouts internally via the JSON-RPC
-layer, so the HTTP timeout problem that motivated the OpenCode async approach
-does not apply here.
+1. **Fire-and-forget**: `session.send({ prompt: text })` queues the prompt for
+   processing (`src/providers/copilot.ts:110`).
+2. **Wait for completion**: The provider subscribes to `session.idle` and
+   `session.error` events via `session.on()`. The wait is wrapped in
+   [`withTimeout()`](../shared-utilities/timeout.md) with a **300-second
+   (5-minute) deadline** (`src/providers/copilot.ts:117-129`).
+3. **Fetch messages**: On `session.idle`, `session.getMessages()` retrieves
+   the conversation history, and the last `assistant.message` event's
+   `data.content` is returned (`src/providers/copilot.ts:138-144`).
+
+Event listeners are cleaned up in a `finally` block by calling the
+unsubscribe functions returned by `session.on()`, ensuring no listener leaks
+regardless of whether the prompt succeeds, times out, or errors.
+
+This pattern is structurally similar to the
+[OpenCode provider's](./opencode-backend.md#asynchronous-prompt-model) async
+approach, though Copilot uses SDK-level event callbacks rather than SSE
+streams.
+
+### Prompt timeout
+
+The 300-second (5-minute) timeout is **hardcoded** at
+`src/providers/copilot.ts:127`. It is not configurable via CLI flags or the
+configuration file. If neither `session.idle` nor `session.error` fires
+within 300 seconds, the prompt rejects with a `TimeoutError` containing the
+label `"copilot session ready"`.
+
+**Is 300 seconds sufficient?** For most prompts, 300 seconds is more than
+adequate. Complex prompts that trigger extensive tool use by the agent may
+occasionally approach this limit. If timeouts are observed frequently:
+
+- Check whether the Copilot backend is under load (rate limits, slow model).
+- Consider using a simpler model via `--model`.
+- The timeout cannot currently be increased without modifying the source code.
+
+The timeout is separate from the [planner timeout](../cli-orchestration/configuration.md)
+(`--plan-timeout`), which wraps the entire planner agent call including session
+creation.
+
+### Permission auto-approval (`approveAll`)
+
+When creating a session, the provider passes `onPermissionRequest: approveAll`
+(`src/providers/copilot.ts:75`). The `approveAll` function is imported from
+the `@github/copilot-sdk` and automatically approves all permission requests
+the agent makes during a session — including file reads, file writes, shell
+command execution, and any other tool invocations.
+
+**Why auto-approve?** Dispatch runs as an automated pipeline where
+human-in-the-loop confirmation would block execution. The planner and executor
+agents need unrestricted filesystem and tool access to explore the codebase
+and implement changes. This is the same philosophy as Claude's
+`permissionMode: 'acceptEdits'`.
+
+**Security implications**: Auto-approval means the AI agent can perform any
+operation the Copilot SDK supports without user confirmation. In the context
+of dispatch, this is acceptable because:
+
+- The agent operates within a [worktree](../git-and-worktree/worktree-management.md)
+  or the user's working directory — not arbitrary filesystem locations.
+- All changes are committed to a branch and submitted as a PR for review.
+- The agent's actions are bounded by the provider session and the prompt
+  instructions.
+
+If tighter permission control is needed, a custom `onPermissionRequest`
+handler could be passed instead of `approveAll`, but this would require
+modifying the provider source code.
 
 ## Session management
 
 The Copilot provider maintains an in-memory `Map<string, CopilotSession>` at
 `src/providers/copilot.ts:36` to track live sessions. This client-side map is
 necessary because the `CopilotClient.createSession()` returns a `CopilotSession`
-object that must be retained for subsequent `sendAndWait()` calls -- unlike the
-OpenCode SDK where sessions are server-managed and referenced by ID.
+object that must be retained for subsequent `send()` and event listener calls --
+unlike the OpenCode SDK where sessions are server-managed and referenced by ID.
 
 When `createSession()` is called:
 
-1. `client.createSession()` is invoked.
+1. `client.createSession()` is invoked with `onPermissionRequest: approveAll`
+   and optional `model` and `workingDirectory` options.
 2. The returned `CopilotSession` is stored in the map keyed by `session.sessionId`.
-3. The `sessionId` string is returned to the caller.
+3. **Lazy model detection**: On the *first* session only (guarded by a
+   `modelDetected` boolean at `src/providers/copilot.ts:80-92`), the provider
+   calls `session.rpc.model.getCurrent()` to detect the actual default model ID.
+   This result is used by `listModels()`. If the RPC call fails, the error is
+   swallowed (logged at debug level) and the provider continues without a model
+   name.
+4. The `sessionId` string is returned to the caller.
 
 When `prompt()` is called:
 
 1. The session is looked up in the map. If not found, an error is thrown.
-2. `session.sendAndWait({ prompt: text })` is called, which blocks until the
-   agent produces a response.
-3. The response event is examined. If `event` is null or `event.data?.content` is
-   undefined, `null` is returned.
+2. `session.send({ prompt: text })` fires the prompt asynchronously.
+3. The provider waits for a `session.idle` or `session.error` event (with a
+   300-second timeout via [`withTimeout()`](../shared-utilities/timeout.md)).
+4. On idle, `session.getMessages()` retrieves the conversation history.
+5. The last `assistant.message` event's `data.content` is returned (or `null`
+   if no assistant message is found).
 
 ## Handling malformed responses
 
-The `prompt()` implementation uses defensive null-checking at
-`src/providers/copilot.ts:65-69`:
+After `session.idle` fires, the provider calls `session.getMessages()` and
+searches for the last event with `type === "assistant.message"`
+(`src/providers/copilot.ts:138-142`). The response is extracted via:
 
 ```ts
-if (!event) return null;
-const result = event.data?.content ?? null;
+const result = last?.data?.content ?? null;
 ```
 
-If `sendAndWait()` returns an event with missing or malformed `data`, the
-optional chaining (`event.data?.content`) safely evaluates to `undefined`, and
-the nullish coalescing (`?? null`) converts it to `null`. This prevents the
-provider from throwing on unexpected SDK behavior and instead signals "no
-response" to the [orchestrator](../cli-orchestration/orchestrator.md), which records the task as failed with "No response
-from agent" (`src/dispatcher.ts:39`). See the [Dispatcher](../planning-and-dispatch/dispatcher.md) for details on how
-failed responses are handled.
+If no assistant message exists, or if `data.content` is missing, the optional
+chaining evaluates to `undefined` and nullish coalescing converts it to `null`.
+This signals "no response" to the
+[orchestrator](../cli-orchestration/orchestrator.md), which records the task as
+failed with "No response from agent" (`src/dispatcher.ts:39`). See the
+[Dispatcher](../planning-and-dispatch/dispatcher.md) for details on how failed
+responses are handled.
 
-Note: this null-checking path handles both truly null events (no response) and
-events where `data.content` is an empty string. An empty string is falsy in
-JavaScript but will pass through `?? null` because nullish coalescing only
-triggers on `null` or `undefined`, not on `""`. So an empty-string response
-would be returned as `""` (truthy for the dispatcher's `response === null`
-check), which would be treated as a successful dispatch.
+Note: an empty-string response (`""`) passes through `?? null` because nullish
+coalescing only triggers on `null` or `undefined`, not on `""`. So an
+empty-string response would be returned as `""` (truthy for the dispatcher's
+`response === null` check), which would be treated as a successful dispatch.
 
 ## Cleanup behavior
 
@@ -214,15 +279,15 @@ double-cleanup. If `cleanup()` is called twice:
 In practice, this is not a bug because the error swallowing makes double-cleanup
 safe. However, it is a minor inconsistency with the OpenCode provider's
 defensive style. See the
-[provider overview](./provider-overview.md#cleanup-idempotency-comparison) for
+[provider overview](./overview.md#cleanup-idempotency-comparison) for
 a side-by-side comparison.
 
 ## Rate limits and quotas
 
 GitHub Copilot applies rate limits to ensure fair access across all users. The
 rate limits are temporary and apply per-user. If dispatch encounters a rate
-limit during a prompt call, the `sendAndWait()` promise will reject with an error
-that propagates as a failed task.
+limit during a prompt call, the `session.send()` or event listener promise will
+reject with an error that propagates as a failed task.
 
 **Key points from the
 [Copilot rate limits documentation](https://docs.github.com/en/copilot/concepts/rate-limits)**:
@@ -304,7 +369,7 @@ dispatch "tasks/**/*.md" --provider copilot
 
 ## Related documentation
 
-- [Provider Overview](./provider-overview.md) -- how the provider abstraction
+- [Provider Overview](./overview.md) -- how the provider abstraction
   layer works
 - [OpenCode Backend](./opencode-backend.md) -- the alternative provider backend
 - [Adding a New Provider](./adding-a-provider.md) -- guide for implementing new
@@ -326,3 +391,5 @@ dispatch "tasks/**/*.md" --provider copilot
   Copilot provider unit tests (`copilot.test.ts`)
 - [Prerequisites & Safety Checks](../prereqs-and-safety/overview.md) --
   `checkProviderInstalled()` that probes for the `copilot` binary on PATH
+- [Logger](../shared-types/logger.md) -- How `log.debug()` and
+  `log.formatErrorChain()` trace Copilot boot, session, and prompt errors

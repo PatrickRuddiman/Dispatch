@@ -36,7 +36,7 @@ planner and executor agents identically.
 ### Boot and provider requirement
 
 The executor is created via the `boot()` function
-(`src/agents/executor.ts:68`), which requires an `AgentBootOptions` with a
+(`src/agents/executor.ts:68`), which requires an [`AgentBootOptions`](../agent-system/overview.md) with a
 non-null `provider` field. If no provider is supplied, `boot()` throws
 immediately.
 
@@ -121,16 +121,21 @@ Input to the executor for a single task:
 | `plan` | `string \| null` | Planner output, or `null` if planning was skipped |
 | `worktreeRoot` | `string?` | Worktree root directory for isolation, if applicable |
 
-### `ExecuteResult`
+### Return type: `AgentResult<ExecutorData>`
 
-Structured result of executing a single task:
+The `execute()` method returns
+[`AgentResult<ExecutorData>`](./agent-types.md#agentresultt) — a discriminated
+union on `success`. When `success` is `true`, `data.dispatchResult` contains
+the underlying `DispatchResult`. When `success` is `false`, `data` is `null`
+and `error` contains a human-readable message.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `dispatchResult` | [`DispatchResult`](./dispatcher.md#dispatchresult) | The underlying dispatch result |
-| `success` | `boolean` | Whether the task completed successfully |
-| `error` | `string?` | Error message if execution failed |
-| `elapsedMs` | `number` | Elapsed wall-clock time in milliseconds |
+| Field | Type (success) | Type (failure) | Description |
+|-------|---------------|----------------|-------------|
+| `success` | `true` | `false` | Discriminant |
+| `data` | `ExecutorData` | `null` | Payload |
+| `data.dispatchResult` | [`DispatchResult`](./dispatcher.md#dispatchresult) | — | The dispatch result |
+| `error` | `never` | `string?` | Error message |
+| `durationMs` | `number?` | `number?` | Wall-clock elapsed time |
 
 ### `ExecutorAgent`
 
@@ -138,9 +143,22 @@ The booted executor agent interface:
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `execute` | `(input: ExecuteInput) => Promise<ExecuteResult>` | Execute a single task |
+| `execute` | `(input: ExecuteInput) => Promise<AgentResult<ExecutorData>>` | Execute a single task |
 | `cleanup` | `() => Promise<void>` | No-op — provider lifecycle is external |
 | `name` | `string` | Always `"executor"` |
+
+### File logger integration
+
+The executor writes structured log entries via the same
+[`AsyncLocalStorage<FileLogger>`](../shared-types/file-logger.md)
+mechanism used by the [planner](./planner.md#file-logger-integration). It logs:
+
+| Method | When | Content |
+|--------|------|---------|
+| `agentEvent("executor", "started", ...)` | Before dispatch | Task text |
+| `agentEvent("executor", "completed", ...)` | On success | Elapsed time in ms |
+| `agentEvent("executor", "failed", ...)` | On dispatch failure | Error message |
+| `error(...)` | On exception | Error message with stack trace |
 
 ## Related documentation
 
@@ -153,14 +171,21 @@ The booted executor agent interface:
   `markTaskComplete` function contract
 - [Orchestrator](../cli-orchestration/orchestrator.md) -- How the orchestrator
   creates and calls the executor
-- [Provider Abstraction](../provider-system/provider-overview.md) -- The
+- [Provider Abstraction](../provider-system/overview.md) -- The
   `ProviderInstance` interface consumed by the executor
+- [Agent Types](./agent-types.md) -- `AgentResult<T>`, `AgentErrorCode`, and
+  `ExecutorData` type definitions
 - [Agent Interface](../shared-types/overview.md) -- The `Agent` base interface
   that `ExecutorAgent` extends
 - [Git Worktree Helpers](../git-and-worktree/overview.md) -- Worktree isolation
   model consumed via the `worktreeRoot` passthrough
-- [Testing Overview](../testing/overview.md) -- Project-wide test suite
-  (note: the executor agent has no unit tests)
+- [Planner & Executor Tests](../testing/planner-executor-tests.md) -- The
+  executor test suite with 7 tests covering boot, dispatch, task completion,
+  error handling, and worktree passthrough
 - [Datasource Helpers](../datasource-system/datasource-helpers.md) -- The
   orchestration bridge that consumes `DispatchResult` for issue lifecycle
   operations like `closeCompletedSpecIssues`
+- [File Logger](../shared-types/file-logger.md) -- Per-issue structured
+  logging via `AsyncLocalStorage` used by executor event logging
+- [Configuration](../cli-orchestration/configuration.md) -- How `--retries`
+  controls executor retry attempts

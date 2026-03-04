@@ -499,6 +499,9 @@ interface).
   the datasource implementations that the shims delegate to
 - [Prerequisite Checker](../prereqs-and-safety/prereqs.md) -- Startup
   validation of `gh` and `az` CLI tools required by the underlying datasources
+- [Testing Overview](../testing/overview.md) -- Project-wide test suite;
+  the deprecated shims are not independently tested but rely on datasource
+  tests
 
 ## External references
 

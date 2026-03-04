@@ -3,7 +3,7 @@
 ## What it does
 
 The `withTimeout<T>` function in
-[`src/timeout.ts`](../../src/timeout.ts) wraps any `Promise<T>` with a
+[`src/helpers/timeout.ts`](../../src/helpers/timeout.ts) wraps any `Promise<T>` with a
 deadline. If the wrapped promise does not settle within the specified number
 of milliseconds, `withTimeout` rejects with a `TimeoutError` that includes a
 human-readable label identifying which operation timed out.
@@ -164,6 +164,8 @@ these tests.
   whose `prompt()` calls are timeout-wrapped
 - [Provider Tests](../testing/provider-tests.md) -- Unit tests for provider
   implementations that exercise the prompt interface
+- [Dispatch Pipeline](../cli-orchestration/dispatch-pipeline.md) -- The
+  execution engine that uses `withTimeout` for plan generation deadlines
 - [Prerequisite Checker](../prereqs-and-safety/prereqs.md) -- Startup validation
   that runs before timeout-wrapped pipeline operations
 - [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) --

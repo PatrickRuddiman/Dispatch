@@ -3,7 +3,7 @@
 ## What it does
 
 The `slugify` function in
-[`src/slugify.ts`](../../src/slugify.ts) converts an arbitrary input string
+[`src/helpers/slugify.ts`](../../src/helpers/slugify.ts) converts an arbitrary input string
 into a lowercase, hyphen-separated identifier containing only ASCII letters
 and digits. It accepts an optional `maxLength` parameter to truncate the
 result.
@@ -108,11 +108,19 @@ See [Testing](./testing.md) for instructions on running these tests.
   layer that depends on slugify
 - [GitHub Datasource](../datasource-system/github-datasource.md) -- Uses
   `slugify(title, 50)` for branch name generation
+- [Azure DevOps Datasource](../datasource-system/azdevops-datasource.md) --
+  Uses `slugify(title, 50)` for branch name generation
+- [Markdown Datasource](../datasource-system/markdown-datasource.md) -- Uses
+  `slugify()` for `buildBranchName()` and `create()` filename generation
 - [Datasource System](../datasource-system/overview.md) -- Datasources that
   consume slugify for branch names
 - [Datasource Helpers](../datasource-system/datasource-helpers.md) -- Uses
   `slugify(title, 60)` for temp file naming in `writeItemsToTempDir()`
 - [Spec Generation](../spec-generation/overview.md) -- Spec pipelines that
   consume slugify for filenames
+- [Branch Name Validation](../git-and-worktree/branch-validation.md) --
+  Validation rules for branch names produced from slugified titles
 - [Testing Overview](../testing/overview.md) -- Project-wide test suite
   including slugify tests
+- [Spec Generator Tests](../testing/spec-generator-tests.md) -- Tests
+  referencing slugify usage in the spec pipeline

@@ -54,7 +54,7 @@ file path or glob pattern.
 | relative subdirectory path | `"drafts/feature.md"` | Path syntax |
 | mixed numeric and alphabetic | `"42,foo"` | Non-numeric token |
 
-This function is the first decision point in the [spec pipeline](../spec-generation/overview.md) -- it determines
+This function is the first decision point in the [spec pipeline](../spec-generation/overview.md#input-mode-discrimination) -- it determines
 whether the `--spec` argument is treated as issue numbers to fetch or as a file
 path/glob to read from disk.
 
@@ -220,7 +220,13 @@ the [issue fetchers](../issue-fetching/overview.md) and [AI provider](../shared-
   rules for the `- [ ]` checkbox format and `(P)`/`(S)`/`(I)` mode prefixes
   that the spec generator must produce
 - [Issue fetching overview](../issue-fetching/overview.md) — issue fetchers consumed by `generateSpecs()`
+- [Azure DevOps Fetcher (Deprecated)](../issue-fetching/azdevops-fetcher.md) —
+  Legacy Azure DevOps fetching shim referenced by spec generation
 - [Provider interface](../shared-types/provider.md) — AI provider used by spec generation
 - [Datasource system](../datasource-system/overview.md) — datasources that feed issue data into spec generation
+- [Markdown Datasource](../datasource-system/markdown-datasource.md) —
+  `extractTitle()` function shared between markdown datasource and spec pipeline
 - [Config tests](config-tests.md) — adjacent test documentation for the config module
+- [Dispatch pipeline tests](dispatch-pipeline-tests.md) — tests for the
+  pipeline that consumes generated spec files
 - [Slugify utility](../shared-utilities/slugify.md) — used by spec pipeline for filename generation

@@ -197,10 +197,16 @@ correct task text without trailing `\r` characters.
 
 ### Write behavior
 
-`markTaskComplete` splits on `\n` and rejoins with `\n`, which means **the
-output always uses LF line endings** regardless of the original file's line
-ending style. See [Architecture & Concurrency](./architecture-and-concurrency.md#file-encoding-and-line-endings)
-for the implications.
+`markTaskComplete` detects the original line ending style before processing and
+preserves it on write (`src/parser.ts:123,144`). The function checks whether
+the raw file content contains CRLF sequences and uses the detected EOL style
+when rejoining lines:
+
+- **LF files** (`\n`): Written back with LF endings
+- **CRLF files** (`\r\n`): Written back with CRLF endings
+
+See [Architecture & Concurrency](./architecture-and-concurrency.md#file-encoding-and-line-endings)
+for the full line ending handling details.
 
 ## Task file format expectations
 
@@ -242,3 +248,9 @@ would contain mojibake characters.
   these task markdown formats
 - [Git Operations](../planning-and-dispatch/git.md) -- How `commitTask()`
   creates commits after `markTaskComplete` modifies the checkbox
+- [Spec Generation](../spec-generation/overview.md) -- How the spec pipeline
+  generates files using `(P)`/`(S)`/`(I)` prefixes documented here
+- [Dispatcher](../planning-and-dispatch/dispatcher.md) -- Prompt construction
+  that consumes parsed task data
+- [Spec Generator Tests](../testing/spec-generator-tests.md) -- Tests for
+  `(P)`/`(S)`/`(I)` prefix instructions in spec prompts

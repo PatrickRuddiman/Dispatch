@@ -83,3 +83,11 @@ section of the Markdown Syntax page.
   How the parser normalizes Windows line endings.
 - [Architecture Overview](./architecture.md) -- High-level system design and
   component interactions.
+- [Worktree Management](./git-and-worktree/worktree-management.md) -- Worktree
+  directory layout relevant to long path issues on Windows.
+- [Gitignore Helper](./git-and-worktree/gitignore-helper.md) -- `.gitignore`
+  manipulation with a known duplicate-entry issue on Windows (#212).
+- [Provider Detection](./prereqs-and-safety/provider-detection.md) -- Provider
+  binary detection with a known Windows false-negative issue (#213).
+- [CLI & Orchestration Overview](./cli-orchestration/overview.md) -- Entry point
+  and pipeline that works across PowerShell, cmd, and Git Bash.
