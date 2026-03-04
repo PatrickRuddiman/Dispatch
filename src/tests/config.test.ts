@@ -8,6 +8,7 @@ import {
   saveConfig,
   validateConfigValue,
   CONFIG_KEYS,
+  CONFIG_BOUNDS,
   type DispatchConfig,
 } from "../config.js";
 
@@ -151,30 +152,105 @@ describe("validateConfigValue", () => {
     expect(result).toContain("Invalid source");
   });
 
-  it("accepts valid testTimeout (positive number)", () => {
-    expect(validateConfigValue("testTimeout", "1")).toBe(null);
+  it("accepts valid testTimeout (within bounds)", () => {
+    expect(validateConfigValue("testTimeout", String(CONFIG_BOUNDS.testTimeout.min))).toBe(null);
     expect(validateConfigValue("testTimeout", "10")).toBe(null);
     expect(validateConfigValue("testTimeout", "1.5")).toBe(null);
-    expect(validateConfigValue("testTimeout", "0.5")).toBe(null);
+    expect(validateConfigValue("testTimeout", String(CONFIG_BOUNDS.testTimeout.max))).toBe(null);
   });
 
-  it("rejects non-positive testTimeout", () => {
+  it("rejects testTimeout below minimum", () => {
     const zero = validateConfigValue("testTimeout", "0");
     expect(zero).not.toBe(null);
-    expect(zero).toContain("positive number");
+    expect(zero).toContain("between");
 
     const negative = validateConfigValue("testTimeout", "-5");
     expect(negative).not.toBe(null);
-    expect(negative).toContain("positive number");
+    expect(negative).toContain("between");
+  });
+
+  it("rejects testTimeout above maximum", () => {
+    const result = validateConfigValue("testTimeout", String(CONFIG_BOUNDS.testTimeout.max + 1));
+    expect(result).not.toBe(null);
+    expect(result).toContain("between");
   });
 
   it("rejects non-numeric testTimeout", () => {
     const text = validateConfigValue("testTimeout", "abc");
     expect(text).not.toBe(null);
-    expect(text).toContain("positive number");
+    expect(text).toContain("between");
 
     const empty = validateConfigValue("testTimeout", "");
     expect(empty).not.toBe(null);
+  });
+
+  it("rejects Infinity and NaN for testTimeout", () => {
+    expect(validateConfigValue("testTimeout", "Infinity")).not.toBe(null);
+    expect(validateConfigValue("testTimeout", "NaN")).not.toBe(null);
+  });
+
+  it("accepts valid planTimeout (within bounds)", () => {
+    expect(validateConfigValue("planTimeout", String(CONFIG_BOUNDS.planTimeout.min))).toBe(null);
+    expect(validateConfigValue("planTimeout", "10")).toBe(null);
+    expect(validateConfigValue("planTimeout", "1.5")).toBe(null);
+    expect(validateConfigValue("planTimeout", String(CONFIG_BOUNDS.planTimeout.max))).toBe(null);
+  });
+
+  it("rejects planTimeout below minimum", () => {
+    const zero = validateConfigValue("planTimeout", "0");
+    expect(zero).not.toBe(null);
+    expect(zero).toContain("between");
+
+    const negative = validateConfigValue("planTimeout", "-1");
+    expect(negative).not.toBe(null);
+  });
+
+  it("rejects planTimeout above maximum", () => {
+    const result = validateConfigValue("planTimeout", String(CONFIG_BOUNDS.planTimeout.max + 1));
+    expect(result).not.toBe(null);
+    expect(result).toContain("between");
+  });
+
+  it("rejects non-numeric planTimeout", () => {
+    expect(validateConfigValue("planTimeout", "abc")).not.toBe(null);
+    expect(validateConfigValue("planTimeout", "")).not.toBe(null);
+  });
+
+  it("rejects Infinity and NaN for planTimeout", () => {
+    expect(validateConfigValue("planTimeout", "Infinity")).not.toBe(null);
+    expect(validateConfigValue("planTimeout", "NaN")).not.toBe(null);
+  });
+
+  it("accepts valid concurrency (within bounds)", () => {
+    expect(validateConfigValue("concurrency", String(CONFIG_BOUNDS.concurrency.min))).toBe(null);
+    expect(validateConfigValue("concurrency", "4")).toBe(null);
+    expect(validateConfigValue("concurrency", String(CONFIG_BOUNDS.concurrency.max))).toBe(null);
+  });
+
+  it("rejects concurrency below minimum", () => {
+    const zero = validateConfigValue("concurrency", "0");
+    expect(zero).not.toBe(null);
+    expect(zero).toContain("between");
+
+    const negative = validateConfigValue("concurrency", "-1");
+    expect(negative).not.toBe(null);
+  });
+
+  it("rejects concurrency above maximum", () => {
+    const result = validateConfigValue("concurrency", String(CONFIG_BOUNDS.concurrency.max + 1));
+    expect(result).not.toBe(null);
+    expect(result).toContain("between");
+  });
+
+  it("rejects non-integer concurrency", () => {
+    expect(validateConfigValue("concurrency", "1.5")).not.toBe(null);
+    expect(validateConfigValue("concurrency", "abc")).not.toBe(null);
+    expect(validateConfigValue("concurrency", "")).not.toBe(null);
+  });
+
+  it("rejects Infinity and NaN for concurrency", () => {
+    expect(validateConfigValue("concurrency", "Infinity")).not.toBe(null);
+    expect(validateConfigValue("concurrency", "NaN")).not.toBe(null);
   });
 });
 

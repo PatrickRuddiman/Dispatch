@@ -17,9 +17,9 @@ import type { ProviderName } from "./providers/interface.js";
 import type { DatasourceName } from "./datasources/interface.js";
 import { PROVIDER_NAMES } from "./providers/index.js";
 import { DATASOURCE_NAMES } from "./datasources/index.js";
-import { handleConfigCommand } from "./config.js";
+import { handleConfigCommand, CONFIG_BOUNDS } from "./config.js";
 
-export const MAX_CONCURRENCY = 64;
+export const MAX_CONCURRENCY = CONFIG_BOUNDS.concurrency.max;
 
 const HELP = `
   dispatch — AI agent orchestration CLI
@@ -41,7 +41,7 @@ const HELP = `
     --no-worktree          Skip git worktree isolation for parallel issues
     --feature              Group issues into a single feature branch and PR
     --force              Ignore prior run state and re-run all tasks
-    --concurrency <n>      Max parallel dispatches (default: min(cpus, freeMB/500), max: 64)
+    --concurrency <n>      Max parallel dispatches (default: min(cpus, freeMB/500), max: ${MAX_CONCURRENCY})
     --provider <name>      Agent backend: ${PROVIDER_NAMES.join(", ")} (default: opencode)
     --server-url <url>     URL of a running provider server
     --plan-timeout <min>   Planning timeout in minutes (default: 10)
@@ -218,8 +218,12 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
     } else if (arg === "--plan-timeout") {
       i++;
       const val = parseFloat(argv[i]);
-      if (isNaN(val) || val <= 0) {
+      if (isNaN(val) || val < CONFIG_BOUNDS.planTimeout.min) {
         log.error("--plan-timeout must be a positive number (minutes)");
+        process.exit(1);
+      }
+      if (val > CONFIG_BOUNDS.planTimeout.max) {
+        log.error(`--plan-timeout must not exceed ${CONFIG_BOUNDS.planTimeout.max}`);
         process.exit(1);
       }
       args.planTimeout = val;

@@ -27,10 +27,19 @@ export interface DispatchConfig {
   model?: string;
   source?: DatasourceName;
   testTimeout?: number;
+  planTimeout?: number;
+  concurrency?: number;
 }
 
+/** Minimum and maximum bounds for numeric configuration values. */
+export const CONFIG_BOUNDS = {
+  testTimeout: { min: 1, max: 120 },
+  planTimeout: { min: 1, max: 120 },
+  concurrency: { min: 1, max: 64 },
+} as const;
+
 /** Valid configuration key names. */
-export const CONFIG_KEYS = ["provider", "model", "source", "testTimeout"] as const;
+export const CONFIG_KEYS = ["provider", "model", "source", "testTimeout", "planTimeout", "concurrency"] as const;
 
 /** A valid configuration key name. */
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -99,8 +108,24 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
 
     case "testTimeout": {
       const num = Number(value);
-      if (!Number.isFinite(num) || num <= 0) {
-        return `Invalid testTimeout "${value}". Must be a positive number (minutes)`;
+      if (!Number.isFinite(num) || num < CONFIG_BOUNDS.testTimeout.min || num > CONFIG_BOUNDS.testTimeout.max) {
+        return `Invalid testTimeout "${value}". Must be a number between ${CONFIG_BOUNDS.testTimeout.min} and ${CONFIG_BOUNDS.testTimeout.max} (minutes)`;
+      }
+      return null;
+    }
+
+    case "planTimeout": {
+      const num = Number(value);
+      if (!Number.isFinite(num) || num < CONFIG_BOUNDS.planTimeout.min || num > CONFIG_BOUNDS.planTimeout.max) {
+        return `Invalid planTimeout "${value}". Must be a number between ${CONFIG_BOUNDS.planTimeout.min} and ${CONFIG_BOUNDS.planTimeout.max} (minutes)`;
+      }
+      return null;
+    }
+
+    case "concurrency": {
+      const num = Number(value);
+      if (!Number.isInteger(num) || num < CONFIG_BOUNDS.concurrency.min || num > CONFIG_BOUNDS.concurrency.max) {
+        return `Invalid concurrency "${value}". Must be an integer between ${CONFIG_BOUNDS.concurrency.min} and ${CONFIG_BOUNDS.concurrency.max}`;
       }
       return null;
     }
