@@ -559,9 +559,12 @@ export async function runDispatchPipeline(
                 tuiTask.status = "failed";
                 tuiTask.error = mergeError;
               }
-              results.push({ task, success: false, error: mergeError });
+              const existingResult = results.find((r) => r.task === task);
+              if (existingResult) {
+                existingResult.success = false;
+                existingResult.error = mergeError;
+              }
             }
-            failed += fileTasks.length;
             return;
           }
 
