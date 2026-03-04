@@ -62,6 +62,56 @@ describe("azdevops datasource — list", () => {
     expect(args).toContain("MyProj");
   });
 
+  it("appends iteration filter to WIQL query", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: JSON.stringify([]) });
+    await datasource.list({ cwd: "/tmp", iteration: "MyProject\\Sprint 1" });
+    const args = mockExecFile.mock.calls[0][1] as string[];
+    const wiqlIdx = args.indexOf("--wiql");
+    const wiql = args[wiqlIdx + 1];
+    expect(wiql).toContain("[System.IterationPath] UNDER 'MyProject\\Sprint 1'");
+  });
+
+  it("appends area filter to WIQL query", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: JSON.stringify([]) });
+    await datasource.list({ cwd: "/tmp", area: "MyProject\\Team A" });
+    const args = mockExecFile.mock.calls[0][1] as string[];
+    const wiqlIdx = args.indexOf("--wiql");
+    const wiql = args[wiqlIdx + 1];
+    expect(wiql).toContain("[System.AreaPath] UNDER 'MyProject\\Team A'");
+  });
+
+  it("handles @CurrentIteration macro without quotes", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: JSON.stringify([]) });
+    await datasource.list({ cwd: "/tmp", iteration: "@CurrentIteration" });
+    const args = mockExecFile.mock.calls[0][1] as string[];
+    const wiqlIdx = args.indexOf("--wiql");
+    const wiql = args[wiqlIdx + 1];
+    expect(wiql).toContain("[System.IterationPath] UNDER @CurrentIteration");
+  });
+
+  it("appends both iteration and area filters", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: JSON.stringify([]) });
+    await datasource.list({ cwd: "/tmp", iteration: "MyProject\\Sprint 1", area: "MyProject\\Team A" });
+    const args = mockExecFile.mock.calls[0][1] as string[];
+    const wiqlIdx = args.indexOf("--wiql");
+    const wiql = args[wiqlIdx + 1];
+    expect(wiql).toContain("[System.IterationPath] UNDER 'MyProject\\Sprint 1'");
+    expect(wiql).toContain("[System.AreaPath] UNDER 'MyProject\\Team A'");
+  });
+
+  it("does not add iteration or area filters when neither is set", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: JSON.stringify([]) });
+    await datasource.list({ cwd: "/tmp" });
+
+    const args = mockExecFile.mock.calls[0][1] as string[];
+    const wiqlIdx = args.indexOf("--wiql");
+    const wiql = args[wiqlIdx + 1];
+    expect(wiql).not.toContain("[System.IterationPath]");
+    expect(wiql).not.toContain("[System.AreaPath]");
+    expect(wiql).toContain("[System.State] <> 'Closed'");
+    expect(wiql).toContain("[System.State] <> 'Removed'");
+  });
+
   it("throws descriptive error when az returns non-JSON output", async () => {
     mockExecFile.mockResolvedValueOnce({ stdout: "Not Found\n" });
 

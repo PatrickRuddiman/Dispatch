@@ -76,12 +76,14 @@ async function resolveDatasource(
   org?: string,
   project?: string,
   workItemType?: string,
+  iteration?: string,
+  area?: string,
 ): Promise<ResolvedSource | null> {
   const source = await resolveSource(issues, issueSource, specCwd);
   if (!source) return null;
 
   const datasource = getDatasource(source);
-  const fetchOpts: IssueFetchOptions = { cwd: specCwd, org, project, workItemType };
+  const fetchOpts: IssueFetchOptions = { cwd: specCwd, org, project, workItemType, iteration, area };
   return { source, datasource, fetchOpts };
 }
 
@@ -478,6 +480,8 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     org,
     project,
     workItemType,
+    iteration,
+    area,
     concurrency = defaultConcurrency(),
     dryRun,
     retries = 2,
@@ -486,7 +490,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
   const pipelineStart = Date.now();
 
   // ── Resolve datasource ─────────────────────────────────────
-  const resolved = await resolveDatasource(issues, opts.issueSource, specCwd, org, project, workItemType);
+  const resolved = await resolveDatasource(issues, opts.issueSource, specCwd, org, project, workItemType, iteration, area);
   if (!resolved) {
     return { total: 0, generated: 0, failed: 0, files: [], issueNumbers: [], durationMs: Date.now() - pipelineStart, fileDurationsMs: {} };
   }

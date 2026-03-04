@@ -59,6 +59,10 @@ export interface IssueFetchOptions {
   project?: string;
   /** Work item type (e.g. "User Story", "Product Backlog Item") */
   workItemType?: string;
+  /** Iteration path filter (e.g. "MyProject\\Sprint 1" or "@CurrentIteration") */
+  iteration?: string;
+  /** Area path filter (e.g. "MyProject\\Team A") */
+  area?: string;
 }
 
 /**

@@ -71,6 +71,8 @@ export async function runDispatchPipeline(
     org,
     project,
     workItemType,
+    iteration,
+    area,
     planTimeout,
     planRetries,
     retries,
@@ -84,7 +86,7 @@ export async function runDispatchPipeline(
 
   // Dry-run mode uses simple log output
   if (dryRun) {
-    return dryRunMode(issueIds, cwd, source, org, project, workItemType);
+    return dryRunMode(issueIds, cwd, source, org, project, workItemType, iteration, area);
   }
 
   // ── Start TUI (or inline logging for verbose mode) ──────────
@@ -128,7 +130,7 @@ export async function runDispatchPipeline(
     }
 
     const datasource = getDatasource(source);
-    const fetchOpts: IssueFetchOptions = { cwd, org, project, workItemType };
+    const fetchOpts: IssueFetchOptions = { cwd, org, project, workItemType, iteration, area };
     const items = issueIds.length > 0
       ? await fetchItemsById(issueIds, datasource, fetchOpts)
       : await datasource.list(fetchOpts);
@@ -742,6 +744,8 @@ export async function dryRunMode(
   org?: string,
   project?: string,
   workItemType?: string,
+  iteration?: string,
+  area?: string,
 ): Promise<DispatchSummary> {
   if (!source) {
     log.error("No datasource configured. Use --source or run 'dispatch config' to set up defaults.");
@@ -749,7 +753,7 @@ export async function dryRunMode(
   }
 
   const datasource = getDatasource(source);
-  const fetchOpts: IssueFetchOptions = { cwd, org, project, workItemType };
+  const fetchOpts: IssueFetchOptions = { cwd, org, project, workItemType, iteration, area };
 
   const lifecycleOpts = { cwd };
   let username = "";
