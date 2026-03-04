@@ -40,7 +40,7 @@ describe("checkPrereqs", () => {
     const failures = await checkPrereqs();
 
     expect(failures).toEqual([]);
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["--version"], { shell: false });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["--version"], { shell: realPlatform === "win32" });
   });
 
   it("reports failure when git is not found", async () => {
@@ -116,7 +116,7 @@ describe("checkPrereqs", () => {
     const failures = await checkPrereqs({ datasource: "md" });
 
     expect(failures).toEqual([]);
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["--version"], { shell: false });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["--version"], { shell: realPlatform === "win32" });
     expect(mockExecFile).not.toHaveBeenCalledWith("gh", expect.anything(), expect.anything());
     expect(mockExecFile).not.toHaveBeenCalledWith("az", expect.anything(), expect.anything());
   });
@@ -127,7 +127,7 @@ describe("checkPrereqs", () => {
     const failures = await checkPrereqs();
 
     expect(failures).toEqual([]);
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["--version"], { shell: false });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["--version"], { shell: realPlatform === "win32" });
     expect(mockExecFile).not.toHaveBeenCalledWith("gh", expect.anything(), expect.anything());
     expect(mockExecFile).not.toHaveBeenCalledWith("az", expect.anything(), expect.anything());
   });
@@ -161,7 +161,7 @@ describe("checkPrereqs", () => {
     const failures = await checkPrereqs({ datasource: "github" });
 
     expect(failures).toEqual([]);
-    expect(mockExecFile).toHaveBeenCalledWith("gh", ["--version"], { shell: false });
+    expect(mockExecFile).toHaveBeenCalledWith("gh", ["--version"], { shell: realPlatform === "win32" });
   });
 
   it("passes all checks when az is available and datasource is azdevops", async () => {
@@ -174,7 +174,7 @@ describe("checkPrereqs", () => {
     const failures = await checkPrereqs({ datasource: "azdevops" });
 
     expect(failures).toEqual([]);
-    expect(mockExecFile).toHaveBeenCalledWith("az", ["--version"], { shell: false });
+    expect(mockExecFile).toHaveBeenCalledWith("az", ["--version"], { shell: realPlatform === "win32" });
   });
 
   it("passes shell option to git exec on Windows", async () => {
