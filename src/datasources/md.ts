@@ -174,7 +174,7 @@ export const datasource: Datasource = {
   },
 
   async commitAllChanges(_message: string, _opts: DispatchLifecycleOptions): Promise<void> {
-    // No-op for local markdown datasource
+    throw new UnsupportedOperationError("commitAllChanges");
   },
 
   async createPullRequest(
