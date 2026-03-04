@@ -170,11 +170,11 @@ Tasks are marked `[x]` when complete. Rerunning dispatch skips already-completed
 Dispatch uses three-tier configuration: CLI flags override config file values, which override hardcoded defaults.
 
 ```sh
-# Interactive wizard — guided setup for all options
+# Interactive wizard — guided setup for core AI settings (provider/model/source)
 dispatch config
 ```
 
-Config is stored at `.dispatch/config.json` (project-local):
+Config is stored at `.dispatch/config.json` (relative to the working directory where you run `dispatch`):
 
 ```json
 {
