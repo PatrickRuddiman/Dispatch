@@ -472,7 +472,7 @@ export async function runDispatchPipeline(
 
       // ── Commit agent (rewrite commits + generate PR metadata) ───
       let commitAgentResult: import("../agents/commit.js").CommitResult | undefined;
-      if (!noBranch && branchName && defaultBranch && details) {
+      if (!noBranch && branchName && defaultBranch && details && datasource.supportsGit()) {
         try {
           const branchDiff = await getBranchDiff(defaultBranch, issueCwd);
           if (branchDiff) {
