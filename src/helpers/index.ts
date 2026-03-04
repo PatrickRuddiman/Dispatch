@@ -9,3 +9,4 @@ export * from "./confirm-large-batch.js";
 export * from "./worktree.js";
 export * from "./run-state.js";
 export * from "./errors.js";
+export * from "./guards.js";

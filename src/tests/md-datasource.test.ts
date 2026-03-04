@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { mockExecFile } from "./fixtures.js";
 
 vi.mock("node:child_process", () => ({
   execFile: vi.fn(),
@@ -14,31 +15,25 @@ beforeEach(() => {
 
 describe("getUsername", () => {
   it("returns slugified git user name", async () => {
-    vi.mocked(execFile).mockImplementation(
-      ((_cmd: string, _args: string[], _opts: any, cb: Function) => {
-        cb(null, { stdout: "John Doe\n", stderr: "" });
-      }) as any,
-    );
+    mockExecFile(vi.mocked(execFile), (_cmd, _args, _opts, cb) => {
+      cb(null, { stdout: "John Doe\n", stderr: "" });
+    });
     const result = await datasource.getUsername({ cwd: "/tmp" });
     expect(result).toBe("john-doe");
   });
 
   it('returns "local" when git returns empty string', async () => {
-    vi.mocked(execFile).mockImplementation(
-      ((_cmd: string, _args: string[], _opts: any, cb: Function) => {
-        cb(null, { stdout: "  \n", stderr: "" });
-      }) as any,
-    );
+    mockExecFile(vi.mocked(execFile), (_cmd, _args, _opts, cb) => {
+      cb(null, { stdout: "  \n", stderr: "" });
+    });
     const result = await datasource.getUsername({ cwd: "/tmp" });
     expect(result).toBe("local");
   });
 
   it('returns "local" when git command fails', async () => {
-    vi.mocked(execFile).mockImplementation(
-      ((_cmd: string, _args: string[], _opts: any, cb: Function) => {
-        cb(new Error("git not found"));
-      }) as any,
-    );
+    mockExecFile(vi.mocked(execFile), (_cmd, _args, _opts, cb) => {
+      cb(new Error("git not found"));
+    });
     const result = await datasource.getUsername({ cwd: "/tmp" });
     expect(result).toBe("local");
   });
