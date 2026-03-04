@@ -88,9 +88,10 @@ describe("git lifecycle", () => {
     ).rejects.toThrow(UnsupportedOperationError);
   });
 
-  it("commitAllChanges resolves to undefined", async () => {
-    const result = await datasource.commitAllChanges("msg", { cwd: "/tmp" });
-    expect(result).toBeUndefined();
+  it("commitAllChanges throws UnsupportedOperationError", async () => {
+    await expect(
+      datasource.commitAllChanges("msg", { cwd: "/tmp" }),
+    ).rejects.toThrow(UnsupportedOperationError);
   });
 
   it('createPullRequest resolves to ""', async () => {
