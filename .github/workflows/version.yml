@@ -1,0 +1,94 @@
+name: Version Bump
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  version:
+    # Skip version-bump merges to avoid infinite loops
+    if: github.actor != 'github-actions[bot]' && !startsWith(github.event.head_commit.message, 'chore(release)')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm ci
+
+      - name: Determine next version
+        id: next
+        run: |
+          CURRENT=$(node -p "require('./package.json').version")
+          echo "current=$CURRENT"
+
+          # Run semantic-release dry-run and capture output
+          OUTPUT=$(npx semantic-release --dry-run 2>&1) || true
+          echo "$OUTPUT"
+
+          # Extract the next version from dry-run output
+          # semantic-release prints lines like:
+          #   "The next release version is X.Y.Z"
+          #   "Published release X.Y.Z"
+          NEXT=$(echo "$OUTPUT" | grep -oP '(?:next release version is |Published release )\K[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+
+          if [ -z "$NEXT" ] || [ "$NEXT" = "$CURRENT" ]; then
+            echo "No version bump needed"
+            echo "bump=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Version bump: $CURRENT -> $NEXT"
+            echo "bump=true" >> "$GITHUB_OUTPUT"
+            echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check for existing PR
+        if: steps.next.outputs.bump == 'true'
+        id: existing
+        run: |
+          BRANCH="release/v${{ steps.next.outputs.next }}"
+          PR=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number' || true)
+          if [ -n "$PR" ]; then
+            echo "PR #$PR already exists for $BRANCH"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create version bump PR
+        if: steps.next.outputs.bump == 'true' && steps.existing.outputs.exists != 'true'
+        run: |
+          VERSION="${{ steps.next.outputs.next }}"
+          BRANCH="release/v${VERSION}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git checkout -b "$BRANCH"
+
+          npm version "$VERSION" --no-git-tag-version
+          npm install --package-lock-only
+
+          git add package.json package-lock.json
+          git commit -m "chore(release): bump version to ${VERSION}"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --title "chore(release): v${VERSION}" \
+            --body "Automated version bump to \`${VERSION}\` based on conventional commits since the last release." \
+            --base main \
+            --head "$BRANCH"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
