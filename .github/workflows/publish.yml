@@ -1,10 +1,11 @@
 name: Publish
 
 on:
-  workflow_run:
-    workflows: ["Version"]
-    types: [completed]
-    branches: [main]
+  push:
+    branches:
+      - main
+    paths:
+      - package.json
 
 concurrency:
   group: publish-${{ github.ref }}
@@ -16,7 +17,6 @@ permissions:
 
 jobs:
   check-version:
-    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
       should_publish: ${{ steps.compare.outputs.should_publish }}
@@ -24,18 +24,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Compare local version with npm registry
         id: compare
         run: |
           LOCAL_VERSION=$(node -p "require('./package.json').version")
           NPM_VERSION=$(npm view @pruddiman/dispatch version 2>/dev/null || echo "0.0.0")
           echo "local=$LOCAL_VERSION npm=$NPM_VERSION"
+
           SHOULD_PUBLISH=$(node -e "
             const [lM, lm, lp] = '${LOCAL_VERSION}'.split('.').map(Number);
             const [nM, nm, np] = '${NPM_VERSION}'.split('.').map(Number);
             const gt = lM > nM || (lM === nM && lm > nm) || (lM === nM && lm === nm && lp > np);
             console.log(gt ? 'true' : 'false');
           ")
+
           echo "should_publish=$SHOULD_PUBLISH" >> "$GITHUB_OUTPUT"
           echo "local_version=$LOCAL_VERSION" >> "$GITHUB_OUTPUT"
 
@@ -51,8 +57,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          # No registry-url: setting it writes an .npmrc with NODE_AUTH_TOKEN
-          # substitution that breaks npm OIDC trusted publishing auth
 
       - run: npm ci
 
@@ -67,8 +71,9 @@ jobs:
 
       - name: Create git tag
         run: |
-          git tag "v${{ needs.check-version.outputs.local_version }}"
-          git push origin "v${{ needs.check-version.outputs.local_version }}"
+          VERSION="v${{ needs.check-version.outputs.local_version }}"
+          git tag "$VERSION"
+          git push origin "$VERSION"
 
       - name: Create GitHub Release
         run: gh release create "v${{ needs.check-version.outputs.local_version }}" --generate-notes
