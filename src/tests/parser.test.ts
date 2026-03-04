@@ -726,6 +726,46 @@ describe("markTaskComplete", () => {
 
     await expect(markTaskComplete(task)).rejects.toThrow("does not match");
   });
+
+  it("preserves CRLF line endings when marking complete", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
+    const filePath = join(tmpDir, "tasks.md");
+    const md = "# Tasks\r\n- [ ] First task\r\n- [ ] Second task\r\n";
+    await writeFile(filePath, md, "utf-8");
+
+    const task: Task = {
+      index: 0,
+      text: "First task",
+      line: 2,
+      raw: "- [ ] First task",
+      file: filePath,
+    };
+
+    await markTaskComplete(task);
+
+    const updated = await readFile(filePath, "utf-8");
+    expect(updated).toBe("# Tasks\r\n- [x] First task\r\n- [ ] Second task\r\n");
+  });
+
+  it("preserves LF line endings when marking complete", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
+    const filePath = join(tmpDir, "tasks.md");
+    const md = "# Tasks\n- [ ] First task\n- [ ] Second task\n";
+    await writeFile(filePath, md, "utf-8");
+
+    const task: Task = {
+      index: 0,
+      text: "First task",
+      line: 2,
+      raw: "- [ ] First task",
+      file: filePath,
+    };
+
+    await markTaskComplete(task);
+
+    const updated = await readFile(filePath, "utf-8");
+    expect(updated).toBe("# Tasks\n- [x] First task\n- [ ] Second task\n");
+  });
 });
 
 // ─── buildTaskContext ────────────────────────────────────────────────

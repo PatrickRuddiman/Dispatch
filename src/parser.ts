@@ -120,7 +120,9 @@ export async function parseTaskFile(filePath: string): Promise<TaskFile> {
  */
 export async function markTaskComplete(task: Task): Promise<void> {
   const content = await readFile(task.file, "utf-8");
-  const lines = content.split("\n");
+  const eol = content.includes("\r\n") ? "\r\n" : "\n";
+  const normalized = content.replace(/\r\n/g, "\n");
+  const lines = normalized.split("\n");
   const lineIndex = task.line - 1;
 
   if (lineIndex < 0 || lineIndex >= lines.length) {
@@ -139,7 +141,7 @@ export async function markTaskComplete(task: Task): Promise<void> {
   }
 
   lines[lineIndex] = updated;
-  await writeFile(task.file, lines.join("\n"), "utf-8");
+  await writeFile(task.file, lines.join(eol), "utf-8");
 }
 
 /**
