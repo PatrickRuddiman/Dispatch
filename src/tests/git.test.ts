@@ -783,9 +783,10 @@ describe("MD datasource — no-op dispatch lifecycle methods", () => {
     ).rejects.toThrow(UnsupportedOperationError);
   });
 
-  it("commitAllChanges resolves without error (no-op)", async () => {
-    await md.commitAllChanges("feat: test", { cwd: "/tmp" });
-    expect(mockExecFile).not.toHaveBeenCalled();
+  it("commitAllChanges throws UnsupportedOperationError", async () => {
+    await expect(
+      md.commitAllChanges("feat: test", { cwd: "/tmp" }),
+    ).rejects.toThrow(UnsupportedOperationError);
   });
 
   it("createPullRequest resolves to empty string (no-op)", async () => {
