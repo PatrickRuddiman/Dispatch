@@ -1,10 +1,10 @@
 {
   "name": "@pruddiman/dispatch",
-  "version": "0.0.1",
+  "version": "1.3.2",
   "description": "AI agent orchestration CLI — parse markdown task files, dispatch each unit of work to code agents (OpenCode, GitHub Copilot, etc.), and commit results with conventional commits",
   "type": "module",
   "bin": {
-    "dispatch": "./dist/cli.js"
+    "dispatch": "dist/cli.js"
   },
   "files": [
     "dist"
@@ -54,6 +54,7 @@
   },
   "devDependencies": {
     "@semantic-release/exec": "^6.0.0",
+    "@semantic-release/git": "^10.0.1",
     "@semantic-release/github": "^10.0.0",
     "@types/node": "^22.13.4",
     "@vitest/coverage-v8": "^4.0.18",
