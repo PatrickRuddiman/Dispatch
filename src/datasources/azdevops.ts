@@ -130,6 +130,16 @@ export const datasource: Datasource = {
       comments,
       acceptanceCriteria:
         fields["Microsoft.VSTS.Common.AcceptanceCriteria"] ?? "",
+      iterationPath: fields["System.IterationPath"] || undefined,
+      areaPath: fields["System.AreaPath"] || undefined,
+      assignee: fields["System.AssignedTo"]?.displayName || undefined,
+      priority: fields["Microsoft.VSTS.Common.Priority"] ?? undefined,
+      storyPoints:
+        fields["Microsoft.VSTS.Scheduling.StoryPoints"] ??
+        fields["Microsoft.VSTS.Scheduling.Effort"] ??
+        fields["Microsoft.VSTS.Scheduling.Size"] ??
+        undefined,
+      workItemType: fields["System.WorkItemType"] || undefined,
     };
   },
 
@@ -228,6 +238,16 @@ export const datasource: Datasource = {
       comments: [],
       acceptanceCriteria:
         fields["Microsoft.VSTS.Common.AcceptanceCriteria"] ?? "",
+      iterationPath: fields["System.IterationPath"] || undefined,
+      areaPath: fields["System.AreaPath"] || undefined,
+      assignee: fields["System.AssignedTo"]?.displayName || undefined,
+      priority: fields["Microsoft.VSTS.Common.Priority"] ?? undefined,
+      storyPoints:
+        fields["Microsoft.VSTS.Scheduling.StoryPoints"] ??
+        fields["Microsoft.VSTS.Scheduling.Effort"] ??
+        fields["Microsoft.VSTS.Scheduling.Size"] ??
+        undefined,
+      workItemType: fields["System.WorkItemType"] || workItemType,
     };
   },
 
