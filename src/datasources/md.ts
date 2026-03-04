@@ -42,7 +42,7 @@ function resolveDir(opts?: IssueFetchOptions): string {
 function resolveFilePath(issueId: string, opts?: IssueFetchOptions): string {
   const filename = issueId.endsWith(".md") ? issueId : `${issueId}.md`;
   if (isAbsolute(filename)) return filename;
-  if (/[/\\]/.test(filename) || /^\.\.?[/\\]/.test(filename)) {
+  if (/[/\\]/.test(filename)) {
     const cwd = opts?.cwd ?? process.cwd();
     return resolve(cwd, filename);
   }
@@ -145,8 +145,9 @@ export const datasource: Datasource = {
   async fetch(issueId: string, opts?: IssueFetchOptions): Promise<IssueDetails> {
     const filePath = resolveFilePath(issueId, opts);
     const content = await readFile(filePath, "utf-8");
-    const filename = issueId.endsWith(".md") ? issueId : `${issueId}.md`;
-    return toIssueDetails(filename, content, resolveDir(opts));
+    const filename = basename(filePath);
+    const dir = dirname(filePath);
+    return toIssueDetails(filename, content, dir);
   },
 
   async update(issueId: string, _title: string, body: string, opts?: IssueFetchOptions): Promise<void> {
@@ -156,7 +157,7 @@ export const datasource: Datasource = {
 
   async close(issueId: string, opts?: IssueFetchOptions): Promise<void> {
     const filePath = resolveFilePath(issueId, opts);
-    const filename = issueId.endsWith(".md") ? issueId : `${issueId}.md`;
+    const filename = basename(filePath);
     const archiveDir = join(resolveDir(opts), "archive");
     await mkdir(archiveDir, { recursive: true });
     await rename(filePath, join(archiveDir, filename));

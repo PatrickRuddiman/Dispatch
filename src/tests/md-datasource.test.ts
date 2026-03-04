@@ -327,7 +327,7 @@ describe("close", () => {
   it("resolves a relative path with ../ against cwd", async () => {
     await datasource.close("../specs/my-issue.md", { cwd: "/tmp/project" });
     const expected = resolve("/tmp/project", "../specs/my-issue.md");
-    const archiveDest = join("/tmp/project", ".dispatch/specs", "archive", "../specs/my-issue.md");
+    const archiveDest = join("/tmp/project", ".dispatch/specs", "archive", "my-issue.md");
     expect(vi.mocked(rename)).toHaveBeenCalledWith(expected, archiveDest);
   });
 });
