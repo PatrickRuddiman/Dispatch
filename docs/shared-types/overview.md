@@ -5,14 +5,14 @@ other module in the Dispatch CLI depends on. Seven files compose this layer:
 
 | File | Purpose |
 |------|---------|
-| `src/cleanup.ts` | Process-level [cleanup registry](./cleanup.md) for graceful shutdown of provider resources |
-| `src/format.ts` | Duration [formatting helper](./format.md) (`elapsed()`) for progress reporting |
+| `src/helpers/cleanup.ts` | Process-level [cleanup registry](./cleanup.md) for graceful shutdown of provider resources |
+| `src/helpers/format.ts` | Duration [formatting helper](./format.md) (`elapsed()`) for progress reporting |
 | `src/helpers/logger.ts` | Dual-channel [console logger](./logger.md) with chalk styling, level filtering, and file logger mirroring |
 | `src/helpers/file-logger.ts` | Per-issue [file logger](./file-logger.md) with `AsyncLocalStorage` scoping and timestamped plain-text output |
 | `src/parser.ts` | [Task/TaskFile data types](./parser.md) and pure + async helpers for markdown checkbox parsing |
-| `src/provider.ts` | [ProviderName, ProviderBootOptions, and ProviderInstance](./provider.md) abstractions for AI agent runtimes |
-| `src/slugify.ts` | Pure function to convert arbitrary text into URL/filesystem-safe identifiers ([slugify](../shared-utilities/slugify.md)) |
-| `src/timeout.ts` | Promise deadline wrapper ([`withTimeout`](../shared-utilities/timeout.md)) and `TimeoutError` for bounded async execution |
+| `src/providers/interface.ts` | [ProviderName, ProviderBootOptions, and ProviderInstance](./provider.md) abstractions for AI agent runtimes |
+| `src/helpers/slugify.ts` | Pure function to convert arbitrary text into URL/filesystem-safe identifiers ([slugify](../shared-utilities/slugify.md)) |
+| `src/helpers/timeout.ts` | Promise deadline wrapper ([`withTimeout`](../shared-utilities/timeout.md)) and `TimeoutError` for bounded async execution |
 
 ## Why this layer exists
 

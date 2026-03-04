@@ -1,6 +1,6 @@
 # Provider Interface
 
-The provider module (`src/provider.ts`) defines the `ProviderName`,
+The provider module (`src/providers/interface.ts`) defines the `ProviderName`,
 `ProviderBootOptions`, and `ProviderInstance` types that abstract the AI agent
 runtime. This abstraction enables the orchestrator to interact with OpenCode,
 GitHub Copilot, Claude, Codex, or any future backend through a uniform
@@ -113,7 +113,7 @@ see [Adding a New Provider](../provider-system/adding-a-provider.md).
 
 ## Source reference
 
-- `src/provider.ts` -- Type definitions (52 lines)
+- `src/providers/interface.ts` -- Type definitions (52 lines)
 - `src/providers/index.ts` -- Registry (42 lines)
 - `src/providers/opencode.ts` -- OpenCode implementation (67 lines)
 - `src/providers/copilot.ts` -- Copilot implementation (62 lines)

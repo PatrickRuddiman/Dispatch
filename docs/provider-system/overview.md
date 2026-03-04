@@ -24,12 +24,12 @@ while the rest of the pipeline remains agnostic.
 | `src/providers/copilot.ts` | GitHub Copilot backend implementation |
 | `src/providers/claude.ts` | Claude backend implementation |
 | `src/providers/codex.ts` | Codex backend implementation |
-| `src/cleanup.ts` | Process-level cleanup registry for session leak prevention |
+| `src/helpers/cleanup.ts` | Process-level cleanup registry for session leak prevention |
 
 ## The ProviderInstance interface
 
 Every provider backend must implement the four-method lifecycle contract defined
-in `src/provider.ts:31-52`:
+in `src/providers/interface.ts:31-52`:
 
 | Method | Purpose | Returns |
 |--------|---------|---------|
@@ -247,7 +247,7 @@ same codebase but should not confuse the agent by mixing conversation contexts.
 
 ### The cleanup registry
 
-The process-level [cleanup registry](../shared-types/cleanup.md) (`src/cleanup.ts`) provides a safety net for
+The process-level [cleanup registry](../shared-types/cleanup.md) (`src/helpers/cleanup.ts`) provides a safety net for
 resource cleanup on abnormal exit. See also the [Logger](../shared-types/logger.md) for how cleanup events
 are traced with `log.debug()`. It works as follows:
 
@@ -257,7 +257,7 @@ are traced with `log.debug()`. It works as follows:
 2. On **normal completion**, the orchestrator calls `instance.cleanup()` directly
    on the success path.
 3. On **signal exit** (SIGINT, SIGTERM, unhandled error), the CLI's signal
-   handlers call `runCleanup()` from `src/cleanup.ts`, which drains the registry
+   handlers call `runCleanup()` from `src/helpers/cleanup.ts`, which drains the registry
    and invokes all registered cleanup functions.
 4. After draining, the registry is cleared (`cleanups.splice(0)`), so repeated
    calls to `runCleanup()` are harmless.
@@ -382,8 +382,12 @@ implementations normalize to `string | null`:
   implementing and registering a new backend
 - [CLI & Orchestration](../cli-orchestration/overview.md) -- how the CLI parses arguments and
   drives the orchestrator
+- [CLI Argument Parser](../cli-orchestration/cli.md) -- `--provider` flag
+  documentation and argument validation
 - [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) -- how the planner
   and dispatcher consume `ProviderInstance`
+- [Dispatcher](../planning-and-dispatch/dispatcher.md) -- How the dispatcher
+  creates sessions and sends prompts via the provider interface
 - [Shared Provider Types](../shared-types/provider.md) -- `ProviderName`,
   `ProviderBootOptions`, and `ProviderInstance` type definitions
 - [Cleanup Registry](../shared-types/cleanup.md) -- Process-level cleanup
@@ -408,3 +412,5 @@ implementations normalize to `string | null`:
   detection used by the config wizard to show install status
 - [Provider Tests](../testing/provider-tests.md) -- Detailed breakdown of
   provider unit tests for Claude, Copilot, OpenCode, and the registry
+- [Prerequisites & Safety](../prereqs-and-safety/integrations.md) -- External
+  CLI tool dependencies including provider binary checks

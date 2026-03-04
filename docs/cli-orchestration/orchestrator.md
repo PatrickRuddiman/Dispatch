@@ -550,7 +550,7 @@ cleanup registry:
 registerCleanup(() => instance.cleanup())
 ```
 
-The `registerCleanup` function (from `src/cleanup.ts`; see [Cleanup Registry](../shared-types/cleanup.md)) adds the callback to a
+The `registerCleanup` function (from `src/helpers/cleanup.ts`; see [Cleanup Registry](../shared-types/cleanup.md)) adds the callback to a
 module-level array. The CLI's signal handlers and error handler call
 `runCleanup()` to drain all registered functions before the process exits. This
 is the **safety net** for the cleanup gap described below — even if the

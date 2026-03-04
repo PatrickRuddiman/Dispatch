@@ -319,7 +319,7 @@ This guard is important because cleanup can be triggered from two paths:
 1. **Explicit call**: The orchestrator calls `instance.cleanup()` on the success
    path after all tasks complete (`src/agents/orchestrator.ts:165`).
 2. **Safety net**: The orchestrator registers `instance.cleanup()` with the
-   process-level [cleanup registry](../shared-types/cleanup.md) (`src/cleanup.ts`) at boot time
+   process-level [cleanup registry](../shared-types/cleanup.md) (`src/helpers/cleanup.ts`) at boot time
    (`src/agents/orchestrator.ts:151`). Signal handlers (SIGINT, SIGTERM) drain
    this registry on exit.
 

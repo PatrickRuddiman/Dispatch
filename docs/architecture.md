@@ -51,7 +51,7 @@ C4Context
         Container(parser, "Task Parser", "src/parser.ts", "Markdown checkbox extraction, context filtering, completion marking")
         Container(specgen, "Spec Generator", "src/spec-generator.ts", "Input classification, post-processing, validation")
         Container(tui, "Terminal UI", "src/tui.ts", "Real-time progress dashboard with spinner and task list")
-        Container(shared, "Shared Utilities", "src/cleanup.ts, logger.ts, format.ts, slugify.ts, timeout.ts", "Cleanup registry, logging, formatting, slugification, timeout")
+        Container(shared, "Shared Utilities", "src/helpers/cleanup.ts, logger.ts, format.ts, slugify.ts, timeout.ts", "Cleanup registry, logging, formatting, slugification, timeout")
     }
 
     System_Ext(github, "GitHub", "Issues, PRs via gh CLI")
@@ -262,8 +262,8 @@ agent runtimes behind a session-based lifecycle: `boot` → `createSession` →
 |----------|-----|-------------|-------------|
 | `opencode` | `@opencode-ai/sdk` | Async (fire-and-forget + SSE events) | [OpenCode backend](provider-system/opencode-backend.md) |
 | `copilot` | `@github/copilot-sdk` | Async (event-based `send` + idle/error listeners) | [Copilot backend](provider-system/copilot-backend.md) |
-| `claude` | Claude CLI | CLI-based agent interaction | [Provider overview](provider-system/provider-overview.md) |
-| `codex` | Codex CLI / `@openai/codex` | CLI-based agent loop | [Provider overview](provider-system/provider-overview.md) |
+| `claude` | Claude CLI | CLI-based agent interaction | [Provider overview](provider-system/overview.md) |
+| `codex` | Codex CLI / `@openai/codex` | CLI-based agent loop | [Provider overview](provider-system/overview.md) |
 
 Each task gets an isolated session to prevent context leakage between tasks.
 Providers manage their own server lifecycle (spawning or connecting to external
@@ -307,7 +307,7 @@ See [datasource integrations](datasource-system/integrations.md) and
 
 ### Process cleanup and graceful shutdown
 
-The [cleanup registry](shared-types/cleanup.md) (`src/cleanup.ts`) provides a
+The [cleanup registry](shared-types/cleanup.md) (`src/helpers/cleanup.ts`) provides a
 safety net for resource teardown:
 
 1. When a provider boots, its `cleanup()` is registered immediately via
@@ -731,7 +731,6 @@ guidance and removal safety assessment.
   and Codex AI runtime backends
   - [OpenCode backend](provider-system/opencode-backend.md)
   - [Copilot backend](provider-system/copilot-backend.md)
-  - [Provider overview](provider-system/provider-overview.md)
   - [Adding a provider](provider-system/adding-a-provider.md)
 
 ### Data layer

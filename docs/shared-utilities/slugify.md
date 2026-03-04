@@ -3,7 +3,7 @@
 ## What it does
 
 The `slugify` function in
-[`src/slugify.ts`](../../src/slugify.ts) converts an arbitrary input string
+[`src/helpers/slugify.ts`](../../src/helpers/slugify.ts) converts an arbitrary input string
 into a lowercase, hyphen-separated identifier containing only ASCII letters
 and digits. It accepts an optional `maxLength` parameter to truncate the
 result.

@@ -3,7 +3,7 @@
 ## What it does
 
 The `withTimeout<T>` function in
-[`src/timeout.ts`](../../src/timeout.ts) wraps any `Promise<T>` with a
+[`src/helpers/timeout.ts`](../../src/helpers/timeout.ts) wraps any `Promise<T>` with a
 deadline. If the wrapped promise does not settle within the specified number
 of milliseconds, `withTimeout` rejects with a `TimeoutError` that includes a
 human-readable label identifying which operation timed out.

@@ -8,12 +8,12 @@ architectural context.
 
 ## Checklist
 
-As documented in `src/provider.ts:27-29` and `src/providers/index.ts:2-8`
+As documented in `src/providers/interface.ts:27-29` and `src/providers/index.ts:2-8`
 (see also [Provider Interface](../shared-types/provider.md)):
 
 1. Create `src/providers/<name>.ts` with an async `boot()` function that returns
    a `ProviderInstance`.
-2. Add the name to the `ProviderName` union type in `src/provider.ts`.
+2. Add the name to the `ProviderName` union type in `src/providers/interface.ts`.
 3. Import and register the boot function in `src/providers/index.ts`.
 
 Each step is detailed below.
@@ -26,7 +26,7 @@ Create a new file at `src/providers/<name>.ts`. The module must export an async
 
 ### The interface contract
 
-From `src/provider.ts:31-52`, your provider must implement:
+From `src/providers/interface.ts:31-52`, your provider must implement:
 
 | Member | Type | Contract |
 |--------|------|----------|
@@ -37,7 +37,7 @@ From `src/provider.ts:31-52`, your provider must implement:
 
 ### The boot options
 
-From `src/provider.ts:16-21`:
+From `src/providers/interface.ts:16-21`:
 
 | Option | Type | Purpose |
 |--------|------|---------|
@@ -53,7 +53,7 @@ remote connections, ignore the `url` option or throw a clear error.
 ```ts
 // src/providers/example.ts
 
-import type { ProviderInstance, ProviderBootOptions } from "../provider.js";
+import type { ProviderInstance, ProviderBootOptions } from "../providers/interface.js";
 
 /**
  * Boot an Example provider instance.
@@ -115,7 +115,7 @@ Based on patterns in the existing providers:
 
 ## Step 2: Add to the ProviderName union
 
-Edit `src/provider.ts:11` to add your provider name to the union type:
+Edit `src/providers/interface.ts:11` to add your provider name to the union type:
 
 ```ts
 // Before

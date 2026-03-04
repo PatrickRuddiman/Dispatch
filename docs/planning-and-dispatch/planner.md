@@ -135,7 +135,7 @@ instruction, it could make filesystem changes during the planning phase.
 
 Neither the OpenCode SDK nor the Copilot SDK expose a mechanism to create
 sessions with restricted tool access (e.g., read-only filesystem access). The
-[`ProviderInstance`](../shared-types/provider.md#providerinstance-interface) interface (`src/provider.ts`) defines only `createSession()`
+[`ProviderInstance`](../shared-types/provider.md#providerinstance-interface) interface (`src/providers/interface.ts`) defines only `createSession()`
 and `prompt()` -- there is no parameter for capability restrictions.
 
 Adding provider-level enforcement would require:

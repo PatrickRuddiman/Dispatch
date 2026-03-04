@@ -709,7 +709,6 @@ for how this interacts with the orchestrator's own error recovery.
 - [TUI](tui.md) -- ANSI rendering and TTY detection
 - [Logger](../shared-types/logger.md) -- chalk usage in logging
 - [Provider Abstraction & Backends](../provider-system/overview.md) -- provider SDK details
-- [Provider Overview](../provider-system/provider-overview.md) -- architecture
   and design decisions for the provider layer
 - [OpenCode Backend](../provider-system/opencode-backend.md) -- OpenCode-specific setup and troubleshooting
 - [Copilot Backend](../provider-system/copilot-backend.md) -- Copilot-specific setup and authentication

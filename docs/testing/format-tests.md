@@ -2,7 +2,7 @@
 
 This document provides a detailed breakdown of `src/tests/format.test.ts`,
 which tests the duration formatting utility defined in
-[`src/format.ts`](../../src/format.ts).
+[`src/helpers/format.ts`](../../src/helpers/format.ts).
 
 ## What is tested
 

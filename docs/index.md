@@ -203,7 +203,6 @@ integration tests.
 - [Copilot Backend](./provider-system/copilot-backend.md)
 - [OpenCode Backend](./provider-system/opencode-backend.md)
 - [Overview](./provider-system/overview.md)
-- [Provider Overview](./provider-system/provider-overview.md)
 
 ## Shared Types
 

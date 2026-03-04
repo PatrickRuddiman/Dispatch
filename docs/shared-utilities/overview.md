@@ -7,8 +7,8 @@ guards, custom error types, and startup prerequisite validation.
 
 | File | Purpose |
 |------|---------|
-| [`src/slugify.ts`](../../src/slugify.ts) | Convert arbitrary text into URL/filesystem-safe identifiers |
-| [`src/timeout.ts`](../../src/timeout.ts) | Wrap any promise with a configurable deadline and labeled error |
+| [`src/helpers/slugify.ts`](../../src/helpers/slugify.ts) | Convert arbitrary text into URL/filesystem-safe identifiers |
+| [`src/helpers/timeout.ts`](../../src/helpers/timeout.ts) | Wrap any promise with a configurable deadline and labeled error |
 | [`src/helpers/errors.ts`](../../src/helpers/errors.ts) | Custom `UnsupportedOperationError` for datasource operations that are structurally unsupported |
 | [`src/helpers/guards.ts`](../../src/helpers/guards.ts) | Runtime `hasProperty` type guard for safely narrowing `unknown` values |
 | [`src/helpers/prereqs.ts`](../../src/helpers/prereqs.ts) | Startup prerequisite checker validating git, Node.js, and datasource-specific CLIs |

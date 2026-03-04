@@ -7,8 +7,8 @@ shared utility modules: slugify, timeout, and prerequisite checker.
 
 | Test file | Production module | Tests | Lines (test) | Lines (source) | Category |
 |-----------|-------------------|-------|-------------|----------------|----------|
-| [`src/tests/slugify.test.ts`](../../src/tests/slugify.test.ts) | [`src/slugify.ts`](../../src/slugify.ts) | 24 | 113 | 31 | Pure logic |
-| [`src/tests/timeout.test.ts`](../../src/tests/timeout.test.ts) | [`src/timeout.ts`](../../src/timeout.ts) | ~12 | 190 | 79 | Async + fake timers |
+| [`src/tests/slugify.test.ts`](../../src/tests/slugify.test.ts) | [`src/helpers/slugify.ts`](../../src/helpers/slugify.ts) | 24 | 113 | 31 | Pure logic |
+| [`src/tests/timeout.test.ts`](../../src/tests/timeout.test.ts) | [`src/helpers/timeout.ts`](../../src/helpers/timeout.ts) | ~12 | 190 | 79 | Async + fake timers |
 | [`src/tests/prereqs.test.ts`](../../src/tests/prereqs.test.ts) | [`src/helpers/prereqs.ts`](../../src/helpers/prereqs.ts) | 17 | 267 | 98 | Mocking + platform |
 
 ## Running the tests
