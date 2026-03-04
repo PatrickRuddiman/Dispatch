@@ -14,6 +14,18 @@ import { log } from "../helpers/logger.js";
 
 const exec = promisify(execFile);
 
+/**
+ * Thrown when a branch name fails validation.
+ * Provides reliable `instanceof` detection instead of brittle message-string checks.
+ */
+export class InvalidBranchNameError extends Error {
+  constructor(branch: string, reason?: string) {
+    const detail = reason ? ` (${reason})` : "";
+    super(`Invalid branch name: "${branch}"${detail}`);
+    this.name = "InvalidBranchNameError";
+  }
+}
+
 /** Execute a git command and return stdout. */
 async function git(args: string[], cwd: string): Promise<string> {
   const { stdout } = await exec("git", args, { cwd });
@@ -26,12 +38,28 @@ async function gh(args: string[], cwd: string): Promise<string> {
   return stdout;
 }
 
-/** Strict pattern for valid git branch name components. */
+/** Strict pattern for valid git branch name character set. */
 const VALID_BRANCH_NAME_RE = /^[a-zA-Z0-9._\-/]+$/;
 
-/** Check whether a branch name is safe to use in git/gh commands. */
+/**
+ * Check whether a branch name is safe to use in git/gh commands.
+ * Enforces git refname rules beyond simple character validation:
+ *  - Must be 1–255 characters of allowed characters
+ *  - Cannot start or end with "/"
+ *  - Cannot contain ".." (parent traversal)
+ *  - Cannot end with ".lock"
+ *  - Cannot contain "@{" (reflog syntax)
+ *  - Cannot contain "//" (empty path component)
+ */
 function isValidBranchName(name: string): boolean {
-  return name.length > 0 && name.length <= 255 && VALID_BRANCH_NAME_RE.test(name);
+  if (name.length === 0 || name.length > 255) return false;
+  if (!VALID_BRANCH_NAME_RE.test(name)) return false;
+  if (name.startsWith("/") || name.endsWith("/")) return false;
+  if (name.includes("..")) return false;
+  if (name.endsWith(".lock")) return false;
+  if (name.includes("@{")) return false;
+  if (name.includes("//")) return false;
+  return true;
 }
 
 /**
@@ -53,19 +81,20 @@ function buildBranchName(issueNumber: string, title: string, username: string = 
  * falls back to checking if "main" or "master" exists.
  */
 async function getDefaultBranch(cwd: string): Promise<string> {
+  const PREFIX = "refs/remotes/origin/";
   try {
     const ref = await git(["symbolic-ref", "refs/remotes/origin/HEAD"], cwd);
-    // ref looks like "refs/remotes/origin/main"
-    const parts = ref.trim().split("/");
-    const branch = parts[parts.length - 1];
+    // ref looks like "refs/remotes/origin/main" or "refs/remotes/origin/release/2024"
+    const trimmed = ref.trim();
+    const branch = trimmed.startsWith(PREFIX)
+      ? trimmed.slice(PREFIX.length)
+      : trimmed;
     if (!isValidBranchName(branch)) {
-      throw new Error(
-        `Invalid branch name from symbolic-ref output: "${branch}"`,
-      );
+      throw new InvalidBranchNameError(branch, "from symbolic-ref output");
     }
     return branch;
   } catch (err) {
-    if (err instanceof Error && err.message.startsWith("Invalid branch name")) {
+    if (err instanceof InvalidBranchNameError) {
       throw err;
     }
     // Fallback: check if "main" branch exists
