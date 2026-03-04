@@ -21,6 +21,7 @@ import type { SpecAgent } from "../agents/spec.js";
 import { boot as bootSpecAgent } from "../agents/spec.js";
 import { registerCleanup } from "../helpers/cleanup.js";
 import { log } from "../helpers/logger.js";
+import { FileLogger, fileLoggerStorage } from "../helpers/file-logger.js";
 import { confirmLargeBatch } from "../helpers/confirm-large-batch.js";
 import chalk from "chalk";
 import { elapsed, renderHeaderLines } from "../helpers/format.js";
@@ -76,12 +77,14 @@ async function resolveDatasource(
   org?: string,
   project?: string,
   workItemType?: string,
+  iteration?: string,
+  area?: string,
 ): Promise<ResolvedSource | null> {
   const source = await resolveSource(issues, issueSource, specCwd);
   if (!source) return null;
 
   const datasource = getDatasource(source);
-  const fetchOpts: IssueFetchOptions = { cwd: specCwd, org, project, workItemType };
+  const fetchOpts: IssueFetchOptions = { cwd: specCwd, org, project, workItemType, iteration, area };
   return { source, datasource, fetchOpts };
 }
 
@@ -325,82 +328,103 @@ async function generateSpecsBatch(
           return null;
         }
 
-        let filepath: string;
-        if (isTrackerMode) {
-          const slug = slugify(details.title, MAX_SLUG_LENGTH);
-          const filename = `${id}-${slug}.md`;
-          filepath = join(outputDir, filename);
-        } else if (isInlineText) {
-          filepath = id;
-        } else {
-          filepath = id;
-        }
-
-        try {
-          log.info(`Generating spec for ${isTrackerMode ? `#${id}` : filepath}: ${details.title}...`);
-
-          const result = await withRetry(
-            () => specAgent.generate({
-              issue: isTrackerMode ? details : undefined,
-              filePath: isTrackerMode ? undefined : id,
-              fileContent: isTrackerMode ? undefined : details.body,
-              cwd: specCwd,
-              outputPath: filepath,
-            }),
-            retries,
-            { label: `specAgent.generate(${isTrackerMode ? `#${id}` : filepath})` },
-          );
-
-          if (!result.success) {
-            throw new Error(result.error ?? "Spec generation failed");
+        const itemBody = async (): Promise<{ filepath: string; identifier: string } | null> => {
+          let filepath: string;
+          if (isTrackerMode) {
+            const slug = slugify(details.title, MAX_SLUG_LENGTH);
+            const filename = `${id}-${slug}.md`;
+            filepath = join(outputDir, filename);
+          } else if (isInlineText) {
+            filepath = id;
+          } else {
+            filepath = id;
           }
 
-          if (isTrackerMode || isInlineText) {
-            const h1Title = extractTitle(result.data.content, filepath);
-            const h1Slug = slugify(h1Title, MAX_SLUG_LENGTH);
-            const finalFilename = isTrackerMode ? `${id}-${h1Slug}.md` : `${h1Slug}.md`;
-            const finalFilepath = join(outputDir, finalFilename);
-            if (finalFilepath !== filepath) {
-              await rename(filepath, finalFilepath);
-              filepath = finalFilepath;
-            }
-          }
-
-          const specDuration = Date.now() - specStart;
-          fileDurationsMs[filepath] = specDuration;
-          log.success(`Spec written: ${filepath} (${elapsed(specDuration)})`);
-
-          let identifier = filepath;
+          fileLoggerStorage.getStore()?.info(`Output path: ${filepath}`);
 
           try {
-            if (isTrackerMode) {
-              await datasource.update(id, details.title, result.data.content, fetchOpts);
-              log.success(`Updated issue #${id} with spec content`);
-              await unlink(filepath);
-              log.success(`Deleted local spec ${filepath} (now tracked as issue #${id})`);
-              identifier = id;
-              issueNumbers.push(id);
-            } else if (datasource.name !== "md") {
-              const created = await datasource.create(details.title, result.data.content, fetchOpts);
-              log.success(`Created issue #${created.number} from ${filepath}`);
-              await unlink(filepath);
-              log.success(`Deleted local spec ${filepath} (now tracked as issue #${created.number})`);
-              identifier = created.number;
-              issueNumbers.push(created.number);
-            }
-          } catch (err) {
-            const label = isTrackerMode ? `issue #${id}` : filepath;
-            log.warn(`Could not sync ${label} to datasource: ${log.formatErrorChain(err)}`);
-          }
+            fileLoggerStorage.getStore()?.info(`Starting spec generation for ${isTrackerMode ? `#${id}` : filepath}`);
+            log.info(`Generating spec for ${isTrackerMode ? `#${id}` : filepath}: ${details.title}...`);
 
-          return { filepath, identifier };
-        } catch (err) {
-          log.error(`Failed to generate spec for ${isTrackerMode ? `#${id}` : filepath}: ${log.formatErrorChain(err)}`);
-          log.debug(log.formatErrorChain(err));
-          return null;
+            const result = await withRetry(
+              () => specAgent.generate({
+                issue: isTrackerMode ? details : undefined,
+                filePath: isTrackerMode ? undefined : id,
+                fileContent: isTrackerMode ? undefined : details.body,
+                cwd: specCwd,
+                outputPath: filepath,
+              }),
+              retries,
+              { label: `specAgent.generate(${isTrackerMode ? `#${id}` : filepath})` },
+            );
+
+            if (!result.success) {
+              throw new Error(result.error ?? "Spec generation failed");
+            }
+
+            fileLoggerStorage.getStore()?.info(`Spec generated successfully`);
+
+            if (isTrackerMode || isInlineText) {
+              const h1Title = extractTitle(result.data.content, filepath);
+              const h1Slug = slugify(h1Title, MAX_SLUG_LENGTH);
+              const finalFilename = isTrackerMode ? `${id}-${h1Slug}.md` : `${h1Slug}.md`;
+              const finalFilepath = join(outputDir, finalFilename);
+              if (finalFilepath !== filepath) {
+                await rename(filepath, finalFilepath);
+                filepath = finalFilepath;
+              }
+            }
+
+            const specDuration = Date.now() - specStart;
+            fileDurationsMs[filepath] = specDuration;
+            log.success(`Spec written: ${filepath} (${elapsed(specDuration)})`);
+
+            let identifier = filepath;
+
+            fileLoggerStorage.getStore()?.phase("Datasource sync");
+            try {
+              if (isTrackerMode) {
+                await datasource.update(id, details.title, result.data.content, fetchOpts);
+                log.success(`Updated issue #${id} with spec content`);
+                await unlink(filepath);
+                log.success(`Deleted local spec ${filepath} (now tracked as issue #${id})`);
+                identifier = id;
+                issueNumbers.push(id);
+              } else if (datasource.name !== "md") {
+                const created = await datasource.create(details.title, result.data.content, fetchOpts);
+                log.success(`Created issue #${created.number} from ${filepath}`);
+                await unlink(filepath);
+                log.success(`Deleted local spec ${filepath} (now tracked as issue #${created.number})`);
+                identifier = created.number;
+                issueNumbers.push(created.number);
+              }
+            } catch (err) {
+              const label = isTrackerMode ? `issue #${id}` : filepath;
+              log.warn(`Could not sync ${label} to datasource: ${log.formatErrorChain(err)}`);
+            }
+
+            return { filepath, identifier };
+          } catch (err) {
+            fileLoggerStorage.getStore()?.error(`Spec generation failed for ${id}: ${log.extractMessage(err)}${err instanceof Error && err.stack ? `\n${err.stack}` : ""}`);
+            log.error(`Failed to generate spec for ${isTrackerMode ? `#${id}` : filepath}: ${log.formatErrorChain(err)}`);
+            log.debug(log.formatErrorChain(err));
+            return null;
+          }
+        };
+
+        const fileLogger = log.verbose ? new FileLogger(id, specCwd) : null;
+        if (fileLogger) {
+          return fileLoggerStorage.run(fileLogger, async () => {
+            try {
+              fileLogger.phase(`Spec generation: ${id}`);
+              return await itemBody();
+            } finally {
+              fileLogger.close();
+            }
+          });
         }
-      })
-    );
+        return itemBody();
+      }));
 
     for (const result of batchResults) {
       if (result !== null) {
@@ -478,6 +502,8 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     org,
     project,
     workItemType,
+    iteration,
+    area,
     concurrency = defaultConcurrency(),
     dryRun,
     retries = 2,
@@ -486,7 +512,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
   const pipelineStart = Date.now();
 
   // ── Resolve datasource ─────────────────────────────────────
-  const resolved = await resolveDatasource(issues, opts.issueSource, specCwd, org, project, workItemType);
+  const resolved = await resolveDatasource(issues, opts.issueSource, specCwd, org, project, workItemType, iteration, area);
   if (!resolved) {
     return { total: 0, generated: 0, failed: 0, files: [], issueNumbers: [], durationMs: Date.now() - pipelineStart, fileDurationsMs: {} };
   }

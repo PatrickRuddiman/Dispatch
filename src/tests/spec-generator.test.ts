@@ -300,6 +300,22 @@ describe("isGlobOrFilePath", () => {
     expect(isGlobOrFilePath("../specs/feature.md")).toBe(true);
   });
 
+  it("returns true for a backslash dot-slash relative path", () => {
+    expect(isGlobOrFilePath(".\\my-spec.md")).toBe(true);
+  });
+
+  it("returns true for a backslash dot-dot relative path", () => {
+    expect(isGlobOrFilePath("..\\specs\\feature.md")).toBe(true);
+  });
+
+  it("returns true for a backslash dot-slash relative path without extension", () => {
+    expect(isGlobOrFilePath(".\\foo")).toBe(true);
+  });
+
+  it("returns true for a backslash dot-dot relative path with nested dirs", () => {
+    expect(isGlobOrFilePath("..\\bar\\baz.md")).toBe(true);
+  });
+
   it("returns true for an absolute Unix path", () => {
     expect(isGlobOrFilePath("/home/user/spec.md")).toBe(true);
   });

@@ -158,6 +158,101 @@ describe("resolveCliConfig()", () => {
       expect(result.model).toBe("anthropic/claude-sonnet-4");
       expect(result.issueSource).toBe("azdevops");
     });
+
+    it("merges azdevops config values (org, project, workItemType, iteration, area) when not in explicitFlags", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({
+        provider: "copilot",
+        source: "azdevops",
+        org: "my-org",
+        project: "my-project",
+        workItemType: "Bug",
+        iteration: "Sprint 1",
+        area: "Team\\Frontend",
+      });
+
+      const args = createRawCliArgs({
+        explicitFlags: new Set(),
+      });
+      const result = await resolveCliConfig(args);
+
+      expect(result.org).toBe("my-org");
+      expect(result.project).toBe("my-project");
+      expect(result.workItemType).toBe("Bug");
+      expect(result.iteration).toBe("Sprint 1");
+      expect(result.area).toBe("Team\\Frontend");
+    });
+
+    it("CLI flags take precedence over config for org, project, workItemType, iteration, area", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({
+        provider: "copilot",
+        source: "azdevops",
+        org: "config-org",
+        project: "config-project",
+        workItemType: "Bug",
+        iteration: "Sprint 1",
+        area: "Team\\Backend",
+      });
+
+      const args = createRawCliArgs({
+        explicitFlags: new Set(["provider", "issueSource", "org", "project", "workItemType", "iteration", "area"]),
+        issueSource: "azdevops",
+        org: "cli-org",
+        project: "cli-project",
+        workItemType: "User Story",
+        iteration: "Sprint 2",
+        area: "Team\\Frontend",
+      });
+      const result = await resolveCliConfig(args);
+
+      expect(result.org).toBe("cli-org");
+      expect(result.project).toBe("cli-project");
+      expect(result.workItemType).toBe("User Story");
+      expect(result.iteration).toBe("Sprint 2");
+      expect(result.area).toBe("Team\\Frontend");
+    });
+
+    it("merges only the azdevops config fields that are set, leaving others undefined", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({
+        provider: "copilot",
+        source: "azdevops",
+        org: "my-org",
+        project: "my-project",
+      });
+
+      const args = createRawCliArgs({
+        explicitFlags: new Set(),
+      });
+      const result = await resolveCliConfig(args);
+
+      expect(result.org).toBe("my-org");
+      expect(result.project).toBe("my-project");
+      expect(result.workItemType).toBeUndefined();
+      expect(result.iteration).toBeUndefined();
+      expect(result.area).toBeUndefined();
+    });
+
+    it("uses config for azdevops fields not in explicitFlags and CLI for those in explicitFlags", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({
+        provider: "copilot",
+        source: "azdevops",
+        org: "config-org",
+        project: "config-project",
+        iteration: "Sprint 1",
+        area: "Team\\Backend",
+      });
+
+      const args = createRawCliArgs({
+        explicitFlags: new Set(["org", "project"]),
+        org: "cli-org",
+        project: "cli-project",
+      });
+      const result = await resolveCliConfig(args);
+
+      expect(result.org).toBe("cli-org");
+      expect(result.project).toBe("cli-project");
+      expect(result.iteration).toBe("Sprint 1");
+      expect(result.area).toBe("Team\\Backend");
+    });
   });
 
   describe("validation errors", () => {

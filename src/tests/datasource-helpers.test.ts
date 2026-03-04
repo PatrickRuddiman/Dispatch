@@ -32,29 +32,17 @@ vi.mock("node:util", () => ({
   promisify: () => mockExecFile,
 }));
 
-const { mockGetDatasource, mockDetectDatasource } = vi.hoisted(() => ({
-  mockGetDatasource: vi.fn(),
-  mockDetectDatasource: vi.fn(),
-}));
-
-vi.mock("../datasources/index.js", () => ({
-  getDatasource: mockGetDatasource,
-  detectDatasource: mockDetectDatasource,
-}));
-
 // Must import log AFTER vi.mock to get the mocked version
 import { log } from "../helpers/logger.js";
 
 beforeEach(() => {
   mockExecFile.mockReset();
-  mockGetDatasource.mockReset();
-  mockDetectDatasource.mockReset();
 });
 import {
   parseIssueFilename,
   fetchItemsById,
   writeItemsToTempDir,
-  closeCompletedSpecIssues,
+
   buildPrBody,
   buildPrTitle,
   buildFeaturePrTitle,
@@ -753,136 +741,6 @@ describe("buildFeaturePrBody", () => {
     const issues = [createIssueDetails({ number: "10" })];
     const body = buildFeaturePrBody(issues, [], [], "github");
     expect(body).not.toContain("## Tasks");
-  });
-});
-
-// ─── closeCompletedSpecIssues ────────────────────────────────────────
-
-describe("closeCompletedSpecIssues", () => {
-  /** Create a Task fixture. */
-  function createCloseTask(overrides?: Partial<Task>): Task {
-    return {
-      index: 0,
-      text: "Implement feature",
-      line: 1,
-      raw: "- [ ] Implement feature",
-      file: "/tmp/dispatch-abc/42-feature.md",
-      ...overrides,
-    };
-  }
-
-  function createTaskFile(path: string, tasks: Task[]) {
-    return { path, tasks, content: "" };
-  }
-
-  function createCloseDatasource(overrides?: Partial<Datasource>): Datasource {
-    return {
-      name: "github",
-      supportsGit: vi.fn<Datasource["supportsGit"]>().mockReturnValue(true),
-      list: vi.fn<Datasource["list"]>().mockResolvedValue([]),
-      fetch: vi.fn<Datasource["fetch"]>().mockResolvedValue({} as IssueDetails),
-      update: vi.fn<Datasource["update"]>().mockResolvedValue(undefined),
-      close: vi.fn<Datasource["close"]>().mockResolvedValue(undefined),
-      create: vi.fn<Datasource["create"]>().mockResolvedValue({} as IssueDetails),
-      getDefaultBranch: vi.fn<Datasource["getDefaultBranch"]>().mockResolvedValue("main"),
-      getUsername: vi.fn<Datasource["getUsername"]>().mockResolvedValue("testuser"),
-      buildBranchName: vi.fn<Datasource["buildBranchName"]>().mockReturnValue("testuser/dispatch/1"),
-      createAndSwitchBranch: vi.fn<Datasource["createAndSwitchBranch"]>().mockResolvedValue(undefined),
-      switchBranch: vi.fn<Datasource["switchBranch"]>().mockResolvedValue(undefined),
-      pushBranch: vi.fn<Datasource["pushBranch"]>().mockResolvedValue(undefined),
-      commitAllChanges: vi.fn<Datasource["commitAllChanges"]>().mockResolvedValue(undefined),
-      createPullRequest: vi.fn<Datasource["createPullRequest"]>().mockResolvedValue(""),
-      ...overrides,
-    };
-  }
-
-  it("closes issue when all tasks succeeded", async () => {
-    const task = createCloseTask({ file: "/tmp/42-bug-fix.md" });
-    const taskFile = createTaskFile("/tmp/42-bug-fix.md", [task]);
-    const results: DispatchResult[] = [{ task, success: true }];
-    const ds = createCloseDatasource();
-    mockGetDatasource.mockReturnValue(ds);
-
-    await closeCompletedSpecIssues([taskFile], results, "/tmp", "github");
-
-    expect(ds.close).toHaveBeenCalledWith("42", { cwd: "/tmp", org: undefined, project: undefined });
-  });
-
-  it("does not close when some tasks failed", async () => {
-    const task1 = createCloseTask({ index: 0, file: "/tmp/42-feat.md" });
-    const task2 = createCloseTask({ index: 1, text: "Second task", file: "/tmp/42-feat.md" });
-    const taskFile = createTaskFile("/tmp/42-feat.md", [task1, task2]);
-    const results: DispatchResult[] = [
-      { task: task1, success: true },
-      { task: task2, success: false, error: "failed" },
-    ];
-    const ds = createCloseDatasource();
-    mockGetDatasource.mockReturnValue(ds);
-
-    await closeCompletedSpecIssues([taskFile], results, "/tmp", "github");
-
-    expect(ds.close).not.toHaveBeenCalled();
-  });
-
-  it("auto-detects datasource when source is undefined", async () => {
-    const task = createCloseTask({ file: "/tmp/42-bug.md" });
-    const taskFile = createTaskFile("/tmp/42-bug.md", [task]);
-    const results: DispatchResult[] = [{ task, success: true }];
-    const ds = createCloseDatasource();
-    mockDetectDatasource.mockResolvedValue("github");
-    mockGetDatasource.mockReturnValue(ds);
-
-    await closeCompletedSpecIssues([taskFile], results, "/tmp");
-
-    expect(mockDetectDatasource).toHaveBeenCalledWith("/tmp");
-    expect(ds.close).toHaveBeenCalled();
-  });
-
-  it("returns early when source is undefined and auto-detect fails", async () => {
-    const task = createCloseTask({ file: "/tmp/42-bug.md" });
-    const taskFile = createTaskFile("/tmp/42-bug.md", [task]);
-    const results: DispatchResult[] = [{ task, success: true }];
-    mockDetectDatasource.mockResolvedValue(null);
-
-    await closeCompletedSpecIssues([taskFile], results, "/tmp");
-
-    expect(mockGetDatasource).not.toHaveBeenCalled();
-  });
-
-  it("skips files that don't match <id>-<slug>.md pattern", async () => {
-    const task = createCloseTask({ file: "/tmp/notes.md" });
-    const taskFile = createTaskFile("/tmp/notes.md", [task]);
-    const results: DispatchResult[] = [{ task, success: true }];
-    const ds = createCloseDatasource();
-    mockGetDatasource.mockReturnValue(ds);
-
-    await closeCompletedSpecIssues([taskFile], results, "/tmp", "github");
-
-    expect(ds.close).not.toHaveBeenCalled();
-  });
-
-  it("skips files with no tasks", async () => {
-    const taskFile = createTaskFile("/tmp/42-empty.md", []);
-    const ds = createCloseDatasource();
-    mockGetDatasource.mockReturnValue(ds);
-
-    await closeCompletedSpecIssues([taskFile], [], "/tmp", "github");
-
-    expect(ds.close).not.toHaveBeenCalled();
-  });
-
-  it("logs warning when close throws", async () => {
-    const task = createCloseTask({ file: "/tmp/42-bug.md" });
-    const taskFile = createTaskFile("/tmp/42-bug.md", [task]);
-    const results: DispatchResult[] = [{ task, success: true }];
-    const ds = createCloseDatasource({
-      close: vi.fn<Datasource["close"]>().mockRejectedValue(new Error("close failed")),
-    });
-    mockGetDatasource.mockReturnValue(ds);
-
-    await closeCompletedSpecIssues([taskFile], results, "/tmp", "github");
-
-    expect(log.warn).toHaveBeenCalledWith(expect.stringContaining("close failed"));
   });
 });
 

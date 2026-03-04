@@ -59,6 +59,10 @@ export interface SpecOptions {
   project?: string;
   /** Azure DevOps work item type (e.g. "User Story", "Product Backlog Item") */
   workItemType?: string;
+  /** Azure DevOps iteration path filter (e.g. "MyProject\\Sprint 1" or "@CurrentIteration") */
+  iteration?: string;
+  /** Azure DevOps area path filter (e.g. "MyProject\\Team A") */
+  area?: string;
   /** Max parallel fetches/generations (default: min(cpuCount, freeMB/500)) */
   concurrency?: number;
   /** When true, log a preview of what would be generated without booting the provider or writing files. */
@@ -119,8 +123,8 @@ export function isGlobOrFilePath(input: string | string[]): boolean {
   // Path separators (forward slash or backslash)
   if (/[/\\]/.test(input)) return true;
 
-  // Dot-prefix relative paths (./something or ../something)
-  if (/^\.\.?\//.test(input)) return true;
+  // Dot-prefix relative paths (./something, ../something, .\something, ..\something)
+  if (/^\.\.?[\/\\]/.test(input)) return true;
 
   // Common file extensions at end of string
   if (/\.(md|txt|yaml|yml|json|ts|js|tsx|jsx)$/i.test(input)) return true;

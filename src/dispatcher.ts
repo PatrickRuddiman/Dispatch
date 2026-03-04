@@ -6,6 +6,7 @@
 import type { ProviderInstance } from "./providers/interface.js";
 import type { Task } from "./parser.js";
 import { log } from "./helpers/logger.js";
+import { fileLoggerStorage } from "./helpers/file-logger.js";
 
 export interface DispatchResult {
   task: Task;
@@ -32,19 +33,23 @@ export async function dispatchTask(
     const sessionId = await instance.createSession();
     const prompt = plan ? buildPlannedPrompt(task, cwd, plan, worktreeRoot) : buildPrompt(task, cwd, worktreeRoot);
     log.debug(`Prompt built (${prompt.length} chars, ${plan ? "with plan" : "no plan"})`);
+    fileLoggerStorage.getStore()?.prompt("dispatchTask", prompt);
 
     const response = await instance.prompt(sessionId, prompt);
 
     if (response === null) {
       log.debug("Task dispatch returned null response");
+      fileLoggerStorage.getStore()?.warn("dispatchTask: null response");
       return { task, success: false, error: "No response from agent" };
     }
 
     log.debug(`Task dispatch completed (${response.length} chars response)`);
+    fileLoggerStorage.getStore()?.response("dispatchTask", response);
     return { task, success: true };
   } catch (err) {
     const message = log.extractMessage(err);
     log.debug(`Task dispatch failed: ${log.formatErrorChain(err)}`);
+    fileLoggerStorage.getStore()?.error(`dispatchTask error: ${message}${err instanceof Error && err.stack ? `\n${err.stack}` : ""}`);
     return { task, success: false, error: message };
   }
 }

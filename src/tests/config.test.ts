@@ -111,6 +111,23 @@ describe("saveConfig", () => {
     const loaded = await loadConfig(tmpDir);
     expect(loaded).toEqual({ provider: "copilot" });
   });
+
+  it("round-trips config with all Azure DevOps fields", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
+    const config: DispatchConfig = {
+      provider: "copilot",
+      model: "gpt-4o",
+      source: "azdevops",
+      org: "https://dev.azure.com/myorg",
+      project: "MyProject",
+      workItemType: "User Story",
+      iteration: "MyProject\\Sprint 1",
+      area: "MyProject\\Team A",
+    };
+    await saveConfig(config, tmpDir);
+    const loaded = await loadConfig(tmpDir);
+    expect(loaded).toEqual(config);
+  });
 });
 
 // ─── getConfigPath ───────────────────────────────────────────────────
@@ -251,6 +268,57 @@ describe("validateConfigValue", () => {
   it("rejects Infinity and NaN for concurrency", () => {
     expect(validateConfigValue("concurrency", "Infinity")).not.toBe(null);
     expect(validateConfigValue("concurrency", "NaN")).not.toBe(null);
+  });
+
+  it("accepts valid org values", () => {
+    expect(validateConfigValue("org", "https://dev.azure.com/myorg")).toBe(null);
+    expect(validateConfigValue("org", "my-org")).toBe(null);
+  });
+
+  it("rejects empty org", () => {
+    expect(validateConfigValue("org", "")).not.toBe(null);
+    expect(validateConfigValue("org", "   ")).not.toBe(null);
+  });
+
+  it("accepts valid project values", () => {
+    expect(validateConfigValue("project", "MyProject")).toBe(null);
+    expect(validateConfigValue("project", "my-project-123")).toBe(null);
+  });
+
+  it("rejects empty project", () => {
+    expect(validateConfigValue("project", "")).not.toBe(null);
+    expect(validateConfigValue("project", "   ")).not.toBe(null);
+  });
+
+  it("accepts valid workItemType values", () => {
+    expect(validateConfigValue("workItemType", "User Story")).toBe(null);
+    expect(validateConfigValue("workItemType", "Product Backlog Item")).toBe(null);
+    expect(validateConfigValue("workItemType", "Bug")).toBe(null);
+  });
+
+  it("rejects empty workItemType", () => {
+    expect(validateConfigValue("workItemType", "")).not.toBe(null);
+    expect(validateConfigValue("workItemType", "   ")).not.toBe(null);
+  });
+
+  it("accepts valid iteration values", () => {
+    expect(validateConfigValue("iteration", "MyProject\\Sprint 1")).toBe(null);
+    expect(validateConfigValue("iteration", "@CurrentIteration")).toBe(null);
+  });
+
+  it("rejects empty iteration", () => {
+    expect(validateConfigValue("iteration", "")).not.toBe(null);
+    expect(validateConfigValue("iteration", "   ")).not.toBe(null);
+  });
+
+  it("accepts valid area values", () => {
+    expect(validateConfigValue("area", "MyProject\\Team A")).toBe(null);
+    expect(validateConfigValue("area", "RootArea")).toBe(null);
+  });
+
+  it("rejects empty area", () => {
+    expect(validateConfigValue("area", "")).not.toBe(null);
+    expect(validateConfigValue("area", "   ")).not.toBe(null);
   });
 });
 

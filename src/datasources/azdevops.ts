@@ -24,7 +24,7 @@ function mapWorkItemToIssueDetails(
   item: any,
   id: string,
   comments: string[],
-  defaults?: { title?: string; body?: string; state?: string }
+  defaults?: { title?: string; body?: string; state?: string; workItemType?: string }
 ): IssueDetails {
   const fields = item.fields ?? {};
   return {
@@ -40,6 +40,16 @@ function mapWorkItemToIssueDetails(
     comments,
     acceptanceCriteria:
       fields["Microsoft.VSTS.Common.AcceptanceCriteria"] ?? "",
+    iterationPath: fields["System.IterationPath"] || undefined,
+    areaPath: fields["System.AreaPath"] || undefined,
+    assignee: fields["System.AssignedTo"]?.displayName || undefined,
+    priority: fields["Microsoft.VSTS.Common.Priority"] ?? undefined,
+    storyPoints:
+      fields["Microsoft.VSTS.Scheduling.StoryPoints"] ??
+      fields["Microsoft.VSTS.Scheduling.Effort"] ??
+      fields["Microsoft.VSTS.Scheduling.Size"] ??
+      undefined,
+    workItemType: fields["System.WorkItemType"] || defaults?.workItemType || undefined,
   };
 }
 
@@ -77,8 +87,29 @@ export const datasource: Datasource = {
   },
 
   async list(opts: IssueFetchOptions = {}): Promise<IssueDetails[]> {
-    const wiql =
-      "SELECT [System.Id] FROM workitems WHERE [System.State] <> 'Closed' AND [System.State] <> 'Removed' ORDER BY [System.CreatedDate] DESC";
+    const conditions = [
+      "[System.State] <> 'Closed'",
+      "[System.State] <> 'Removed'",
+    ];
+
+    if (opts.iteration) {
+      const iterValue = String(opts.iteration).trim();
+      if (iterValue === "@CurrentIteration") {
+        conditions.push(`[System.IterationPath] UNDER @CurrentIteration`);
+      } else {
+        const escaped = iterValue.replace(/'/g, "''");
+        if (escaped) conditions.push(`[System.IterationPath] UNDER '${escaped}'`);
+      }
+    }
+
+    if (opts.area) {
+      const area = String(opts.area).trim().replace(/'/g, "''");
+      if (area) {
+        conditions.push(`[System.AreaPath] UNDER '${area}'`);
+      }
+    }
+
+    const wiql = `SELECT [System.Id] FROM workitems WHERE ${conditions.join(" AND ")} ORDER BY [System.CreatedDate] DESC`;
 
     const args = ["boards", "query", "--wiql", wiql, "--output", "json"];
     if (opts.org) args.push("--org", opts.org);
@@ -269,6 +300,7 @@ export const datasource: Datasource = {
       title,
       body,
       state: "New",
+      workItemType: workItemType,
     });
   },
 
@@ -290,12 +322,31 @@ export const datasource: Datasource = {
   async getUsername(opts: DispatchLifecycleOptions): Promise<string> {
     try {
       const { stdout } = await exec("git", ["config", "user.name"], { cwd: opts.cwd });
-      const name = stdout.trim();
-      if (!name) return "unknown";
-      return slugify(name);
+      const name = slugify(stdout.trim());
+      if (name) return name;
     } catch {
-      return "unknown";
+      // fall through
     }
+
+    try {
+      const { stdout } = await exec("az", ["account", "show", "--query", "user.name", "-o", "tsv"], { cwd: opts.cwd });
+      const name = slugify(stdout.trim());
+      if (name) return name;
+    } catch {
+      // fall through
+    }
+
+    try {
+      const { stdout } = await exec("az", ["account", "show", "--query", "user.principalName", "-o", "tsv"], { cwd: opts.cwd });
+      const principal = stdout.trim();
+      const prefix = principal.split("@")[0];
+      const name = slugify(prefix);
+      if (name) return name;
+    } catch {
+      // fall through
+    }
+
+    return "unknown";
   },
 
   buildBranchName(issueNumber: string, title: string, username: string): string {
