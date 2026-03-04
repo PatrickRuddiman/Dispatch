@@ -10,3 +10,4 @@ export * from "./worktree.js";
 export * from "./run-state.js";
 export * from "./errors.js";
 export * from "./guards.js";
+export * from "./file-logger.js";
