@@ -354,6 +354,12 @@ describe("log", () => {
       expect(getLogLevel()).toBe("info");
     });
 
+    it("ignores prototype LOG_LEVEL keys like toString", async () => {
+      process.env.LOG_LEVEL = "toString";
+      const { getLogLevel } = await import("../helpers/logger.js");
+      expect(getLogLevel()).toBe("info");
+    });
+
     it("verbose setter overrides env-var-resolved level", async () => {
       process.env.LOG_LEVEL = "warn";
       const { log, getLogLevel } = await import("../helpers/logger.js");

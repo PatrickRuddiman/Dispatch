@@ -1,11 +1,14 @@
 /**
  * Minimal structured logger for CLI output.
  *
- * Log verbosity is controlled by (in priority order):
+ * The initial log level is resolved at module load from environment variables:
  *   1. `LOG_LEVEL` env var — one of `"debug"`, `"info"`, `"warn"`, `"error"`
  *   2. `DEBUG` env var — any truthy value sets the level to `"debug"`
- *   3. `log.verbose = true` / the `--verbose` CLI flag (maps to `"debug"`)
- *   4. Default: `"info"`
+ *   3. Default: `"info"`
+ *
+ * At runtime, `log.verbose` (or the `--verbose` CLI flag) can override the
+ * env-resolved level — setting it to `true` forces `"debug"`, and `false`
+ * resets to `"info"` regardless of the original env value.
  */
 
 import chalk from "chalk";
@@ -26,7 +29,7 @@ const LOG_LEVEL_SEVERITY: Record<LogLevel, number> = {
  */
 function resolveLogLevel(): LogLevel {
   const envLevel = process.env.LOG_LEVEL?.toLowerCase();
-  if (envLevel && envLevel in LOG_LEVEL_SEVERITY) {
+  if (envLevel && Object.hasOwn(LOG_LEVEL_SEVERITY, envLevel)) {
     return envLevel as LogLevel;
   }
   if (process.env.DEBUG) {
