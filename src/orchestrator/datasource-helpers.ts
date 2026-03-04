@@ -50,7 +50,8 @@ export async function fetchItemsById(
       const item = await datasource.fetch(id, fetchOpts);
       items.push(item);
     } catch (err) {
-      log.warn(`Could not fetch issue #${id}: ${log.formatErrorChain(err)}`);
+      const prefix = id.includes("/") || id.includes("\\") || id.endsWith(".md") ? "" : "#";
+      log.warn(`Could not fetch issue ${prefix}${id}: ${log.formatErrorChain(err)}`);
     }
   }
   return items;
