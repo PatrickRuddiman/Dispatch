@@ -65,7 +65,7 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
 
       - name: Create version bump PR
         if: steps.next.outputs.bump == 'true' && steps.existing.outputs.exists != 'true'
@@ -90,5 +90,8 @@ jobs:
             --body "Automated version bump to \`${VERSION}\` based on conventional commits since the last release." \
             --base main \
             --head "$BRANCH"
+        # RELEASE_TOKEN must be a PAT with `repo` scope when the repository setting
+        # "Allow GitHub Actions to create and approve pull requests" is disabled.
+        # Falls back to github.token when that setting is enabled.
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
