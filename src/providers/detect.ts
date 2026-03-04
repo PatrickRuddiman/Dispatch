@@ -10,6 +10,9 @@ import type { ProviderName } from "./interface.js";
 
 const exec = promisify(execFile);
 
+/** Kill provider binary detection after this many milliseconds. */
+const DETECTION_TIMEOUT_MS = 5000;
+
 /**
  * Maps each provider name to its expected CLI binary.
  */
@@ -32,6 +35,7 @@ export async function checkProviderInstalled(
   try {
     await exec(PROVIDER_BINARIES[name], ["--version"], {
       shell: process.platform === "win32",
+      timeout: DETECTION_TIMEOUT_MS,
     });
     return true;
   } catch {
