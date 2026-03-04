@@ -138,7 +138,7 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
         const events = await session.getMessages();
         const last = [...events]
           .reverse()
-          .find((e) => e.type === "assistant.message") as AssistantMessageEvent | undefined;
+          .find((e): e is AssistantMessageEvent => e.type === "assistant.message");
 
         const result = last?.data?.content ?? null;
         log.debug(`Prompt response received (${result?.length ?? 0} chars)`);
