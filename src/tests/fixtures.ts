@@ -1,4 +1,4 @@
-import { vi } from "vitest";
+import { vi, type Mock } from "vitest";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import type { ChildProcess } from "node:child_process";
@@ -106,4 +106,27 @@ export function createMockChildProcess(overrides?: Partial<Pick<ChildProcess, "p
   });
 
   return child as unknown as ChildProcess;
+}
+
+/**
+ * Callback-style implementation for an execFile mock intended to be wrapped with util.promisify.
+ *
+ * util.promisify does not create a `{ stdout, stderr }` object by itself; it simply resolves
+ * with whatever non-error arguments are passed to the callback. In this test helper, the mock
+ * implementation is expected to call `cb(null, { stdout, stderr })`, so the promisified wrapper
+ * resolves to that single result object.
+ *
+ * Note: the real `child_process.execFile` callback has the shape `(error, stdout, stderr)`.
+ * This helper uses a different, test-only callback shape for convenience.
+ */
+export type ExecFileMockImpl = (
+  cmd: string,
+  args: readonly string[] | null,
+  opts: Record<string, unknown>,
+  cb: (error: Error | null, result?: { stdout: string; stderr: string }) => void,
+) => void;
+
+/** Apply a typed mock implementation to a mocked execFile function. */
+export function mockExecFile(mock: Mock, impl: ExecFileMockImpl): void {
+  mock.mockImplementation(impl);
 }
