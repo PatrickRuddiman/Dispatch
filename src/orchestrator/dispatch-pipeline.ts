@@ -237,6 +237,9 @@ export async function runDispatchPipeline(
     if (feature) {
       try {
         featureDefaultBranch = await datasource.getDefaultBranch(lifecycleOpts);
+
+        // Ensure we are on the default branch so the feature branch starts from the correct commit
+        await datasource.switchBranch(featureDefaultBranch, lifecycleOpts);
         featureBranchName = generateFeatureBranchName();
 
         // Create the feature branch from the default branch

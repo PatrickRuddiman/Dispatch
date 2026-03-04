@@ -1634,15 +1634,22 @@ describe("feature branch workflow", () => {
       "dispatch/feature-abcd1234",
       expect.any(Object),
     );
+    // switchBranch must be called before createAndSwitchBranch to ensure the correct base
+    const switchOrder = vi.mocked(ds.switchBranch).mock.invocationCallOrder[0];
+    const createOrder = vi.mocked(ds.createAndSwitchBranch).mock.invocationCallOrder[0];
+    expect(switchOrder).toBeLessThan(createOrder);
   });
 
   it("switches back to default branch after creating feature branch", async () => {
     await runDispatchPipeline(featureOpts(), "/tmp/test");
 
     const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
-    const switchCalls = vi.mocked(ds.switchBranch).mock.calls;
-    // First switchBranch call should be switching back to default branch
-    expect(switchCalls[0][0]).toBe("main");
+    const switchInvocationOrders = vi.mocked(ds.switchBranch).mock.invocationCallOrder;
+    const createOrder = vi.mocked(ds.createAndSwitchBranch).mock.invocationCallOrder[0];
+    // First switchBranch call switches TO the default branch (so feature branch has correct base)
+    expect(switchInvocationOrders[0]).toBeLessThan(createOrder);
+    // Second switchBranch call switches back to the default branch after creating feature branch
+    expect(switchInvocationOrders[1]).toBeGreaterThan(createOrder);
   });
 
   it("creates worktrees with feature branch as start point", async () => {
