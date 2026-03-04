@@ -99,6 +99,8 @@ az extension add --name azure-devops
 
 **Local markdown** (`--source md`): No external tools or authentication required.
 
+> **Windows users:** See [Windows prerequisites and setup](docs/windows.md) for platform-specific installation commands, recommended configuration, and known limitations.
+
 ## Installation
 
 ```sh
@@ -255,6 +257,7 @@ Full documentation is in the [`docs/`](docs/) directory:
 - [Planning & Dispatch](docs/planning-and-dispatch/overview.md)
 - [Spec Generation](docs/spec-generation/overview.md)
 - [Testing](docs/testing/overview.md)
+- [Windows](docs/windows.md)
 
 ## License
 
