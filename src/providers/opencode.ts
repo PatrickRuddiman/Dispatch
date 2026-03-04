@@ -24,6 +24,7 @@ import {
 } from "@opencode-ai/sdk";
 import type { ProviderInstance, ProviderBootOptions } from "./interface.js";
 import { log } from "../helpers/logger.js";
+import { hasProperty } from "../helpers/guards.js";
 
 /**
  * List available OpenCode models for configured providers.
@@ -152,6 +153,8 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
     async prompt(sessionId: string, text: string): Promise<string | null> {
       log.debug(`Sending async prompt to session ${sessionId} (${text.length} chars)...`);
 
+      let controller: AbortController | undefined;
+
       try {
         // ── 1. Fire-and-forget: start the LLM processing ──────────
         const { error: promptError } = await client.session.promptAsync({
@@ -169,7 +172,7 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
         log.debug("Async prompt accepted, subscribing to events...");
 
         // ── 2. Subscribe to SSE events ────────────────────────────
-        const controller = new AbortController();
+        controller = new AbortController();
         try {
           const { stream } = await client.event.subscribe({
             signal: controller.signal,
@@ -203,7 +206,7 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
             }
           }
         } finally {
-          controller.abort();
+          if (controller && !controller.signal.aborted) controller.abort();
         }
 
         // ── 4. Fetch the completed message ────────────────────────
@@ -226,7 +229,7 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
         }
 
         // Check for errors on the assistant message
-        if (lastAssistant.info.role === "assistant" && "error" in lastAssistant.info && lastAssistant.info.error) {
+        if (hasProperty(lastAssistant.info, "error") && lastAssistant.info.error) {
           throw new Error(
             `OpenCode assistant error: ${JSON.stringify(lastAssistant.info.error)}`
           );
@@ -266,26 +269,22 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
  *   - `message.*` events → `properties.info.sessionID` or `properties.part.sessionID`
  */
 function isSessionEvent(event: SdkEvent, sessionId: string): boolean {
-  const props = event.properties as Record<string, unknown>;
+  const props: unknown = event.properties;
+
+  if (!hasProperty(props, "sessionID") && !hasProperty(props, "info") && !hasProperty(props, "part")) {
+    return false;
+  }
 
   // Direct sessionID on the event (session.idle, session.error, session.status, etc.)
-  if (props.sessionID === sessionId) return true;
+  if (hasProperty(props, "sessionID") && props.sessionID === sessionId) return true;
 
   // Nested in .info (message.updated)
-  if (
-    props.info &&
-    typeof props.info === "object" &&
-    (props.info as Record<string, unknown>).sessionID === sessionId
-  ) {
+  if (hasProperty(props, "info") && hasProperty(props.info, "sessionID") && props.info.sessionID === sessionId) {
     return true;
   }
 
   // Nested in .part (message.part.updated)
-  if (
-    props.part &&
-    typeof props.part === "object" &&
-    (props.part as Record<string, unknown>).sessionID === sessionId
-  ) {
+  if (hasProperty(props, "part") && hasProperty(props.part, "sessionID") && props.part.sessionID === sessionId) {
     return true;
   }
 

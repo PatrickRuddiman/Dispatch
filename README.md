@@ -181,7 +181,7 @@ Config is stored at `.dispatch/config.json` (project-local):
   "provider": "copilot",
   "model": "claude-sonnet-4-5",
   "source": "github",
-  "testTimeout": 5
+  "testTimeout": 60
 }
 ```
 
@@ -190,7 +190,7 @@ Config is stored at `.dispatch/config.json` (project-local):
 | `provider` | AI backend: `opencode` (default), `copilot`, `claude`, or `codex` |
 | `model` | Model to use when spawning agents (provider-specific format) |
 | `source` | Issue tracker: `github`, `azdevops`, or `md` |
-| `testTimeout` | Test timeout in minutes |
+| `testTimeout` | Test execution timeout in seconds (default: 60) |
 
 ## Options reference
 
