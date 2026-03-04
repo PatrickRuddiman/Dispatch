@@ -56,14 +56,20 @@ export const datasource: Datasource = {
     ];
 
     if (opts.iteration) {
-      const iterValue = opts.iteration === "@CurrentIteration"
-        ? "@CurrentIteration"
-        : `'${opts.iteration}'`;
-      conditions.push(`[System.IterationPath] UNDER ${iterValue}`);
+      const iterValue = String(opts.iteration).trim();
+      if (iterValue === "@CurrentIteration") {
+        conditions.push(`[System.IterationPath] UNDER @CurrentIteration`);
+      } else {
+        const escaped = iterValue.replace(/'/g, "''");
+        if (escaped) conditions.push(`[System.IterationPath] UNDER '${escaped}'`);
+      }
     }
 
     if (opts.area) {
-      conditions.push(`[System.AreaPath] UNDER '${opts.area}'`);
+      const area = String(opts.area).trim().replace(/'/g, "''");
+      if (area) {
+        conditions.push(`[System.AreaPath] UNDER '${area}'`);
+      }
     }
 
     const wiql = `SELECT [System.Id] FROM workitems WHERE ${conditions.join(" AND ")} ORDER BY [System.CreatedDate] DESC`;
