@@ -12,6 +12,7 @@ export default defineConfig({
       "**/node_modules/**",
       "**/dist/**",
       ".worktrees/**",
+      ".dispatch/worktrees/**",
     ],
     coverage: {
       provider: "v8",
@@ -21,9 +22,14 @@ export default defineConfig({
         "src/tests/**",
         "src/**/interface.ts",
         "src/**/index.ts",
+        "src/**/*.d.ts",
+        "src/__mocks__/**",
       ],
+      all: true,
       thresholds: {
-        lines: 80,
+        lines: 85,
+        branches: 80,
+        functions: 85,
       },
     },
   },

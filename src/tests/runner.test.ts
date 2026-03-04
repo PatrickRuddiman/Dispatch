@@ -300,6 +300,42 @@ describe("runFromCli()", () => {
     expect(log.error).toHaveBeenCalledWith("--fix-tests cannot be combined with issue IDs");
   });
 
+  it("exits with error when --feature and --no-branch are both set", async () => {
+    const runner = await boot({ cwd: "/tmp/test" });
+
+    await expect(
+      runner.runFromCli(createRawCliArgs({ feature: true, noBranch: true })),
+    ).rejects.toThrow("process.exit called");
+
+    expect(log.error).toHaveBeenCalledWith(
+      "--feature and --no-branch are mutually exclusive",
+    );
+  });
+
+  it("exits with error when --feature and --spec are both set", async () => {
+    const runner = await boot({ cwd: "/tmp/test" });
+
+    await expect(
+      runner.runFromCli(createRawCliArgs({ feature: true, spec: "1" })),
+    ).rejects.toThrow("process.exit called");
+
+    expect(log.error).toHaveBeenCalledWith(
+      expect.stringContaining("mutually exclusive"),
+    );
+  });
+
+  it("exits with error when --feature and --fix-tests are both set", async () => {
+    const runner = await boot({ cwd: "/tmp/test" });
+
+    await expect(
+      runner.runFromCli(createRawCliArgs({ feature: true, fixTests: true })),
+    ).rejects.toThrow("process.exit called");
+
+    expect(log.error).toHaveBeenCalledWith(
+      expect.stringContaining("mutually exclusive"),
+    );
+  });
+
   it("uses defaultConcurrency when concurrency is not set", async () => {
     const runner = await boot({ cwd: "/tmp/test" });
     await runner.runFromCli(createRawCliArgs({ issueIds: ["1"] }));

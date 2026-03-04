@@ -296,6 +296,35 @@ describe("parseTaskContent", () => {
     expect(result.tasks[0].text).toBe("Task one");
     expect(result.tasks[1].text).toBe("Task two");
   });
+
+  it("rejects malformed task markers", () => {
+    const md = [
+      "- []task",
+      "- [x task",
+      "-[x] task",
+      "- [ ] ",
+    ].join("\n");
+
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks).toHaveLength(0);
+  });
+
+  it("treats unknown mode character (Q) as default serial mode", () => {
+    const md = "- [ ] (Q) task text";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0]).toMatchObject({
+      text: "(Q) task text",
+      mode: "serial",
+    });
+  });
+
+  it("parses tasks with nested markdown formatting", () => {
+    const md = "- [ ] Fix **bold** and `code` in description";
+    const result = parseTaskContent(md, FILE);
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0].text).toBe("Fix **bold** and `code` in description");
+  });
 });
 
 // ─── parseTaskContent: mode extraction ───────────────────────────────

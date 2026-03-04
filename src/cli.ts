@@ -39,6 +39,7 @@ const HELP = `
     --no-plan              Skip the planner agent, dispatch directly
     --no-branch            Skip branch creation, push, and PR lifecycle
     --no-worktree          Skip git worktree isolation for parallel issues
+    --feature              Group issues into a single feature branch and PR
     --force              Ignore prior run state and re-run all tasks
     --concurrency <n>      Max parallel dispatches (default: min(cpus, freeMB/500), max: 64)
     --provider <name>      Agent backend: ${PROVIDER_NAMES.join(", ")} (default: opencode)
@@ -91,6 +92,7 @@ const HELP = `
 export interface ParsedArgs extends Omit<RawCliArgs, "explicitFlags"> {
   help: boolean;
   version: boolean;
+  feature?: boolean;
 }
 
 export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
@@ -132,6 +134,9 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
     } else if (arg === "--no-worktree") {
       args.noWorktree = true;
       explicitFlags.add("noWorktree");
+    } else if (arg === "--feature") {
+      args.feature = true;
+      explicitFlags.add("feature");
     } else if (arg === "--force") {
       args.force = true;
       explicitFlags.add("force");
