@@ -38,7 +38,7 @@ export interface AgentResult<T> {
   /** Machine-readable error classification. */
   errorCode?: AgentErrorCode;
   /** Elapsed wall-clock time in milliseconds. */
-  durationMs?: number;
+  durationMs: number;
 }
 
 // ---------------------------------------------------------------------------
