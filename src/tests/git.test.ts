@@ -749,7 +749,7 @@ describe("MD datasource — no-op dispatch lifecycle methods", () => {
     mockExecFile.mockResolvedValueOnce({ stdout: "John Doe\n", stderr: "" });
     const result = await md.getUsername({ cwd: "/tmp" });
     expect(result).toBe("john-doe");
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["config", "user.name"], { cwd: "/tmp" });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["config", "user.name"], { cwd: "/tmp", shell: false });
   });
 
   it("getUsername falls back to 'local' on error", async () => {
