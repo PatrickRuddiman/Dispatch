@@ -15,9 +15,17 @@ import { promisify } from "node:util";
 import { glob } from "glob";
 import type { Datasource, IssueDetails, IssueFetchOptions, DispatchLifecycleOptions } from "./interface.js";
 import { slugify } from "../helpers/slugify.js";
-import { UnsupportedOperationError } from "../helpers/errors.js";
+import { loadConfig, saveConfig } from "../config.js";
+import { log } from "../helpers/logger.js";
+import { InvalidBranchNameError, isValidBranchName } from "../helpers/branch-validation.js";
 
 const exec = promisify(execFile);
+
+/** Execute a git command and return stdout. */
+async function git(args: string[], cwd: string): Promise<string> {
+  const { stdout } = await exec("git", args, { cwd, shell: process.platform === "win32" });
+  return stdout;
+}
 
 /** Default directory for markdown specs, relative to cwd. */
 const DEFAULT_DIR = ".dispatch/specs";
@@ -47,6 +55,24 @@ function resolveFilePath(issueId: string, opts?: IssueFetchOptions): string {
     return resolve(cwd, filename);
   }
   return join(resolveDir(opts), filename);
+}
+
+/**
+ * Resolve a potentially numeric issue ID to its full file path.
+ * If `issueId` is purely numeric (e.g. "1"), scans the specs directory for
+ * a file matching `{id}-*.md` and returns its path. Falls back to the
+ * standard `resolveFilePath` when no match is found or the ID is not numeric.
+ */
+async function resolveNumericFilePath(issueId: string, opts?: IssueFetchOptions): Promise<string> {
+  if (/^\d+$/.test(issueId)) {
+    const dir = resolveDir(opts);
+    const entries = await readdir(dir);
+    const match = entries.find((f) => f.startsWith(`${issueId}-`) && f.endsWith(".md"));
+    if (match) {
+      return join(dir, match);
+    }
+  }
+  return resolveFilePath(issueId, opts);
 }
 
 /**
@@ -86,8 +112,9 @@ export function extractTitle(content: string, filename: string): string {
  * Build an `IssueDetails` object from a markdown file's content and filename.
  */
 function toIssueDetails(filename: string, content: string, dir: string): IssueDetails {
+  const idMatch = /^(\d+)-/.exec(filename);
   return {
-    number: filename,
+    number: idMatch ? idMatch[1] : filename,
     title: extractTitle(content, filename),
     body: content,
     labels: [],
@@ -102,7 +129,7 @@ export const datasource: Datasource = {
   name: "md",
 
   supportsGit(): boolean {
-    return false;
+    return true;
   },
 
   async list(opts?: IssueFetchOptions): Promise<IssueDetails[]> {
@@ -143,6 +170,15 @@ export const datasource: Datasource = {
   },
 
   async fetch(issueId: string, opts?: IssueFetchOptions): Promise<IssueDetails> {
+    if (/^\d+$/.test(issueId)) {
+      const dir = resolveDir(opts);
+      const entries = await readdir(dir);
+      const match = entries.find((f) => f.startsWith(`${issueId}-`) && f.endsWith(".md"));
+      if (match) {
+        const content = await readFile(join(dir, match), "utf-8");
+        return toIssueDetails(match, content, dir);
+      }
+    }
     const filePath = resolveFilePath(issueId, opts);
     const content = await readFile(filePath, "utf-8");
     const filename = basename(filePath);
@@ -151,12 +187,12 @@ export const datasource: Datasource = {
   },
 
   async update(issueId: string, _title: string, body: string, opts?: IssueFetchOptions): Promise<void> {
-    const filePath = resolveFilePath(issueId, opts);
+    const filePath = await resolveNumericFilePath(issueId, opts);
     await writeFile(filePath, body, "utf-8");
   },
 
   async close(issueId: string, opts?: IssueFetchOptions): Promise<void> {
-    const filePath = resolveFilePath(issueId, opts);
+    const filePath = await resolveNumericFilePath(issueId, opts);
     const filename = basename(filePath);
     const archiveDir = join(dirname(filePath), "archive");
     await mkdir(archiveDir, { recursive: true });
@@ -164,16 +200,49 @@ export const datasource: Datasource = {
   },
 
   async create(title: string, body: string, opts?: IssueFetchOptions): Promise<IssueDetails> {
+    const cwd = opts?.cwd ?? process.cwd();
+    const configDir = join(cwd, ".dispatch");
+    const config = await loadConfig(configDir);
+    const id = config.nextIssueId ?? 1;
+
     const dir = resolveDir(opts);
     await mkdir(dir, { recursive: true });
-    const filename = `${slugify(title)}.md`;
+    const filename = `${id}-${slugify(title)}.md`;
     const filePath = join(dir, filename);
     await writeFile(filePath, body, "utf-8");
-    return toIssueDetails(filename, body, dir);
+
+    config.nextIssueId = id + 1;
+    await saveConfig(config, configDir);
+
+    return {
+      ...toIssueDetails(filename, body, dir),
+      number: String(id),
+    };
   },
 
-  async getDefaultBranch(_opts: DispatchLifecycleOptions): Promise<string> {
-    return "main";
+  async getDefaultBranch(opts: DispatchLifecycleOptions): Promise<string> {
+    const PREFIX = "refs/remotes/origin/";
+    try {
+      const ref = await git(["symbolic-ref", "refs/remotes/origin/HEAD"], opts.cwd);
+      const trimmed = ref.trim();
+      const branch = trimmed.startsWith(PREFIX)
+        ? trimmed.slice(PREFIX.length)
+        : trimmed;
+      if (!isValidBranchName(branch)) {
+        throw new InvalidBranchNameError(branch, "from symbolic-ref output");
+      }
+      return branch;
+    } catch (err) {
+      if (err instanceof InvalidBranchNameError) {
+        throw err;
+      }
+      try {
+        await git(["rev-parse", "--verify", "main"], opts.cwd);
+        return "main";
+      } catch {
+        return "master";
+      }
+    }
   },
 
   async getUsername(opts: DispatchLifecycleOptions): Promise<string> {
@@ -192,20 +261,35 @@ export const datasource: Datasource = {
     return `${username}/dispatch/${issueNumber}-${slug}`;
   },
 
-  async createAndSwitchBranch(_branchName: string, _opts: DispatchLifecycleOptions): Promise<void> {
-    throw new UnsupportedOperationError("createAndSwitchBranch");
+  async createAndSwitchBranch(branchName: string, opts: DispatchLifecycleOptions): Promise<void> {
+    try {
+      await git(["checkout", "-b", branchName], opts.cwd);
+    } catch (err) {
+      const message = log.extractMessage(err);
+      if (message.includes("already exists")) {
+        await git(["checkout", branchName], opts.cwd);
+      } else {
+        throw err;
+      }
+    }
   },
 
-  async switchBranch(_branchName: string, _opts: DispatchLifecycleOptions): Promise<void> {
-    throw new UnsupportedOperationError("switchBranch");
+  async switchBranch(branchName: string, opts: DispatchLifecycleOptions): Promise<void> {
+    await git(["checkout", branchName], opts.cwd);
   },
 
   async pushBranch(_branchName: string, _opts: DispatchLifecycleOptions): Promise<void> {
-    throw new UnsupportedOperationError("pushBranch");
+    // No-op: MD datasource does not push to a remote
   },
 
-  async commitAllChanges(_message: string, _opts: DispatchLifecycleOptions): Promise<void> {
-    throw new UnsupportedOperationError("commitAllChanges");
+  async commitAllChanges(message: string, opts: DispatchLifecycleOptions): Promise<void> {
+    const cwd = opts.cwd;
+    await git(["add", "-A"], cwd);
+    const status = await git(["diff", "--cached", "--stat"], cwd);
+    if (!status.trim()) {
+      return;
+    }
+    await git(["commit", "-m", message], cwd);
   },
 
   async createPullRequest(
@@ -215,6 +299,7 @@ export const datasource: Datasource = {
     _body: string,
     _opts: DispatchLifecycleOptions,
   ): Promise<string> {
-    throw new UnsupportedOperationError("createPullRequest");
+    // No-op: MD datasource does not create pull requests
+    return "";
   },
 };

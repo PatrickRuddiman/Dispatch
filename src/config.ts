@@ -34,6 +34,8 @@ export interface DispatchConfig {
   workItemType?: string;
   iteration?: string;
   area?: string;
+  /** Internal auto-increment counter for MD datasource issue IDs. Defaults to 1 when absent. */
+  nextIssueId?: number;
 }
 
 /** Minimum and maximum bounds for numeric configuration values. */

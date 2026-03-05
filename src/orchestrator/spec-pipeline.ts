@@ -28,6 +28,7 @@ import { elapsed, renderHeaderLines } from "../helpers/format.js";
 import { withRetry } from "../helpers/retry.js";
 import { withTimeout } from "../helpers/timeout.js";
 import { slugify, MAX_SLUG_LENGTH } from "../helpers/slugify.js";
+import { parseIssueFilename } from "./datasource-helpers.js";
 
 /** Per-item timeout for datasource fetch calls (ms). */
 const FETCH_TIMEOUT_MS = 30_000;
@@ -390,7 +391,24 @@ async function generateSpecsBatch(
                 log.success(`Deleted local spec ${filepath} (now tracked as issue #${id})`);
                 identifier = id;
                 issueNumbers.push(id);
-              } else if (datasource.name !== "md") {
+              } else if (datasource.name === "md") {
+                const parsed = parseIssueFilename(filepath);
+                if (parsed) {
+                  await datasource.update(parsed.issueId, details.title, result.data.content, fetchOpts);
+                  log.success(`Updated spec #${parsed.issueId} in-place`);
+                  identifier = parsed.issueId;
+                  issueNumbers.push(parsed.issueId);
+                } else {
+                  const created = await datasource.create(details.title, result.data.content, fetchOpts);
+                  log.success(`Created spec #${created.number}: ${created.url}`);
+                  if (filepath !== created.url) {
+                    await unlink(filepath);
+                  }
+                  filepath = created.url;
+                  identifier = created.number;
+                  issueNumbers.push(created.number);
+                }
+              } else {
                 const created = await datasource.create(details.title, result.data.content, fetchOpts);
                 log.success(`Created issue #${created.number} from ${filepath}`);
                 await unlink(filepath);

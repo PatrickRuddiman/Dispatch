@@ -374,7 +374,7 @@ describe("runSpecPipeline", () => {
       expect(result.issueNumbers).toContain("99");
     });
 
-    it("does not create issue or delete file when datasource is md", async () => {
+    it("creates spec with auto-assigned ID when datasource is md and file has no ID prefix", async () => {
       vi.mocked(getDatasource).mockReturnValue(
         createMockDatasource("md", {
           fetch: mocks.mockFetch,
@@ -382,13 +382,53 @@ describe("runSpecPipeline", () => {
           create: mocks.mockCreate,
         }),
       );
+      mocks.mockCreate.mockResolvedValue({
+        number: "1",
+        title: "Mock Title",
+        body: "# Generated Spec\n\n## Tasks\n\n- [ ] Do something",
+        labels: [],
+        state: "open",
+        url: "/tmp/test-cwd/.dispatch/specs/1-mock-title.md",
+        comments: [],
+        acceptanceCriteria: "",
+      });
       mocks.mockGlob.mockResolvedValue(["/tmp/test-cwd/spec1.md"]);
       vi.mocked(readFile).mockResolvedValue("# File Content\n\nBody");
 
       const result = await runSpecPipeline(baseOpts({ issues: "*.md" }));
 
+      expect(mocks.mockCreate).toHaveBeenCalledWith(
+        "Mock Title",
+        expect.any(String),
+        expect.any(Object),
+      );
+      expect(unlink).toHaveBeenCalledWith("/tmp/test-cwd/spec1.md");
+      expect(result.issueNumbers).toContain("1");
+      expect(result.generated).toBe(1);
+    });
+
+    it("updates spec in-place when datasource is md and file has ID prefix (respec)", async () => {
+      vi.mocked(getDatasource).mockReturnValue(
+        createMockDatasource("md", {
+          fetch: mocks.mockFetch,
+          update: mocks.mockUpdate,
+          create: mocks.mockCreate,
+        }),
+      );
+      mocks.mockGlob.mockResolvedValue(["/tmp/test-cwd/.dispatch/specs/3-my-feature.md"]);
+      vi.mocked(readFile).mockResolvedValue("# My Feature\n\nBody");
+
+      const result = await runSpecPipeline(baseOpts({ issues: ".dispatch/specs/3-*.md" }));
+
+      expect(mocks.mockUpdate).toHaveBeenCalledWith(
+        "3",
+        "Mock Title",
+        expect.any(String),
+        expect.any(Object),
+      );
       expect(mocks.mockCreate).not.toHaveBeenCalled();
       expect(unlink).not.toHaveBeenCalled();
+      expect(result.issueNumbers).toContain("3");
       expect(result.generated).toBe(1);
     });
   });
