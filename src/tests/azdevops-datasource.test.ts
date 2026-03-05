@@ -129,12 +129,11 @@ describe("azdevops datasource — list", () => {
 
     await datasource.list({ cwd: "/tmp", org: "https://dev.azure.com/myorg", project: "MyProj" });
 
-    // Verify batch call (second call) includes --org and --project
+    // Verify batch call (second call) includes --org but NOT --project (show doesn't accept it)
     const batchArgs = mockExecFile.mock.calls[1][1] as string[];
     expect(batchArgs).toContain("--org");
     expect(batchArgs).toContain("https://dev.azure.com/myorg");
-    expect(batchArgs).toContain("--project");
-    expect(batchArgs).toContain("MyProj");
+    expect(batchArgs).not.toContain("--project");
   });
 
   it("appends iteration filter to WIQL query", async () => {
@@ -241,6 +240,7 @@ describe("azdevops datasource — fetch", () => {
     const fetchArgs = mockExecFile.mock.calls[0][1] as string[];
     expect(fetchArgs).toContain("--org");
     expect(fetchArgs).toContain("org-url");
+    expect(fetchArgs).not.toContain("--project");
   });
 
   it("returns empty comments when fetchComments fails", async () => {
@@ -391,7 +391,7 @@ describe("azdevops datasource — update", () => {
 
     const args = mockExecFile.mock.calls[0][1] as string[];
     expect(args).toContain("--org");
-    expect(args).toContain("--project");
+    expect(args).not.toContain("--project");
   });
 });
 
@@ -534,12 +534,14 @@ describe("azdevops datasource — close", () => {
     const showArgs = mockExecFile.mock.calls[0][1] as string[];
     expect(showArgs).toContain("--org");
     expect(showArgs).toContain("close-org5");
-    expect(showArgs).toContain("--project");
-    expect(showArgs).toContain("close-proj5");
+    expect(showArgs).not.toContain("--project");
+
+    const stateListArgs = mockExecFile.mock.calls[1][1] as string[];
+    expect(stateListArgs).toContain("--project");
 
     const updateArgs = mockExecFile.mock.calls[2][1] as string[];
     expect(updateArgs).toContain("--org");
-    expect(updateArgs).toContain("--project");
+    expect(updateArgs).not.toContain("--project");
   });
 });
 

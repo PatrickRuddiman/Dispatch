@@ -197,7 +197,6 @@ export const datasource: Datasource = {
         "--output", "json",
       ];
       if (opts.org) batchArgs.push("--org", opts.org);
-      if (opts.project) batchArgs.push("--project", opts.project);
 
       const { stdout: batchStdout } = await exec("az", batchArgs, {
         cwd: opts.cwd || process.cwd(),
@@ -254,9 +253,6 @@ export const datasource: Datasource = {
     if (opts.org) {
       args.push("--org", opts.org);
     }
-    if (opts.project) {
-      args.push("--project", opts.project);
-    }
 
     const { stdout } = await exec("az", args, {
       cwd: opts.cwd || process.cwd(),
@@ -292,7 +288,6 @@ export const datasource: Datasource = {
       body,
     ];
     if (opts.org) args.push("--org", opts.org);
-    if (opts.project) args.push("--project", opts.project);
     await exec("az", args, { cwd: opts.cwd || process.cwd(), shell: process.platform === "win32" });
   },
 
@@ -312,7 +307,6 @@ export const datasource: Datasource = {
         "json",
       ];
       if (opts.org) showArgs.push("--org", opts.org);
-      if (opts.project) showArgs.push("--project", opts.project);
       const { stdout } = await exec("az", showArgs, {
         cwd: opts.cwd || process.cwd(),
         shell: process.platform === "win32",
@@ -339,7 +333,6 @@ export const datasource: Datasource = {
       state,
     ];
     if (opts.org) args.push("--org", opts.org);
-    if (opts.project) args.push("--project", opts.project);
     await exec("az", args, { cwd: opts.cwd || process.cwd(), shell: process.platform === "win32" });
   },
 
@@ -577,9 +570,6 @@ async function fetchComments(
 
     if (opts.org) {
       args.push("--org", opts.org);
-    }
-    if (opts.project) {
-      args.push("--project", opts.project);
     }
 
     const { stdout } = await exec("az", args, {
