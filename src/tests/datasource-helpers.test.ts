@@ -528,6 +528,136 @@ describe("writeItemsToTempDir", () => {
       expect(content).toBe(mapped!.body);
     }
   });
+
+  it("sanitizes absolute paths in item.number to just the basename", async () => {
+    const item = createIssueDetails({
+      number: "/home/user/source/repos/PROJECT/.dispatch/specs/batch-updates.md",
+      title: "Batch Updates",
+      body: "body",
+    });
+
+    const result = await writeItemsToTempDir([item]);
+    tempFiles = result.files;
+
+    expect(result.files).toHaveLength(1);
+    expect(basename(result.files[0])).toBe("batch-updates-batch-updates.md");
+  });
+
+  it("sanitizes relative paths in item.number to just the basename", async () => {
+    const item = createIssueDetails({
+      number: ".dispatch/specs/my-spec.md",
+      title: "My Spec",
+      body: "body",
+    });
+
+    const result = await writeItemsToTempDir([item]);
+    tempFiles = result.files;
+
+    expect(result.files).toHaveLength(1);
+    expect(basename(result.files[0])).toBe("my-spec-my-spec.md");
+  });
+
+  it("leaves numeric IDs unchanged in item.number", async () => {
+    const item = createIssueDetails({
+      number: "42",
+      title: "Some Issue",
+      body: "body",
+    });
+
+    const result = await writeItemsToTempDir([item]);
+    tempFiles = result.files;
+
+    expect(basename(result.files[0])).toBe("42-some-issue.md");
+  });
+
+  it("leaves plain string IDs unchanged in item.number", async () => {
+    const item = createIssueDetails({
+      number: "batch-updates",
+      title: "Batch Updates",
+      body: "body",
+    });
+
+    const result = await writeItemsToTempDir([item]);
+    tempFiles = result.files;
+
+    expect(basename(result.files[0])).toBe("batch-updates-batch-updates.md");
+  });
+
+  it("handles item.number as an absolute path by producing a flat filename", async () => {
+    const item = createIssueDetails({
+      number: "/home/user/project/.dispatch/specs/batch-updates.md",
+      title: "Batch Updates",
+      body: "absolute path body",
+    });
+
+    const result = await writeItemsToTempDir([item]);
+    tempFiles = result.files;
+
+    expect(result.files).toHaveLength(1);
+    // The file should be written inside the temp directory, not at the absolute path
+    const file = result.files[0];
+    expect(basename(file)).not.toContain("/");
+    expect(basename(file)).toMatch(/\.md$/);
+    const content = await readFile(file, "utf-8");
+    expect(content).toBe("absolute path body");
+  });
+
+  it("handles item.number as a relative path with separators by producing a flat filename", async () => {
+    const item = createIssueDetails({
+      number: ".dispatch/specs/batch-updates.md",
+      title: "Batch Updates",
+      body: "relative path body",
+    });
+
+    const result = await writeItemsToTempDir([item]);
+    tempFiles = result.files;
+
+    expect(result.files).toHaveLength(1);
+    const file = result.files[0];
+    expect(basename(file)).not.toContain("/");
+    expect(basename(file)).toMatch(/\.md$/);
+    const content = await readFile(file, "utf-8");
+    expect(content).toBe("relative path body");
+  });
+
+  it("handles item.number as a plain filename with .md extension", async () => {
+    const item = createIssueDetails({
+      number: "batch-updates.md",
+      title: "Batch Updates",
+      body: "plain filename body",
+    });
+
+    const result = await writeItemsToTempDir([item]);
+    tempFiles = result.files;
+
+    expect(result.files).toHaveLength(1);
+    const file = result.files[0];
+    // No path separators in basename
+    expect(basename(file)).not.toContain("/");
+    expect(basename(file)).toMatch(/\.md$/);
+    const content = await readFile(file, "utf-8");
+    expect(content).toBe("plain filename body");
+  });
+
+  it("preserves existing numeric ID behavior unchanged", async () => {
+    const item = createIssueDetails({
+      number: "42",
+      title: "Fix Authentication Bug",
+      body: "numeric id body",
+    });
+
+    const result = await writeItemsToTempDir([item]);
+    tempFiles = result.files;
+
+    expect(result.files).toHaveLength(1);
+    expect(basename(result.files[0])).toBe("42-fix-authentication-bug.md");
+    const content = await readFile(result.files[0], "utf-8");
+    expect(content).toBe("numeric id body");
+    // Verify mapping is preserved
+    const mapped = result.issueDetailsByFile.get(result.files[0]);
+    expect(mapped).toBeDefined();
+    expect(mapped!.number).toBe("42");
+  });
 });
 
 // ─── buildPrTitle ───────────────────────────────────────────────────

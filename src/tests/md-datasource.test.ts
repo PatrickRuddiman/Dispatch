@@ -17,12 +17,17 @@ vi.mock("glob", () => ({
   glob: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock("../config.js", () => ({
+  loadConfig: vi.fn().mockResolvedValue({}),
+  saveConfig: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { datasource } from "../datasources/md.js";
-import { UnsupportedOperationError } from "../helpers/errors.js";
 import { execFile } from "node:child_process";
 import { readFile, writeFile, readdir, mkdir, rename } from "node:fs/promises";
 import { join, dirname, resolve } from "node:path";
 import { glob } from "glob";
+import { loadConfig, saveConfig } from "../config.js";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -81,6 +86,23 @@ describe("list", () => {
     const results = await datasource.list({ cwd: "/tmp", pattern: "nothing/*.md" });
 
     expect(results).toHaveLength(0);
+  });
+
+  it("extracts numeric ID prefix as the number field for {id}-{slug}.md files", async () => {
+    vi.mocked(readdir).mockResolvedValue(["1-feature-a.md", "2-feature-b.md"] as any);
+    vi.mocked(readFile).mockImplementation(async (filePath) => {
+      if (String(filePath).endsWith("1-feature-a.md")) return "# Feature A\nContent A";
+      if (String(filePath).endsWith("2-feature-b.md")) return "# Feature B\nContent B";
+      return "";
+    });
+
+    const results = await datasource.list({ cwd: "/tmp/project" });
+
+    expect(results).toHaveLength(2);
+    expect(results[0].number).toBe("1");
+    expect(results[0].title).toBe("Feature A");
+    expect(results[1].number).toBe("2");
+    expect(results[1].title).toBe("Feature B");
   });
 
   it("returns empty array when default specs directory does not exist", async () => {
@@ -169,53 +191,107 @@ describe("buildBranchName", () => {
 });
 
 describe("getDefaultBranch", () => {
-  it('returns "main"', async () => {
+  it("detects default branch via git symbolic-ref", async () => {
+    mockExecFile(vi.mocked(execFile), (_cmd, _args, _opts, cb) => {
+      cb(null, { stdout: "refs/remotes/origin/main\n", stderr: "" });
+    });
     const result = await datasource.getDefaultBranch({ cwd: "/tmp" });
     expect(result).toBe("main");
+  });
+
+  it('falls back to "main" when symbolic-ref fails and main exists', async () => {
+    let callCount = 0;
+    mockExecFile(vi.mocked(execFile), (_cmd, args, _opts, cb) => {
+      callCount++;
+      if (callCount === 1) {
+        cb(new Error("not a git repo"));
+      } else {
+        cb(null, { stdout: "", stderr: "" });
+      }
+    });
+    const result = await datasource.getDefaultBranch({ cwd: "/tmp" });
+    expect(result).toBe("main");
+  });
+
+  it('falls back to "master" when both symbolic-ref and main check fail', async () => {
+    mockExecFile(vi.mocked(execFile), (_cmd, _args, _opts, cb) => {
+      cb(new Error("failed"));
+    });
+    const result = await datasource.getDefaultBranch({ cwd: "/tmp" });
+    expect(result).toBe("master");
   });
 });
 
 describe("supportsGit", () => {
-  it("returns false", () => {
-    expect(datasource.supportsGit()).toBe(false);
+  it("returns true", () => {
+    expect(datasource.supportsGit()).toBe(true);
   });
 });
 
 describe("git lifecycle", () => {
-  it("createAndSwitchBranch throws UnsupportedOperationError", async () => {
-    await expect(
-      datasource.createAndSwitchBranch("branch", { cwd: "/tmp" }),
-    ).rejects.toThrow(UnsupportedOperationError);
+  it("createAndSwitchBranch runs git checkout -b", async () => {
+    mockExecFile(vi.mocked(execFile), (_cmd, _args, _opts, cb) => {
+      cb(null, { stdout: "", stderr: "" });
+    });
+    await datasource.createAndSwitchBranch("user/dispatch/1-feat", { cwd: "/tmp" });
+    expect(execFile).toHaveBeenCalledWith(
+      "git",
+      ["checkout", "-b", "user/dispatch/1-feat"],
+      expect.objectContaining({ cwd: "/tmp" }),
+      expect.any(Function),
+    );
   });
 
-  it("switchBranch throws UnsupportedOperationError", async () => {
-    await expect(
-      datasource.switchBranch("branch", { cwd: "/tmp" }),
-    ).rejects.toThrow(UnsupportedOperationError);
+  it("switchBranch runs git checkout", async () => {
+    mockExecFile(vi.mocked(execFile), (_cmd, _args, _opts, cb) => {
+      cb(null, { stdout: "", stderr: "" });
+    });
+    await datasource.switchBranch("main", { cwd: "/tmp" });
+    expect(execFile).toHaveBeenCalledWith(
+      "git",
+      ["checkout", "main"],
+      expect.objectContaining({ cwd: "/tmp" }),
+      expect.any(Function),
+    );
   });
 
-  it("pushBranch throws UnsupportedOperationError", async () => {
-    await expect(
-      datasource.pushBranch("branch", { cwd: "/tmp" }),
-    ).rejects.toThrow(UnsupportedOperationError);
+  it("pushBranch is a no-op", async () => {
+    await datasource.pushBranch("branch", { cwd: "/tmp" });
+    expect(execFile).not.toHaveBeenCalled();
   });
 
-  it("commitAllChanges throws UnsupportedOperationError", async () => {
-    await expect(
-      datasource.commitAllChanges("msg", { cwd: "/tmp" }),
-    ).rejects.toThrow(UnsupportedOperationError);
+  it("commitAllChanges stages and commits", async () => {
+    mockExecFile(vi.mocked(execFile), (_cmd, args, _opts, cb) => {
+      if (args && args[0] === "diff") {
+        cb(null, { stdout: " file.ts | 1 +\n", stderr: "" });
+      } else {
+        cb(null, { stdout: "", stderr: "" });
+      }
+    });
+    await datasource.commitAllChanges("feat: test", { cwd: "/tmp" });
+    expect(execFile).toHaveBeenCalledWith(
+      "git",
+      ["add", "-A"],
+      expect.objectContaining({ cwd: "/tmp" }),
+      expect.any(Function),
+    );
+    expect(execFile).toHaveBeenCalledWith(
+      "git",
+      ["commit", "-m", "feat: test"],
+      expect.objectContaining({ cwd: "/tmp" }),
+      expect.any(Function),
+    );
   });
 
-  it("createPullRequest throws UnsupportedOperationError", async () => {
-    await expect(
-      datasource.createPullRequest(
-        "branch",
-        "42",
-        "title",
-        "body",
-        { cwd: "/tmp" },
-      ),
-    ).rejects.toThrow(UnsupportedOperationError);
+  it("createPullRequest returns empty string", async () => {
+    const result = await datasource.createPullRequest(
+      "branch",
+      "42",
+      "title",
+      "body",
+      { cwd: "/tmp" },
+    );
+    expect(result).toBe("");
   });
 });
 
@@ -270,6 +346,45 @@ describe("fetch", () => {
     const expected = resolve("/tmp", "subfolder/task.md");
     expect(vi.mocked(readFile)).toHaveBeenCalledWith(expected, "utf-8");
   });
+
+  it("resolves a numeric-only ID by scanning for {id}-*.md in specs directory", async () => {
+    vi.mocked(readdir).mockResolvedValue(["1-my-feature.md", "2-other-task.md"] as any);
+    vi.mocked(readFile).mockResolvedValue("# My Feature\n\nBody content");
+
+    const result = await datasource.fetch("1", { cwd: "/tmp" });
+
+    expect(readdir).toHaveBeenCalledWith(join("/tmp", ".dispatch/specs"));
+    expect(vi.mocked(readFile)).toHaveBeenCalledWith(
+      join("/tmp", ".dispatch/specs", "1-my-feature.md"),
+      "utf-8",
+    );
+    expect(result.number).toBe("1");
+    expect(result.title).toBe("My Feature");
+  });
+
+  it("falls through to resolveFilePath when numeric ID has no matching file", async () => {
+    vi.mocked(readdir).mockResolvedValue(["1-my-feature.md"] as any);
+    vi.mocked(readFile).mockRejectedValue(new Error("ENOENT"));
+
+    await expect(datasource.fetch("99", { cwd: "/tmp" })).rejects.toThrow();
+  });
+
+  it("does not use numeric scan for non-numeric IDs", async () => {
+    vi.mocked(readFile).mockResolvedValue("# Test\n\nBody");
+
+    await datasource.fetch("my-issue", { cwd: "/tmp" });
+
+    expect(readdir).not.toHaveBeenCalled();
+  });
+
+  it("extracts numeric ID prefix from {id}-{slug}.md filename as number", async () => {
+    vi.mocked(readFile).mockResolvedValue("# Dark Mode\n\nAdd dark mode support");
+
+    const result = await datasource.fetch("3-add-dark-mode.md", { cwd: "/tmp" });
+
+    expect(result.number).toBe("3");
+    expect(result.title).toBe("Dark Mode");
+  });
 });
 
 describe("update", () => {
@@ -301,6 +416,31 @@ describe("update", () => {
     await datasource.update("../specs/my-issue.md", "title", "new body", { cwd: "/tmp/project" });
     const expected = resolve("/tmp/project", "../specs/my-issue.md");
     expect(vi.mocked(writeFile)).toHaveBeenCalledWith(expected, "new body", "utf-8");
+  });
+
+  it("resolves a numeric-only ID by scanning for {id}-*.md in specs directory", async () => {
+    vi.mocked(readdir).mockResolvedValue(["1-my-feature.md", "2-other-task.md"] as any);
+
+    await datasource.update("1", "title", "new body", { cwd: "/tmp" });
+
+    expect(readdir).toHaveBeenCalledWith(join("/tmp", ".dispatch/specs"));
+    expect(vi.mocked(writeFile)).toHaveBeenCalledWith(
+      join("/tmp", ".dispatch/specs", "1-my-feature.md"),
+      "new body",
+      "utf-8",
+    );
+  });
+
+  it("falls through to resolveFilePath when numeric ID has no matching file", async () => {
+    vi.mocked(readdir).mockResolvedValue(["1-my-feature.md"] as any);
+
+    await datasource.update("99", "title", "new body", { cwd: "/tmp" });
+
+    expect(vi.mocked(writeFile)).toHaveBeenCalledWith(
+      join("/tmp", ".dispatch/specs", "99.md"),
+      "new body",
+      "utf-8",
+    );
   });
 });
 
@@ -338,5 +478,80 @@ describe("close", () => {
     const expected = resolve("/tmp/project", "../specs/my-issue.md");
     const archiveDest = join(dirname(expected), "archive", "my-issue.md");
     expect(vi.mocked(rename)).toHaveBeenCalledWith(expected, archiveDest);
+  });
+
+  it("resolves a numeric-only ID by scanning for {id}-*.md in specs directory", async () => {
+    vi.mocked(readdir).mockResolvedValue(["1-my-feature.md", "2-other-task.md"] as any);
+
+    await datasource.close("1", { cwd: "/tmp" });
+
+    expect(readdir).toHaveBeenCalledWith(join("/tmp", ".dispatch/specs"));
+    const expectedFile = join("/tmp", ".dispatch/specs", "1-my-feature.md");
+    const expectedArchive = join("/tmp", ".dispatch/specs", "archive");
+    expect(vi.mocked(mkdir)).toHaveBeenCalledWith(expectedArchive, { recursive: true });
+    expect(vi.mocked(rename)).toHaveBeenCalledWith(expectedFile, join(expectedArchive, "1-my-feature.md"));
+  });
+
+  it("falls through to resolveFilePath when numeric ID has no matching file", async () => {
+    vi.mocked(readdir).mockResolvedValue(["1-my-feature.md"] as any);
+
+    await datasource.close("99", { cwd: "/tmp" });
+
+    const expectedFile = join("/tmp", ".dispatch/specs", "99.md");
+    const expectedArchive = join("/tmp", ".dispatch/specs", "archive");
+    expect(vi.mocked(mkdir)).toHaveBeenCalledWith(expectedArchive, { recursive: true });
+    expect(vi.mocked(rename)).toHaveBeenCalledWith(expectedFile, join(expectedArchive, "99.md"));
+  });
+});
+
+describe("create", () => {
+  it("creates a file with auto-incremented ID prefix defaulting to 1", async () => {
+    vi.mocked(loadConfig).mockResolvedValue({});
+    vi.mocked(saveConfig).mockResolvedValue(undefined);
+
+    const result = await datasource.create("My Feature", "# My Feature\n\nbody content", { cwd: "/tmp" });
+
+    expect(result.number).toBe("1");
+    expect(result.title).toBe("My Feature");
+    expect(vi.mocked(writeFile)).toHaveBeenCalledWith(
+      join("/tmp", ".dispatch/specs", "1-my-feature.md"),
+      "# My Feature\n\nbody content",
+      "utf-8",
+    );
+    expect(loadConfig).toHaveBeenCalledWith(join("/tmp", ".dispatch"));
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ nextIssueId: 2 }),
+      join("/tmp", ".dispatch"),
+    );
+  });
+
+  it("uses existing nextIssueId from config", async () => {
+    vi.mocked(loadConfig).mockResolvedValue({ nextIssueId: 5 });
+    vi.mocked(saveConfig).mockResolvedValue(undefined);
+
+    const result = await datasource.create("Another Task", "body", { cwd: "/tmp" });
+
+    expect(result.number).toBe("5");
+    expect(vi.mocked(writeFile)).toHaveBeenCalledWith(
+      join("/tmp", ".dispatch/specs", "5-another-task.md"),
+      "body",
+      "utf-8",
+    );
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ nextIssueId: 6 }),
+      join("/tmp", ".dispatch"),
+    );
+  });
+
+  it("increments the counter sequentially across calls", async () => {
+    vi.mocked(loadConfig).mockResolvedValueOnce({ nextIssueId: 1 });
+    vi.mocked(saveConfig).mockResolvedValue(undefined);
+
+    await datasource.create("First", "body1", { cwd: "/tmp" });
+
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ nextIssueId: 2 }),
+      join("/tmp", ".dispatch"),
+    );
   });
 });

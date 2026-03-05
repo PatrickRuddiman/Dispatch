@@ -269,16 +269,16 @@ describe("MD datasource — create", () => {
     const specsDir = join(tmpDir, ".dispatch", "specs");
     await mkdir(specsDir, { recursive: true });
     const result = await md.create("My New Feature", "body content", { cwd: tmpDir });
-    expect(result.number).toBe("my-new-feature.md");
-    const content = await readFile(join(specsDir, "my-new-feature.md"), "utf-8");
+    expect(result.number).toBe("1");
+    const content = await readFile(join(specsDir, "1-my-new-feature.md"), "utf-8");
     expect(content).toBe("body content");
   });
 
   it("creates specs directory if it does not exist", async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
     const result = await md.create("Auto Dir", "auto body", { cwd: tmpDir });
-    expect(result.number).toBe("auto-dir.md");
-    const content = await readFile(join(tmpDir, ".dispatch", "specs", "auto-dir.md"), "utf-8");
+    expect(result.number).toBe("1");
+    const content = await readFile(join(tmpDir, ".dispatch", "specs", "1-auto-dir.md"), "utf-8");
     expect(content).toBe("auto body");
   });
 

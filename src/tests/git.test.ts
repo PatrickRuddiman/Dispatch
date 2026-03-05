@@ -736,13 +736,28 @@ describe("Azure DevOps datasource — buildBranchName", () => {
   });
 });
 
-// ─── Section J: MD datasource — no-op dispatch lifecycle methods ────────────────
+// ─── Section J: MD datasource — git lifecycle methods ───────────────────────────
 
-describe("MD datasource — no-op dispatch lifecycle methods", () => {
-  it("getDefaultBranch resolves to 'main'", async () => {
+describe("MD datasource — git lifecycle methods", () => {
+  it("getDefaultBranch detects branch via git symbolic-ref", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: "refs/remotes/origin/main\n", stderr: "" });
     const result = await md.getDefaultBranch({ cwd: "/tmp" });
     expect(result).toBe("main");
-    expect(mockExecFile).not.toHaveBeenCalled();
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], { cwd: "/tmp", shell: false });
+  });
+
+  it("getDefaultBranch falls back to main when symbolic-ref fails", async () => {
+    mockExecFile.mockRejectedValueOnce(new Error("not set"));
+    mockExecFile.mockResolvedValueOnce({ stdout: "", stderr: "" });
+    const result = await md.getDefaultBranch({ cwd: "/tmp" });
+    expect(result).toBe("main");
+  });
+
+  it("getDefaultBranch falls back to master when main check also fails", async () => {
+    mockExecFile.mockRejectedValueOnce(new Error("not set"));
+    mockExecFile.mockRejectedValueOnce(new Error("not found"));
+    const result = await md.getDefaultBranch({ cwd: "/tmp" });
+    expect(result).toBe("master");
   });
 
   it("getUsername resolves via git config user.name", async () => {
@@ -765,48 +780,65 @@ describe("MD datasource — no-op dispatch lifecycle methods", () => {
     expect(mockExecFile).not.toHaveBeenCalled();
   });
 
-  it("createAndSwitchBranch throws UnsupportedOperationError", async () => {
-    await expect(
-      md.createAndSwitchBranch("dispatch/42-feature", { cwd: "/tmp" }),
-    ).rejects.toThrow(UnsupportedOperationError);
+  it("createAndSwitchBranch runs git checkout -b", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: "", stderr: "" });
+    await md.createAndSwitchBranch("local/dispatch/1-feat", { cwd: "/tmp" });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "-b", "local/dispatch/1-feat"], { cwd: "/tmp", shell: false });
   });
 
-  it("switchBranch throws UnsupportedOperationError", async () => {
-    await expect(
-      md.switchBranch("main", { cwd: "/tmp" }),
-    ).rejects.toThrow(UnsupportedOperationError);
+  it("createAndSwitchBranch falls back to checkout when branch exists", async () => {
+    mockExecFile.mockRejectedValueOnce(new Error("fatal: a branch named 'x' already exists"));
+    mockExecFile.mockResolvedValueOnce({ stdout: "", stderr: "" });
+    await md.createAndSwitchBranch("local/dispatch/1-feat", { cwd: "/tmp" });
+    expect(mockExecFile).toHaveBeenCalledTimes(2);
+    expect(mockExecFile).toHaveBeenLastCalledWith("git", ["checkout", "local/dispatch/1-feat"], { cwd: "/tmp", shell: false });
   });
 
-  it("pushBranch throws UnsupportedOperationError", async () => {
-    await expect(
-      md.pushBranch("dispatch/42-feature", { cwd: "/tmp" }),
-    ).rejects.toThrow(UnsupportedOperationError);
+  it("switchBranch runs git checkout", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: "", stderr: "" });
+    await md.switchBranch("main", { cwd: "/tmp" });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "main"], { cwd: "/tmp", shell: false });
   });
 
-  it("commitAllChanges throws UnsupportedOperationError", async () => {
-    await expect(
-      md.commitAllChanges("feat: test", { cwd: "/tmp" }),
-    ).rejects.toThrow(UnsupportedOperationError);
+  it("pushBranch is a no-op", async () => {
+    await md.pushBranch("dispatch/42-feature", { cwd: "/tmp" });
+    expect(mockExecFile).not.toHaveBeenCalled();
   });
 
-  it("createPullRequest throws UnsupportedOperationError", async () => {
-    await expect(
-      md.createPullRequest("dispatch/42-feature", "42", "title", "", {
-        cwd: "/tmp",
-      }),
-    ).rejects.toThrow(UnsupportedOperationError);
+  it("commitAllChanges stages and commits changes", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: "", stderr: "" }); // git add -A
+    mockExecFile.mockResolvedValueOnce({ stdout: " file.ts | 1 +\n", stderr: "" }); // git diff --cached --stat
+    mockExecFile.mockResolvedValueOnce({ stdout: "", stderr: "" }); // git commit
+    await md.commitAllChanges("feat: test", { cwd: "/tmp" });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["add", "-A"], { cwd: "/tmp", shell: false });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["commit", "-m", "feat: test"], { cwd: "/tmp", shell: false });
   });
 
-  it("createPullRequest with custom body throws UnsupportedOperationError", async () => {
-    await expect(
-      md.createPullRequest(
-        "dispatch/42-feature",
-        "42",
-        "feat: add auth",
-        "## Summary\n\nCustom body content\n\nCloses #42",
-        { cwd: "/tmp" },
-      ),
-    ).rejects.toThrow(UnsupportedOperationError);
+  it("commitAllChanges skips commit when nothing staged", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: "", stderr: "" }); // git add -A
+    mockExecFile.mockResolvedValueOnce({ stdout: "", stderr: "" }); // git diff --cached --stat (empty)
+    await md.commitAllChanges("feat: test", { cwd: "/tmp" });
+    expect(mockExecFile).toHaveBeenCalledTimes(2);
+  });
+
+  it("createPullRequest returns empty string", async () => {
+    const result = await md.createPullRequest("dispatch/42-feature", "42", "title", "", {
+      cwd: "/tmp",
+    });
+    expect(result).toBe("");
+    expect(mockExecFile).not.toHaveBeenCalled();
+  });
+
+  it("createPullRequest with custom body returns empty string", async () => {
+    const result = await md.createPullRequest(
+      "dispatch/42-feature",
+      "42",
+      "feat: add auth",
+      "## Summary\n\nCustom body content\n\nCloses #42",
+      { cwd: "/tmp" },
+    );
+    expect(result).toBe("");
+    expect(mockExecFile).not.toHaveBeenCalled();
   });
 });
 
