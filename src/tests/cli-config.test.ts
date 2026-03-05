@@ -468,6 +468,93 @@ describe("resolveCliConfig()", () => {
       expect(result.issueSource).toBeUndefined();
     });
 
+    it("auto-detects datasource in fix-tests mode with issue IDs", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+      vi.mocked(detectDatasource).mockResolvedValue("github");
+
+      const args = createRawCliArgs({
+        explicitFlags: new Set(),
+        provider: undefined as never,
+        issueSource: undefined,
+        fixTests: true,
+        issueIds: ["14"],
+      });
+
+      const result = await resolveCliConfig(args);
+      expect(detectDatasource).toHaveBeenCalledWith("/tmp/test-cwd");
+      expect(result.issueSource).toBe("github");
+    });
+
+    it("exits with error in fix-tests mode with issue IDs when detection fails", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+      vi.mocked(detectDatasource).mockResolvedValue(null);
+
+      const args = createRawCliArgs({
+        explicitFlags: new Set(),
+        provider: undefined as never,
+        issueSource: undefined,
+        fixTests: true,
+        issueIds: ["14"],
+      });
+
+      await expect(resolveCliConfig(args)).rejects.toThrow(
+        "process.exit called",
+      );
+      expect(detectDatasource).toHaveBeenCalledWith("/tmp/test-cwd");
+      expect(log.error).toHaveBeenCalledWith(
+        expect.stringContaining("auto-detection failed"),
+      );
+    });
+
+    it("uses explicit source in fix-tests mode with issue IDs", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+
+      const args = createRawCliArgs({
+        explicitFlags: new Set(["issueSource"]),
+        provider: undefined as never,
+        issueSource: "azdevops",
+        fixTests: true,
+        issueIds: ["14"],
+      });
+
+      const result = await resolveCliConfig(args);
+      expect(detectDatasource).not.toHaveBeenCalled();
+      expect(result.issueSource).toBe("azdevops");
+    });
+
+    it("uses config source in fix-tests mode with issue IDs", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot", source: "github" });
+
+      const args = createRawCliArgs({
+        explicitFlags: new Set(),
+        provider: undefined as never,
+        issueSource: undefined,
+        fixTests: true,
+        issueIds: ["14"],
+      });
+
+      const result = await resolveCliConfig(args);
+      expect(detectDatasource).not.toHaveBeenCalled();
+      expect(result.issueSource).toBe("github");
+    });
+
+    it("auto-detects datasource in fix-tests mode with multiple issue IDs", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+      vi.mocked(detectDatasource).mockResolvedValue("github");
+
+      const args = createRawCliArgs({
+        explicitFlags: new Set(),
+        provider: undefined as never,
+        issueSource: undefined,
+        fixTests: true,
+        issueIds: ["14", "15", "16"],
+      });
+
+      const result = await resolveCliConfig(args);
+      expect(detectDatasource).toHaveBeenCalledWith("/tmp/test-cwd");
+      expect(result.issueSource).toBe("github");
+    });
+
     it("skips auto-detection in spec mode", async () => {
       vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
 

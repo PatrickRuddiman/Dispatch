@@ -169,6 +169,26 @@ describe("parseArgs --fix-tests", () => {
     expect(args.fixTests).toBe(true);
     expect(args.dryRun).toBe(true);
   });
+
+  it("combines --fix-tests with positional issue IDs", () => {
+    const [args, flags] = parseArgs(["--fix-tests", "14", "15"]);
+    expect(args.fixTests).toBe(true);
+    expect(args.issueIds).toEqual(["14", "15"]);
+    expect(flags.has("fixTests")).toBe(true);
+  });
+
+  it("combines --fix-tests with a single positional issue ID", () => {
+    const [args] = parseArgs(["--fix-tests", "42"]);
+    expect(args.fixTests).toBe(true);
+    expect(args.issueIds).toEqual(["42"]);
+  });
+
+  it("combines --fix-tests with positional issue IDs and --verbose", () => {
+    const [args] = parseArgs(["--fix-tests", "14", "15", "--verbose"]);
+    expect(args.fixTests).toBe(true);
+    expect(args.issueIds).toEqual(["14", "15"]);
+    expect(args.verbose).toBe(true);
+  });
 });
 
 describe("parseArgs --fix-tests mutual exclusion (at parser level)", () => {

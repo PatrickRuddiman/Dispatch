@@ -34,6 +34,7 @@ const HELP = `
     dispatch --respec <glob>         Regenerate specs matching a glob pattern
     dispatch --spec "description"    Generate a spec from an inline text description
     dispatch --fix-tests             Run tests and fix failures via AI agent
+    dispatch --fix-tests <ids>       Fix tests on specific issue branches (in worktrees)
 
   Dispatch options:
     --dry-run              List tasks without dispatching (also works with --spec)
@@ -88,6 +89,10 @@ const HELP = `
     dispatch --spec "feature A should do x" --provider copilot
     dispatch --feature
     dispatch --feature my-feature
+    dispatch --fix-tests
+    dispatch --fix-tests 14
+    dispatch --fix-tests 14 15 16
+    dispatch --fix-tests 14,15,16
     dispatch config
 `.trimStart();
 
@@ -118,7 +123,7 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
     .option("--feature [name]", "Group issues into a single feature branch")
     .option("--force", "Ignore prior run state")
     .option("--verbose", "Show detailed debug output")
-    .option("--fix-tests", "Run tests and fix failures")
+    .option("--fix-tests", "Run tests and fix failures (optionally pass issue IDs to target specific branches)")
     .option("--spec <values...>", "Spec mode: issue numbers, glob, or text")
     .option("--respec [values...]", "Regenerate specs")
     .addOption(
