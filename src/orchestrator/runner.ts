@@ -140,6 +140,86 @@ export interface OrchestratorAgent {
   runFromCli(args: RawCliArgs): Promise<RunResult>;
 }
 
+/** Options for the multi-issue worktree fix-tests flow. */
+interface MultiIssueFixTestsOptions {
+  cwd: string;
+  issueIds: string[];
+  source: DatasourceName;
+  provider: ProviderName;
+  serverUrl?: string;
+  verbose: boolean;
+  testTimeout?: number;
+  org?: string;
+  project?: string;
+}
+
+/**
+ * Run fix-tests across multiple issues, each in its own worktree.
+ *
+ * Fetches the specified issues from the configured datasource,
+ * creates a worktree per issue, runs `runFixTestsPipeline` inside
+ * each worktree, and collects per-issue results.
+ */
+async function runMultiIssueFixTests(opts: MultiIssueFixTestsOptions): Promise<FixTestsSummary> {
+  const { runFixTestsPipeline } = await import("./fix-tests-pipeline.js");
+  const datasource = getDatasource(opts.source);
+  const fetchOpts = { cwd: opts.cwd, org: opts.org, project: opts.project };
+  const items = await fetchItemsById(opts.issueIds, datasource, fetchOpts);
+
+  if (items.length === 0) {
+    log.warn("No issues found for the given IDs");
+    return { mode: "fix-tests", success: false, error: "No issues found" };
+  }
+
+  let username = "";
+  try {
+    username = await datasource.getUsername({ cwd: opts.cwd });
+  } catch (err) {
+    log.warn(`Could not resolve git username for branch naming: ${log.formatErrorChain(err)}`);
+  }
+
+  log.info(`Running fix-tests for ${items.length} issue(s) in worktrees`);
+
+  const issueResults: IssueResult[] = [];
+
+  for (const item of items) {
+    const branchName = datasource.buildBranchName(item.number, item.title, username);
+    const issueFilename = `${item.number}-fix-tests.md`;
+    let worktreePath: string | undefined;
+
+    try {
+      worktreePath = await createWorktree(opts.cwd, issueFilename, branchName);
+      registerCleanup(async () => { await removeWorktree(opts.cwd, issueFilename); });
+      log.info(`Created worktree for issue #${item.number} at ${worktreePath}`);
+
+      const result = await runFixTestsPipeline({
+        cwd: worktreePath,
+        provider: opts.provider,
+        serverUrl: opts.serverUrl,
+        verbose: opts.verbose,
+        testTimeout: opts.testTimeout,
+      });
+
+      issueResults.push({ issueId: item.number, branch: branchName, success: result.success, error: result.error });
+    } catch (err) {
+      const message = log.extractMessage(err);
+      log.error(`Fix-tests failed for issue #${item.number}: ${message}`);
+      issueResults.push({ issueId: item.number, branch: branchName, success: false, error: message });
+    } finally {
+      if (worktreePath) {
+        try {
+          await removeWorktree(opts.cwd, issueFilename);
+        } catch (err) {
+          log.warn(`Could not remove worktree for issue #${item.number}: ${log.formatErrorChain(err)}`);
+        }
+      }
+    }
+  }
+
+  const allSuccess = issueResults.length > 0 && issueResults.every((r) => r.success);
+  return { mode: "fix-tests", success: allSuccess, issueResults };
+}
+
 /** Boot a runner. */
 export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
   const { cwd } = opts;
@@ -162,66 +242,19 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
           return runFixTestsPipeline({ cwd, provider: opts.provider ?? "opencode", serverUrl: opts.serverUrl, verbose: opts.verbose ?? false, testTimeout: opts.testTimeout });
         }
 
-        // ── Multi-issue fix-tests via worktrees ─────────────────
+        // Multi-issue fix-tests via worktrees
         const source = opts.source;
         if (!source) {
           log.error("No datasource configured for multi-issue fix-tests.");
           return { mode: "fix-tests" as const, success: false, error: "No datasource configured" };
         }
 
-        const datasource = getDatasource(source);
-        const fetchOpts = { cwd, org: opts.org, project: opts.project };
-        const items = await fetchItemsById(opts.issueIds, datasource, fetchOpts);
-
-        if (items.length === 0) {
-          log.warn("No issues found for the given IDs");
-          return { mode: "fix-tests" as const, success: false, error: "No issues found" };
-        }
-
-        let username = "";
-        try {
-          username = await datasource.getUsername({ cwd });
-        } catch (err) {
-          log.warn(`Could not resolve git username for branch naming: ${log.formatErrorChain(err)}`);
-        }
-
-        const issueResults: { issueId: string; branch: string; success: boolean; error?: string }[] = [];
-
-        for (const item of items) {
-          const branchName = datasource.buildBranchName(item.number, item.title, username);
-          const issueFilename = `${item.number}-fix-tests.md`;
-          let worktreePath: string | undefined;
-
-          try {
-            worktreePath = await createWorktree(cwd, issueFilename, branchName);
-            registerCleanup(async () => { await removeWorktree(cwd, issueFilename); });
-
-            const result = await runFixTestsPipeline({
-              cwd: worktreePath,
-              provider: opts.provider ?? "opencode",
-              serverUrl: opts.serverUrl,
-              verbose: opts.verbose ?? false,
-              testTimeout: opts.testTimeout,
-            });
-
-            issueResults.push({ issueId: item.number, branch: branchName, success: result.success, error: result.error });
-          } catch (err) {
-            const message = log.extractMessage(err);
-            log.error(`Fix-tests failed for issue #${item.number}: ${message}`);
-            issueResults.push({ issueId: item.number, branch: branchName, success: false, error: message });
-          } finally {
-            if (worktreePath) {
-              try {
-                await removeWorktree(cwd, issueFilename);
-              } catch (err) {
-                log.warn(`Could not remove worktree for issue #${item.number}: ${log.formatErrorChain(err)}`);
-              }
-            }
-          }
-        }
-
-        const allSuccess = issueResults.length > 0 && issueResults.every((r) => r.success);
-        return { mode: "fix-tests" as const, success: allSuccess, issueResults };
+        return runMultiIssueFixTests({
+          cwd, issueIds: opts.issueIds, source,
+          provider: opts.provider ?? "opencode", serverUrl: opts.serverUrl,
+          verbose: opts.verbose ?? false, testTimeout: opts.testTimeout,
+          org: opts.org, project: opts.project,
+        });
       }
       const { mode: _, ...rest } = opts;
       return runner.orchestrate(rest);
@@ -269,67 +302,19 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
           return runFixTestsPipeline({ cwd: m.cwd, provider: m.provider, serverUrl: m.serverUrl, verbose: m.verbose, testTimeout: m.testTimeout });
         }
 
-        // ── Multi-issue fix-tests via worktrees ─────────────────
+        // Multi-issue fix-tests via worktrees
         const source = m.issueSource;
         if (!source) {
           log.error("No datasource configured. Use --source or run 'dispatch config' to set up defaults.");
           process.exit(1);
         }
 
-        const datasource = getDatasource(source);
-        const fetchOpts = { cwd: m.cwd, org: m.org, project: m.project };
-        const items = await fetchItemsById(m.issueIds, datasource, fetchOpts);
-
-        if (items.length === 0) {
-          log.warn("No issues found for the given IDs");
-          return { mode: "fix-tests" as const, success: false, error: "No issues found" };
-        }
-
-        let username = "";
-        try {
-          username = await datasource.getUsername({ cwd: m.cwd });
-        } catch (err) {
-          log.warn(`Could not resolve git username for branch naming: ${log.formatErrorChain(err)}`);
-        }
-
-        const issueResults: { issueId: string; branch: string; success: boolean; error?: string }[] = [];
-
-        for (const item of items) {
-          const branchName = datasource.buildBranchName(item.number, item.title, username);
-          const issueFilename = `${item.number}-fix-tests.md`;
-          let worktreePath: string | undefined;
-
-          try {
-            worktreePath = await createWorktree(m.cwd, issueFilename, branchName);
-            registerCleanup(async () => { await removeWorktree(m.cwd, issueFilename); });
-            log.info(`Created worktree for issue #${item.number} at ${worktreePath}`);
-
-            const result = await runFixTestsPipeline({
-              cwd: worktreePath,
-              provider: m.provider,
-              serverUrl: m.serverUrl,
-              verbose: m.verbose,
-              testTimeout: m.testTimeout,
-            });
-
-            issueResults.push({ issueId: item.number, branch: branchName, success: result.success, error: result.error });
-          } catch (err) {
-            const message = log.extractMessage(err);
-            log.error(`Fix-tests failed for issue #${item.number}: ${message}`);
-            issueResults.push({ issueId: item.number, branch: branchName, success: false, error: message });
-          } finally {
-            if (worktreePath) {
-              try {
-                await removeWorktree(m.cwd, issueFilename);
-              } catch (err) {
-                log.warn(`Could not remove worktree for issue #${item.number}: ${log.formatErrorChain(err)}`);
-              }
-            }
-          }
-        }
-
-        const allSuccess = issueResults.length > 0 && issueResults.every((r) => r.success);
-        return { mode: "fix-tests" as const, success: allSuccess, issueResults };
+        return runMultiIssueFixTests({
+          cwd: m.cwd, issueIds: m.issueIds, source,
+          provider: m.provider, serverUrl: m.serverUrl,
+          verbose: m.verbose, testTimeout: m.testTimeout,
+          org: m.org, project: m.project,
+        });
       }
 
       if (m.spec) {
