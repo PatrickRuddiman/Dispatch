@@ -68,7 +68,11 @@ export async function writeItemsToTempDir(items: IssueDetails[]): Promise<WriteI
 
   for (const item of items) {
     const slug = slugify(item.title, MAX_SLUG_LENGTH);
-    const filename = `${item.number}-${slug}.md`;
+    // When item.number is a file path, extract just the basename without extension
+    const id = item.number.includes("/") || item.number.includes("\\")
+      ? basename(item.number, ".md")
+      : item.number;
+    const filename = `${id}-${slug}.md`;
     const filepath = join(tempDir, filename);
     await writeFile(filepath, item.body, "utf-8");
     files.push(filepath);

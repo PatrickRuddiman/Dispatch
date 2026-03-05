@@ -528,6 +528,60 @@ describe("writeItemsToTempDir", () => {
       expect(content).toBe(mapped!.body);
     }
   });
+
+  it("sanitizes absolute paths in item.number to just the basename", async () => {
+    const item = createIssueDetails({
+      number: "/home/user/source/repos/PROJECT/.dispatch/specs/batch-updates.md",
+      title: "Batch Updates",
+      body: "body",
+    });
+
+    const result = await writeItemsToTempDir([item]);
+    tempFiles = result.files;
+
+    expect(result.files).toHaveLength(1);
+    expect(basename(result.files[0])).toBe("batch-updates-batch-updates.md");
+  });
+
+  it("sanitizes relative paths in item.number to just the basename", async () => {
+    const item = createIssueDetails({
+      number: ".dispatch/specs/my-spec.md",
+      title: "My Spec",
+      body: "body",
+    });
+
+    const result = await writeItemsToTempDir([item]);
+    tempFiles = result.files;
+
+    expect(result.files).toHaveLength(1);
+    expect(basename(result.files[0])).toBe("my-spec-my-spec.md");
+  });
+
+  it("leaves numeric IDs unchanged in item.number", async () => {
+    const item = createIssueDetails({
+      number: "42",
+      title: "Some Issue",
+      body: "body",
+    });
+
+    const result = await writeItemsToTempDir([item]);
+    tempFiles = result.files;
+
+    expect(basename(result.files[0])).toBe("42-some-issue.md");
+  });
+
+  it("leaves plain string IDs unchanged in item.number", async () => {
+    const item = createIssueDetails({
+      number: "batch-updates",
+      title: "Batch Updates",
+      body: "body",
+    });
+
+    const result = await writeItemsToTempDir([item]);
+    tempFiles = result.files;
+
+    expect(basename(result.files[0])).toBe("batch-updates-batch-updates.md");
+  });
 });
 
 // ─── buildPrTitle ───────────────────────────────────────────────────
