@@ -103,7 +103,7 @@ export async function resolveCliConfig(args: RawCliArgs): Promise<RawCliArgs> {
   // ── Auto-detect datasource when not explicitly set ─────────
   const sourceConfigured =
     explicitFlags.has("issueSource") || config.source !== undefined;
-  const needsSource = !merged.fixTests && !merged.spec && !merged.respec;
+  const needsSource = !(merged.fixTests && merged.issueIds.length === 0) && !merged.spec && !merged.respec;
 
   if (needsSource && !sourceConfigured) {
     const detected = await detectDatasource(merged.cwd);
