@@ -1,11 +1,11 @@
 /**
- * Azure DevOps datasource — reads and writes work items using the `az` CLI.
+ * Azure DevOps datasource — reads and writes work items using the
+ * `azure-devops-node-api` SDK with OAuth device-flow authentication.
  *
  * Requires:
- *   - `az` CLI installed with the `azure-devops` extension
- *   - User authenticated via `az login`
- *   - Organization and project specified via --org / --project flags
- *     or configured as defaults in the az CLI
+ *   - Working directory inside an Azure DevOps git repository with an
+ *     `origin` remote
+ *   - User will be prompted to authenticate via device code on first use
  */
 
 import { execFile } from "node:child_process";
@@ -14,9 +14,54 @@ import type { Datasource, IssueDetails, IssueFetchOptions, DispatchLifecycleOpti
 import { slugify } from "../helpers/slugify.js";
 import { log } from "../helpers/logger.js";
 import { InvalidBranchNameError, isValidBranchName } from "../helpers/branch-validation.js";
+import { getAzureConnection } from "../helpers/auth.js";
+import { getGitRemoteUrl, parseAzDevOpsRemoteUrl } from "./index.js";
+import type { WebApi } from "azure-devops-node-api";
+import { PullRequestStatus } from "azure-devops-node-api/interfaces/GitInterfaces.js";
 
 const exec = promisify(execFile);
 const doneStateCache = new Map<string, string>();
+
+/** Execute a git command and return stdout. */
+async function git(args: string[], cwd: string): Promise<string> {
+  const { stdout } = await exec("git", args, { cwd, shell: process.platform === "win32" });
+  return stdout;
+}
+
+/**
+ * Resolve the Azure DevOps org URL, project name, and an authenticated
+ * WebApi connection from the git remote URL.
+ *
+ * If `opts.org` and `opts.project` are already provided they are used
+ * directly; otherwise they are parsed from the `origin` remote.
+ */
+async function getOrgAndProject(
+  opts: IssueFetchOptions = {}
+): Promise<{ orgUrl: string; project: string; connection: WebApi }> {
+  let orgUrl = opts.org;
+  let project = opts.project;
+
+  if (!orgUrl || !project) {
+    const cwd = opts.cwd || process.cwd();
+    const remoteUrl = await getGitRemoteUrl(cwd);
+    if (!remoteUrl) {
+      throw new Error(
+        "Could not determine git remote URL. Is this a git repository with an origin remote?"
+      );
+    }
+    const parsed = parseAzDevOpsRemoteUrl(remoteUrl);
+    if (!parsed) {
+      throw new Error(
+        `Could not parse Azure DevOps org/project from remote URL: ${remoteUrl}`
+      );
+    }
+    orgUrl = orgUrl ?? parsed.orgUrl;
+    project = project ?? parsed.project;
+  }
+
+  const connection = await getAzureConnection(orgUrl);
+  return { orgUrl, project, connection };
+}
 
 /**
  * Map a raw Azure DevOps work item JSON object to an IssueDetails.
@@ -59,19 +104,13 @@ export async function detectWorkItemType(
   opts: IssueFetchOptions = {}
 ): Promise<string | null> {
   try {
-    const args = ["boards", "work-item", "type", "list", "--output", "json"];
-    if (opts.project) args.push("--project", opts.project);
-    if (opts.org) args.push("--org", opts.org);
+    const { project, connection } = await getOrgAndProject(opts);
+    const witApi = await connection.getWorkItemTrackingApi();
+    const types = await witApi.getWorkItemTypes(project);
 
-    const { stdout } = await exec("az", args, {
-      cwd: opts.cwd || process.cwd(),
-      shell: process.platform === "win32",
-    });
-
-    const types: { name: string }[] = JSON.parse(stdout);
     if (!Array.isArray(types) || types.length === 0) return null;
 
-    const names = types.map((t) => t.name);
+    const names = types.map((t) => t.name).filter((n): n is string => !!n);
     const preferred = ["User Story", "Product Backlog Item", "Requirement", "Issue"];
     for (const p of preferred) {
       if (names.includes(p)) return p;
@@ -91,31 +130,20 @@ export async function detectDoneState(
   if (cached) return cached;
 
   try {
-    const args = [
-      "boards", "work-item", "type", "state", "list",
-      "--type", workItemType,
-      "--output", "json",
-    ];
-    if (opts.project) args.push("--project", opts.project);
-    if (opts.org) args.push("--org", opts.org);
-
-    const { stdout } = await exec("az", args, {
-      cwd: opts.cwd || process.cwd(),
-      shell: process.platform === "win32",
-    });
-
-    const states: { name: string; category?: string }[] = JSON.parse(stdout);
+    const { project, connection } = await getOrgAndProject(opts);
+    const witApi = await connection.getWorkItemTrackingApi();
+    const states = await witApi.getWorkItemTypeStates(project, workItemType);
 
     // Primary: find state with "Completed" category
     if (Array.isArray(states)) {
       const completed = states.find((s) => s.category === "Completed");
-      if (completed) {
+      if (completed?.name) {
         doneStateCache.set(cacheKey, completed.name);
         return completed.name;
       }
 
       // Fallback: check for known terminal states in priority order
-      const names = states.map((s) => s.name);
+      const names = states.map((s) => s.name).filter((n): n is string => !!n);
       const fallbacks = ["Done", "Closed", "Resolved", "Completed"];
       for (const f of fallbacks) {
         if (names.includes(f)) {
@@ -128,9 +156,34 @@ export async function detectDoneState(
     // Fall through to default
   }
 
-  // Don't cache the default — a transient CLI/parse error should not
+  // Don't cache the default — a transient error should not
   // prevent subsequent calls from retrying the detection.
   return "Closed";
+}
+
+/**
+ * Fetch comments for an Azure DevOps work item.
+ * Non-fatal — returns empty array on failure.
+ */
+async function fetchComments(
+  workItemId: number,
+  project: string,
+  connection: WebApi
+): Promise<string[]> {
+  try {
+    const witApi = await connection.getWorkItemTrackingApi();
+    const commentList = await witApi.getComments(project, workItemId);
+
+    if (commentList.comments && Array.isArray(commentList.comments)) {
+      return commentList.comments.map((c) => {
+        const author = c.createdBy?.displayName ?? "unknown";
+        return `**${author}:** ${c.text ?? ""}`;
+      });
+    }
+    return [];
+  } catch {
+    return [];
+  }
 }
 
 export const datasource: Datasource = {
@@ -141,6 +194,9 @@ export const datasource: Datasource = {
   },
 
   async list(opts: IssueFetchOptions = {}): Promise<IssueDetails[]> {
+    const { project, connection } = await getOrgAndProject(opts);
+    const witApi = await connection.getWorkItemTrackingApi();
+
     const conditions = [
       "[System.State] <> 'Closed'",
       "[System.State] <> 'Done'",
@@ -166,51 +222,19 @@ export const datasource: Datasource = {
 
     const wiql = `SELECT [System.Id] FROM workitems WHERE ${conditions.join(" AND ")} ORDER BY [System.CreatedDate] DESC`;
 
-    const args = ["boards", "query", "--wiql", wiql, "--output", "json"];
-    if (opts.org) args.push("--org", opts.org);
-    if (opts.project) args.push("--project", opts.project);
+    const queryResult = await witApi.queryByWiql({ query: wiql }, { project });
+    const workItemRefs = queryResult.workItems ?? [];
+    if (workItemRefs.length === 0) return [];
 
-    const { stdout } = await exec("az", args, {
-      cwd: opts.cwd || process.cwd(),
-      shell: process.platform === "win32",
-    });
-
-    let data;
-    try {
-      data = JSON.parse(stdout);
-    } catch {
-      throw new Error(`Failed to parse Azure CLI output: ${stdout.slice(0, 200)}`);
-    }
-
-    if (!Array.isArray(data)) return [];
-
-    const ids = data
-      .map((row) => String(row.id ?? row.ID ?? ""))
-      .filter(Boolean);
+    const ids = workItemRefs
+      .map((ref) => ref.id)
+      .filter((id): id is number => id != null);
 
     if (ids.length === 0) return [];
 
     try {
-      const batchArgs = [
-        "boards", "work-item", "show",
-        "--id", ...ids,
-        "--output", "json",
-      ];
-      if (opts.org) batchArgs.push("--org", opts.org);
-
-      const { stdout: batchStdout } = await exec("az", batchArgs, {
-        cwd: opts.cwd || process.cwd(),
-        shell: process.platform === "win32",
-      });
-
-      let batchItems;
-      try {
-        batchItems = JSON.parse(batchStdout);
-      } catch {
-        throw new Error(`Failed to parse Azure CLI output: ${batchStdout.slice(0, 200)}`);
-      }
-
-      const itemsArray = Array.isArray(batchItems) ? batchItems : [batchItems];
+      const items = await witApi.getWorkItems(ids);
+      const itemsArray = Array.isArray(items) ? items : [items];
 
       // Fetch comments with bounded concurrency (batches of 5)
       const commentsArray: string[][] = [];
@@ -218,7 +242,7 @@ export const datasource: Datasource = {
       for (let i = 0; i < itemsArray.length; i += CONCURRENCY) {
         const batch = itemsArray.slice(i, i + CONCURRENCY);
         const batchResults = await Promise.all(
-          batch.map((item) => fetchComments(String(item.id), opts))
+          batch.map((item) => fetchComments(item.id!, project, connection))
         );
         commentsArray.push(...batchResults);
       }
@@ -227,10 +251,10 @@ export const datasource: Datasource = {
         mapWorkItemToIssueDetails(item, String(item.id), commentsArray[i])
       );
     } catch (err) {
-      log.debug(`Batch work-item show failed, falling back to individual fetches: ${log.extractMessage(err)}`);
+      log.debug(`Batch getWorkItems failed, falling back to individual fetches: ${log.extractMessage(err)}`);
       // Fallback: fetch items individually in parallel
       const results = await Promise.all(
-        ids.map((id) => datasource.fetch(id, opts))
+        ids.map((id) => datasource.fetch(String(id), opts))
       );
       return results;
     }
@@ -240,32 +264,11 @@ export const datasource: Datasource = {
     issueId: string,
     opts: IssueFetchOptions = {}
   ): Promise<IssueDetails> {
-    const args = [
-      "boards",
-      "work-item",
-      "show",
-      "--id",
-      issueId,
-      "--output",
-      "json",
-    ];
+    const { project, connection } = await getOrgAndProject(opts);
+    const witApi = await connection.getWorkItemTrackingApi();
 
-    if (opts.org) {
-      args.push("--org", opts.org);
-    }
-
-    const { stdout } = await exec("az", args, {
-      cwd: opts.cwd || process.cwd(),
-      shell: process.platform === "win32",
-    });
-
-    let item;
-    try {
-      item = JSON.parse(stdout);
-    } catch {
-      throw new Error(`Failed to parse Azure CLI output: ${stdout.slice(0, 200)}`);
-    }
-    const comments = await fetchComments(issueId, opts);
+    const item = await witApi.getWorkItem(Number(issueId));
+    const comments = await fetchComments(Number(issueId), project, connection);
 
     return mapWorkItemToIssueDetails(item, issueId, comments);
   },
@@ -276,64 +279,38 @@ export const datasource: Datasource = {
     body: string,
     opts: IssueFetchOptions = {}
   ): Promise<void> {
-    const args = [
-      "boards",
-      "work-item",
-      "update",
-      "--id",
-      issueId,
-      "--title",
-      title,
-      "--description",
-      body,
+    const { connection } = await getOrgAndProject(opts);
+    const witApi = await connection.getWorkItemTrackingApi();
+
+    const document = [
+      { op: "add", path: "/fields/System.Title", value: title },
+      { op: "add", path: "/fields/System.Description", value: body },
     ];
-    if (opts.org) args.push("--org", opts.org);
-    await exec("az", args, { cwd: opts.cwd || process.cwd(), shell: process.platform === "win32" });
+    // customHeaders is the first arg (pass null), document second, id third
+    await witApi.updateWorkItem(null as any, document as any, Number(issueId));
   },
 
   async close(
     issueId: string,
     opts: IssueFetchOptions = {}
   ): Promise<void> {
+    const { connection } = await getOrgAndProject(opts);
+    const witApi = await connection.getWorkItemTrackingApi();
+
     let workItemType = opts.workItemType;
     if (!workItemType) {
-      const showArgs = [
-        "boards",
-        "work-item",
-        "show",
-        "--id",
-        issueId,
-        "--output",
-        "json",
-      ];
-      if (opts.org) showArgs.push("--org", opts.org);
-      const { stdout } = await exec("az", showArgs, {
-        cwd: opts.cwd || process.cwd(),
-        shell: process.platform === "win32",
-      });
-      try {
-        const item = JSON.parse(stdout);
-        workItemType = item.fields?.["System.WorkItemType"] ?? undefined;
-      } catch {
-        workItemType = undefined;
-      }
+      const item = await witApi.getWorkItem(Number(issueId));
+      workItemType = item.fields?.["System.WorkItemType"] ?? undefined;
     }
 
     const state = workItemType
       ? await detectDoneState(workItemType, opts)
       : "Closed";
 
-    const args = [
-      "boards",
-      "work-item",
-      "update",
-      "--id",
-      issueId,
-      "--state",
-      state,
+    const document = [
+      { op: "add", path: "/fields/System.State", value: state },
     ];
-    if (opts.org) args.push("--org", opts.org);
-    await exec("az", args, { cwd: opts.cwd || process.cwd(), shell: process.platform === "win32" });
+    await witApi.updateWorkItem(null as any, document as any, Number(issueId));
   },
 
   async create(
@@ -350,45 +327,33 @@ export const datasource: Datasource = {
       );
     }
 
-    const args = [
-      "boards",
-      "work-item",
-      "create",
-      "--type",
-      workItemType,
-      "--title",
-      title,
-      "--description",
-      body,
-      "--output",
-      "json",
+    const { project, connection } = await getOrgAndProject(opts);
+    const witApi = await connection.getWorkItemTrackingApi();
+
+    const document = [
+      { op: "add", path: "/fields/System.Title", value: title },
+      { op: "add", path: "/fields/System.Description", value: body },
     ];
-    if (opts.org) args.push("--org", opts.org);
-    if (opts.project) args.push("--project", opts.project);
 
-    const { stdout } = await exec("az", args, {
-      cwd: opts.cwd || process.cwd(),
-      shell: process.platform === "win32",
-    });
+    const item = await witApi.createWorkItem(
+      null as any,
+      document as any,
+      project,
+      workItemType
+    );
 
-    let item;
-    try {
-      item = JSON.parse(stdout);
-    } catch {
-      throw new Error(`Failed to parse Azure CLI output: ${stdout.slice(0, 200)}`);
-    }
     return mapWorkItemToIssueDetails(item, String(item.id), [], {
       title,
       body,
       state: "New",
-      workItemType: workItemType,
+      workItemType,
     });
   },
 
   async getDefaultBranch(opts: DispatchLifecycleOptions): Promise<string> {
     try {
-      const { stdout } = await exec("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], { cwd: opts.cwd, shell: process.platform === "win32" });
-      const parts = stdout.trim().split("/");
+      const ref = await git(["symbolic-ref", "refs/remotes/origin/HEAD"], opts.cwd);
+      const parts = ref.trim().split("/");
       const branch = parts[parts.length - 1];
       if (!isValidBranchName(branch)) {
         throw new InvalidBranchNameError(branch, "from symbolic-ref output");
@@ -399,7 +364,7 @@ export const datasource: Datasource = {
         throw err;
       }
       try {
-        await exec("git", ["rev-parse", "--verify", "main"], { cwd: opts.cwd, shell: process.platform === "win32" });
+        await git(["rev-parse", "--verify", "main"], opts.cwd);
         return "main";
       } catch {
         return "master";
@@ -409,27 +374,9 @@ export const datasource: Datasource = {
 
   async getUsername(opts: DispatchLifecycleOptions): Promise<string> {
     try {
-      const { stdout } = await exec("git", ["config", "user.name"], { cwd: opts.cwd, shell: process.platform === "win32" });
-      const name = slugify(stdout.trim());
-      if (name) return name;
-    } catch {
-      // fall through
-    }
-
-    try {
-      const { stdout } = await exec("az", ["account", "show", "--query", "user.name", "-o", "tsv"], { cwd: opts.cwd, shell: process.platform === "win32" });
-      const name = slugify(stdout.trim());
-      if (name) return name;
-    } catch {
-      // fall through
-    }
-
-    try {
-      const { stdout } = await exec("az", ["account", "show", "--query", "user.principalName", "-o", "tsv"], { cwd: opts.cwd, shell: process.platform === "win32" });
-      const principal = stdout.trim();
-      const prefix = principal.split("@")[0];
-      const name = slugify(prefix);
-      if (name) return name;
+      const name = await git(["config", "user.name"], opts.cwd);
+      const slug = slugify(name.trim());
+      if (slug) return slug;
     } catch {
       // fall through
     }
@@ -451,11 +398,11 @@ export const datasource: Datasource = {
       throw new InvalidBranchNameError(branchName);
     }
     try {
-      await exec("git", ["checkout", "-b", branchName], { cwd: opts.cwd, shell: process.platform === "win32" });
+      await git(["checkout", "-b", branchName], opts.cwd);
     } catch (err) {
       const message = log.extractMessage(err);
       if (message.includes("already exists")) {
-        await exec("git", ["checkout", branchName], { cwd: opts.cwd, shell: process.platform === "win32" });
+        await git(["checkout", branchName], opts.cwd);
       } else {
         throw err;
       }
@@ -463,20 +410,20 @@ export const datasource: Datasource = {
   },
 
   async switchBranch(branchName: string, opts: DispatchLifecycleOptions): Promise<void> {
-    await exec("git", ["checkout", branchName], { cwd: opts.cwd, shell: process.platform === "win32" });
+    await git(["checkout", branchName], opts.cwd);
   },
 
   async pushBranch(branchName: string, opts: DispatchLifecycleOptions): Promise<void> {
-    await exec("git", ["push", "--set-upstream", "origin", branchName], { cwd: opts.cwd, shell: process.platform === "win32" });
+    await git(["push", "--set-upstream", "origin", branchName], opts.cwd);
   },
 
   async commitAllChanges(message: string, opts: DispatchLifecycleOptions): Promise<void> {
-    await exec("git", ["add", "-A"], { cwd: opts.cwd, shell: process.platform === "win32" });
-    const { stdout } = await exec("git", ["diff", "--cached", "--stat"], { cwd: opts.cwd, shell: process.platform === "win32" });
-    if (!stdout.trim()) {
+    await git(["add", "-A"], opts.cwd);
+    const status = await git(["diff", "--cached", "--stat"], opts.cwd);
+    if (!status.trim()) {
       return; // nothing to commit
     }
-    await exec("git", ["commit", "-m", message], { cwd: opts.cwd, shell: process.platform === "win32" });
+    await git(["commit", "-m", message], opts.cwd);
   },
 
   async createPullRequest(
@@ -486,60 +433,72 @@ export const datasource: Datasource = {
     body: string,
     opts: DispatchLifecycleOptions,
   ): Promise<string> {
+    const cwd = opts.cwd;
+    const remoteUrl = await getGitRemoteUrl(cwd);
+    if (!remoteUrl) {
+      throw new Error("Could not determine git remote URL.");
+    }
+    const parsed = parseAzDevOpsRemoteUrl(remoteUrl);
+    if (!parsed) {
+      throw new Error(`Could not parse Azure DevOps org/project from remote URL: ${remoteUrl}`);
+    }
+    const { orgUrl, project } = parsed;
+    const connection = await getAzureConnection(orgUrl);
+    const gitApi = await connection.getGitApi();
+
+    // Find the repository by matching remote URL
+    const repos = await gitApi.getRepositories(project);
+    const normalizeUrl = (u: string) => u.replace(/\.git$/, "").replace(/\/$/, "").toLowerCase();
+    const normalizedRemote = normalizeUrl(remoteUrl);
+    const repo = repos.find(
+      (r) =>
+        (r.remoteUrl && normalizeUrl(r.remoteUrl) === normalizedRemote) ||
+        (r.sshUrl && normalizeUrl(r.sshUrl) === normalizedRemote) ||
+        (r.webUrl && normalizeUrl(r.webUrl) === normalizedRemote)
+    );
+
+    if (!repo || !repo.id) {
+      throw new Error(`Could not find Azure DevOps repository matching remote URL: ${remoteUrl}`);
+    }
+
+    const defaultBranch = await this.getDefaultBranch(opts);
+
     try {
-      const { stdout } = await exec(
-        "az",
-        [
-          "repos",
-          "pr",
-          "create",
-          "--title",
+      const pr = await gitApi.createPullRequest(
+        {
+          sourceRefName: `refs/heads/${branchName}`,
+          targetRefName: `refs/heads/${defaultBranch}`,
           title,
-          "--description",
-          body || `Resolves AB#${issueNumber}`,
-          "--source-branch",
-          branchName,
-          "--work-items",
-          issueNumber,
-          "--output",
-          "json",
-        ],
-        { cwd: opts.cwd, shell: process.platform === "win32" },
+          description: body || `Resolves AB#${issueNumber}`,
+          workItemRefs: [{ id: issueNumber }],
+        },
+        repo.id,
+        project
       );
-      let pr;
-      try {
-        pr = JSON.parse(stdout);
-      } catch {
-        throw new Error(`Failed to parse Azure CLI output: ${stdout.slice(0, 200)}`);
-      }
-      return pr.url ?? "";
+
+      // Construct web UI URL (SDK url is REST API URL, not browser URL)
+      const webUrl = repo.webUrl
+        ? `${repo.webUrl}/pullrequest/${pr.pullRequestId}`
+        : pr.url ?? "";
+      return webUrl;
     } catch (err) {
       // If a PR already exists for this branch, retrieve its URL
       const message = log.extractMessage(err);
       if (message.includes("already exists")) {
-        const { stdout } = await exec(
-          "az",
-          [
-            "repos",
-            "pr",
-            "list",
-            "--source-branch",
-            branchName,
-            "--status",
-            "active",
-            "--output",
-            "json",
-          ],
-          { cwd: opts.cwd, shell: process.platform === "win32" },
+        const prs = await gitApi.getPullRequests(
+          repo.id,
+          {
+            sourceRefName: `refs/heads/${branchName}`,
+            status: PullRequestStatus.Active,
+          },
+          project
         );
-        let prs;
-        try {
-          prs = JSON.parse(stdout);
-        } catch {
-          throw new Error(`Failed to parse Azure CLI output: ${stdout.slice(0, 200)}`);
-        }
         if (Array.isArray(prs) && prs.length > 0) {
-          return prs[0].url ?? "";
+          const existingPr = prs[0];
+          const webUrl = repo.webUrl
+            ? `${repo.webUrl}/pullrequest/${existingPr.pullRequestId}`
+            : existingPr.url ?? "";
+          return webUrl;
         }
         return "";
       }
@@ -547,47 +506,3 @@ export const datasource: Datasource = {
     }
   },
 };
-
-/**
- * Fetch comments for an Azure DevOps work item.
- * Non-fatal — returns empty array on failure.
- */
-async function fetchComments(
-  workItemId: string,
-  opts: IssueFetchOptions
-): Promise<string[]> {
-  try {
-    const args = [
-      "boards",
-      "work-item",
-      "relation",
-      "list-comment",
-      "--work-item-id",
-      workItemId,
-      "--output",
-      "json",
-    ];
-
-    if (opts.org) {
-      args.push("--org", opts.org);
-    }
-
-    const { stdout } = await exec("az", args, {
-      cwd: opts.cwd || process.cwd(),
-      shell: process.platform === "win32",
-    });
-
-    const data = JSON.parse(stdout);
-    if (data.comments && Array.isArray(data.comments)) {
-      return data.comments.map(
-        (c: { text?: string; createdBy?: { displayName?: string } }) => {
-          const author = c.createdBy?.displayName ?? "unknown";
-          return `**${author}:** ${c.text ?? ""}`;
-        }
-      );
-    }
-    return [];
-  } catch {
-    return [];
-  }
-}

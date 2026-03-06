@@ -148,3 +148,35 @@ export function parseAzDevOpsRemoteUrl(
 
   return null;
 }
+
+/**
+ * Parse a GitHub git remote URL and extract the owner and repository name.
+ *
+ * Supports both GitHub remote URL formats:
+ * - **HTTPS:** `https://github.com/{owner}/{repo}[.git]`
+ * - **SSH:** `git@github.com:{owner}/{repo}[.git]`
+ *
+ * @param url - The git remote URL to parse
+ * @returns The parsed owner and repo, or `null` if the URL is not a recognized GitHub format
+ */
+export function parseGitHubRemoteUrl(
+  url: string
+): { owner: string; repo: string } | null {
+  // HTTPS: https://github.com/{owner}/{repo}[.git]
+  const httpsMatch = url.match(
+    /^https?:\/\/github\.com\/([^/]+)\/([^/.]+?)(?:\.git)?\/?$/i
+  );
+  if (httpsMatch) {
+    return { owner: httpsMatch[1], repo: httpsMatch[2] };
+  }
+
+  // SSH: git@github.com:{owner}/{repo}[.git]
+  const sshMatch = url.match(
+    /^git@github\.com:([^/]+)\/([^/.]+?)(?:\.git)?\/?$/i
+  );
+  if (sshMatch) {
+    return { owner: sshMatch[1], repo: sshMatch[2] };
+  }
+
+  return null;
+}
