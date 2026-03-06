@@ -1003,62 +1003,72 @@ describe("azdevops datasource — commitAllChanges", () => {
 });
 
 describe("azdevops datasource — createPullRequest", () => {
+  const REPO = {
+    id: "repo-id",
+    remoteUrl: "https://dev.azure.com/testorg/testproject/_git/testrepo",
+    webUrl: "https://dev.azure.com/testorg/testproject/_git/testrepo",
+  };
+
   it("creates PR and returns URL", async () => {
-    // getDefaultBranch mock
     mockExecFile.mockResolvedValueOnce({ stdout: "refs/remotes/origin/main\n" });
-    mockGitApi.getRepositories.mockResolvedValueOnce([
-      {
-        id: "repo-id",
-        remoteUrl: "https://dev.azure.com/testorg/testproject/_git/testrepo",
-        webUrl: "https://dev.azure.com/testorg/testproject/_git/testrepo",
-      },
-    ]);
-    mockGitApi.createPullRequest.mockResolvedValueOnce({
-      pullRequestId: 1,
-      url: "https://dev.azure.com/testorg/testproject/_apis/git/pullrequests/1",
-    });
+    mockGitApi.getRepositories.mockResolvedValueOnce([REPO]);
+    mockGitApi.createPullRequest.mockResolvedValueOnce({ pullRequestId: 1 });
 
     const url = await datasource.createPullRequest(
       "dispatch/42-feat", "42", "Title", "Body", { cwd: "/tmp" },
     );
 
     expect(url).toBe("https://dev.azure.com/testorg/testproject/_git/testrepo/pullrequest/1");
+    expect(mockGitApi.createPullRequest).toHaveBeenCalledWith(
+      {
+        sourceRefName: "refs/heads/dispatch/42-feat",
+        targetRefName: "refs/heads/main",
+        title: "Title",
+        description: "Body",
+        workItemRefs: [{ id: "42" }],
+      },
+      "repo-id",
+      "testproject",
+    );
+  });
+
+  it("uses default description when body is empty", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: "refs/remotes/origin/main\n" });
+    mockGitApi.getRepositories.mockResolvedValueOnce([REPO]);
+    mockGitApi.createPullRequest.mockResolvedValueOnce({ pullRequestId: 2 });
+
+    await datasource.createPullRequest(
+      "dispatch/99-fix", "99", "Fix bug", "", { cwd: "/tmp" },
+    );
+
+    expect(mockGitApi.createPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ description: "Resolves AB#99" }),
+      "repo-id",
+      "testproject",
+    );
   });
 
   it("returns existing PR URL when already exists", async () => {
-    // getDefaultBranch mock
     mockExecFile.mockResolvedValueOnce({ stdout: "refs/remotes/origin/main\n" });
-    mockGitApi.getRepositories.mockResolvedValueOnce([
-      {
-        id: "repo-id",
-        remoteUrl: "https://dev.azure.com/testorg/testproject/_git/testrepo",
-        webUrl: "https://dev.azure.com/testorg/testproject/_git/testrepo",
-      },
-    ]);
+    mockGitApi.getRepositories.mockResolvedValueOnce([REPO]);
     mockGitApi.createPullRequest.mockRejectedValueOnce(new Error("already exists"));
-    mockGitApi.getPullRequests.mockResolvedValueOnce([
-      {
-        pullRequestId: 5,
-        url: "https://dev.azure.com/testorg/testproject/_apis/git/pullrequests/5",
-      },
-    ]);
+    mockGitApi.getPullRequests.mockResolvedValueOnce([{ pullRequestId: 5 }]);
 
     const url = await datasource.createPullRequest(
       "dispatch/42-feat", "42", "Title", "Body", { cwd: "/tmp" },
     );
 
     expect(url).toBe("https://dev.azure.com/testorg/testproject/_git/testrepo/pullrequest/5");
+    expect(mockGitApi.getPullRequests).toHaveBeenCalledWith(
+      "repo-id",
+      { sourceRefName: "refs/heads/dispatch/42-feat", status: 1 },
+      "testproject",
+    );
   });
 
   it("returns empty string when existing PR list is empty", async () => {
     mockExecFile.mockResolvedValueOnce({ stdout: "refs/remotes/origin/main\n" });
-    mockGitApi.getRepositories.mockResolvedValueOnce([
-      {
-        id: "repo-id",
-        remoteUrl: "https://dev.azure.com/testorg/testproject/_git/testrepo",
-        webUrl: "https://dev.azure.com/testorg/testproject/_git/testrepo",
-      },
-    ]);
+    mockGitApi.getRepositories.mockResolvedValueOnce([REPO]);
     mockGitApi.createPullRequest.mockRejectedValueOnce(new Error("already exists"));
     mockGitApi.getPullRequests.mockResolvedValueOnce([]);
 
@@ -1071,18 +1081,23 @@ describe("azdevops datasource — createPullRequest", () => {
 
   it("throws for non-already-exists errors", async () => {
     mockExecFile.mockResolvedValueOnce({ stdout: "refs/remotes/origin/main\n" });
-    mockGitApi.getRepositories.mockResolvedValueOnce([
-      {
-        id: "repo-id",
-        remoteUrl: "https://dev.azure.com/testorg/testproject/_git/testrepo",
-        webUrl: "https://dev.azure.com/testorg/testproject/_git/testrepo",
-      },
-    ]);
+    mockGitApi.getRepositories.mockResolvedValueOnce([REPO]);
     mockGitApi.createPullRequest.mockRejectedValueOnce(new Error("auth required"));
 
     await expect(
       datasource.createPullRequest("b", "1", "T", "B", { cwd: "/tmp" }),
     ).rejects.toThrow("auth required");
+  });
+
+  it("throws when no repository matches the remote URL", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: "refs/remotes/origin/main\n" });
+    mockGitApi.getRepositories.mockResolvedValueOnce([
+      { id: "other-id", webUrl: "https://dev.azure.com/other/other/_git/other" },
+    ]);
+
+    await expect(
+      datasource.createPullRequest("b", "1", "T", "B", { cwd: "/tmp" }),
+    ).rejects.toThrow("Could not find Azure DevOps repository");
   });
 });
 
