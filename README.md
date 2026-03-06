@@ -2,6 +2,8 @@
 
 AI agent orchestration CLI — parse work items from GitHub Issues, Azure DevOps, or local markdown files, dispatch each unit of work to a coding agent (OpenCode, GitHub Copilot, Claude Code, or OpenAI Codex), and commit results with conventional commits.
 
+> **⚠️ Work in Progress:** Support for **Azure DevOps**, **Windows**, **OpenAI Codex** (`--provider codex`), and **Claude Code** (`--provider claude`) is currently buggy and under active development. Expect rough edges and potential failures when using these features.
+
 ## What it does
 
 Dispatch closes the gap between issue trackers and AI coding agents. It:
