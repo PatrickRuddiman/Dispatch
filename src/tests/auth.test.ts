@@ -120,10 +120,12 @@ describe("getGithubOctokit", () => {
     const parsed = JSON.parse(writeData);
     expect(parsed.github).toEqual({ token: "gh-new-token" });
 
-    expect(mockFs.chmod).toHaveBeenCalledWith(
-      join("/fakehome", ".dispatch", "auth.json"),
-      0o600,
-    );
+    if (realPlatform !== "win32") {
+      expect(mockFs.chmod).toHaveBeenCalledWith(
+        join("/fakehome", ".dispatch", "auth.json"),
+        0o600,
+      );
+    }
     expect(mockOctokitConstructor).toHaveBeenCalledWith({
       auth: "gh-new-token",
     });
@@ -195,10 +197,12 @@ describe("getAzureConnection", () => {
     expect(parsed.azure.token).toBe("az-new-token");
     expect(parsed.azure.expiresAt).toBeDefined();
 
-    expect(mockFs.chmod).toHaveBeenCalledWith(
-      join("/fakehome", ".dispatch", "auth.json"),
-      0o600,
-    );
+    if (realPlatform !== "win32") {
+      expect(mockFs.chmod).toHaveBeenCalledWith(
+        join("/fakehome", ".dispatch", "auth.json"),
+        0o600,
+      );
+    }
     expect(mockWebApi).toHaveBeenCalledWith(
       "https://dev.azure.com/myorg",
       "bearer-handler",

@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const SHELL = process.platform === "win32";
+
 const { mockExecFile } = vi.hoisted(() => ({ mockExecFile: vi.fn() }));
 
 const mockOctokit = vi.hoisted(() => ({
@@ -255,7 +257,7 @@ describe("github datasource — createAndSwitchBranch", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["checkout", "-b", "dispatch/42-feat"],
-      { cwd: "/tmp", shell: false },
+      { cwd: "/tmp", shell: SHELL },
     );
   });
 
@@ -270,7 +272,7 @@ describe("github datasource — createAndSwitchBranch", () => {
     expect(mockExecFile).toHaveBeenLastCalledWith(
       "git",
       ["checkout", "dispatch/42-feat"],
-      { cwd: "/tmp", shell: false },
+      { cwd: "/tmp", shell: SHELL },
     );
   });
 
@@ -289,7 +291,7 @@ describe("github datasource — switchBranch", () => {
 
     await datasource.switchBranch("main", { cwd: "/tmp" });
 
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "main"], { cwd: "/tmp", shell: false });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "main"], { cwd: "/tmp", shell: SHELL });
   });
 });
 
@@ -302,7 +304,7 @@ describe("github datasource — pushBranch", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["push", "--set-upstream", "origin", "dispatch/42-feat"],
-      { cwd: "/tmp", shell: false },
+      { cwd: "/tmp", shell: SHELL },
     );
   });
 });
@@ -320,7 +322,7 @@ describe("github datasource — commitAllChanges", () => {
     expect(mockExecFile).toHaveBeenLastCalledWith(
       "git",
       ["commit", "-m", "feat: update"],
-      { cwd: "/tmp", shell: false },
+      { cwd: "/tmp", shell: SHELL },
     );
   });
 
