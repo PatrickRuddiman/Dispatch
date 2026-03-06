@@ -45,6 +45,8 @@ import type { DispatchResult } from "../dispatcher.js";
 import type { IssueDetails } from "../datasources/interface.js";
 import { UnsupportedOperationError } from "../helpers/errors.js";
 
+const SHELL = process.platform === "win32";
+
 beforeEach(() => {
   vi.resetAllMocks();
   mockGetAzureConnection.mockResolvedValue(mockAzdoConnection);
@@ -107,7 +109,7 @@ describe("GitHub datasource — getDefaultBranch", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["symbolic-ref", "refs/remotes/origin/HEAD"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
   });
 
@@ -154,7 +156,7 @@ describe("GitHub datasource — getUsername", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["config", "user.name"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
   });
 
@@ -196,7 +198,7 @@ describe("GitHub datasource — createAndSwitchBranch", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["checkout", "-b", "dispatch/42-feature"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
   });
 
@@ -218,13 +220,13 @@ describe("GitHub datasource — createAndSwitchBranch", () => {
       1,
       "git",
       ["checkout", "-b", "dispatch/42-feature"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
     expect(mockExecFile).toHaveBeenNthCalledWith(
       2,
       "git",
       ["checkout", "dispatch/42-feature"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
   });
 
@@ -250,7 +252,7 @@ describe("GitHub datasource — switchBranch", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["checkout", "main"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
   });
 
@@ -274,7 +276,7 @@ describe("GitHub datasource — pushBranch", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["push", "--set-upstream", "origin", "dispatch/42-feature"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
   });
 
@@ -305,19 +307,19 @@ describe("GitHub datasource — commitAllChanges", () => {
       1,
       "git",
       ["add", "-A"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
     expect(mockExecFile).toHaveBeenNthCalledWith(
       2,
       "git",
       ["diff", "--cached", "--stat"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
     expect(mockExecFile).toHaveBeenNthCalledWith(
       3,
       "git",
       ["commit", "-m", "feat: implement feature"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
   });
 
@@ -352,7 +354,7 @@ describe("GitHub datasource — getCommitMessages", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["log", "origin/main..HEAD", "--pretty=format:%s"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
   });
 
@@ -537,7 +539,7 @@ describe("MD datasource — git lifecycle methods", () => {
     mockExecFile.mockResolvedValueOnce({ stdout: "refs/remotes/origin/main\n", stderr: "" });
     const result = await md.getDefaultBranch({ cwd: "/tmp" });
     expect(result).toBe("main");
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], { cwd: "/tmp", shell: false });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], { cwd: "/tmp", shell: SHELL });
   });
 
   it("getDefaultBranch falls back to main when symbolic-ref fails", async () => {
@@ -558,7 +560,7 @@ describe("MD datasource — git lifecycle methods", () => {
     mockExecFile.mockResolvedValueOnce({ stdout: "John Doe\n", stderr: "" });
     const result = await md.getUsername({ cwd: "/tmp" });
     expect(result).toBe("john-doe");
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["config", "user.name"], { cwd: "/tmp", shell: false });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["config", "user.name"], { cwd: "/tmp", shell: SHELL });
   });
 
   it("getUsername falls back to 'local' on error", async () => {
@@ -577,7 +579,7 @@ describe("MD datasource — git lifecycle methods", () => {
   it("createAndSwitchBranch runs git checkout -b", async () => {
     mockExecFile.mockResolvedValueOnce({ stdout: "", stderr: "" });
     await md.createAndSwitchBranch("local/dispatch/1-feat", { cwd: "/tmp" });
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "-b", "local/dispatch/1-feat"], { cwd: "/tmp", shell: false });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "-b", "local/dispatch/1-feat"], { cwd: "/tmp", shell: SHELL });
   });
 
   it("createAndSwitchBranch falls back to checkout when branch exists", async () => {
@@ -585,13 +587,13 @@ describe("MD datasource — git lifecycle methods", () => {
     mockExecFile.mockResolvedValueOnce({ stdout: "", stderr: "" });
     await md.createAndSwitchBranch("local/dispatch/1-feat", { cwd: "/tmp" });
     expect(mockExecFile).toHaveBeenCalledTimes(2);
-    expect(mockExecFile).toHaveBeenLastCalledWith("git", ["checkout", "local/dispatch/1-feat"], { cwd: "/tmp", shell: false });
+    expect(mockExecFile).toHaveBeenLastCalledWith("git", ["checkout", "local/dispatch/1-feat"], { cwd: "/tmp", shell: SHELL });
   });
 
   it("switchBranch runs git checkout", async () => {
     mockExecFile.mockResolvedValueOnce({ stdout: "", stderr: "" });
     await md.switchBranch("main", { cwd: "/tmp" });
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "main"], { cwd: "/tmp", shell: false });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "main"], { cwd: "/tmp", shell: SHELL });
   });
 
   it("pushBranch is a no-op", async () => {
@@ -604,8 +606,8 @@ describe("MD datasource — git lifecycle methods", () => {
     mockExecFile.mockResolvedValueOnce({ stdout: " file.ts | 1 +\n", stderr: "" }); // git diff --cached --stat
     mockExecFile.mockResolvedValueOnce({ stdout: "", stderr: "" }); // git commit
     await md.commitAllChanges("feat: test", { cwd: "/tmp" });
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["add", "-A"], { cwd: "/tmp", shell: false });
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["commit", "-m", "feat: test"], { cwd: "/tmp", shell: false });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["add", "-A"], { cwd: "/tmp", shell: SHELL });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["commit", "-m", "feat: test"], { cwd: "/tmp", shell: SHELL });
   });
 
   it("commitAllChanges skips commit when nothing staged", async () => {
@@ -658,7 +660,7 @@ describe("buildPrTitle", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["log", "main..HEAD", "--pretty=format:%s"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
   });
 

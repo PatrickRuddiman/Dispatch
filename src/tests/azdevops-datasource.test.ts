@@ -52,6 +52,8 @@ vi.mock("azure-devops-node-api/interfaces/GitInterfaces.js", () => ({
 import { datasource, detectWorkItemType, detectDoneState } from "../datasources/azdevops.js";
 import { InvalidBranchNameError } from "../helpers/branch-validation.js";
 
+const SHELL = process.platform === "win32";
+
 beforeEach(() => {
   mockExecFile.mockReset();
   mockWitApi.queryByWiql.mockReset();
@@ -938,7 +940,7 @@ describe("azdevops datasource — createAndSwitchBranch", () => {
     await datasource.createAndSwitchBranch("dispatch/42-feat", { cwd: "/tmp" });
 
     expect(mockExecFile).toHaveBeenCalledWith(
-      "git", ["checkout", "-b", "dispatch/42-feat"], { cwd: "/tmp", shell: false },
+      "git", ["checkout", "-b", "dispatch/42-feat"], { cwd: "/tmp", shell: SHELL },
     );
   });
 
@@ -965,7 +967,7 @@ describe("azdevops datasource — switchBranch", () => {
   it("calls git checkout", async () => {
     mockExecFile.mockResolvedValue({ stdout: "" });
     await datasource.switchBranch("main", { cwd: "/tmp" });
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "main"], { cwd: "/tmp", shell: false });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "main"], { cwd: "/tmp", shell: SHELL });
   });
 });
 
@@ -974,7 +976,7 @@ describe("azdevops datasource — pushBranch", () => {
     mockExecFile.mockResolvedValue({ stdout: "" });
     await datasource.pushBranch("dispatch/42-feat", { cwd: "/tmp" });
     expect(mockExecFile).toHaveBeenCalledWith(
-      "git", ["push", "--set-upstream", "origin", "dispatch/42-feat"], { cwd: "/tmp", shell: false },
+      "git", ["push", "--set-upstream", "origin", "dispatch/42-feat"], { cwd: "/tmp", shell: SHELL },
     );
   });
 });

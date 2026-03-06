@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { join } from "node:path";
 
 const mockFs = vi.hoisted(() => ({
   readFile: vi.fn(),
@@ -115,12 +116,12 @@ describe("getGithubOctokit", () => {
 
     expect(mockFs.writeFile).toHaveBeenCalledOnce();
     const [writePath, writeData] = mockFs.writeFile.mock.calls[0];
-    expect(writePath).toBe("/fakehome/.dispatch/auth.json");
+    expect(writePath).toBe(join("/fakehome", ".dispatch", "auth.json"));
     const parsed = JSON.parse(writeData);
     expect(parsed.github).toEqual({ token: "gh-new-token" });
 
     expect(mockFs.chmod).toHaveBeenCalledWith(
-      "/fakehome/.dispatch/auth.json",
+      join("/fakehome", ".dispatch", "auth.json"),
       0o600,
     );
     expect(mockOctokitConstructor).toHaveBeenCalledWith({
@@ -189,13 +190,13 @@ describe("getAzureConnection", () => {
 
     expect(mockFs.writeFile).toHaveBeenCalledOnce();
     const [writePath, writeData] = mockFs.writeFile.mock.calls[0];
-    expect(writePath).toBe("/fakehome/.dispatch/auth.json");
+    expect(writePath).toBe(join("/fakehome", ".dispatch", "auth.json"));
     const parsed = JSON.parse(writeData);
     expect(parsed.azure.token).toBe("az-new-token");
     expect(parsed.azure.expiresAt).toBeDefined();
 
     expect(mockFs.chmod).toHaveBeenCalledWith(
-      "/fakehome/.dispatch/auth.json",
+      join("/fakehome", ".dispatch", "auth.json"),
       0o600,
     );
     expect(mockWebApi).toHaveBeenCalledWith(
@@ -254,19 +255,19 @@ describe("auth cache file operations", () => {
 
     await getGithubOctokit();
 
-    expect(mockFs.mkdir).toHaveBeenCalledWith("/fakehome/.dispatch", {
+    expect(mockFs.mkdir).toHaveBeenCalledWith(join("/fakehome", ".dispatch"), {
       recursive: true,
     });
   });
 
-  it("sets file permissions to 0o600 after writing on non-Windows", async () => {
+  it.skipIf(realPlatform === "win32")("sets file permissions to 0o600 after writing on non-Windows", async () => {
     mockFs.readFile.mockRejectedValue(new Error("ENOENT"));
     mockAuthFn.mockResolvedValue({ token: "tok" });
 
     await getGithubOctokit();
 
     expect(mockFs.chmod).toHaveBeenCalledWith(
-      "/fakehome/.dispatch/auth.json",
+      join("/fakehome", ".dispatch", "auth.json"),
       0o600,
     );
   });

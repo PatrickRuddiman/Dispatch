@@ -44,7 +44,7 @@ describe("list", () => {
 
     const results = await datasource.list({ cwd: "/tmp/project" });
 
-    expect(readdir).toHaveBeenCalledWith(expect.stringContaining(".dispatch/specs"));
+    expect(readdir).toHaveBeenCalledWith(expect.stringContaining(join(".dispatch", "specs")));
     expect(results).toHaveLength(2);
     expect(results[0].number).toBe("a.md");
     expect(results[0].title).toBe("Alpha");
