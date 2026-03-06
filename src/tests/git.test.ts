@@ -7,12 +7,32 @@ const { mockExecFile } = vi.hoisted(() => ({
   mockExecFile: vi.fn(),
 }));
 
+const mockGitApiAzdo = vi.hoisted(() => ({
+  getRepositories: vi.fn(),
+  createPullRequest: vi.fn(),
+  getPullRequests: vi.fn(),
+}));
+
+const mockAzdoConnection = vi.hoisted(() => ({
+  getGitApi: vi.fn(),
+}));
+
+const mockGetAzureConnection = vi.hoisted(() => vi.fn());
+
 vi.mock("node:child_process", () => ({
   execFile: mockExecFile,
 }));
 
 vi.mock("node:util", () => ({
   promisify: () => mockExecFile,
+}));
+
+vi.mock("../helpers/auth.js", () => ({
+  getAzureConnection: mockGetAzureConnection,
+}));
+
+vi.mock("azure-devops-node-api/interfaces/GitInterfaces.js", () => ({
+  PullRequestStatus: { Active: 1 },
 }));
 
 // Import the actual datasource implementations AFTER mocking
@@ -27,6 +47,8 @@ import { UnsupportedOperationError } from "../helpers/errors.js";
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mockGetAzureConnection.mockResolvedValue(mockAzdoConnection);
+  mockAzdoConnection.getGitApi.mockResolvedValue(mockGitApiAzdo);
 });
 
 // ─── Section A: GitHub — buildBranchName ────────────────────────────────────────
@@ -364,12 +386,18 @@ describe("GitHub datasource — getCommitMessages", () => {
 // ─── Section H: Azure DevOps — createPullRequest ────────────────────────────────
 
 describe("Azure DevOps datasource — createPullRequest", () => {
-  it("creates PR using az repos pr create and returns URL", async () => {
-    mockExecFile.mockResolvedValue({
-      stdout: JSON.stringify({
-        url: "https://dev.azure.com/org/project/_git/repo/pullrequest/1",
-      }),
-    });
+  const REMOTE_URL = "https://dev.azure.com/testorg/testproject/_git/testrepo";
+  const MOCK_REPO = { id: "repo-id-123", webUrl: REMOTE_URL };
+
+  function setupGitMocks() {
+    mockExecFile.mockResolvedValueOnce({ stdout: `${REMOTE_URL}\n` });
+    mockExecFile.mockResolvedValueOnce({ stdout: "refs/remotes/origin/main\n" });
+  }
+
+  it("creates PR using SDK and returns web URL", async () => {
+    setupGitMocks();
+    mockGitApiAzdo.getRepositories.mockResolvedValue([MOCK_REPO]);
+    mockGitApiAzdo.createPullRequest.mockResolvedValue({ pullRequestId: 1 });
 
     const result = await azdevops.createPullRequest(
       "dispatch/42-feature",
@@ -379,40 +407,25 @@ describe("Azure DevOps datasource — createPullRequest", () => {
       { cwd: "/tmp/repo" },
     );
 
-    expect(result).toBe(
-      "https://dev.azure.com/org/project/_git/repo/pullrequest/1",
-    );
-    expect(mockExecFile).toHaveBeenCalledWith(
-      "az",
-      [
-        "repos",
-        "pr",
-        "create",
-        "--title",
-        "feat: add auth",
-        "--description",
-        "Resolves AB#42",
-        "--source-branch",
-        "dispatch/42-feature",
-        "--work-items",
-        "42",
-        "--output",
-        "json",
-      ],
-      { cwd: "/tmp/repo", shell: false },
+    expect(result).toBe(`${REMOTE_URL}/pullrequest/1`);
+    expect(mockGitApiAzdo.createPullRequest).toHaveBeenCalledWith(
+      {
+        sourceRefName: "refs/heads/dispatch/42-feature",
+        targetRefName: "refs/heads/main",
+        title: "feat: add auth",
+        description: "Resolves AB#42",
+        workItemRefs: [{ id: "42" }],
+      },
+      "repo-id-123",
+      "testproject",
     );
   });
 
   it("returns existing PR URL when PR already exists", async () => {
-    mockExecFile
-      .mockRejectedValueOnce(new Error("already exists"))
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify([
-          {
-            url: "https://dev.azure.com/org/project/_git/repo/pullrequest/1",
-          },
-        ]),
-      });
+    setupGitMocks();
+    mockGitApiAzdo.getRepositories.mockResolvedValue([MOCK_REPO]);
+    mockGitApiAzdo.createPullRequest.mockRejectedValue(new Error("already exists"));
+    mockGitApiAzdo.getPullRequests.mockResolvedValue([{ pullRequestId: 5 }]);
 
     const result = await azdevops.createPullRequest(
       "dispatch/42-feature",
@@ -422,31 +435,19 @@ describe("Azure DevOps datasource — createPullRequest", () => {
       { cwd: "/tmp/repo" },
     );
 
-    expect(result).toBe(
-      "https://dev.azure.com/org/project/_git/repo/pullrequest/1",
-    );
-    expect(mockExecFile).toHaveBeenNthCalledWith(
-      2,
-      "az",
-      [
-        "repos",
-        "pr",
-        "list",
-        "--source-branch",
-        "dispatch/42-feature",
-        "--status",
-        "active",
-        "--output",
-        "json",
-      ],
-      { cwd: "/tmp/repo", shell: false },
+    expect(result).toBe(`${REMOTE_URL}/pullrequest/5`);
+    expect(mockGitApiAzdo.getPullRequests).toHaveBeenCalledWith(
+      "repo-id-123",
+      { sourceRefName: "refs/heads/dispatch/42-feature", status: 1 },
+      "testproject",
     );
   });
 
   it("returns empty string when PR already exists but none found", async () => {
-    mockExecFile
-      .mockRejectedValueOnce(new Error("already exists"))
-      .mockResolvedValueOnce({ stdout: "[]" });
+    setupGitMocks();
+    mockGitApiAzdo.getRepositories.mockResolvedValue([MOCK_REPO]);
+    mockGitApiAzdo.createPullRequest.mockRejectedValue(new Error("already exists"));
+    mockGitApiAzdo.getPullRequests.mockResolvedValue([]);
 
     const result = await azdevops.createPullRequest(
       "dispatch/42-feature",
@@ -460,21 +461,21 @@ describe("Azure DevOps datasource — createPullRequest", () => {
   });
 
   it("re-throws non-'already exists' errors", async () => {
-    mockExecFile.mockRejectedValue(new Error("auth failed"));
+    setupGitMocks();
+    mockGitApiAzdo.getRepositories.mockResolvedValue([MOCK_REPO]);
+    mockGitApiAzdo.createPullRequest.mockRejectedValue(new Error("network error"));
 
     await expect(
       azdevops.createPullRequest("dispatch/42-feature", "42", "feat: auth", "", {
         cwd: "/tmp/repo",
       }),
-    ).rejects.toThrow("auth failed");
+    ).rejects.toThrow("network error");
   });
 
-  it("passes provided body to az repos pr create --description", async () => {
-    mockExecFile.mockResolvedValue({
-      stdout: JSON.stringify({
-        url: "https://dev.azure.com/org/project/_git/repo/pullrequest/2",
-      }),
-    });
+  it("passes provided body as PR description", async () => {
+    setupGitMocks();
+    mockGitApiAzdo.getRepositories.mockResolvedValue([MOCK_REPO]);
+    mockGitApiAzdo.createPullRequest.mockResolvedValue({ pullRequestId: 2 });
 
     const customBody = "## Summary\n\nImplemented auth flow\n\nResolves AB#42";
     const result = await azdevops.createPullRequest(
@@ -485,36 +486,18 @@ describe("Azure DevOps datasource — createPullRequest", () => {
       { cwd: "/tmp/repo" },
     );
 
-    expect(result).toBe(
-      "https://dev.azure.com/org/project/_git/repo/pullrequest/2",
-    );
-    expect(mockExecFile).toHaveBeenCalledWith(
-      "az",
-      [
-        "repos",
-        "pr",
-        "create",
-        "--title",
-        "feat: add auth",
-        "--description",
-        customBody,
-        "--source-branch",
-        "dispatch/42-feature",
-        "--work-items",
-        "42",
-        "--output",
-        "json",
-      ],
-      { cwd: "/tmp/repo", shell: false },
+    expect(result).toBe(`${REMOTE_URL}/pullrequest/2`);
+    expect(mockGitApiAzdo.createPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ description: customBody }),
+      "repo-id-123",
+      "testproject",
     );
   });
 
   it("uses default description when body is empty string", async () => {
-    mockExecFile.mockResolvedValue({
-      stdout: JSON.stringify({
-        url: "https://dev.azure.com/org/project/_git/repo/pullrequest/3",
-      }),
-    });
+    setupGitMocks();
+    mockGitApiAzdo.getRepositories.mockResolvedValue([MOCK_REPO]);
+    mockGitApiAzdo.createPullRequest.mockResolvedValue({ pullRequestId: 3 });
 
     const result = await azdevops.createPullRequest(
       "dispatch/99-fix",
@@ -524,27 +507,11 @@ describe("Azure DevOps datasource — createPullRequest", () => {
       { cwd: "/tmp/repo" },
     );
 
-    expect(result).toBe(
-      "https://dev.azure.com/org/project/_git/repo/pullrequest/3",
-    );
-    expect(mockExecFile).toHaveBeenCalledWith(
-      "az",
-      [
-        "repos",
-        "pr",
-        "create",
-        "--title",
-        "fix: resolve bug",
-        "--description",
-        "Resolves AB#99",
-        "--source-branch",
-        "dispatch/99-fix",
-        "--work-items",
-        "99",
-        "--output",
-        "json",
-      ],
-      { cwd: "/tmp/repo", shell: false },
+    expect(result).toBe(`${REMOTE_URL}/pullrequest/3`);
+    expect(mockGitApiAzdo.createPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ description: "Resolves AB#99" }),
+      "repo-id-123",
+      "testproject",
     );
   });
 });
