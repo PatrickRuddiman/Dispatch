@@ -16,6 +16,7 @@ const mockOctokit = vi.hoisted(() => ({
       list: vi.fn(),
     },
   },
+  paginate: vi.fn(),
 }));
 
 vi.mock("node:child_process", () => ({ execFile: mockExecFile }));
@@ -43,16 +44,15 @@ beforeEach(() => {
   mockOctokit.rest.issues.create.mockReset();
   mockOctokit.rest.pulls.create.mockReset();
   mockOctokit.rest.pulls.list.mockReset();
+  mockOctokit.paginate.mockReset();
 });
 
 describe("github datasource — list", () => {
   it("returns parsed issues from Octokit", async () => {
-    mockOctokit.rest.issues.listForRepo.mockResolvedValue({
-      data: [
-        { number: 1, title: "Bug", body: "fix it", labels: [{ name: "bug" }], state: "open", html_url: "https://github.com/o/r/issues/1" },
-        { number: 2, title: "Feature", body: "add it", labels: [], state: "open", html_url: "https://github.com/o/r/issues/2" },
-      ],
-    });
+    mockOctokit.paginate.mockResolvedValue([
+      { number: 1, title: "Bug", body: "fix it", labels: [{ name: "bug" }], state: "open", html_url: "https://github.com/o/r/issues/1" },
+      { number: 2, title: "Feature", body: "add it", labels: [], state: "open", html_url: "https://github.com/o/r/issues/2" },
+    ]);
 
     const result = await datasource.list({ cwd: "/tmp" });
 
@@ -64,12 +64,10 @@ describe("github datasource — list", () => {
   });
 
   it("filters out pull requests from issue list", async () => {
-    mockOctokit.rest.issues.listForRepo.mockResolvedValue({
-      data: [
-        { number: 1, title: "Issue", body: "", labels: [], state: "open", html_url: "https://github.com/o/r/issues/1" },
-        { number: 2, title: "PR", body: "", labels: [], state: "open", html_url: "https://github.com/o/r/pull/2", pull_request: { url: "..." } },
-      ],
-    });
+    mockOctokit.paginate.mockResolvedValue([
+      { number: 1, title: "Issue", body: "", labels: [], state: "open", html_url: "https://github.com/o/r/issues/1" },
+      { number: 2, title: "PR", body: "", labels: [], state: "open", html_url: "https://github.com/o/r/pull/2", pull_request: { url: "..." } },
+    ]);
 
     const result = await datasource.list({ cwd: "/tmp" });
 
@@ -90,9 +88,9 @@ describe("github datasource — fetch", () => {
         html_url: "https://github.com/o/r/issues/42",
       },
     });
-    mockOctokit.rest.issues.listComments.mockResolvedValue({
-      data: [{ user: { login: "alice" }, body: "on it" }],
-    });
+    mockOctokit.paginate.mockResolvedValue(
+      [{ user: { login: "alice" }, body: "on it" }],
+    );
 
     const result = await datasource.fetch("42", { cwd: "/tmp" });
 
@@ -105,10 +103,22 @@ describe("github datasource — fetch", () => {
     mockOctokit.rest.issues.get.mockResolvedValue({
       data: { number: 1, title: "T", body: "B", labels: [], state: "open", html_url: "" },
     });
-    mockOctokit.rest.issues.listComments.mockResolvedValue({ data: [] });
+    mockOctokit.paginate.mockResolvedValue([]);
 
     const result = await datasource.fetch("1", { cwd: "/tmp" });
     expect(result.comments).toEqual([]);
+  });
+
+  it("handles null comment body without producing 'null' string", async () => {
+    mockOctokit.rest.issues.get.mockResolvedValue({
+      data: { number: 1, title: "T", body: "B", labels: [], state: "open", html_url: "" },
+    });
+    mockOctokit.paginate.mockResolvedValue(
+      [{ user: { login: "bob" }, body: null }],
+    );
+
+    const result = await datasource.fetch("1", { cwd: "/tmp" });
+    expect(result.comments).toEqual(["**bob:** "]);
   });
 });
 
@@ -341,9 +351,11 @@ describe("github datasource — createPullRequest", () => {
 
   it("returns existing PR URL when already exists", async () => {
     mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/main\n" });
-    mockOctokit.rest.pulls.create.mockRejectedValue(
-      new Error("A pull request already exists for o:dispatch/42-feat"),
+    const error = Object.assign(
+      new Error("Validation Failed"),
+      { status: 422, response: { data: { errors: [{ message: "A pull request already exists" }] } } },
     );
+    mockOctokit.rest.pulls.create.mockRejectedValue(error);
     mockOctokit.rest.pulls.list.mockResolvedValue({
       data: [{ html_url: "https://github.com/o/r/pull/5" }],
     });

@@ -116,11 +116,14 @@ export const datasource: Datasource = {
     const { owner, repo } = await getOwnerRepo(cwd);
     const octokit = await getGithubOctokit();
 
-    const { data: issues } = await octokit.rest.issues.listForRepo({
-      owner,
-      repo,
-      state: "open",
-    });
+    const issues = await octokit.paginate(
+      octokit.rest.issues.listForRepo,
+      {
+        owner,
+        repo,
+        state: "open",
+      },
+    );
 
     return issues
       .filter((issue) => !issue.pull_request)
@@ -147,14 +150,17 @@ export const datasource: Datasource = {
       issue_number: Number(issueId),
     });
 
-    const { data: issueComments } = await octokit.rest.issues.listComments({
-      owner,
-      repo,
-      issue_number: Number(issueId),
-    });
+    const issueComments = await octokit.paginate(
+      octokit.rest.issues.listComments,
+      {
+        owner,
+        repo,
+        issue_number: Number(issueId),
+      },
+    );
 
     const comments: string[] = issueComments.map(
-      (c) => `**${c.user?.login ?? "unknown"}:** ${c.body}`
+      (c) => `**${c.user?.login ?? "unknown"}:** ${c.body ?? ""}`
     );
 
     return {
@@ -288,10 +294,17 @@ export const datasource: Datasource = {
         base: defaultBranch,
       });
       return pr.html_url;
-    } catch (err) {
-      // If a PR already exists for this branch, retrieve its URL
-      const message = log.extractMessage(err);
-      if (message.includes("A pull request already exists")) {
+    } catch (err: unknown) {
+      // If a PR already exists for this branch, retrieve its URL.
+      // Octokit throws a RequestError with status 422 for validation
+      // failures, including "A pull request already exists".
+      const isValidationError =
+        typeof err === "object" &&
+        err !== null &&
+        "status" in err &&
+        (err as { status: number }).status === 422;
+
+      if (isValidationError) {
         const { data: prs } = await octokit.rest.pulls.list({
           owner,
           repo,

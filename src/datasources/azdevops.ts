@@ -125,12 +125,12 @@ export async function detectDoneState(
   workItemType: string,
   opts: IssueFetchOptions = {}
 ): Promise<string> {
-  const cacheKey = `${opts.org ?? ""}|${opts.project ?? ""}|${workItemType}`;
+  const { orgUrl, project, connection } = await getOrgAndProject(opts);
+  const cacheKey = `${orgUrl}|${project}|${workItemType}`;
   const cached = doneStateCache.get(cacheKey);
   if (cached) return cached;
 
   try {
-    const { project, connection } = await getOrgAndProject(opts);
     const witApi = await connection.getWorkItemTrackingApi();
     const states = await witApi.getWorkItemTypeStates(project, workItemType);
 
@@ -434,17 +434,14 @@ export const datasource: Datasource = {
     opts: DispatchLifecycleOptions,
   ): Promise<string> {
     const cwd = opts.cwd;
+    const { orgUrl, project, connection } = await getOrgAndProject(opts);
+    const gitApi = await connection.getGitApi();
+
+    // Resolve the remote URL for repo matching
     const remoteUrl = await getGitRemoteUrl(cwd);
     if (!remoteUrl) {
       throw new Error("Could not determine git remote URL.");
     }
-    const parsed = parseAzDevOpsRemoteUrl(remoteUrl);
-    if (!parsed) {
-      throw new Error(`Could not parse Azure DevOps org/project from remote URL: ${remoteUrl}`);
-    }
-    const { orgUrl, project } = parsed;
-    const connection = await getAzureConnection(orgUrl);
-    const gitApi = await connection.getGitApi();
 
     // Find the repository by matching remote URL
     const repos = await gitApi.getRepositories(project);

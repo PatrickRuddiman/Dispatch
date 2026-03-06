@@ -76,6 +76,8 @@ vi.mock("../helpers/logger.js", () => ({
 
 import { getGithubOctokit, getAzureConnection } from "../helpers/auth.js";
 
+const realPlatform = process.platform;
+
 beforeEach(() => {
   vi.resetAllMocks();
   mockHomedir.mockReturnValue("/fakehome");
@@ -257,7 +259,7 @@ describe("auth cache file operations", () => {
     });
   });
 
-  it("sets file permissions to 0o600 after writing", async () => {
+  it("sets file permissions to 0o600 after writing on non-Windows", async () => {
     mockFs.readFile.mockRejectedValue(new Error("ENOENT"));
     mockAuthFn.mockResolvedValue({ token: "tok" });
 
@@ -267,5 +269,25 @@ describe("auth cache file operations", () => {
       "/fakehome/.dispatch/auth.json",
       0o600,
     );
+  });
+
+  it("skips chmod on Windows platform", async () => {
+    mockFs.readFile.mockRejectedValue(new Error("ENOENT"));
+    mockAuthFn.mockResolvedValue({ token: "tok" });
+
+    Object.defineProperty(process, "platform", {
+      value: "win32",
+      configurable: true,
+    });
+
+    try {
+      await getGithubOctokit();
+      expect(mockFs.chmod).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(process, "platform", {
+        value: realPlatform,
+        configurable: true,
+      });
+    }
   });
 });

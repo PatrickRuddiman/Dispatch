@@ -390,7 +390,11 @@ describe("Azure DevOps datasource — createPullRequest", () => {
   const MOCK_REPO = { id: "repo-id-123", webUrl: REMOTE_URL };
 
   function setupGitMocks() {
+    // 1st call: getOrgAndProject() → getGitRemoteUrl() reads the remote URL
     mockExecFile.mockResolvedValueOnce({ stdout: `${REMOTE_URL}\n` });
+    // 2nd call: createPullRequest() → getGitRemoteUrl() reads the remote URL again
+    mockExecFile.mockResolvedValueOnce({ stdout: `${REMOTE_URL}\n` });
+    // 3rd call: getDefaultBranch() reads the symbolic ref
     mockExecFile.mockResolvedValueOnce({ stdout: "refs/remotes/origin/main\n" });
   }
 

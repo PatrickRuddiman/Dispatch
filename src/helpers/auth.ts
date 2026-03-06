@@ -45,7 +45,13 @@ async function loadAuthCache(): Promise<AuthCache> {
 async function saveAuthCache(cache: AuthCache): Promise<void> {
   await mkdir(dirname(AUTH_PATH), { recursive: true });
   await writeFile(AUTH_PATH, JSON.stringify(cache, null, 2) + "\n", "utf-8");
-  await chmod(AUTH_PATH, 0o600);
+  if (process.platform !== "win32") {
+    try {
+      await chmod(AUTH_PATH, 0o600);
+    } catch {
+      // chmod may fail on restricted filesystems; token was already written
+    }
+  }
 }
 
 /**
@@ -113,6 +119,11 @@ export async function getAzureConnection(
   });
 
   const accessToken = await credential.getToken(AZURE_DEVOPS_SCOPE);
+  if (!accessToken) {
+    throw new Error(
+      "Azure device-code authentication did not return a token. Please try again.",
+    );
+  }
 
   cache.azure = {
     token: accessToken.token,

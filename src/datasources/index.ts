@@ -164,18 +164,35 @@ export function parseGitHubRemoteUrl(
 ): { owner: string; repo: string } | null {
   // HTTPS: https://github.com/{owner}/{repo}[.git]
   const httpsMatch = url.match(
-    /^https?:\/\/github\.com\/([^/]+)\/([^/.]+?)(?:\.git)?\/?$/i
+    /^https?:\/\/github\.com\/([^/]+)\/([^/]+?)\/?$/i
   );
   if (httpsMatch) {
-    return { owner: httpsMatch[1], repo: httpsMatch[2] };
+    const owner = decodeURIComponent(httpsMatch[1]);
+    const rawRepo = decodeURIComponent(httpsMatch[2]);
+    const repo = rawRepo.endsWith(".git") ? rawRepo.slice(0, -4) : rawRepo;
+    return { owner, repo };
   }
 
-  // SSH: git@github.com:{owner}/{repo}[.git]
+  // SSH (scp-style): git@github.com:{owner}/{repo}[.git]
   const sshMatch = url.match(
-    /^git@github\.com:([^/]+)\/([^/.]+?)(?:\.git)?\/?$/i
+    /^git@github\.com:([^/]+)\/([^/]+?)\/?$/i
   );
   if (sshMatch) {
-    return { owner: sshMatch[1], repo: sshMatch[2] };
+    const owner = decodeURIComponent(sshMatch[1]);
+    const rawRepo = decodeURIComponent(sshMatch[2]);
+    const repo = rawRepo.endsWith(".git") ? rawRepo.slice(0, -4) : rawRepo;
+    return { owner, repo };
+  }
+
+  // SSH (url-style): ssh://git@github.com/{owner}/{repo}[.git]
+  const sshUrlMatch = url.match(
+    /^ssh:\/\/git@github\.com\/([^/]+)\/([^/]+?)\/?$/i
+  );
+  if (sshUrlMatch) {
+    const owner = decodeURIComponent(sshUrlMatch[1]);
+    const rawRepo = decodeURIComponent(sshUrlMatch[2]);
+    const repo = rawRepo.endsWith(".git") ? rawRepo.slice(0, -4) : rawRepo;
+    return { owner, repo };
   }
 
   return null;

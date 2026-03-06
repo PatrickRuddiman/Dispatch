@@ -135,4 +135,39 @@ describe("parseGitHubRemoteUrl", () => {
     );
     expect(result).toEqual({ owner: "owner", repo: "repo" });
   });
+
+  it("handles HTTPS URL with repo name containing dots", () => {
+    const result = parseGitHubRemoteUrl(
+      "https://github.com/owner/my.repo.name.git",
+    );
+    expect(result).toEqual({ owner: "owner", repo: "my.repo.name" });
+  });
+
+  it("handles HTTPS URL without .git and repo name containing dots", () => {
+    const result = parseGitHubRemoteUrl(
+      "https://github.com/owner/my.repo.name",
+    );
+    expect(result).toEqual({ owner: "owner", repo: "my.repo.name" });
+  });
+
+  it("handles SSH URL with repo name containing dots", () => {
+    const result = parseGitHubRemoteUrl(
+      "git@github.com:owner/my.repo.git",
+    );
+    expect(result).toEqual({ owner: "owner", repo: "my.repo" });
+  });
+
+  it("parses ssh:// URL with .git suffix", () => {
+    const result = parseGitHubRemoteUrl(
+      "ssh://git@github.com/owner/repo.git",
+    );
+    expect(result).toEqual({ owner: "owner", repo: "repo" });
+  });
+
+  it("parses ssh:// URL without .git suffix", () => {
+    const result = parseGitHubRemoteUrl(
+      "ssh://git@github.com/owner/repo",
+    );
+    expect(result).toEqual({ owner: "owner", repo: "repo" });
+  });
 });
