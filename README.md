@@ -78,26 +78,9 @@ export OPENAI_API_KEY=sk-...
 
 Default model: `o4-mini`. Available models: `o4-mini`, `o3-mini`, `codex-mini-latest`.
 
-### Issue tracker (choose based on your repo)
+### Issue tracker
 
-**GitHub** (`--source github`):
-
-```sh
-# Install the GitHub CLI
-# https://cli.github.com/
-
-gh auth login
-```
-
-**Azure DevOps** (`--source azdevops`):
-
-```sh
-# Install the Azure CLI
-# https://learn.microsoft.com/en-us/cli/azure/install-azure-cli
-
-az login
-az extension add --name azure-devops
-```
+**GitHub** (`--source github`), **Azure DevOps** (`--source azdevops`): No external CLI tools required — Dispatch authenticates directly via browser. See [Authentication](#authentication) below.
 
 **Local markdown** (`--source md`): No external tools or authentication required.
 
@@ -138,6 +121,20 @@ dispatch --provider copilot
 # Generate specs from issues (before dispatching)
 dispatch --spec 42,43
 ```
+
+## Authentication
+
+Dispatch authenticates with GitHub and Azure DevOps using the **OAuth device flow** — no external CLI tools (`gh`, `az`) are required.
+
+On first use (or when a cached token is missing/expired), Dispatch will:
+
+1. Display a **one-time code** and open your browser to the provider's verification page.
+2. You sign in and authorize Dispatch in the browser.
+3. The token is cached locally at **`~/.dispatch/auth.json`** for future runs.
+
+Authentication is triggered automatically when you run `dispatch` with `--source github` or `--source azdevops`. No separate login step is needed.
+
+**Re-authenticating:** Delete `~/.dispatch/auth.json` (or just the relevant platform key inside it) and run `dispatch` again to re-trigger the device flow.
 
 ## Pipeline modes
 

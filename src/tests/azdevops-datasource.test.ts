@@ -1,45 +1,92 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// Git execFile mock — still needed for git operations
 const { mockExecFile } = vi.hoisted(() => ({ mockExecFile: vi.fn() }));
+
+// Azure DevOps SDK mocks
+const mockWitApi = vi.hoisted(() => ({
+  queryByWiql: vi.fn(),
+  getWorkItems: vi.fn(),
+  getWorkItem: vi.fn(),
+  updateWorkItem: vi.fn(),
+  createWorkItem: vi.fn(),
+  getWorkItemTypes: vi.fn(),
+  getWorkItemTypeStates: vi.fn(),
+  getComments: vi.fn(),
+}));
+
+const mockGitApi = vi.hoisted(() => ({
+  getRepositories: vi.fn(),
+  createPullRequest: vi.fn(),
+  getPullRequests: vi.fn(),
+}));
+
+const mockConnection = vi.hoisted(() => ({
+  getWorkItemTrackingApi: vi.fn().mockResolvedValue(mockWitApi),
+  getGitApi: vi.fn().mockResolvedValue(mockGitApi),
+}));
 
 vi.mock("node:child_process", () => ({ execFile: mockExecFile }));
 vi.mock("node:util", () => ({ promisify: () => mockExecFile }));
 
+// Mock auth module to return our mock connection
+vi.mock("../helpers/auth.js", () => ({
+  getAzureConnection: vi.fn().mockResolvedValue(mockConnection),
+}));
+
+// Mock datasource index — preserve real parseAzDevOpsRemoteUrl and other exports,
+// but mock getGitRemoteUrl to return a valid Azure DevOps URL
+vi.mock("../datasources/index.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../datasources/index.js")>();
+  return {
+    ...original,
+    getGitRemoteUrl: vi.fn().mockResolvedValue("https://dev.azure.com/testorg/testproject/_git/testrepo"),
+  };
+});
+
+// Mock azure-devops-node-api interfaces import used for PullRequestStatus
+vi.mock("azure-devops-node-api/interfaces/GitInterfaces.js", () => ({
+  PullRequestStatus: { Active: 1 },
+}));
+
 import { datasource, detectWorkItemType, detectDoneState } from "../datasources/azdevops.js";
 import { InvalidBranchNameError } from "../helpers/branch-validation.js";
 
+const SHELL = process.platform === "win32";
+
 beforeEach(() => {
   mockExecFile.mockReset();
+  mockWitApi.queryByWiql.mockReset();
+  mockWitApi.getWorkItems.mockReset();
+  mockWitApi.getWorkItem.mockReset();
+  mockWitApi.updateWorkItem.mockReset();
+  mockWitApi.createWorkItem.mockReset();
+  mockWitApi.getWorkItemTypes.mockReset();
+  mockWitApi.getWorkItemTypeStates.mockReset();
+  mockWitApi.getComments.mockReset();
+  mockGitApi.getRepositories.mockReset();
+  mockGitApi.createPullRequest.mockReset();
+  mockGitApi.getPullRequests.mockReset();
 });
 
 describe("azdevops datasource — list", () => {
   it("queries work items and fetches details", async () => {
-    // First call: az boards query
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([{ id: 1 }, { id: 2 }]),
+    mockWitApi.queryByWiql.mockResolvedValueOnce({
+      workItems: [{ id: 1 }, { id: 2 }],
     });
-    // Second call: batch az boards work-item show --id 1 2
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([
-        {
-          id: 1,
-          fields: { "System.Title": "Bug", "System.Description": "fix", "System.Tags": "bug", "System.State": "Active" },
-          _links: { html: { href: "https://dev.azure.com/1" } },
-        },
-        {
-          id: 2,
-          fields: { "System.Title": "Feature", "System.Description": "add", "System.Tags": "", "System.State": "New" },
-          url: "https://dev.azure.com/2",
-        },
-      ]),
-    });
-    // Third + Fourth calls: fetchComments for item 1 and item 2 (parallel)
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({ comments: [] }),
-    });
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({ comments: [] }),
-    });
+    mockWitApi.getWorkItems.mockResolvedValueOnce([
+      {
+        id: 1,
+        fields: { "System.Title": "Bug", "System.Description": "fix", "System.Tags": "bug", "System.State": "Active" },
+        _links: { html: { href: "https://dev.azure.com/1" } },
+      },
+      {
+        id: 2,
+        fields: { "System.Title": "Feature", "System.Description": "add", "System.Tags": "", "System.State": "New" },
+        url: "https://dev.azure.com/2",
+      },
+    ]);
+    mockWitApi.getComments.mockResolvedValue({ comments: [] });
 
     const result = await datasource.list({ cwd: "/tmp" });
 
@@ -48,33 +95,22 @@ describe("azdevops datasource — list", () => {
     expect(result[0].title).toBe("Bug");
     expect(result[1].number).toBe("2");
 
-    // Verify batch call args
-    const batchArgs = mockExecFile.mock.calls[1][1] as string[];
-    expect(batchArgs).toContain("show");
-    expect(batchArgs).toContain("--id");
-    expect(batchArgs).toContain("1");
-    expect(batchArgs).toContain("2");
+    // Verify batch call was made with correct ids
+    expect(mockWitApi.getWorkItems).toHaveBeenCalledWith([1, 2]);
   });
 
   it("falls back to individual fetches when batch call fails", async () => {
-    // First call: az boards query
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([{ id: 1 }]),
+    mockWitApi.queryByWiql.mockResolvedValueOnce({
+      workItems: [{ id: 1 }],
     });
-    // Second call: batch show fails
-    mockExecFile.mockRejectedValueOnce(new Error("batch not supported"));
-    // Fallback: individual fetch for item 1
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        id: 1,
-        fields: { "System.Title": "Bug", "System.Description": "fix", "System.Tags": "", "System.State": "Active" },
-        _links: { html: { href: "https://dev.azure.com/1" } },
-      }),
+    mockWitApi.getWorkItems.mockRejectedValueOnce(new Error("batch not supported"));
+    // Fallback path calls datasource.fetch() which calls getWorkItem
+    mockWitApi.getWorkItem.mockResolvedValueOnce({
+      id: 1,
+      fields: { "System.Title": "Bug", "System.Description": "fix", "System.Tags": "", "System.State": "Active" },
+      _links: { html: { href: "https://dev.azure.com/1" } },
     });
-    // fetchComments for item 1
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({ comments: [] }),
-    });
+    mockWitApi.getComments.mockResolvedValueOnce({ comments: [] });
 
     const result = await datasource.list({ cwd: "/tmp" });
 
@@ -83,139 +119,110 @@ describe("azdevops datasource — list", () => {
     expect(result[0].title).toBe("Bug");
   });
 
-  it("passes org and project to az command", async () => {
-    mockExecFile.mockResolvedValueOnce({ stdout: JSON.stringify([]) });
+  it("passes org and project to SDK calls", async () => {
+    mockWitApi.queryByWiql.mockResolvedValueOnce({ workItems: [] });
 
     await datasource.list({ cwd: "/tmp", org: "https://dev.azure.com/myorg", project: "MyProj" });
 
-    const args = mockExecFile.mock.calls[0][1] as string[];
-    expect(args).toContain("--org");
-    expect(args).toContain("https://dev.azure.com/myorg");
-    expect(args).toContain("--project");
-    expect(args).toContain("MyProj");
+    // When org and project are provided, the method completes without error
+    expect(mockWitApi.queryByWiql).toHaveBeenCalledTimes(1);
   });
 
   it("returns early when WIQL result is empty", async () => {
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([]),
+    mockWitApi.queryByWiql.mockResolvedValueOnce({
+      workItems: [],
     });
 
     const result = await datasource.list({ cwd: "/tmp" });
 
     expect(result).toEqual([]);
-    // Only the WIQL query should have been called — no batch show call
-    expect(mockExecFile).toHaveBeenCalledTimes(1);
+    // getWorkItems should NOT have been called
+    expect(mockWitApi.getWorkItems).not.toHaveBeenCalled();
   });
 
-  it("passes org and project through on batch call", async () => {
-    // First call: WIQL query
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([{ id: 1 }]),
+  it("passes ids through on batch call", async () => {
+    mockWitApi.queryByWiql.mockResolvedValueOnce({
+      workItems: [{ id: 1 }],
     });
-    // Second call: batch show
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([
-        {
-          id: 1,
-          fields: { "System.Title": "T", "System.Description": "D", "System.Tags": "", "System.State": "Active" },
-          _links: { html: { href: "https://dev.azure.com/1" } },
-        },
-      ]),
-    });
-    // Third call: fetchComments
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({ comments: [] }),
-    });
+    mockWitApi.getWorkItems.mockResolvedValueOnce([
+      {
+        id: 1,
+        fields: { "System.Title": "T", "System.Description": "D", "System.Tags": "", "System.State": "Active" },
+        _links: { html: { href: "https://dev.azure.com/1" } },
+      },
+    ]);
+    mockWitApi.getComments.mockResolvedValueOnce({ comments: [] });
 
     await datasource.list({ cwd: "/tmp", org: "https://dev.azure.com/myorg", project: "MyProj" });
 
-    // Verify batch call (second call) includes --org but NOT --project (show doesn't accept it)
-    const batchArgs = mockExecFile.mock.calls[1][1] as string[];
-    expect(batchArgs).toContain("--org");
-    expect(batchArgs).toContain("https://dev.azure.com/myorg");
-    expect(batchArgs).not.toContain("--project");
+    expect(mockWitApi.getWorkItems).toHaveBeenCalledWith([1]);
   });
 
   it("appends iteration filter to WIQL query", async () => {
-    mockExecFile.mockResolvedValueOnce({ stdout: JSON.stringify([]) });
+    mockWitApi.queryByWiql.mockResolvedValueOnce({ workItems: [] });
     await datasource.list({ cwd: "/tmp", iteration: "MyProject\\Sprint 1" });
-    const args = mockExecFile.mock.calls[0][1] as string[];
-    const wiqlIdx = args.indexOf("--wiql");
-    const wiql = args[wiqlIdx + 1];
-    expect(wiql).toContain("[System.IterationPath] UNDER 'MyProject\\Sprint 1'");
+    const wiqlArg = mockWitApi.queryByWiql.mock.calls[0][0];
+    expect(wiqlArg.query).toContain("[System.IterationPath] UNDER 'MyProject\\Sprint 1'");
   });
 
   it("appends area filter to WIQL query", async () => {
-    mockExecFile.mockResolvedValueOnce({ stdout: JSON.stringify([]) });
+    mockWitApi.queryByWiql.mockResolvedValueOnce({ workItems: [] });
     await datasource.list({ cwd: "/tmp", area: "MyProject\\Team A" });
-    const args = mockExecFile.mock.calls[0][1] as string[];
-    const wiqlIdx = args.indexOf("--wiql");
-    const wiql = args[wiqlIdx + 1];
-    expect(wiql).toContain("[System.AreaPath] UNDER 'MyProject\\Team A'");
+    const wiqlArg = mockWitApi.queryByWiql.mock.calls[0][0];
+    expect(wiqlArg.query).toContain("[System.AreaPath] UNDER 'MyProject\\Team A'");
   });
 
   it("handles @CurrentIteration macro without quotes", async () => {
-    mockExecFile.mockResolvedValueOnce({ stdout: JSON.stringify([]) });
+    mockWitApi.queryByWiql.mockResolvedValueOnce({ workItems: [] });
     await datasource.list({ cwd: "/tmp", iteration: "@CurrentIteration" });
-    const args = mockExecFile.mock.calls[0][1] as string[];
-    const wiqlIdx = args.indexOf("--wiql");
-    const wiql = args[wiqlIdx + 1];
-    expect(wiql).toContain("[System.IterationPath] UNDER @CurrentIteration");
+    const wiqlArg = mockWitApi.queryByWiql.mock.calls[0][0];
+    expect(wiqlArg.query).toContain("[System.IterationPath] UNDER @CurrentIteration");
   });
 
   it("appends both iteration and area filters", async () => {
-    mockExecFile.mockResolvedValueOnce({ stdout: JSON.stringify([]) });
+    mockWitApi.queryByWiql.mockResolvedValueOnce({ workItems: [] });
     await datasource.list({ cwd: "/tmp", iteration: "MyProject\\Sprint 1", area: "MyProject\\Team A" });
-    const args = mockExecFile.mock.calls[0][1] as string[];
-    const wiqlIdx = args.indexOf("--wiql");
-    const wiql = args[wiqlIdx + 1];
-    expect(wiql).toContain("[System.IterationPath] UNDER 'MyProject\\Sprint 1'");
-    expect(wiql).toContain("[System.AreaPath] UNDER 'MyProject\\Team A'");
+    const wiqlArg = mockWitApi.queryByWiql.mock.calls[0][0];
+    expect(wiqlArg.query).toContain("[System.IterationPath] UNDER 'MyProject\\Sprint 1'");
+    expect(wiqlArg.query).toContain("[System.AreaPath] UNDER 'MyProject\\Team A'");
   });
 
   it("does not add iteration or area filters when neither is set", async () => {
-    mockExecFile.mockResolvedValueOnce({ stdout: JSON.stringify([]) });
+    mockWitApi.queryByWiql.mockResolvedValueOnce({ workItems: [] });
     await datasource.list({ cwd: "/tmp" });
 
-    const args = mockExecFile.mock.calls[0][1] as string[];
-    const wiqlIdx = args.indexOf("--wiql");
-    const wiql = args[wiqlIdx + 1];
-    expect(wiql).not.toContain("[System.IterationPath]");
-    expect(wiql).not.toContain("[System.AreaPath]");
-    expect(wiql).toContain("[System.State] <> 'Closed'");
-    expect(wiql).toContain("[System.State] <> 'Done'");
-    expect(wiql).toContain("[System.State] <> 'Removed'");
+    const wiqlArg = mockWitApi.queryByWiql.mock.calls[0][0];
+    expect(wiqlArg.query).not.toContain("[System.IterationPath]");
+    expect(wiqlArg.query).not.toContain("[System.AreaPath]");
+    expect(wiqlArg.query).toContain("[System.State] <> 'Closed'");
+    expect(wiqlArg.query).toContain("[System.State] <> 'Done'");
+    expect(wiqlArg.query).toContain("[System.State] <> 'Removed'");
   });
 
-  it("throws descriptive error when az returns non-JSON output", async () => {
-    mockExecFile.mockResolvedValueOnce({ stdout: "Not Found\n" });
+  it("propagates SDK errors", async () => {
+    mockWitApi.queryByWiql.mockRejectedValueOnce(new Error("SDK connection failed"));
 
     await expect(datasource.list({ cwd: "/tmp" })).rejects.toThrow(
-      "Failed to parse Azure CLI output"
+      "SDK connection failed"
     );
   });
 });
 
 describe("azdevops datasource — fetch", () => {
   it("returns issue details", async () => {
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        id: 42,
-        fields: {
-          "System.Title": "Auth bug",
-          "System.Description": "login broken",
-          "System.Tags": "bug;critical",
-          "System.State": "Active",
-          "Microsoft.VSTS.Common.AcceptanceCriteria": "must fix",
-        },
-        _links: { html: { href: "https://dev.azure.com/42" } },
-      }),
+    mockWitApi.getWorkItem.mockResolvedValueOnce({
+      id: 42,
+      fields: {
+        "System.Title": "Auth bug",
+        "System.Description": "login broken",
+        "System.Tags": "bug;critical",
+        "System.State": "Active",
+        "Microsoft.VSTS.Common.AcceptanceCriteria": "must fix",
+      },
+      _links: { html: { href: "https://dev.azure.com/42" } },
     });
-    // fetchComments
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        comments: [{ text: "looking into it", createdBy: { displayName: "Alice" } }],
-      }),
+    mockWitApi.getComments.mockResolvedValueOnce({
+      comments: [{ text: "looking into it", createdBy: { displayName: "Alice" } }],
     });
 
     const result = await datasource.fetch("42", { cwd: "/tmp" });
@@ -228,63 +235,56 @@ describe("azdevops datasource — fetch", () => {
   });
 
   it("handles fetch with org and project", async () => {
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({ id: 1, fields: {} }),
+    mockWitApi.getWorkItem.mockResolvedValueOnce({
+      id: 1,
+      fields: {},
     });
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({ comments: [] }),
-    });
+    mockWitApi.getComments.mockResolvedValueOnce({ comments: [] });
 
-    await datasource.fetch("1", { cwd: "/tmp", org: "org-url", project: "proj" });
+    await datasource.fetch("1", { cwd: "/tmp", org: "https://dev.azure.com/org-url", project: "proj" });
 
-    const fetchArgs = mockExecFile.mock.calls[0][1] as string[];
-    expect(fetchArgs).toContain("--org");
-    expect(fetchArgs).toContain("org-url");
-    expect(fetchArgs).not.toContain("--project");
+    expect(mockWitApi.getWorkItem).toHaveBeenCalledWith(1);
   });
 
   it("returns empty comments when fetchComments fails", async () => {
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({ id: 1, fields: { "System.Title": "T" } }),
+    mockWitApi.getWorkItem.mockResolvedValueOnce({
+      id: 1,
+      fields: { "System.Title": "T" },
     });
-    mockExecFile.mockRejectedValueOnce(new Error("comment fetch failed"));
+    mockWitApi.getComments.mockRejectedValueOnce(new Error("comment fetch failed"));
 
     const result = await datasource.fetch("1", { cwd: "/tmp" });
 
     expect(result.comments).toEqual([]);
   });
 
-  it("throws descriptive error when az returns non-JSON output", async () => {
-    mockExecFile.mockResolvedValueOnce({ stdout: "ERROR: auth required\n" });
+  it("propagates SDK errors from getWorkItem", async () => {
+    mockWitApi.getWorkItem.mockRejectedValueOnce(new Error("auth required"));
 
     await expect(datasource.fetch("42", { cwd: "/tmp" })).rejects.toThrow(
-      "Failed to parse Azure CLI output"
+      "auth required"
     );
   });
 
   it("populates new IssueDetails fields when present in API response", async () => {
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        id: 50,
-        fields: {
-          "System.Title": "Add login",
-          "System.Description": "implement login",
-          "System.Tags": "feature",
-          "System.State": "Active",
-          "Microsoft.VSTS.Common.AcceptanceCriteria": "works",
-          "System.IterationPath": "MyProject\\Sprint 5",
-          "System.AreaPath": "MyProject\\Backend",
-          "System.AssignedTo": { displayName: "Jane Doe" },
-          "Microsoft.VSTS.Common.Priority": 2,
-          "Microsoft.VSTS.Scheduling.StoryPoints": 8,
-          "System.WorkItemType": "User Story",
-        },
-        _links: { html: { href: "https://dev.azure.com/50" } },
-      }),
+    mockWitApi.getWorkItem.mockResolvedValueOnce({
+      id: 50,
+      fields: {
+        "System.Title": "Add login",
+        "System.Description": "implement login",
+        "System.Tags": "feature",
+        "System.State": "Active",
+        "Microsoft.VSTS.Common.AcceptanceCriteria": "works",
+        "System.IterationPath": "MyProject\\Sprint 5",
+        "System.AreaPath": "MyProject\\Backend",
+        "System.AssignedTo": { displayName: "Jane Doe" },
+        "Microsoft.VSTS.Common.Priority": 2,
+        "Microsoft.VSTS.Scheduling.StoryPoints": 8,
+        "System.WorkItemType": "User Story",
+      },
+      _links: { html: { href: "https://dev.azure.com/50" } },
     });
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({ comments: [] }),
-    });
+    mockWitApi.getComments.mockResolvedValueOnce({ comments: [] });
 
     const result = await datasource.fetch("50", { cwd: "/tmp" });
 
@@ -297,21 +297,17 @@ describe("azdevops datasource — fetch", () => {
   });
 
   it("returns undefined for new fields when absent from API response", async () => {
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        id: 51,
-        fields: {
-          "System.Title": "Minimal item",
-          "System.Description": "",
-          "System.Tags": "",
-          "System.State": "New",
-        },
-        _links: { html: { href: "https://dev.azure.com/51" } },
-      }),
+    mockWitApi.getWorkItem.mockResolvedValueOnce({
+      id: 51,
+      fields: {
+        "System.Title": "Minimal item",
+        "System.Description": "",
+        "System.Tags": "",
+        "System.State": "New",
+      },
+      _links: { html: { href: "https://dev.azure.com/51" } },
     });
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({ comments: [] }),
-    });
+    mockWitApi.getComments.mockResolvedValueOnce({ comments: [] });
 
     const result = await datasource.fetch("51", { cwd: "/tmp" });
 
@@ -325,46 +321,40 @@ describe("azdevops datasource — fetch", () => {
 
   it("falls back across story point field variants (Agile → Scrum → CMMI)", async () => {
     // Agile: uses StoryPoints
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        id: 60,
-        fields: {
-          "System.Title": "Agile item",
-          "Microsoft.VSTS.Scheduling.StoryPoints": 5,
-        },
-      }),
+    mockWitApi.getWorkItem.mockResolvedValueOnce({
+      id: 60,
+      fields: {
+        "System.Title": "Agile item",
+        "Microsoft.VSTS.Scheduling.StoryPoints": 5,
+      },
     });
-    mockExecFile.mockResolvedValueOnce({ stdout: JSON.stringify({ comments: [] }) });
+    mockWitApi.getComments.mockResolvedValueOnce({ comments: [] });
 
     const agile = await datasource.fetch("60", { cwd: "/tmp" });
     expect(agile.storyPoints).toBe(5);
 
     // Scrum: uses Effort
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        id: 61,
-        fields: {
-          "System.Title": "Scrum item",
-          "Microsoft.VSTS.Scheduling.Effort": 13,
-        },
-      }),
+    mockWitApi.getWorkItem.mockResolvedValueOnce({
+      id: 61,
+      fields: {
+        "System.Title": "Scrum item",
+        "Microsoft.VSTS.Scheduling.Effort": 13,
+      },
     });
-    mockExecFile.mockResolvedValueOnce({ stdout: JSON.stringify({ comments: [] }) });
+    mockWitApi.getComments.mockResolvedValueOnce({ comments: [] });
 
     const scrum = await datasource.fetch("61", { cwd: "/tmp" });
     expect(scrum.storyPoints).toBe(13);
 
     // CMMI: uses Size
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        id: 62,
-        fields: {
-          "System.Title": "CMMI item",
-          "Microsoft.VSTS.Scheduling.Size": 3,
-        },
-      }),
+    mockWitApi.getWorkItem.mockResolvedValueOnce({
+      id: 62,
+      fields: {
+        "System.Title": "CMMI item",
+        "Microsoft.VSTS.Scheduling.Size": 3,
+      },
     });
-    mockExecFile.mockResolvedValueOnce({ stdout: JSON.stringify({ comments: [] }) });
+    mockWitApi.getComments.mockResolvedValueOnce({ comments: [] });
 
     const cmmi = await datasource.fetch("62", { cwd: "/tmp" });
     expect(cmmi.storyPoints).toBe(3);
@@ -372,197 +362,154 @@ describe("azdevops datasource — fetch", () => {
 });
 
 describe("azdevops datasource — update", () => {
-  it("calls az boards work-item update", async () => {
-    mockExecFile.mockResolvedValue({ stdout: "" });
+  it("calls witApi.updateWorkItem", async () => {
+    mockWitApi.updateWorkItem.mockResolvedValueOnce({});
 
     await datasource.update("42", "New Title", "New Body", { cwd: "/tmp" });
 
-    expect(mockExecFile).toHaveBeenCalledWith(
-      "az",
-      expect.arrayContaining(["boards", "work-item", "update", "--id", "42", "--title", "New Title"]),
-      { cwd: "/tmp", shell: false },
+    expect(mockWitApi.updateWorkItem).toHaveBeenCalledWith(
+      null,
+      [
+        { op: "add", path: "/fields/System.Title", value: "New Title" },
+        { op: "add", path: "/fields/System.Description", value: "New Body" },
+      ],
+      42,
     );
   });
 
   it("passes org and project when provided", async () => {
-    mockExecFile.mockResolvedValue({ stdout: "" });
+    mockWitApi.updateWorkItem.mockResolvedValueOnce({});
 
-    await datasource.update("1", "T", "B", { cwd: "/tmp", org: "org-url", project: "proj" });
+    await datasource.update("1", "T", "B", { cwd: "/tmp", org: "https://dev.azure.com/org-url", project: "proj" });
 
-    const args = mockExecFile.mock.calls[0][1] as string[];
-    expect(args).toContain("--org");
-    expect(args).not.toContain("--project");
+    expect(mockWitApi.updateWorkItem).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("azdevops datasource — close", () => {
   it("detects done state dynamically via work item type", async () => {
-    // 1st call: az boards work-item show (fetch work item to get type)
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        id: 42,
-        fields: { "System.WorkItemType": "User Story" },
-      }),
+    mockWitApi.getWorkItem.mockResolvedValueOnce({
+      id: 42,
+      fields: { "System.WorkItemType": "User Story" },
     });
-    // 2nd call: az boards work-item type state list (detect done state)
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([
-        { name: "New", category: "Proposed" },
-        { name: "Active", category: "InProgress" },
-        { name: "Closed", category: "Completed" },
-      ]),
-    });
-    // 3rd call: az boards work-item update
-    mockExecFile.mockResolvedValueOnce({ stdout: "" });
+    mockWitApi.getWorkItemTypeStates.mockResolvedValueOnce([
+      { name: "New", category: "Proposed" },
+      { name: "Active", category: "InProgress" },
+      { name: "Closed", category: "Completed" },
+    ]);
+    mockWitApi.updateWorkItem.mockResolvedValueOnce({});
 
-    await datasource.close("42", { cwd: "/tmp", org: "close-org1", project: "close-proj1" });
+    await datasource.close("42", { cwd: "/tmp", org: "https://dev.azure.com/close-org1", project: "close-proj1" });
 
     // Verify the update used the detected state
-    const updateArgs = mockExecFile.mock.calls[2][1] as string[];
-    expect(updateArgs).toEqual(
-      expect.arrayContaining(["boards", "work-item", "update", "--id", "42", "--state", "Closed"]),
+    expect(mockWitApi.updateWorkItem).toHaveBeenCalledWith(
+      null,
+      [{ op: "add", path: "/fields/System.State", value: "Closed" }],
+      42,
     );
   });
 
   it("resolves to Done for Scrum process template", async () => {
-    // 1st call: az boards work-item show (fetch work item to get type)
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        id: 42,
-        fields: { "System.WorkItemType": "Product Backlog Item" },
-      }),
+    mockWitApi.getWorkItem.mockResolvedValueOnce({
+      id: 42,
+      fields: { "System.WorkItemType": "Product Backlog Item" },
     });
-    // 2nd call: az boards work-item type state list (detect done state)
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([
-        { name: "New", category: "Proposed" },
-        { name: "Approved", category: "InProgress" },
-        { name: "Committed", category: "InProgress" },
-        { name: "Done", category: "Completed" },
-      ]),
-    });
-    // 3rd call: az boards work-item update
-    mockExecFile.mockResolvedValueOnce({ stdout: "" });
+    mockWitApi.getWorkItemTypeStates.mockResolvedValueOnce([
+      { name: "New", category: "Proposed" },
+      { name: "Approved", category: "InProgress" },
+      { name: "Committed", category: "InProgress" },
+      { name: "Done", category: "Completed" },
+    ]);
+    mockWitApi.updateWorkItem.mockResolvedValueOnce({});
 
-    await datasource.close("42", { cwd: "/tmp", org: "scrum-org", project: "scrum-proj" });
+    await datasource.close("42", { cwd: "/tmp", org: "https://dev.azure.com/scrum-org", project: "scrum-proj" });
 
-    // Verify the update used "Done" (Scrum terminal state)
-    const updateArgs = mockExecFile.mock.calls[2][1] as string[];
-    expect(updateArgs).toEqual(
-      expect.arrayContaining(["boards", "work-item", "update", "--id", "42", "--state", "Done"]),
+    expect(mockWitApi.updateWorkItem).toHaveBeenCalledWith(
+      null,
+      [{ op: "add", path: "/fields/System.State", value: "Done" }],
+      42,
     );
   });
 
   it("uses opts.workItemType to skip fetching work item", async () => {
-    // 1st call: az boards work-item type state list
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([
-        { name: "New", category: "Proposed" },
-        { name: "Done", category: "Completed" },
-      ]),
-    });
-    // 2nd call: az boards work-item update
-    mockExecFile.mockResolvedValueOnce({ stdout: "" });
+    mockWitApi.getWorkItemTypeStates.mockResolvedValueOnce([
+      { name: "New", category: "Proposed" },
+      { name: "Done", category: "Completed" },
+    ]);
+    mockWitApi.updateWorkItem.mockResolvedValueOnce({});
 
-    await datasource.close("42", { cwd: "/tmp", workItemType: "Product Backlog Item", org: "close-org2", project: "close-proj2" });
+    await datasource.close("42", { cwd: "/tmp", workItemType: "Product Backlog Item", org: "https://dev.azure.com/close-org2", project: "close-proj2" });
 
-    // Should NOT have called work-item show — only 2 exec calls
-    expect(mockExecFile).toHaveBeenCalledTimes(2);
-    const updateArgs = mockExecFile.mock.calls[1][1] as string[];
-    expect(updateArgs).toEqual(
-      expect.arrayContaining(["--state", "Done"]),
+    // Should NOT have called getWorkItem
+    expect(mockWitApi.getWorkItem).not.toHaveBeenCalled();
+    expect(mockWitApi.updateWorkItem).toHaveBeenCalledWith(
+      null,
+      [{ op: "add", path: "/fields/System.State", value: "Done" }],
+      42,
     );
   });
 
   it("falls back to Closed when state detection fails", async () => {
-    // 1st call: az boards work-item show
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        id: 42,
-        fields: { "System.WorkItemType": "Bug" },
-      }),
+    mockWitApi.getWorkItem.mockResolvedValueOnce({
+      id: 42,
+      fields: { "System.WorkItemType": "Bug" },
     });
-    // 2nd call: az boards work-item type state list — fails
-    mockExecFile.mockRejectedValueOnce(new Error("az error"));
-    // 3rd call: az boards work-item update
-    mockExecFile.mockResolvedValueOnce({ stdout: "" });
+    mockWitApi.getWorkItemTypeStates.mockRejectedValueOnce(new Error("API error"));
+    mockWitApi.updateWorkItem.mockResolvedValueOnce({});
 
-    await datasource.close("42", { cwd: "/tmp", org: "close-org3", project: "close-proj3" });
+    await datasource.close("42", { cwd: "/tmp", org: "https://dev.azure.com/close-org3", project: "close-proj3" });
 
-    const updateArgs = mockExecFile.mock.calls[2][1] as string[];
-    expect(updateArgs).toEqual(
-      expect.arrayContaining(["--state", "Closed"]),
+    expect(mockWitApi.updateWorkItem).toHaveBeenCalledWith(
+      null,
+      [{ op: "add", path: "/fields/System.State", value: "Closed" }],
+      42,
     );
   });
 
   it("falls back to Closed when work item has no type", async () => {
-    // 1st call: az boards work-item show — returns item without type
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({ id: 42, fields: {} }),
+    mockWitApi.getWorkItem.mockResolvedValueOnce({
+      id: 42,
+      fields: {},
     });
-    // 2nd call: az boards work-item update (should use "Closed" default)
-    mockExecFile.mockResolvedValueOnce({ stdout: "" });
+    mockWitApi.updateWorkItem.mockResolvedValueOnce({});
 
-    await datasource.close("42", { cwd: "/tmp", org: "close-org4", project: "close-proj4" });
+    await datasource.close("42", { cwd: "/tmp", org: "https://dev.azure.com/close-org4", project: "close-proj4" });
 
-    expect(mockExecFile).toHaveBeenCalledTimes(2);
-    const updateArgs = mockExecFile.mock.calls[1][1] as string[];
-    expect(updateArgs).toEqual(
-      expect.arrayContaining(["--state", "Closed"]),
+    expect(mockWitApi.updateWorkItem).toHaveBeenCalledWith(
+      null,
+      [{ op: "add", path: "/fields/System.State", value: "Closed" }],
+      42,
     );
   });
 
   it("passes org and project when provided", async () => {
-    // 1st call: work-item show
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        id: 42,
-        fields: { "System.WorkItemType": "User Story" },
-      }),
+    mockWitApi.getWorkItem.mockResolvedValueOnce({
+      id: 42,
+      fields: { "System.WorkItemType": "User Story" },
     });
-    // 2nd call: state list
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([
-        { name: "Closed", category: "Completed" },
-      ]),
-    });
-    // 3rd call: update
-    mockExecFile.mockResolvedValueOnce({ stdout: "" });
+    mockWitApi.getWorkItemTypeStates.mockResolvedValueOnce([
+      { name: "Closed", category: "Completed" },
+    ]);
+    mockWitApi.updateWorkItem.mockResolvedValueOnce({});
 
-    await datasource.close("42", { cwd: "/tmp", org: "close-org5", project: "close-proj5" });
+    await datasource.close("42", { cwd: "/tmp", org: "https://dev.azure.com/close-org5", project: "close-proj5" });
 
-    const showArgs = mockExecFile.mock.calls[0][1] as string[];
-    expect(showArgs).toContain("--org");
-    expect(showArgs).toContain("close-org5");
-    expect(showArgs).not.toContain("--project");
-
-    const stateListArgs = mockExecFile.mock.calls[1][1] as string[];
-    expect(stateListArgs).toContain("--project");
-
-    const updateArgs = mockExecFile.mock.calls[2][1] as string[];
-    expect(updateArgs).toContain("--org");
-    expect(updateArgs).not.toContain("--project");
+    expect(mockWitApi.updateWorkItem).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("azdevops datasource — create", () => {
   it("creates a work item using detected type when workItemType not provided", async () => {
-    // First call: detectWorkItemType
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([{ name: "User Story" }, { name: "Bug" }]),
-    });
-    // Second call: az boards work-item create
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        id: 99,
-        fields: {
-          "System.Title": "New Item",
-          "System.Description": "desc",
-          "System.Tags": "",
-          "System.State": "New",
-        },
-        _links: { html: { href: "https://dev.azure.com/99" } },
-      }),
+    mockWitApi.getWorkItemTypes.mockResolvedValueOnce([{ name: "User Story" }, { name: "Bug" }]);
+    mockWitApi.createWorkItem.mockResolvedValueOnce({
+      id: 99,
+      fields: {
+        "System.Title": "New Item",
+        "System.Description": "desc",
+        "System.Tags": "",
+        "System.State": "New",
+      },
+      _links: { html: { href: "https://dev.azure.com/99" } },
     });
 
     const result = await datasource.create("New Item", "desc", { cwd: "/tmp" });
@@ -571,23 +518,24 @@ describe("azdevops datasource — create", () => {
     expect(result.title).toBe("New Item");
     expect(result.state).toBe("New");
     // Verify the create call used the detected type
-    const createArgs = mockExecFile.mock.calls[1][1] as string[];
-    expect(createArgs).toContain("--type");
-    expect(createArgs[createArgs.indexOf("--type") + 1]).toBe("User Story");
+    expect(mockWitApi.createWorkItem).toHaveBeenCalledWith(
+      null,
+      expect.any(Array),
+      "testproject",
+      "User Story",
+    );
   });
 
   it("uses opts.workItemType when provided", async () => {
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        id: 100,
-        fields: {
-          "System.Title": "Item",
-          "System.Description": "body",
-          "System.Tags": "",
-          "System.State": "New",
-        },
-        _links: { html: { href: "https://dev.azure.com/100" } },
-      }),
+    mockWitApi.createWorkItem.mockResolvedValueOnce({
+      id: 100,
+      fields: {
+        "System.Title": "Item",
+        "System.Description": "body",
+        "System.Tags": "",
+        "System.State": "New",
+      },
+      _links: { html: { href: "https://dev.azure.com/100" } },
     });
 
     const result = await datasource.create("Item", "body", {
@@ -596,53 +544,50 @@ describe("azdevops datasource — create", () => {
     });
 
     expect(result.number).toBe("100");
-    // Should NOT have called detectWorkItemType — only one exec call (the create)
-    expect(mockExecFile).toHaveBeenCalledTimes(1);
-    const createArgs = mockExecFile.mock.calls[0][1] as string[];
-    expect(createArgs[createArgs.indexOf("--type") + 1]).toBe("Product Backlog Item");
+    // Should NOT have called getWorkItemTypes (detectWorkItemType skipped)
+    expect(mockWitApi.getWorkItemTypes).not.toHaveBeenCalled();
+    expect(mockWitApi.createWorkItem).toHaveBeenCalledWith(
+      null,
+      expect.any(Array),
+      "testproject",
+      "Product Backlog Item",
+    );
   });
 
   it("throws descriptive error when type cannot be determined", async () => {
-    // detectWorkItemType fails
-    mockExecFile.mockRejectedValueOnce(new Error("az not found"));
+    mockWitApi.getWorkItemTypes.mockRejectedValueOnce(new Error("API not found"));
 
     await expect(
       datasource.create("Title", "Body", { cwd: "/tmp" }),
     ).rejects.toThrow("Could not determine work item type");
   });
 
-  it("throws descriptive error when az returns non-JSON output", async () => {
-    // First call: detectWorkItemType succeeds
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([{ name: "User Story" }]),
-    });
-    // Second call: az boards work-item create returns non-JSON
-    mockExecFile.mockResolvedValueOnce({ stdout: "ERROR: not authorized\n" });
+  it("propagates SDK errors from createWorkItem", async () => {
+    mockWitApi.getWorkItemTypes.mockResolvedValueOnce([{ name: "User Story" }]);
+    mockWitApi.createWorkItem.mockRejectedValueOnce(new Error("not authorized"));
 
     await expect(
       datasource.create("Title", "Body", { cwd: "/tmp" })
-    ).rejects.toThrow("Failed to parse Azure CLI output");
+    ).rejects.toThrow("not authorized");
   });
 
   it("populates new metadata fields when present in create response", async () => {
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        id: 200,
-        fields: {
-          "System.Title": "Rich Item",
-          "System.Description": "detailed",
-          "System.Tags": "epic;backend",
-          "System.State": "New",
-          "Microsoft.VSTS.Common.AcceptanceCriteria": "all tests pass",
-          "System.IterationPath": "MyProject\\Sprint 3",
-          "System.AreaPath": "MyProject\\API",
-          "System.AssignedTo": { displayName: "Bob Smith" },
-          "Microsoft.VSTS.Common.Priority": 1,
-          "Microsoft.VSTS.Scheduling.StoryPoints": 13,
-          "System.WorkItemType": "User Story",
-        },
-        _links: { html: { href: "https://dev.azure.com/200" } },
-      }),
+    mockWitApi.createWorkItem.mockResolvedValueOnce({
+      id: 200,
+      fields: {
+        "System.Title": "Rich Item",
+        "System.Description": "detailed",
+        "System.Tags": "epic;backend",
+        "System.State": "New",
+        "Microsoft.VSTS.Common.AcceptanceCriteria": "all tests pass",
+        "System.IterationPath": "MyProject\\Sprint 3",
+        "System.AreaPath": "MyProject\\API",
+        "System.AssignedTo": { displayName: "Bob Smith" },
+        "Microsoft.VSTS.Common.Priority": 1,
+        "Microsoft.VSTS.Scheduling.StoryPoints": 13,
+        "System.WorkItemType": "User Story",
+      },
+      _links: { html: { href: "https://dev.azure.com/200" } },
     });
 
     const result = await datasource.create("Rich Item", "detailed", {
@@ -660,17 +605,15 @@ describe("azdevops datasource — create", () => {
   });
 
   it("returns undefined for new metadata fields when absent from create response", async () => {
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        id: 201,
-        fields: {
-          "System.Title": "Bare Item",
-          "System.Description": "minimal",
-          "System.Tags": "",
-          "System.State": "New",
-        },
-        _links: { html: { href: "https://dev.azure.com/201" } },
-      }),
+    mockWitApi.createWorkItem.mockResolvedValueOnce({
+      id: 201,
+      fields: {
+        "System.Title": "Bare Item",
+        "System.Description": "minimal",
+        "System.Tags": "",
+        "System.State": "New",
+      },
+      _links: { html: { href: "https://dev.azure.com/201" } },
     });
 
     const result = await datasource.create("Bare Item", "minimal", {
@@ -690,21 +633,17 @@ describe("azdevops datasource — create", () => {
 
   it("falls back workItemType to local value when API response omits System.WorkItemType", async () => {
     // detectWorkItemType returns "User Story"
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([{ name: "User Story" }]),
-    });
+    mockWitApi.getWorkItemTypes.mockResolvedValueOnce([{ name: "User Story" }]);
     // create response omits System.WorkItemType
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify({
-        id: 202,
-        fields: {
-          "System.Title": "No Type Field",
-          "System.Description": "body",
-          "System.Tags": "",
-          "System.State": "New",
-        },
-        _links: { html: { href: "https://dev.azure.com/202" } },
-      }),
+    mockWitApi.createWorkItem.mockResolvedValueOnce({
+      id: 202,
+      fields: {
+        "System.Title": "No Type Field",
+        "System.Description": "body",
+        "System.Tags": "",
+        "System.State": "New",
+      },
+      _links: { html: { href: "https://dev.azure.com/202" } },
     });
 
     const result = await datasource.create("No Type Field", "body", { cwd: "/tmp" });
@@ -715,86 +654,69 @@ describe("azdevops datasource — create", () => {
 
 describe("detectWorkItemType", () => {
   it("returns 'User Story' when available", async () => {
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([
-        { name: "Bug" },
-        { name: "User Story" },
-        { name: "Task" },
-      ]),
-    });
+    mockWitApi.getWorkItemTypes.mockResolvedValueOnce([
+      { name: "Bug" },
+      { name: "User Story" },
+      { name: "Task" },
+    ]);
 
-    const result = await detectWorkItemType({ cwd: "/tmp", org: "org-url", project: "proj" });
+    const result = await detectWorkItemType({ cwd: "/tmp", org: "https://dev.azure.com/org-url", project: "proj" });
 
     expect(result).toBe("User Story");
-    const args = mockExecFile.mock.calls[0][1] as string[];
-    expect(args).toContain("--project");
-    expect(args).toContain("proj");
-    expect(args).toContain("--org");
-    expect(args).toContain("org-url");
   });
 
   it("returns 'Product Backlog Item' for Scrum template", async () => {
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([
-        { name: "Bug" },
-        { name: "Product Backlog Item" },
-        { name: "Task" },
-      ]),
-    });
+    mockWitApi.getWorkItemTypes.mockResolvedValueOnce([
+      { name: "Bug" },
+      { name: "Product Backlog Item" },
+      { name: "Task" },
+    ]);
 
     const result = await detectWorkItemType({ cwd: "/tmp" });
     expect(result).toBe("Product Backlog Item");
   });
 
   it("returns 'Requirement' for CMMI template", async () => {
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([
-        { name: "Bug" },
-        { name: "Requirement" },
-        { name: "Task" },
-      ]),
-    });
+    mockWitApi.getWorkItemTypes.mockResolvedValueOnce([
+      { name: "Bug" },
+      { name: "Requirement" },
+      { name: "Task" },
+    ]);
 
     const result = await detectWorkItemType({ cwd: "/tmp" });
     expect(result).toBe("Requirement");
   });
 
   it("returns 'Issue' when no higher-priority types exist", async () => {
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([
-        { name: "Bug" },
-        { name: "Issue" },
-        { name: "Task" },
-      ]),
-    });
+    mockWitApi.getWorkItemTypes.mockResolvedValueOnce([
+      { name: "Bug" },
+      { name: "Issue" },
+      { name: "Task" },
+    ]);
 
     const result = await detectWorkItemType({ cwd: "/tmp" });
     expect(result).toBe("Issue");
   });
 
   it("falls back to first type when no preferred types match", async () => {
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([
-        { name: "Custom Item" },
-        { name: "Task" },
-      ]),
-    });
+    mockWitApi.getWorkItemTypes.mockResolvedValueOnce([
+      { name: "Custom Item" },
+      { name: "Task" },
+    ]);
 
     const result = await detectWorkItemType({ cwd: "/tmp" });
     expect(result).toBe("Custom Item");
   });
 
   it("returns null on failure", async () => {
-    mockExecFile.mockRejectedValueOnce(new Error("az not found"));
+    mockWitApi.getWorkItemTypes.mockRejectedValueOnce(new Error("API not found"));
 
     const result = await detectWorkItemType({ cwd: "/tmp" });
     expect(result).toBeNull();
   });
 
   it("returns null for empty type list", async () => {
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([]),
-    });
+    mockWitApi.getWorkItemTypes.mockResolvedValueOnce([]);
 
     const result = await detectWorkItemType({ cwd: "/tmp" });
     expect(result).toBeNull();
@@ -803,40 +725,32 @@ describe("detectWorkItemType", () => {
 
 describe("detectDoneState", () => {
   it("returns the state with Completed category", async () => {
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([
-        { name: "New", category: "Proposed" },
-        { name: "Active", category: "InProgress" },
-        { name: "Done", category: "Completed" },
-      ]),
-    });
+    mockWitApi.getWorkItemTypeStates.mockResolvedValueOnce([
+      { name: "New", category: "Proposed" },
+      { name: "Active", category: "InProgress" },
+      { name: "Done", category: "Completed" },
+    ]);
 
     const result = await detectDoneState("Product Backlog Item", {
       cwd: "/tmp",
-      org: "org1",
+      org: "https://dev.azure.com/org1",
       project: "proj1",
     });
 
     expect(result).toBe("Done");
-    const args = mockExecFile.mock.calls[0][1] as string[];
-    expect(args).toContain("--type");
-    expect(args[args.indexOf("--type") + 1]).toBe("Product Backlog Item");
-    expect(args).toContain("--project");
-    expect(args).toContain("--org");
+    expect(mockWitApi.getWorkItemTypeStates).toHaveBeenCalledWith("proj1", "Product Backlog Item");
   });
 
   it("returns Closed when category is Completed for Agile template", async () => {
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([
-        { name: "New", category: "Proposed" },
-        { name: "Active", category: "InProgress" },
-        { name: "Closed", category: "Completed" },
-      ]),
-    });
+    mockWitApi.getWorkItemTypeStates.mockResolvedValueOnce([
+      { name: "New", category: "Proposed" },
+      { name: "Active", category: "InProgress" },
+      { name: "Closed", category: "Completed" },
+    ]);
 
     const result = await detectDoneState("User Story", {
       cwd: "/tmp",
-      org: "org2",
+      org: "https://dev.azure.com/org2",
       project: "proj2",
     });
 
@@ -844,17 +758,15 @@ describe("detectDoneState", () => {
   });
 
   it("falls back to Done when no Completed category exists", async () => {
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([
-        { name: "New" },
-        { name: "Active" },
-        { name: "Done" },
-      ]),
-    });
+    mockWitApi.getWorkItemTypeStates.mockResolvedValueOnce([
+      { name: "New" },
+      { name: "Active" },
+      { name: "Done" },
+    ]);
 
     const result = await detectDoneState("Product Backlog Item", {
       cwd: "/tmp",
-      org: "org3",
+      org: "https://dev.azure.com/org3",
       project: "proj3",
     });
 
@@ -862,17 +774,15 @@ describe("detectDoneState", () => {
   });
 
   it("falls back to Closed when Done is not available", async () => {
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([
-        { name: "New" },
-        { name: "Active" },
-        { name: "Closed" },
-      ]),
-    });
+    mockWitApi.getWorkItemTypeStates.mockResolvedValueOnce([
+      { name: "New" },
+      { name: "Active" },
+      { name: "Closed" },
+    ]);
 
     const result = await detectDoneState("User Story", {
       cwd: "/tmp",
-      org: "org4",
+      org: "https://dev.azure.com/org4",
       project: "proj4",
     });
 
@@ -880,17 +790,15 @@ describe("detectDoneState", () => {
   });
 
   it("falls back to Resolved when Done and Closed are not available", async () => {
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([
-        { name: "New" },
-        { name: "Active" },
-        { name: "Resolved" },
-      ]),
-    });
+    mockWitApi.getWorkItemTypeStates.mockResolvedValueOnce([
+      { name: "New" },
+      { name: "Active" },
+      { name: "Resolved" },
+    ]);
 
     const result = await detectDoneState("Requirement", {
       cwd: "/tmp",
-      org: "org5",
+      org: "https://dev.azure.com/org5",
       project: "proj5",
     });
 
@@ -898,17 +806,15 @@ describe("detectDoneState", () => {
   });
 
   it("falls back to Completed when only Completed state exists", async () => {
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([
-        { name: "New" },
-        { name: "Active" },
-        { name: "Completed" },
-      ]),
-    });
+    mockWitApi.getWorkItemTypeStates.mockResolvedValueOnce([
+      { name: "New" },
+      { name: "Active" },
+      { name: "Completed" },
+    ]);
 
     const result = await detectDoneState("Custom Item", {
       cwd: "/tmp",
-      org: "org6",
+      org: "https://dev.azure.com/org6",
       project: "proj6",
     });
 
@@ -916,29 +822,27 @@ describe("detectDoneState", () => {
   });
 
   it("defaults to Closed when no known terminal states exist", async () => {
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([
-        { name: "New" },
-        { name: "Active" },
-        { name: "Custom Final" },
-      ]),
-    });
+    mockWitApi.getWorkItemTypeStates.mockResolvedValueOnce([
+      { name: "New" },
+      { name: "Active" },
+      { name: "Custom Final" },
+    ]);
 
     const result = await detectDoneState("Custom Item", {
       cwd: "/tmp",
-      org: "org7",
+      org: "https://dev.azure.com/org7",
       project: "proj7",
     });
 
     expect(result).toBe("Closed");
   });
 
-  it("defaults to Closed on CLI error", async () => {
-    mockExecFile.mockRejectedValueOnce(new Error("az not found"));
+  it("defaults to Closed on API error", async () => {
+    mockWitApi.getWorkItemTypeStates.mockRejectedValueOnce(new Error("API not found"));
 
     const result = await detectDoneState("User Story", {
       cwd: "/tmp",
-      org: "org8",
+      org: "https://dev.azure.com/org8",
       project: "proj8",
     });
 
@@ -946,27 +850,25 @@ describe("detectDoneState", () => {
   });
 
   it("returns cached result on subsequent calls", async () => {
-    mockExecFile.mockResolvedValueOnce({
-      stdout: JSON.stringify([
-        { name: "Done", category: "Completed" },
-      ]),
-    });
+    mockWitApi.getWorkItemTypeStates.mockResolvedValueOnce([
+      { name: "Done", category: "Completed" },
+    ]);
 
     const first = await detectDoneState("PBI", {
       cwd: "/tmp",
-      org: "cached-org",
+      org: "https://dev.azure.com/cached-org",
       project: "cached-proj",
     });
     const second = await detectDoneState("PBI", {
       cwd: "/tmp",
-      org: "cached-org",
+      org: "https://dev.azure.com/cached-org",
       project: "cached-proj",
     });
 
     expect(first).toBe("Done");
     expect(second).toBe("Done");
-    // Only one CLI call should have been made
-    expect(mockExecFile).toHaveBeenCalledTimes(1);
+    // Only one API call should have been made
+    expect(mockWitApi.getWorkItemTypeStates).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -980,57 +882,20 @@ describe("azdevops datasource — getUsername", () => {
     expect(mockExecFile).toHaveBeenCalledTimes(1);
   });
 
-  it("falls back to az account show user.name when git config fails", async () => {
+  it("returns unknown when git config fails", async () => {
     mockExecFile.mockRejectedValueOnce(new Error("git config not set"));
-    mockExecFile.mockResolvedValueOnce({ stdout: "Bob Jones\n" });
-
-    const result = await datasource.getUsername({ cwd: "/tmp" });
-
-    expect(result).toBe("bob-jones");
-    expect(mockExecFile).toHaveBeenCalledTimes(2);
-  });
-
-  it("falls back to az account show user.name when git config returns empty", async () => {
-    mockExecFile.mockResolvedValueOnce({ stdout: "\n" });
-    mockExecFile.mockResolvedValueOnce({ stdout: "Bob Jones\n" });
-
-    const result = await datasource.getUsername({ cwd: "/tmp" });
-
-    expect(result).toBe("bob-jones");
-    expect(mockExecFile).toHaveBeenCalledTimes(2);
-  });
-
-  it("falls back to az account show user.principalName email prefix", async () => {
-    mockExecFile.mockRejectedValueOnce(new Error("git config not set"));
-    mockExecFile.mockRejectedValueOnce(new Error("az user.name failed"));
-    mockExecFile.mockResolvedValueOnce({ stdout: "john@corp.com\n" });
-
-    const result = await datasource.getUsername({ cwd: "/tmp" });
-
-    expect(result).toBe("john");
-    expect(mockExecFile).toHaveBeenCalledTimes(3);
-  });
-
-  it("returns unknown when all fallbacks fail", async () => {
-    mockExecFile.mockRejectedValueOnce(new Error("git config not set"));
-    mockExecFile.mockRejectedValueOnce(new Error("az user.name failed"));
-    mockExecFile.mockRejectedValueOnce(new Error("az principalName failed"));
 
     const result = await datasource.getUsername({ cwd: "/tmp" });
 
     expect(result).toBe("unknown");
-    expect(mockExecFile).toHaveBeenCalledTimes(3);
   });
 
-  it("skips empty az account show user.name and tries principalName", async () => {
-    mockExecFile.mockRejectedValueOnce(new Error("git config not set"));
+  it("returns unknown when git config returns empty", async () => {
     mockExecFile.mockResolvedValueOnce({ stdout: "\n" });
-    mockExecFile.mockResolvedValueOnce({ stdout: "alice@example.com\n" });
 
     const result = await datasource.getUsername({ cwd: "/tmp" });
 
-    expect(result).toBe("alice");
-    expect(mockExecFile).toHaveBeenCalledTimes(3);
+    expect(result).toBe("unknown");
   });
 });
 
@@ -1075,7 +940,7 @@ describe("azdevops datasource — createAndSwitchBranch", () => {
     await datasource.createAndSwitchBranch("dispatch/42-feat", { cwd: "/tmp" });
 
     expect(mockExecFile).toHaveBeenCalledWith(
-      "git", ["checkout", "-b", "dispatch/42-feat"], { cwd: "/tmp", shell: false },
+      "git", ["checkout", "-b", "dispatch/42-feat"], { cwd: "/tmp", shell: SHELL },
     );
   });
 
@@ -1102,7 +967,7 @@ describe("azdevops datasource — switchBranch", () => {
   it("calls git checkout", async () => {
     mockExecFile.mockResolvedValue({ stdout: "" });
     await datasource.switchBranch("main", { cwd: "/tmp" });
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "main"], { cwd: "/tmp", shell: false });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "main"], { cwd: "/tmp", shell: SHELL });
   });
 });
 
@@ -1111,7 +976,7 @@ describe("azdevops datasource — pushBranch", () => {
     mockExecFile.mockResolvedValue({ stdout: "" });
     await datasource.pushBranch("dispatch/42-feat", { cwd: "/tmp" });
     expect(mockExecFile).toHaveBeenCalledWith(
-      "git", ["push", "--set-upstream", "origin", "dispatch/42-feat"], { cwd: "/tmp", shell: false },
+      "git", ["push", "--set-upstream", "origin", "dispatch/42-feat"], { cwd: "/tmp", shell: SHELL },
     );
   });
 });
@@ -1140,36 +1005,74 @@ describe("azdevops datasource — commitAllChanges", () => {
 });
 
 describe("azdevops datasource — createPullRequest", () => {
+  const REPO = {
+    id: "repo-id",
+    remoteUrl: "https://dev.azure.com/testorg/testproject/_git/testrepo",
+    webUrl: "https://dev.azure.com/testorg/testproject/_git/testrepo",
+  };
+
   it("creates PR and returns URL", async () => {
-    mockExecFile.mockResolvedValue({
-      stdout: JSON.stringify({ url: "https://dev.azure.com/pr/1" }),
-    });
+    mockExecFile.mockResolvedValueOnce({ stdout: "refs/remotes/origin/main\n" });
+    mockGitApi.getRepositories.mockResolvedValueOnce([REPO]);
+    mockGitApi.createPullRequest.mockResolvedValueOnce({ pullRequestId: 1 });
 
     const url = await datasource.createPullRequest(
       "dispatch/42-feat", "42", "Title", "Body", { cwd: "/tmp" },
     );
 
-    expect(url).toBe("https://dev.azure.com/pr/1");
+    expect(url).toBe("https://dev.azure.com/testorg/testproject/_git/testrepo/pullrequest/1");
+    expect(mockGitApi.createPullRequest).toHaveBeenCalledWith(
+      {
+        sourceRefName: "refs/heads/dispatch/42-feat",
+        targetRefName: "refs/heads/main",
+        title: "Title",
+        description: "Body",
+        workItemRefs: [{ id: "42" }],
+      },
+      "repo-id",
+      "testproject",
+    );
+  });
+
+  it("uses default description when body is empty", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: "refs/remotes/origin/main\n" });
+    mockGitApi.getRepositories.mockResolvedValueOnce([REPO]);
+    mockGitApi.createPullRequest.mockResolvedValueOnce({ pullRequestId: 2 });
+
+    await datasource.createPullRequest(
+      "dispatch/99-fix", "99", "Fix bug", "", { cwd: "/tmp" },
+    );
+
+    expect(mockGitApi.createPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ description: "Resolves AB#99" }),
+      "repo-id",
+      "testproject",
+    );
   });
 
   it("returns existing PR URL when already exists", async () => {
-    mockExecFile
-      .mockRejectedValueOnce(new Error("already exists"))
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify([{ url: "https://dev.azure.com/pr/5" }]),
-      });
+    mockExecFile.mockResolvedValueOnce({ stdout: "refs/remotes/origin/main\n" });
+    mockGitApi.getRepositories.mockResolvedValueOnce([REPO]);
+    mockGitApi.createPullRequest.mockRejectedValueOnce(new Error("already exists"));
+    mockGitApi.getPullRequests.mockResolvedValueOnce([{ pullRequestId: 5 }]);
 
     const url = await datasource.createPullRequest(
       "dispatch/42-feat", "42", "Title", "Body", { cwd: "/tmp" },
     );
 
-    expect(url).toBe("https://dev.azure.com/pr/5");
+    expect(url).toBe("https://dev.azure.com/testorg/testproject/_git/testrepo/pullrequest/5");
+    expect(mockGitApi.getPullRequests).toHaveBeenCalledWith(
+      "repo-id",
+      { sourceRefName: "refs/heads/dispatch/42-feat", status: 1 },
+      "testproject",
+    );
   });
 
   it("returns empty string when existing PR list is empty", async () => {
-    mockExecFile
-      .mockRejectedValueOnce(new Error("already exists"))
-      .mockResolvedValueOnce({ stdout: JSON.stringify([]) });
+    mockExecFile.mockResolvedValueOnce({ stdout: "refs/remotes/origin/main\n" });
+    mockGitApi.getRepositories.mockResolvedValueOnce([REPO]);
+    mockGitApi.createPullRequest.mockRejectedValueOnce(new Error("already exists"));
+    mockGitApi.getPullRequests.mockResolvedValueOnce([]);
 
     const url = await datasource.createPullRequest(
       "b", "1", "T", "B", { cwd: "/tmp" },
@@ -1179,30 +1082,24 @@ describe("azdevops datasource — createPullRequest", () => {
   });
 
   it("throws for non-already-exists errors", async () => {
-    mockExecFile.mockRejectedValue(new Error("auth required"));
+    mockExecFile.mockResolvedValueOnce({ stdout: "refs/remotes/origin/main\n" });
+    mockGitApi.getRepositories.mockResolvedValueOnce([REPO]);
+    mockGitApi.createPullRequest.mockRejectedValueOnce(new Error("auth required"));
 
     await expect(
       datasource.createPullRequest("b", "1", "T", "B", { cwd: "/tmp" }),
     ).rejects.toThrow("auth required");
   });
 
-  it("throws descriptive error when pr create returns non-JSON output", async () => {
-    mockExecFile.mockResolvedValueOnce({ stdout: "ERROR: server error\n" });
+  it("throws when no repository matches the remote URL", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: "refs/remotes/origin/main\n" });
+    mockGitApi.getRepositories.mockResolvedValueOnce([
+      { id: "other-id", webUrl: "https://dev.azure.com/other/other/_git/other" },
+    ]);
 
     await expect(
-      datasource.createPullRequest("b", "1", "T", "B", { cwd: "/tmp" })
-    ).rejects.toThrow("Failed to parse Azure CLI output");
-  });
-
-  it("throws descriptive error when pr list returns non-JSON output in catch branch", async () => {
-    // First call: pr create rejects with "already exists" to trigger catch path
-    mockExecFile.mockRejectedValueOnce(new Error("already exists"));
-    // Second call: pr list returns non-JSON
-    mockExecFile.mockResolvedValueOnce({ stdout: "unexpected output\n" });
-
-    await expect(
-      datasource.createPullRequest("b", "1", "T", "B", { cwd: "/tmp" })
-    ).rejects.toThrow("Failed to parse Azure CLI output");
+      datasource.createPullRequest("b", "1", "T", "B", { cwd: "/tmp" }),
+    ).rejects.toThrow("Could not find Azure DevOps repository");
   });
 });
 

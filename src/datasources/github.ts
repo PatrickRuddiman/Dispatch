@@ -1,9 +1,9 @@
 /**
- * GitHub datasource — reads and writes issues using the `gh` CLI.
+ * GitHub datasource — reads and writes issues using the Octokit SDK.
  *
  * Requires:
- *   - `gh` CLI installed and authenticated
- *   - Working directory inside a GitHub repository (or GITHUB_REPOSITORY set)
+ *   - A GitHub OAuth token (obtained via device flow on first use)
+ *   - Working directory inside a GitHub repository with an `origin` remote
  */
 
 import { execFile } from "node:child_process";
@@ -12,6 +12,8 @@ import type { Datasource, IssueDetails, IssueFetchOptions, DispatchLifecycleOpti
 import { slugify } from "../helpers/slugify.js";
 import { log } from "../helpers/logger.js";
 import { InvalidBranchNameError, isValidBranchName } from "../helpers/branch-validation.js";
+import { getGithubOctokit } from "../helpers/auth.js";
+import { getGitRemoteUrl, parseGitHubRemoteUrl } from "./index.js";
 
 export { InvalidBranchNameError } from "../helpers/branch-validation.js";
 
@@ -23,10 +25,17 @@ async function git(args: string[], cwd: string): Promise<string> {
   return stdout;
 }
 
-/** Execute a gh CLI command and return stdout. */
-async function gh(args: string[], cwd: string): Promise<string> {
-  const { stdout } = await exec("gh", args, { cwd, shell: process.platform === "win32" });
-  return stdout;
+/** Resolve the GitHub owner and repo from the git remote URL. */
+async function getOwnerRepo(cwd: string): Promise<{ owner: string; repo: string }> {
+  const remoteUrl = await getGitRemoteUrl(cwd);
+  if (!remoteUrl) {
+    throw new Error("Could not determine git remote URL. Is this a git repository with an origin remote?");
+  }
+  const parsed = parseGitHubRemoteUrl(remoteUrl);
+  if (!parsed) {
+    throw new Error(`Could not parse GitHub owner/repo from remote URL: ${remoteUrl}`);
+  }
+  return parsed;
 }
 
 /**
@@ -104,85 +113,63 @@ export const datasource: Datasource = {
 
   async list(opts: IssueFetchOptions = {}): Promise<IssueDetails[]> {
     const cwd = opts.cwd || process.cwd();
+    const { owner, repo } = await getOwnerRepo(cwd);
+    const octokit = await getGithubOctokit();
 
-    const { stdout } = await exec(
-      "gh",
-      [
-        "issue",
-        "list",
-        "--state",
-        "open",
-        "--json",
-        "number,title,body,labels,state,url",
-      ],
-      { cwd, shell: process.platform === "win32" }
+    const issues = await octokit.paginate(
+      octokit.rest.issues.listForRepo,
+      {
+        owner,
+        repo,
+        state: "open",
+      },
     );
 
-    let issues;
-    try {
-      issues = JSON.parse(stdout);
-    } catch {
-      throw new Error(`Failed to parse GitHub CLI output: ${stdout.slice(0, 200)}`);
-    }
-
-    return issues.map(
-      (issue: {
-        number: number;
-        title?: string;
-        body?: string;
-        labels?: { name: string }[];
-        state?: string;
-        url?: string;
-      }): IssueDetails => ({
+    return issues
+      .filter((issue) => !issue.pull_request)
+      .map((issue): IssueDetails => ({
         number: String(issue.number),
         title: issue.title ?? "",
         body: issue.body ?? "",
-        labels: (issue.labels ?? []).map((l) => l.name),
-        state: issue.state ?? "OPEN",
-        url: issue.url ?? "",
+        labels: (issue.labels ?? []).map((l) => (typeof l === "string" ? l : l.name ?? "")),
+        state: issue.state ?? "open",
+        url: issue.html_url ?? "",
         comments: [],
         acceptanceCriteria: "",
-      })
-    );
+      }));
   },
 
   async fetch(issueId: string, opts: IssueFetchOptions = {}): Promise<IssueDetails> {
     const cwd = opts.cwd || process.cwd();
+    const { owner, repo } = await getOwnerRepo(cwd);
+    const octokit = await getGithubOctokit();
 
-    const { stdout } = await exec(
-      "gh",
-      [
-        "issue",
-        "view",
-        issueId,
-        "--json",
-        "number,title,body,labels,state,url,comments",
-      ],
-      { cwd, shell: process.platform === "win32" }
+    const { data: issue } = await octokit.rest.issues.get({
+      owner,
+      repo,
+      issue_number: Number(issueId),
+    });
+
+    const issueComments = await octokit.paginate(
+      octokit.rest.issues.listComments,
+      {
+        owner,
+        repo,
+        issue_number: Number(issueId),
+      },
     );
 
-    let issue;
-    try {
-      issue = JSON.parse(stdout);
-    } catch {
-      throw new Error(`Failed to parse GitHub CLI output: ${stdout.slice(0, 200)}`);
-    }
-
-    const comments: string[] = [];
-    if (issue.comments && Array.isArray(issue.comments)) {
-      for (const c of issue.comments) {
-        const author = c.author?.login ?? "unknown";
-        comments.push(`**${author}:** ${c.body}`);
-      }
-    }
+    const comments: string[] = issueComments.map(
+      (c) => `**${c.user?.login ?? "unknown"}:** ${c.body ?? ""}`
+    );
 
     return {
       number: String(issue.number),
       title: issue.title ?? "",
       body: issue.body ?? "",
-      labels: (issue.labels ?? []).map((l: { name: string }) => l.name),
-      state: issue.state ?? "OPEN",
-      url: issue.url ?? "",
+      labels: (issue.labels ?? []).map((l) => (typeof l === "string" ? l : l.name ?? "")),
+      state: issue.state ?? "open",
+      url: issue.html_url ?? "",
       comments,
       acceptanceCriteria: "",
     };
@@ -190,36 +177,50 @@ export const datasource: Datasource = {
 
   async update(issueId: string, title: string, body: string, opts: IssueFetchOptions = {}): Promise<void> {
     const cwd = opts.cwd || process.cwd();
-    await exec("gh", ["issue", "edit", issueId, "--title", title, "--body", body], { cwd, shell: process.platform === "win32" });
+    const { owner, repo } = await getOwnerRepo(cwd);
+    const octokit = await getGithubOctokit();
+
+    await octokit.rest.issues.update({
+      owner,
+      repo,
+      issue_number: Number(issueId),
+      title,
+      body,
+    });
   },
 
   async close(issueId: string, opts: IssueFetchOptions = {}): Promise<void> {
     const cwd = opts.cwd || process.cwd();
-    await exec("gh", ["issue", "close", issueId], { cwd, shell: process.platform === "win32" });
+    const { owner, repo } = await getOwnerRepo(cwd);
+    const octokit = await getGithubOctokit();
+
+    await octokit.rest.issues.update({
+      owner,
+      repo,
+      issue_number: Number(issueId),
+      state: "closed",
+    });
   },
 
   async create(title: string, body: string, opts: IssueFetchOptions = {}): Promise<IssueDetails> {
     const cwd = opts.cwd || process.cwd();
+    const { owner, repo } = await getOwnerRepo(cwd);
+    const octokit = await getGithubOctokit();
 
-    // gh issue create outputs the URL of the created issue on stdout.
-    // It does not support --json (unlike gh issue view / gh issue list).
-    const { stdout } = await exec(
-      "gh",
-      ["issue", "create", "--title", title, "--body", body],
-      { cwd, shell: process.platform === "win32" }
-    );
-
-    const url = stdout.trim();
-    const match = url.match(/\/issues\/(\d+)$/);
-    const number = match ? match[1] : "0";
-
-    return {
-      number,
+    const { data: issue } = await octokit.rest.issues.create({
+      owner,
+      repo,
       title,
       body,
-      labels: [],
-      state: "open",
-      url,
+    });
+
+    return {
+      number: String(issue.number),
+      title: issue.title ?? "",
+      body: issue.body ?? "",
+      labels: (issue.labels ?? []).map((l) => (typeof l === "string" ? l : l.name ?? "")),
+      state: issue.state ?? "open",
+      url: issue.html_url ?? "",
       comments: [],
       acceptanceCriteria: "",
     };
@@ -278,31 +279,41 @@ export const datasource: Datasource = {
 
   async createPullRequest(branchName, issueNumber, title, body, opts) {
     const cwd = opts.cwd;
+    const { owner, repo } = await getOwnerRepo(cwd);
+    const octokit = await getGithubOctokit();
     const prBody = body || `Closes #${issueNumber}`;
+
     try {
-      const url = await gh(
-        [
-          "pr",
-          "create",
-          "--title",
-          title,
-          "--body",
-          prBody,
-          "--head",
-          branchName,
-        ],
-        cwd,
-      );
-      return url.trim();
-    } catch (err) {
-      // If a PR already exists for this branch, retrieve its URL
-      const message = log.extractMessage(err);
-      if (message.includes("already exists")) {
-        const existing = await gh(
-          ["pr", "view", branchName, "--json", "url", "--jq", ".url"],
-          cwd,
-        );
-        return existing.trim();
+      const defaultBranch = await getDefaultBranch(cwd);
+      const { data: pr } = await octokit.rest.pulls.create({
+        owner,
+        repo,
+        title,
+        body: prBody,
+        head: branchName,
+        base: defaultBranch,
+      });
+      return pr.html_url;
+    } catch (err: unknown) {
+      // If a PR already exists for this branch, retrieve its URL.
+      // Octokit throws a RequestError with status 422 for validation
+      // failures, including "A pull request already exists".
+      const isValidationError =
+        typeof err === "object" &&
+        err !== null &&
+        "status" in err &&
+        (err as { status: number }).status === 422;
+
+      if (isValidationError) {
+        const { data: prs } = await octokit.rest.pulls.list({
+          owner,
+          repo,
+          head: `${owner}:${branchName}`,
+          state: "open",
+        });
+        if (prs.length > 0) {
+          return prs[0].html_url;
+        }
       }
       throw err;
     }

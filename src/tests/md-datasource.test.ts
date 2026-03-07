@@ -44,7 +44,7 @@ describe("list", () => {
 
     const results = await datasource.list({ cwd: "/tmp/project" });
 
-    expect(readdir).toHaveBeenCalledWith(expect.stringContaining(".dispatch/specs"));
+    expect(readdir).toHaveBeenCalledWith(expect.stringContaining(join(".dispatch", "specs")));
     expect(results).toHaveLength(2);
     expect(results[0].number).toBe("a.md");
     expect(results[0].title).toBe("Alpha");
@@ -320,7 +320,7 @@ describe("fetch", () => {
     const result = await datasource.fetch(absPath, { cwd: "/tmp" });
     expect(vi.mocked(readFile)).toHaveBeenCalledWith(absPath, "utf-8");
     expect(result.number).toBe("my-issue.md");
-    expect(result.url).toBe(absPath);
+    expect(result.url).toBe(join(dirname(absPath), "my-issue.md"));
   });
 
   it("appends .md extension to absolute paths when missing", async () => {
