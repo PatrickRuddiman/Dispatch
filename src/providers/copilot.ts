@@ -15,6 +15,9 @@ import type { ProviderInstance, ProviderBootOptions } from "./interface.js";
 import { log } from "../helpers/logger.js";
 import { withTimeout } from "../helpers/timeout.js";
 
+/** Maximum time (ms) to wait for a copilot session to become idle after sending a prompt. */
+const SESSION_READY_TIMEOUT_MS = 600_000;
+
 /**
  * List available Copilot models.
  *
@@ -124,7 +127,7 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
                 reject(new Error(`Copilot session error: ${event.data.message}`));
               });
             }),
-            300_000,
+            SESSION_READY_TIMEOUT_MS,
             "copilot session ready",
           );
         } finally {

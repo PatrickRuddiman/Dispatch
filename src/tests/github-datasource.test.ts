@@ -1,24 +1,60 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const SHELL = process.platform === "win32";
+
 const { mockExecFile } = vi.hoisted(() => ({ mockExecFile: vi.fn() }));
+
+const mockOctokit = vi.hoisted(() => ({
+  rest: {
+    issues: {
+      listForRepo: vi.fn(),
+      get: vi.fn(),
+      listComments: vi.fn(),
+      update: vi.fn(),
+      create: vi.fn(),
+    },
+    pulls: {
+      create: vi.fn(),
+      list: vi.fn(),
+    },
+  },
+  paginate: vi.fn(),
+}));
 
 vi.mock("node:child_process", () => ({ execFile: mockExecFile }));
 vi.mock("node:util", () => ({ promisify: () => mockExecFile }));
+vi.mock("../helpers/auth.js", () => ({
+  getGithubOctokit: vi.fn().mockResolvedValue(mockOctokit),
+}));
+vi.mock("../datasources/index.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../datasources/index.js")>();
+  return {
+    ...original,
+    getGitRemoteUrl: vi.fn().mockResolvedValue("https://github.com/o/r.git"),
+    parseGitHubRemoteUrl: vi.fn().mockReturnValue({ owner: "o", repo: "r" }),
+  };
+});
 
 import { datasource, getCommitMessages } from "../datasources/github.js";
 
 beforeEach(() => {
   mockExecFile.mockReset();
+  mockOctokit.rest.issues.listForRepo.mockReset();
+  mockOctokit.rest.issues.get.mockReset();
+  mockOctokit.rest.issues.listComments.mockReset();
+  mockOctokit.rest.issues.update.mockReset();
+  mockOctokit.rest.issues.create.mockReset();
+  mockOctokit.rest.pulls.create.mockReset();
+  mockOctokit.rest.pulls.list.mockReset();
+  mockOctokit.paginate.mockReset();
 });
 
 describe("github datasource — list", () => {
-  it("returns parsed issues from gh issue list", async () => {
-    mockExecFile.mockResolvedValue({
-      stdout: JSON.stringify([
-        { number: 1, title: "Bug", body: "fix it", labels: [{ name: "bug" }], state: "OPEN", url: "https://github.com/o/r/issues/1" },
-        { number: 2, title: "Feature", body: "add it", labels: [], state: "OPEN", url: "https://github.com/o/r/issues/2" },
-      ]),
-    });
+  it("returns parsed issues from Octokit", async () => {
+    mockOctokit.paginate.mockResolvedValue([
+      { number: 1, title: "Bug", body: "fix it", labels: [{ name: "bug" }], state: "open", html_url: "https://github.com/o/r/issues/1" },
+      { number: 2, title: "Feature", body: "add it", labels: [], state: "open", html_url: "https://github.com/o/r/issues/2" },
+    ]);
 
     const result = await datasource.list({ cwd: "/tmp" });
 
@@ -29,28 +65,34 @@ describe("github datasource — list", () => {
     expect(result[1].number).toBe("2");
   });
 
-  it("throws descriptive error when gh returns non-json output", async () => {
-    mockExecFile.mockResolvedValue({ stdout: "Not Found\n" });
+  it("filters out pull requests from issue list", async () => {
+    mockOctokit.paginate.mockResolvedValue([
+      { number: 1, title: "Issue", body: "", labels: [], state: "open", html_url: "https://github.com/o/r/issues/1" },
+      { number: 2, title: "PR", body: "", labels: [], state: "open", html_url: "https://github.com/o/r/pull/2", pull_request: { url: "..." } },
+    ]);
 
-    await expect(datasource.list({ cwd: "/tmp" })).rejects.toThrow(
-      "Failed to parse GitHub CLI output:",
-    );
+    const result = await datasource.list({ cwd: "/tmp" });
+
+    expect(result).toHaveLength(1);
+    expect(result[0].number).toBe("1");
   });
 });
 
 describe("github datasource — fetch", () => {
   it("returns issue details with comments", async () => {
-    mockExecFile.mockResolvedValue({
-      stdout: JSON.stringify({
+    mockOctokit.rest.issues.get.mockResolvedValue({
+      data: {
         number: 42,
         title: "Fix auth",
         body: "broken login",
         labels: [{ name: "bug" }],
-        state: "OPEN",
-        url: "https://github.com/o/r/issues/42",
-        comments: [{ author: { login: "alice" }, body: "on it" }],
-      }),
+        state: "open",
+        html_url: "https://github.com/o/r/issues/42",
+      },
     });
+    mockOctokit.paginate.mockResolvedValue(
+      [{ user: { login: "alice" }, body: "on it" }],
+    );
 
     const result = await datasource.fetch("42", { cwd: "/tmp" });
 
@@ -60,69 +102,77 @@ describe("github datasource — fetch", () => {
   });
 
   it("handles missing comments gracefully", async () => {
-    mockExecFile.mockResolvedValue({
-      stdout: JSON.stringify({ number: 1, title: "T", body: "B", labels: [], state: "OPEN", url: "" }),
+    mockOctokit.rest.issues.get.mockResolvedValue({
+      data: { number: 1, title: "T", body: "B", labels: [], state: "open", html_url: "" },
     });
+    mockOctokit.paginate.mockResolvedValue([]);
 
     const result = await datasource.fetch("1", { cwd: "/tmp" });
     expect(result.comments).toEqual([]);
   });
 
-  it("throws descriptive error when gh returns non-json output", async () => {
-    mockExecFile.mockResolvedValue({ stdout: "ERROR: auth required\n" });
-
-    await expect(datasource.fetch("42", { cwd: "/tmp" })).rejects.toThrow(
-      "Failed to parse GitHub CLI output:",
+  it("handles null comment body without producing 'null' string", async () => {
+    mockOctokit.rest.issues.get.mockResolvedValue({
+      data: { number: 1, title: "T", body: "B", labels: [], state: "open", html_url: "" },
+    });
+    mockOctokit.paginate.mockResolvedValue(
+      [{ user: { login: "bob" }, body: null }],
     );
+
+    const result = await datasource.fetch("1", { cwd: "/tmp" });
+    expect(result.comments).toEqual(["**bob:** "]);
   });
 });
 
 describe("github datasource — update", () => {
-  it("calls gh issue edit with correct args", async () => {
-    mockExecFile.mockResolvedValue({ stdout: "" });
+  it("calls octokit issues.update with correct args", async () => {
+    mockOctokit.rest.issues.update.mockResolvedValue({ data: {} });
 
     await datasource.update("42", "New Title", "New Body", { cwd: "/tmp" });
 
-    expect(mockExecFile).toHaveBeenCalledWith(
-      "gh",
-      ["issue", "edit", "42", "--title", "New Title", "--body", "New Body"],
-      { cwd: "/tmp", shell: false },
-    );
+    expect(mockOctokit.rest.issues.update).toHaveBeenCalledWith({
+      owner: "o",
+      repo: "r",
+      issue_number: 42,
+      title: "New Title",
+      body: "New Body",
+    });
   });
 });
 
 describe("github datasource — close", () => {
-  it("calls gh issue close", async () => {
-    mockExecFile.mockResolvedValue({ stdout: "" });
+  it("calls octokit issues.update with state closed", async () => {
+    mockOctokit.rest.issues.update.mockResolvedValue({ data: {} });
 
     await datasource.close("42", { cwd: "/tmp" });
 
-    expect(mockExecFile).toHaveBeenCalledWith(
-      "gh",
-      ["issue", "close", "42"],
-      { cwd: "/tmp", shell: false },
-    );
+    expect(mockOctokit.rest.issues.update).toHaveBeenCalledWith({
+      owner: "o",
+      repo: "r",
+      issue_number: 42,
+      state: "closed",
+    });
   });
 });
 
 describe("github datasource — create", () => {
-  it("parses issue number from URL", async () => {
-    mockExecFile.mockResolvedValue({
-      stdout: "https://github.com/org/repo/issues/99\n",
+  it("creates issue and returns IssueDetails", async () => {
+    mockOctokit.rest.issues.create.mockResolvedValue({
+      data: {
+        number: 99,
+        title: "New Issue",
+        body: "Body text",
+        labels: [],
+        state: "open",
+        html_url: "https://github.com/o/r/issues/99",
+      },
     });
 
     const result = await datasource.create("New Issue", "Body text", { cwd: "/tmp" });
 
     expect(result.number).toBe("99");
     expect(result.title).toBe("New Issue");
-    expect(result.url).toBe("https://github.com/org/repo/issues/99");
-  });
-
-  it("returns 0 when URL does not match pattern", async () => {
-    mockExecFile.mockResolvedValue({ stdout: "no-match-url\n" });
-
-    const result = await datasource.create("T", "B", { cwd: "/tmp" });
-    expect(result.number).toBe("0");
+    expect(result.url).toBe("https://github.com/o/r/issues/99");
   });
 });
 
@@ -207,7 +257,7 @@ describe("github datasource — createAndSwitchBranch", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["checkout", "-b", "dispatch/42-feat"],
-      { cwd: "/tmp", shell: false },
+      { cwd: "/tmp", shell: SHELL },
     );
   });
 
@@ -222,7 +272,7 @@ describe("github datasource — createAndSwitchBranch", () => {
     expect(mockExecFile).toHaveBeenLastCalledWith(
       "git",
       ["checkout", "dispatch/42-feat"],
-      { cwd: "/tmp", shell: false },
+      { cwd: "/tmp", shell: SHELL },
     );
   });
 
@@ -241,7 +291,7 @@ describe("github datasource — switchBranch", () => {
 
     await datasource.switchBranch("main", { cwd: "/tmp" });
 
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "main"], { cwd: "/tmp", shell: false });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "main"], { cwd: "/tmp", shell: SHELL });
   });
 });
 
@@ -254,7 +304,7 @@ describe("github datasource — pushBranch", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["push", "--set-upstream", "origin", "dispatch/42-feat"],
-      { cwd: "/tmp", shell: false },
+      { cwd: "/tmp", shell: SHELL },
     );
   });
 });
@@ -272,7 +322,7 @@ describe("github datasource — commitAllChanges", () => {
     expect(mockExecFile).toHaveBeenLastCalledWith(
       "git",
       ["commit", "-m", "feat: update"],
-      { cwd: "/tmp", shell: false },
+      { cwd: "/tmp", shell: SHELL },
     );
   });
 
@@ -289,7 +339,10 @@ describe("github datasource — commitAllChanges", () => {
 
 describe("github datasource — createPullRequest", () => {
   it("creates PR and returns URL", async () => {
-    mockExecFile.mockResolvedValue({ stdout: "https://github.com/o/r/pull/10\n" });
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/main\n" });
+    mockOctokit.rest.pulls.create.mockResolvedValue({
+      data: { html_url: "https://github.com/o/r/pull/10" },
+    });
 
     const url = await datasource.createPullRequest(
       "dispatch/42-feat", "42", "Title", "Body", { cwd: "/tmp" },
@@ -299,9 +352,15 @@ describe("github datasource — createPullRequest", () => {
   });
 
   it("returns existing PR URL when already exists", async () => {
-    mockExecFile
-      .mockRejectedValueOnce(new Error("already exists"))
-      .mockResolvedValueOnce({ stdout: "https://github.com/o/r/pull/5\n" });
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/main\n" });
+    const error = Object.assign(
+      new Error("Validation Failed"),
+      { status: 422, response: { data: { errors: [{ message: "A pull request already exists" }] } } },
+    );
+    mockOctokit.rest.pulls.create.mockRejectedValue(error);
+    mockOctokit.rest.pulls.list.mockResolvedValue({
+      data: [{ html_url: "https://github.com/o/r/pull/5" }],
+    });
 
     const url = await datasource.createPullRequest(
       "dispatch/42-feat", "42", "Title", "Body", { cwd: "/tmp" },
@@ -311,11 +370,75 @@ describe("github datasource — createPullRequest", () => {
   });
 
   it("throws for non-already-exists errors", async () => {
-    mockExecFile.mockRejectedValue(new Error("auth required"));
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/main\n" });
+    mockOctokit.rest.pulls.create.mockRejectedValue(new Error("auth required"));
 
     await expect(
       datasource.createPullRequest("b", "1", "T", "B", { cwd: "/tmp" }),
     ).rejects.toThrow("auth required");
+  });
+
+  it("uses default body when body is empty string", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/main\n" });
+    mockOctokit.rest.pulls.create.mockResolvedValue({
+      data: { html_url: "https://github.com/o/r/pull/11" },
+    });
+
+    const url = await datasource.createPullRequest(
+      "dispatch/99-bugfix", "99", "fix: resolve crash", "", { cwd: "/tmp" },
+    );
+
+    expect(url).toBe("https://github.com/o/r/pull/11");
+    expect(mockOctokit.rest.pulls.create).toHaveBeenCalledWith(
+      expect.objectContaining({ body: "Closes #99" }),
+    );
+  });
+
+  it("passes provided body to pulls.create", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/main\n" });
+    mockOctokit.rest.pulls.create.mockResolvedValue({
+      data: { html_url: "https://github.com/o/r/pull/12" },
+    });
+
+    const customBody = "## Summary\n\nImplemented user auth\n\nCloses #42";
+    const url = await datasource.createPullRequest(
+      "dispatch/42-feature", "42", "feat: add user auth", customBody, { cwd: "/tmp" },
+    );
+
+    expect(url).toBe("https://github.com/o/r/pull/12");
+    expect(mockOctokit.rest.pulls.create).toHaveBeenCalledWith(
+      expect.objectContaining({ body: customBody }),
+    );
+  });
+
+  it("passes multiline markdown body through to pulls.create", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/main\n" });
+    mockOctokit.rest.pulls.create.mockResolvedValue({
+      data: { html_url: "https://github.com/o/r/pull/13" },
+    });
+
+    const multilineBody = [
+      "## Summary",
+      "",
+      "- feat: add login",
+      "- feat: add signup",
+      "",
+      "## Tasks",
+      "",
+      "- [x] Implement login",
+      "- [x] Implement signup",
+      "",
+      "Closes #42",
+    ].join("\n");
+
+    const url = await datasource.createPullRequest(
+      "dispatch/42-feature", "42", "feat: add user auth", multilineBody, { cwd: "/tmp" },
+    );
+
+    expect(url).toBe("https://github.com/o/r/pull/13");
+    expect(mockOctokit.rest.pulls.create).toHaveBeenCalledWith(
+      expect.objectContaining({ body: multilineBody }),
+    );
   });
 });
 

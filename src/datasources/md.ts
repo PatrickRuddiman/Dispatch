@@ -258,6 +258,22 @@ export const datasource: Datasource = {
 
   buildBranchName(issueNumber: string, title: string, username: string): string {
     const slug = slugify(title, 50);
+
+    // When issueNumber is a file path, extract a clean identifier from the filename
+    if (issueNumber.includes("/") || issueNumber.includes("\\")) {
+      // Normalize backslashes so basename() works correctly on POSIX
+      const normalized = issueNumber.replaceAll("\\", "/");
+      const filename = basename(normalized);
+      const idMatch = /^(\d+)-(.+)\.md$/.exec(filename);
+      if (idMatch) {
+        return `${username}/dispatch/file-${idMatch[1]}-${slug}`;
+      }
+      // Fallback: use slugified basename without extension
+      const nameWithoutExt = parsePath(filename).name;
+      const slugifiedName = slugify(nameWithoutExt, 50);
+      return `${username}/dispatch/file-${slugifiedName}-${slug}`;
+    }
+
     return `${username}/dispatch/${issueNumber}-${slug}`;
   },
 

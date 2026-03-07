@@ -398,8 +398,18 @@ async function generateSpecsBatch(
                   log.success(`Updated spec #${parsed.issueId} in-place`);
                   identifier = parsed.issueId;
                   issueNumbers.push(parsed.issueId);
+                } else {
+                  const created = await datasource.create(details.title, result.data.content, fetchOpts);
+                  log.success(`Created spec #${created.number} from ${filepath}`);
+                  identifier = created.number;
+                  issueNumbers.push(created.number);
+                  try {
+                    await unlink(filepath);
+                    log.success(`Deleted local spec ${filepath} (now tracked as spec #${created.number})`);
+                  } catch (unlinkErr) {
+                    log.warn(`Could not delete local spec ${filepath}: ${log.formatErrorChain(unlinkErr)}`);
+                  }
                 }
-                // If no ID prefix, spec is already written in-place at filepath — no sync needed
               } else {
                 const created = await datasource.create(details.title, result.data.content, fetchOpts);
                 log.success(`Created issue #${created.number} from ${filepath}`);

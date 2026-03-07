@@ -1,6 +1,6 @@
 {
   "name": "@pruddiman/dispatch",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "AI agent orchestration CLI — parse markdown task files, dispatch each unit of work to code agents (OpenCode, GitHub Copilot, etc.), and commit results with conventional commits",
   "type": "module",
   "bin": {
@@ -44,13 +44,18 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.63",
+    "@azure/identity": "^4.13.0",
     "@github/copilot-sdk": "^0.1.0",
     "@inquirer/prompts": "^8.3.0",
+    "@octokit/auth-oauth-device": "^7.1.5",
+    "@octokit/rest": "^21.1.1",
     "@openai/codex": "^0.1.0",
     "@opencode-ai/sdk": "^1.2.10",
+    "azure-devops-node-api": "^14.1.0",
     "chalk": "^5.4.1",
     "commander": "^14.0.3",
-    "glob": "^11.0.1"
+    "glob": "^11.0.1",
+    "open": "^10.2.0"
   },
   "devDependencies": {
     "@types/node": "^22.13.4",

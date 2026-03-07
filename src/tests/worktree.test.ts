@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { join } from "node:path";
 
+const SHELL = process.platform === "win32";
+
 // ─── Mock setup ────────────────────────────────────────────────────────────────
 
 const { mockExecFile } = vi.hoisted(() => ({
@@ -100,7 +102,7 @@ describe("createWorktree", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["worktree", "add", join("/repo", ".dispatch", "worktrees", "issue-42"), "-b", "user/dispatch/42-my-feature"],
-      { cwd: "/repo", shell: false },
+      { cwd: "/repo", shell: SHELL },
     );
     expect(result).toBe(join("/repo", ".dispatch", "worktrees", "issue-42"));
   });
@@ -124,7 +126,7 @@ describe("createWorktree", () => {
     expect(mockExecFile).toHaveBeenLastCalledWith(
       "git",
       ["worktree", "add", join("/repo", ".dispatch", "worktrees", "issue-42"), "user/dispatch/42-my-feature"],
-      { cwd: "/repo", shell: false },
+      { cwd: "/repo", shell: SHELL },
     );
     expect(result).toBe(join("/repo", ".dispatch", "worktrees", "issue-42"));
   });
@@ -175,13 +177,13 @@ describe("removeWorktree", () => {
       1,
       "git",
       ["worktree", "remove", join("/repo", ".dispatch", "worktrees", "issue-42")],
-      { cwd: "/repo", shell: false },
+      { cwd: "/repo", shell: SHELL },
     );
     expect(mockExecFile).toHaveBeenNthCalledWith(
       2,
       "git",
       ["worktree", "prune"],
-      { cwd: "/repo", shell: false },
+      { cwd: "/repo", shell: SHELL },
     );
   });
 
@@ -198,13 +200,13 @@ describe("removeWorktree", () => {
       2,
       "git",
       ["worktree", "remove", "--force", join("/repo", ".dispatch", "worktrees", "issue-42")],
-      { cwd: "/repo", shell: false },
+      { cwd: "/repo", shell: SHELL },
     );
     expect(mockExecFile).toHaveBeenNthCalledWith(
       3,
       "git",
       ["worktree", "prune"],
-      { cwd: "/repo", shell: false },
+      { cwd: "/repo", shell: SHELL },
     );
   });
 
@@ -257,7 +259,7 @@ describe("removeWorktree", () => {
       3,
       "git",
       ["worktree", "prune"],
-      { cwd: "/repo", shell: false },
+      { cwd: "/repo", shell: SHELL },
     );
   });
 });
@@ -275,7 +277,7 @@ describe("listWorktrees", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["worktree", "list"],
-      { cwd: "/repo", shell: false },
+      { cwd: "/repo", shell: SHELL },
     );
   });
 

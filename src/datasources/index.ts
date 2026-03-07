@@ -148,3 +148,52 @@ export function parseAzDevOpsRemoteUrl(
 
   return null;
 }
+
+/**
+ * Parse a GitHub git remote URL and extract the owner and repository name.
+ *
+ * Supports both GitHub remote URL formats:
+ * - **HTTPS:** `https://github.com/{owner}/{repo}[.git]`
+ * - **SSH:** `git@github.com:{owner}/{repo}[.git]`
+ *
+ * @param url - The git remote URL to parse
+ * @returns The parsed owner and repo, or `null` if the URL is not a recognized GitHub format
+ */
+export function parseGitHubRemoteUrl(
+  url: string
+): { owner: string; repo: string } | null {
+  // HTTPS: https://github.com/{owner}/{repo}[.git]
+  const httpsMatch = url.match(
+    /^https?:\/\/github\.com\/([^/]+)\/([^/]+?)\/?$/i
+  );
+  if (httpsMatch) {
+    const owner = decodeURIComponent(httpsMatch[1]);
+    const rawRepo = decodeURIComponent(httpsMatch[2]);
+    const repo = rawRepo.endsWith(".git") ? rawRepo.slice(0, -4) : rawRepo;
+    return { owner, repo };
+  }
+
+  // SSH (scp-style): git@github.com:{owner}/{repo}[.git]
+  const sshMatch = url.match(
+    /^git@github\.com:([^/]+)\/([^/]+?)\/?$/i
+  );
+  if (sshMatch) {
+    const owner = decodeURIComponent(sshMatch[1]);
+    const rawRepo = decodeURIComponent(sshMatch[2]);
+    const repo = rawRepo.endsWith(".git") ? rawRepo.slice(0, -4) : rawRepo;
+    return { owner, repo };
+  }
+
+  // SSH (url-style): ssh://git@github.com/{owner}/{repo}[.git]
+  const sshUrlMatch = url.match(
+    /^ssh:\/\/git@github\.com\/([^/]+)\/([^/]+?)\/?$/i
+  );
+  if (sshUrlMatch) {
+    const owner = decodeURIComponent(sshUrlMatch[1]);
+    const rawRepo = decodeURIComponent(sshUrlMatch[2]);
+    const repo = rawRepo.endsWith(".git") ? rawRepo.slice(0, -4) : rawRepo;
+    return { owner, repo };
+  }
+
+  return null;
+}
