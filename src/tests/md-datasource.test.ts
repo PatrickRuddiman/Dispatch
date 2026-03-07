@@ -188,6 +188,47 @@ describe("buildBranchName", () => {
     const result = datasource.buildBranchName("99", "Some Task", "local");
     expect(result).toBe("local/dispatch/99-some-task");
   });
+
+  it("extracts file-{id} from an absolute Unix file path with {id}-{slug}.md pattern", () => {
+    const result = datasource.buildBranchName(
+      "/home/user/project/.dispatch/specs/42-batch-updates.md",
+      "Batch Updates",
+      "john-doe",
+    );
+    expect(result).toBe("john-doe/dispatch/file-42-batch-updates");
+  });
+
+  it("falls back to file-{slugified-basename} for paths without numeric prefix", () => {
+    const result = datasource.buildBranchName(
+      "/home/user/project/.dispatch/specs/my-design-doc.md",
+      "My Design Doc",
+      "john-doe",
+    );
+    expect(result).toBe("john-doe/dispatch/file-my-design-doc-my-design-doc");
+  });
+
+  it("extracts file-{id} from a relative path with {id}-{slug}.md pattern", () => {
+    const result = datasource.buildBranchName(
+      "specs/7-add-logging.md",
+      "Add Logging",
+      "alice",
+    );
+    expect(result).toBe("alice/dispatch/file-7-add-logging");
+  });
+
+  it("handles Windows-style backslash path separators", () => {
+    const result = datasource.buildBranchName(
+      "C:\\Users\\dev\\specs\\10-fix-bug.md",
+      "Fix Bug",
+      "bob",
+    );
+    expect(result).toBe("bob/dispatch/file-10-fix-bug");
+  });
+
+  it("preserves plain numeric ID without path separators unchanged", () => {
+    const result = datasource.buildBranchName("7", "Feature Request", "local");
+    expect(result).toBe("local/dispatch/7-feature-request");
+  });
 });
 
 describe("getDefaultBranch", () => {
