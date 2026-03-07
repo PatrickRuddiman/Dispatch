@@ -229,6 +229,20 @@ describe("buildBranchName", () => {
     const result = datasource.buildBranchName("7", "Feature Request", "local");
     expect(result).toBe("local/dispatch/7-feature-request");
   });
+
+  it("falls back to slugified basename for non-.md file path without numeric prefix", () => {
+    const result = datasource.buildBranchName(
+      "/home/user/specs/design-doc.txt",
+      "Design Doc",
+      "dev",
+    );
+    expect(result).toBe("dev/dispatch/file-design-doc-design-doc");
+  });
+
+  it("preserves existing behavior for plain non-numeric identifiers", () => {
+    const result = datasource.buildBranchName("my-issue.md", "Some Task", "user");
+    expect(result).toBe("user/dispatch/my-issue.md-some-task");
+  });
 });
 
 describe("getDefaultBranch", () => {
