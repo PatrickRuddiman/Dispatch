@@ -392,7 +392,7 @@ describe("runSpecPipeline", () => {
         expect.any(String),
         expect.any(Object),
       );
-      expect(unlink).toHaveBeenCalled();
+      expect(unlink).toHaveBeenCalledWith("/tmp/test-cwd/spec1.md");
       expect(result.issueNumbers).toContain("99");
       expect(result.generated).toBe(1);
     });
