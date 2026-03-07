@@ -401,10 +401,14 @@ async function generateSpecsBatch(
                 } else {
                   const created = await datasource.create(details.title, result.data.content, fetchOpts);
                   log.success(`Created spec #${created.number} from ${filepath}`);
-                  await unlink(filepath);
-                  log.success(`Deleted local spec ${filepath} (now tracked as spec #${created.number})`);
                   identifier = created.number;
                   issueNumbers.push(created.number);
+                  try {
+                    await unlink(filepath);
+                    log.success(`Deleted local spec ${filepath} (now tracked as spec #${created.number})`);
+                  } catch (unlinkErr) {
+                    log.warn(`Could not delete local spec ${filepath}: ${log.formatErrorChain(unlinkErr)}`);
+                  }
                 }
               } else {
                 const created = await datasource.create(details.title, result.data.content, fetchOpts);

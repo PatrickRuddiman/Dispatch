@@ -270,7 +270,7 @@ export const datasource: Datasource = {
       }
       // Fallback: use slugified basename without extension
       const nameWithoutExt = parsePath(filename).name;
-      const slugifiedName = slugify(nameWithoutExt);
+      const slugifiedName = slugify(nameWithoutExt, 50);
       return `${username}/dispatch/file-${slugifiedName}-${slug}`;
     }
 
