@@ -1496,7 +1496,7 @@ describe("spec output formatting", () => {
     expect(runLine).not.toContain("drafts/b.md");
   });
 
-  it("shows file paths in dispatch command for file/glob mode with md datasource", async () => {
+  it("shows numeric ID in dispatch command for file/glob mode with md datasource", async () => {
     const mockDs = createMockDatasource("md");
     vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
@@ -1515,8 +1515,8 @@ describe("spec output formatting", () => {
     const runLine = dimCalls.find((msg) => typeof msg === "string" && msg.includes("dispatch"));
 
     expect(runLine).toBeDefined();
-    // Should show file paths for md datasource
-    expect(runLine).toContain("/tmp/test-project/drafts/feature.md");
+    // After create(), identifier is numeric — dispatch hint shows the ID
+    expect(runLine).toContain("dispatch 99");
   });
 
   it("shows single issue number for tracker mode with one issue", async () => {
@@ -1602,7 +1602,7 @@ describe("inline text pipeline", () => {
     expect(result.files[0]).toContain("my-feature-42.md");
   });
 
-  it("shows file path in dispatch command for inline text with md datasource", async () => {
+  it("shows numeric ID in dispatch command for inline text with md datasource", async () => {
     const mockDs = createMockDatasource("md");
     vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
@@ -1619,9 +1619,8 @@ describe("inline text pipeline", () => {
     const runLine = dimCalls.find((msg) => typeof msg === "string" && msg.includes("dispatch"));
 
     expect(runLine).toBeDefined();
-    expect(runLine).toContain("my-feature-42.md");
-    // File paths (non-numeric identifiers) should be quoted in the output
-    expect(runLine).toContain('"');
+    // After create(), identifier is numeric — dispatch hint shows the ID
+    expect(runLine).toContain("dispatch 99");
   });
 
   it("truncates long inline text in spec title", async () => {
@@ -1724,10 +1723,11 @@ describe("inline text pipeline", () => {
 
     expect(result.identifiers).toBeDefined();
     expect(result.identifiers).toHaveLength(1);
-    // Identifier should be the file path (md datasource, not a tracker)
-    expect(result.identifiers![0]).toContain("my-feature-42.md");
-    // No issue numbers should be created for md datasource
-    expect(result.issueNumbers).toHaveLength(0);
+    // Identifier should be the numeric ID assigned by datasource.create()
+    expect(result.identifiers![0]).toBe("99");
+    // Issue number should be created via datasource.create()
+    expect(result.issueNumbers).toHaveLength(1);
+    expect(result.issueNumbers).toContain("99");
   });
 });
 
