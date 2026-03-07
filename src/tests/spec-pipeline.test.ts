@@ -374,7 +374,7 @@ describe("runSpecPipeline", () => {
       expect(result.issueNumbers).toContain("99");
     });
 
-    it("writes spec in-place when datasource is md and file has no ID prefix", async () => {
+    it("creates numbered spec and deletes original when datasource is md and file has no ID prefix", async () => {
       vi.mocked(getDatasource).mockReturnValue(
         createMockDatasource("md", {
           fetch: mocks.mockFetch,
@@ -387,9 +387,13 @@ describe("runSpecPipeline", () => {
 
       const result = await runSpecPipeline(baseOpts({ issues: "*.md" }));
 
-      expect(mocks.mockCreate).not.toHaveBeenCalled();
-      expect(unlink).not.toHaveBeenCalled();
-      expect(result.issueNumbers).toHaveLength(0);
+      expect(mocks.mockCreate).toHaveBeenCalledWith(
+        "Mock Title",
+        expect.any(String),
+        expect.any(Object),
+      );
+      expect(unlink).toHaveBeenCalledWith("/tmp/test-cwd/spec1.md");
+      expect(result.issueNumbers).toContain("99");
       expect(result.generated).toBe(1);
     });
 
