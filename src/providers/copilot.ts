@@ -10,7 +10,7 @@
  *   - COPILOT_GITHUB_TOKEN / GH_TOKEN / GITHUB_TOKEN env vars
  */
 
-import { CopilotClient, approveAll, type AssistantMessageEvent, type CopilotSession } from "@github/copilot-sdk";
+import type { AssistantMessageEvent, CopilotSession } from "@github/copilot-sdk";
 import type { ProviderInstance, ProviderBootOptions } from "./interface.js";
 import { log } from "../helpers/logger.js";
 import { withTimeout } from "../helpers/timeout.js";
@@ -19,12 +19,29 @@ import { withTimeout } from "../helpers/timeout.js";
 const SESSION_READY_TIMEOUT_MS = 600_000;
 
 /**
+ * Lazily load the Copilot SDK.
+ *
+ * The SDK is a devDependency that is bundled into the CLI at build time.
+ * Using a dynamic import here keeps the top-level module graph free of a hard
+ * dependency on `@github/copilot-sdk` so that:
+ *
+ *  - tools that perform static analysis or packaging do not require the SDK to
+ *    be installed just to parse this file, and
+ *  - runtime environments that never use the Copilot provider avoid the
+ *    startup cost of loading the SDK.
+ */
+async function loadCopilotSdk(): Promise<typeof import("@github/copilot-sdk")> {
+  return import("@github/copilot-sdk");
+}
+
+/**
  * List available Copilot models.
  *
  * Starts a temporary client, fetches the model list, then stops it.
  * Returns bare model IDs (e.g. "claude-sonnet-4-5").
  */
 export async function listModels(opts?: ProviderBootOptions): Promise<string[]> {
+  const { CopilotClient } = await loadCopilotSdk();
   const client = new CopilotClient({
     ...(opts?.url ? { cliUrl: opts.url } : {}),
   });
@@ -42,6 +59,8 @@ export async function listModels(opts?: ProviderBootOptions): Promise<string[]> 
  */
 export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance> {
   log.debug(opts?.url ? `Connecting to Copilot CLI at ${opts.url}` : "Starting Copilot CLI...");
+
+  const { CopilotClient, approveAll } = await loadCopilotSdk();
 
   const client = new CopilotClient({
     ...(opts?.url ? { cliUrl: opts.url } : {}),
