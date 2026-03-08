@@ -18,6 +18,18 @@ import { withTimeout } from "../helpers/timeout.js";
 /** Maximum time (ms) to wait for a copilot session to become idle after sending a prompt. */
 const SESSION_READY_TIMEOUT_MS = 600_000;
 
+/**
+ * Lazily load the Copilot SDK.
+ *
+ * The SDK is a devDependency that is bundled into the CLI at build time.
+ * Using a dynamic import here keeps the top-level module graph free of a hard
+ * dependency on `@github/copilot-sdk` so that:
+ *
+ *  - tools that perform static analysis or packaging do not require the SDK to
+ *    be installed just to parse this file, and
+ *  - runtime environments that never use the Copilot provider avoid the
+ *    startup cost of loading the SDK.
+ */
 async function loadCopilotSdk(): Promise<typeof import("@github/copilot-sdk")> {
   return import("@github/copilot-sdk");
 }
