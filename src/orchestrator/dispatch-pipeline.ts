@@ -106,7 +106,7 @@ export async function runDispatchPipeline(
     dryRun,
     serverUrl,
     noPlan,
-    noBranch,
+    noBranch: noBranchOpt,
     noWorktree,
     feature,
     provider = "opencode",
@@ -121,6 +121,7 @@ export async function runDispatchPipeline(
     planRetries,
     retries,
   } = opts;
+  let noBranch = noBranchOpt;
 
   // Planning timeout/retry defaults
   const planTimeoutMs = (planTimeout ?? DEFAULT_PLAN_TIMEOUT_MIN) * 60_000;
@@ -174,6 +175,19 @@ export async function runDispatchPipeline(
     }
 
     const datasource = getDatasource(source);
+
+    // When using the md datasource, git operations are optional — they only
+    // work when dispatch is run from inside a git repository. If no repo is
+    // found, disable branching so the pipeline can still complete its work.
+    if (source === "md" && !noBranch) {
+      try {
+        await exec("git", ["rev-parse", "--git-dir"], { cwd });
+      } catch {
+        noBranch = true;
+        if (verbose) log.debug("No git repository found — skipping git operations for md datasource");
+      }
+    }
+
     const fetchOpts: IssueFetchOptions = { cwd, org, project, workItemType, iteration, area };
     let items: IssueDetails[];
     if (issueIds.length > 0 && source === "md" && issueIds.some(id => isGlobOrFilePath(id))) {
