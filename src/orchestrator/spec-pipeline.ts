@@ -409,6 +409,13 @@ async function generateSpecsBatch(
                   } catch (unlinkErr) {
                     log.warn(`Could not delete local spec ${filepath}: ${log.formatErrorChain(unlinkErr)}`);
                   }
+                  // Update filepath to the newly created spec so
+                  // generatedFiles / fileDurationsMs reference the
+                  // correct (existing) file, not the deleted original.
+                  const oldDuration = fileDurationsMs[filepath];
+                  delete fileDurationsMs[filepath];
+                  filepath = created.url;
+                  fileDurationsMs[filepath] = oldDuration;
                 }
               } else {
                 const created = await datasource.create(details.title, result.data.content, fetchOpts);

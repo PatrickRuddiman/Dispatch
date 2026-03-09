@@ -590,6 +590,18 @@ describe("MD datasource — git lifecycle methods", () => {
     expect(mockExecFile).toHaveBeenLastCalledWith("git", ["checkout", "local/dispatch/1-feat"], { cwd: "/tmp", shell: SHELL });
   });
 
+  it("createAndSwitchBranch prunes stale worktrees and retries checkout when branch is worktree-locked", async () => {
+    mockExecFile.mockRejectedValueOnce(new Error("fatal: a branch named 'local/dispatch/1-feat' already exists"));
+    mockExecFile.mockRejectedValueOnce(new Error("fatal: 'local/dispatch/1-feat' is already used by worktree at '/tmp/stale-worktree'"));
+    mockExecFile.mockResolvedValueOnce({ stdout: "", stderr: "" });
+    mockExecFile.mockResolvedValueOnce({ stdout: "", stderr: "" });
+    await md.createAndSwitchBranch("local/dispatch/1-feat", { cwd: "/tmp" });
+    expect(mockExecFile).toHaveBeenNthCalledWith(1, "git", ["checkout", "-b", "local/dispatch/1-feat"], { cwd: "/tmp", shell: SHELL });
+    expect(mockExecFile).toHaveBeenNthCalledWith(2, "git", ["checkout", "local/dispatch/1-feat"], { cwd: "/tmp", shell: SHELL });
+    expect(mockExecFile).toHaveBeenNthCalledWith(3, "git", ["worktree", "prune"], { cwd: "/tmp", shell: SHELL });
+    expect(mockExecFile).toHaveBeenNthCalledWith(4, "git", ["checkout", "local/dispatch/1-feat"], { cwd: "/tmp", shell: SHELL });
+  });
+
   it("switchBranch runs git checkout", async () => {
     mockExecFile.mockResolvedValueOnce({ stdout: "", stderr: "" });
     await md.switchBranch("main", { cwd: "/tmp" });

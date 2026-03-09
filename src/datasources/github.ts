@@ -261,7 +261,17 @@ export const datasource: Datasource = {
       // Branch may already exist — switch to it instead
       const message = log.extractMessage(err);
       if (message.includes("already exists")) {
-        await git(["checkout", branchName], cwd);
+        try {
+          await git(["checkout", branchName], cwd);
+        } catch (checkoutErr) {
+          const checkoutMessage = log.extractMessage(checkoutErr);
+          if (checkoutMessage.includes("already used by worktree")) {
+            await git(["worktree", "prune"], cwd);
+            await git(["checkout", branchName], cwd);
+          } else {
+            throw checkoutErr;
+          }
+        }
       } else {
         throw err;
       }

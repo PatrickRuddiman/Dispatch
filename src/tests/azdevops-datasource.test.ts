@@ -954,6 +954,41 @@ describe("azdevops datasource — createAndSwitchBranch", () => {
     expect(mockExecFile).toHaveBeenCalledTimes(2);
   });
 
+  it("prunes stale worktrees and retries checkout when branch is worktree-locked", async () => {
+    mockExecFile
+      .mockRejectedValueOnce(new Error("fatal: a branch named 'dispatch/42-feat' already exists"))
+      .mockRejectedValueOnce(new Error("fatal: 'dispatch/42-feat' is already used by worktree at '/tmp/stale-worktree'"))
+      .mockResolvedValueOnce({ stdout: "" })
+      .mockResolvedValueOnce({ stdout: "" });
+
+    await datasource.createAndSwitchBranch("dispatch/42-feat", { cwd: "/tmp" });
+
+    expect(mockExecFile).toHaveBeenNthCalledWith(
+      1,
+      "git",
+      ["checkout", "-b", "dispatch/42-feat"],
+      { cwd: "/tmp", shell: SHELL },
+    );
+    expect(mockExecFile).toHaveBeenNthCalledWith(
+      2,
+      "git",
+      ["checkout", "dispatch/42-feat"],
+      { cwd: "/tmp", shell: SHELL },
+    );
+    expect(mockExecFile).toHaveBeenNthCalledWith(
+      3,
+      "git",
+      ["worktree", "prune"],
+      { cwd: "/tmp", shell: SHELL },
+    );
+    expect(mockExecFile).toHaveBeenNthCalledWith(
+      4,
+      "git",
+      ["checkout", "dispatch/42-feat"],
+      { cwd: "/tmp", shell: SHELL },
+    );
+  });
+
   it("throws for other errors", async () => {
     mockExecFile.mockRejectedValue(new Error("permission denied"));
 

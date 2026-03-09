@@ -22,10 +22,10 @@ import { isValidBranchName } from "../helpers/branch-validation.js";
 import { createTui, type TuiState } from "../tui.js";
 import type { ProviderName, ProviderInstance } from "../providers/interface.js";
 import { bootProvider } from "../providers/index.js";
-import { getDatasource } from "../datasources/index.js";
+import { getDatasource, getGitRemoteUrl, parseAzDevOpsRemoteUrl, parseGitHubRemoteUrl } from "../datasources/index.js";
 import type { DatasourceName, DispatchLifecycleOptions, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
+import { getGithubOctokit, getAzureConnection, setAuthPromptHandler } from "../helpers/auth.js";
 import type { OrchestrateRunOptions, DispatchSummary } from "./runner.js";
-import { setAuthPromptHandler } from "../helpers/auth.js";
 import {
   fetchItemsById,
   writeItemsToTempDir,
@@ -133,6 +133,31 @@ export async function runDispatchPipeline(
   // Dry-run mode uses simple log output
   if (dryRun) {
     return dryRunMode(issueIds, cwd, source, org, project, workItemType, iteration, area);
+  }
+
+  // Pre-authenticate before TUI starts so device codes are visible in the terminal.
+  // For cached tokens this is instant; for new auth it runs the device flow
+  // while stdout is still free.
+  // Validate the remote URL first to fail fast before triggering device auth.
+  if (source === "github") {
+    const remoteUrl = await getGitRemoteUrl(cwd);
+    if (remoteUrl && parseGitHubRemoteUrl(remoteUrl)) {
+      await getGithubOctokit();
+    } else if (!remoteUrl) {
+      log.warn("No git remote found — skipping GitHub pre-authentication");
+    } else {
+      log.warn("Remote URL is not a GitHub repository — skipping GitHub pre-authentication");
+    }
+  } else if (source === "azdevops") {
+    let orgUrl = org;
+    if (!orgUrl) {
+      const remoteUrl = await getGitRemoteUrl(cwd);
+      if (remoteUrl) {
+        const parsed = parseAzDevOpsRemoteUrl(remoteUrl);
+        if (parsed) orgUrl = parsed.orgUrl;
+      }
+    }
+    if (orgUrl) await getAzureConnection(orgUrl);
   }
 
   // ── Start TUI (or inline logging for verbose mode) ──────────

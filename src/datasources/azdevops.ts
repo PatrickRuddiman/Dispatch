@@ -410,7 +410,17 @@ export const datasource: Datasource = {
     } catch (err) {
       const message = log.extractMessage(err);
       if (message.includes("already exists")) {
-        await git(["checkout", branchName], opts.cwd);
+        try {
+          await git(["checkout", branchName], opts.cwd);
+        } catch (checkoutErr) {
+          const checkoutMessage = log.extractMessage(checkoutErr);
+          if (checkoutMessage.includes("already used by worktree")) {
+            await git(["worktree", "prune"], opts.cwd);
+            await git(["checkout", branchName], opts.cwd);
+          } else {
+            throw checkoutErr;
+          }
+        }
       } else {
         throw err;
       }
