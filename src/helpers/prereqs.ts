@@ -48,8 +48,6 @@ function semverGte(current: string, minimum: string): boolean {
  * Checks performed:
  * 1. `git` is available on PATH (via `git --version`)
  * 2. Node.js version meets the `>=20.12.0` minimum
- * 3. `gh` (GitHub CLI) is available when datasource is `github`
- * 4. `az` (Azure CLI) is available when datasource is `azdevops`
  *
  * @param context Optional datasource context for conditional CLI checks.
  * @returns An array of human-readable failure message strings.
@@ -71,27 +69,6 @@ export async function checkPrereqs(context?: PrereqContext): Promise<string[]> {
     failures.push(
       `Node.js >= ${MIN_NODE_VERSION} is required but found ${nodeVersion}. Please upgrade Node.js`,
     );
-  }
-
-  // Datasource-specific CLI tool checks
-  if (context?.datasource === "github") {
-    try {
-      await exec("gh", ["--version"], { shell: process.platform === "win32" });
-    } catch {
-      failures.push(
-        "gh (GitHub CLI) is required for the github datasource but was not found on PATH. Install it from https://cli.github.com/",
-      );
-    }
-  }
-
-  if (context?.datasource === "azdevops") {
-    try {
-      await exec("az", ["--version"], { shell: process.platform === "win32" });
-    } catch {
-      failures.push(
-        "az (Azure CLI) is required for the azdevops datasource but was not found on PATH. Install it from https://learn.microsoft.com/en-us/cli/azure/",
-      );
-    }
   }
 
   return failures;

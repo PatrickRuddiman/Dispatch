@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { join } from "node:path";
 
+const SHELL = process.platform === "win32";
+
 vi.mock("../helpers/logger.js", () => ({
   log: {
     info: vi.fn(),
@@ -239,7 +241,7 @@ describe("runTests", () => {
 
     expect(spawn).toHaveBeenCalledWith("npm", ["test"], {
       cwd: "/project",
-      shell: false,
+      shell: SHELL,
     });
   });
 });

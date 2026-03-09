@@ -10,6 +10,7 @@ import { join, basename } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { slugify } from "./slugify.js";
 import { log } from "./logger.js";
 
@@ -60,6 +61,12 @@ export async function createWorktree(
   const name = worktreeName(issueFilename);
   const worktreePath = join(repoRoot, WORKTREE_DIR, name);
 
+  if (existsSync(worktreePath)) {
+    log.debug(`Detected stale worktree at ${worktreePath}; removing before creation`);
+    await removeWorktree(repoRoot, issueFilename);
+    log.debug(`Removed stale worktree at ${worktreePath}`);
+  }
+
   try {
     const args = ["worktree", "add", worktreePath, "-b", branchName];
     if (startPoint) args.push(startPoint);
@@ -69,6 +76,11 @@ export async function createWorktree(
     const message = log.extractMessage(err);
     // If the branch already exists, try adding without -b
     if (message.includes("already exists")) {
+      if (existsSync(worktreePath)) {
+        log.debug(`Detected stale worktree at ${worktreePath}; removing before creation`);
+        await removeWorktree(repoRoot, issueFilename);
+        log.debug(`Removed stale worktree at ${worktreePath}`);
+      }
       await git(["worktree", "add", worktreePath, branchName], repoRoot);
       log.debug(`Created worktree at ${worktreePath} using existing branch ${branchName}`);
     } else {

@@ -44,7 +44,7 @@ describe("list", () => {
 
     const results = await datasource.list({ cwd: "/tmp/project" });
 
-    expect(readdir).toHaveBeenCalledWith(expect.stringContaining(".dispatch/specs"));
+    expect(readdir).toHaveBeenCalledWith(expect.stringContaining(join(".dispatch", "specs")));
     expect(results).toHaveLength(2);
     expect(results[0].number).toBe("a.md");
     expect(results[0].title).toBe("Alpha");
@@ -188,6 +188,61 @@ describe("buildBranchName", () => {
     const result = datasource.buildBranchName("99", "Some Task", "local");
     expect(result).toBe("local/dispatch/99-some-task");
   });
+
+  it("extracts file-{id} from an absolute Unix file path with {id}-{slug}.md pattern", () => {
+    const result = datasource.buildBranchName(
+      "/home/user/project/.dispatch/specs/42-batch-updates.md",
+      "Batch Updates",
+      "john-doe",
+    );
+    expect(result).toBe("john-doe/dispatch/file-42-batch-updates");
+  });
+
+  it("falls back to file-{slugified-basename} for paths without numeric prefix", () => {
+    const result = datasource.buildBranchName(
+      "/home/user/project/.dispatch/specs/my-design-doc.md",
+      "My Design Doc",
+      "john-doe",
+    );
+    expect(result).toBe("john-doe/dispatch/file-my-design-doc-my-design-doc");
+  });
+
+  it("extracts file-{id} from a relative path with {id}-{slug}.md pattern", () => {
+    const result = datasource.buildBranchName(
+      "specs/7-add-logging.md",
+      "Add Logging",
+      "alice",
+    );
+    expect(result).toBe("alice/dispatch/file-7-add-logging");
+  });
+
+  it("handles Windows-style backslash path separators", () => {
+    const result = datasource.buildBranchName(
+      "C:\\Users\\dev\\specs\\10-fix-bug.md",
+      "Fix Bug",
+      "bob",
+    );
+    expect(result).toBe("bob/dispatch/file-10-fix-bug");
+  });
+
+  it("preserves plain numeric ID without path separators unchanged", () => {
+    const result = datasource.buildBranchName("7", "Feature Request", "local");
+    expect(result).toBe("local/dispatch/7-feature-request");
+  });
+
+  it("falls back to slugified basename for non-.md file path without numeric prefix", () => {
+    const result = datasource.buildBranchName(
+      "/home/user/specs/design-doc.txt",
+      "Design Doc",
+      "dev",
+    );
+    expect(result).toBe("dev/dispatch/file-design-doc-design-doc");
+  });
+
+  it("preserves existing behavior for plain non-numeric identifiers", () => {
+    const result = datasource.buildBranchName("my-issue.md", "Some Task", "user");
+    expect(result).toBe("user/dispatch/my-issue.md-some-task");
+  });
 });
 
 describe("getDefaultBranch", () => {
@@ -320,7 +375,7 @@ describe("fetch", () => {
     const result = await datasource.fetch(absPath, { cwd: "/tmp" });
     expect(vi.mocked(readFile)).toHaveBeenCalledWith(absPath, "utf-8");
     expect(result.number).toBe("my-issue.md");
-    expect(result.url).toBe(absPath);
+    expect(result.url).toBe(join(dirname(absPath), "my-issue.md"));
   });
 
   it("appends .md extension to absolute paths when missing", async () => {

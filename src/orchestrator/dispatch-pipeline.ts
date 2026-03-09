@@ -22,8 +22,9 @@ import { isValidBranchName } from "../helpers/branch-validation.js";
 import { createTui, type TuiState } from "../tui.js";
 import type { ProviderName, ProviderInstance } from "../providers/interface.js";
 import { bootProvider } from "../providers/index.js";
-import { getDatasource } from "../datasources/index.js";
+import { getDatasource, getGitRemoteUrl, parseAzDevOpsRemoteUrl } from "../datasources/index.js";
 import type { DatasourceName, DispatchLifecycleOptions, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
+import { getGithubOctokit, getAzureConnection } from "../helpers/auth.js";
 import type { OrchestrateRunOptions, DispatchSummary } from "./runner.js";
 import {
   fetchItemsById,
@@ -106,7 +107,7 @@ export async function runDispatchPipeline(
     dryRun,
     serverUrl,
     noPlan,
-    noBranch,
+    noBranch: noBranchOpt,
     noWorktree,
     feature,
     provider = "opencode",
@@ -121,6 +122,7 @@ export async function runDispatchPipeline(
     planRetries,
     retries,
   } = opts;
+  let noBranch = noBranchOpt;
 
   // Planning timeout/retry defaults
   const planTimeoutMs = (planTimeout ?? DEFAULT_PLAN_TIMEOUT_MIN) * 60_000;
@@ -131,6 +133,23 @@ export async function runDispatchPipeline(
   // Dry-run mode uses simple log output
   if (dryRun) {
     return dryRunMode(issueIds, cwd, source, org, project, workItemType, iteration, area);
+  }
+
+  // Pre-authenticate before TUI starts so device codes are visible in the terminal.
+  // For cached tokens this is instant; for new auth it runs the device flow
+  // while stdout is still free.
+  if (source === "github") {
+    await getGithubOctokit();
+  } else if (source === "azdevops") {
+    let orgUrl = org;
+    if (!orgUrl) {
+      const remoteUrl = await getGitRemoteUrl(cwd);
+      if (remoteUrl) {
+        const parsed = parseAzDevOpsRemoteUrl(remoteUrl);
+        if (parsed) orgUrl = parsed.orgUrl;
+      }
+    }
+    if (orgUrl) await getAzureConnection(orgUrl);
   }
 
   // ── Start TUI (or inline logging for verbose mode) ──────────
@@ -174,6 +193,19 @@ export async function runDispatchPipeline(
     }
 
     const datasource = getDatasource(source);
+
+    // When using the md datasource, git operations are optional — they only
+    // work when dispatch is run from inside a git repository. If no repo is
+    // found, disable branching so the pipeline can still complete its work.
+    if (source === "md" && !noBranch) {
+      try {
+        await exec("git", ["rev-parse", "--git-dir"], { cwd });
+      } catch {
+        noBranch = true;
+        if (verbose) log.debug("No git repository found — skipping git operations for md datasource");
+      }
+    }
+
     const fetchOpts: IssueFetchOptions = { cwd, org, project, workItemType, iteration, area };
     let items: IssueDetails[];
     if (issueIds.length > 0 && source === "md" && issueIds.some(id => isGlobOrFilePath(id))) {

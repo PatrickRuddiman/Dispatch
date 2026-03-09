@@ -10,10 +10,24 @@
  *   - COPILOT_GITHUB_TOKEN / GH_TOKEN / GITHUB_TOKEN env vars
  */
 
-import { CopilotClient, approveAll, type AssistantMessageEvent, type CopilotSession } from "@github/copilot-sdk";
+import type { AssistantMessageEvent, CopilotSession } from "@github/copilot-sdk";
 import type { ProviderInstance, ProviderBootOptions } from "./interface.js";
 import { log } from "../helpers/logger.js";
 import { withTimeout } from "../helpers/timeout.js";
+
+/** Maximum time (ms) to wait for a copilot session to become idle after sending a prompt. */
+const SESSION_READY_TIMEOUT_MS = 600_000;
+
+/**
+ * Lazily load the Copilot SDK.
+ *
+ * Using a dynamic import defers resolution to runtime so that only code
+ * paths that actually exercise the Copilot provider pay the cost of loading
+ * the SDK, keeping startup fast for users of other providers.
+ */
+async function loadCopilotSdk(): Promise<typeof import("@github/copilot-sdk")> {
+  return import("@github/copilot-sdk");
+}
 
 /**
  * List available Copilot models.
@@ -22,6 +36,7 @@ import { withTimeout } from "../helpers/timeout.js";
  * Returns bare model IDs (e.g. "claude-sonnet-4-5").
  */
 export async function listModels(opts?: ProviderBootOptions): Promise<string[]> {
+  const { CopilotClient } = await loadCopilotSdk();
   const client = new CopilotClient({
     ...(opts?.url ? { cliUrl: opts.url } : {}),
   });
@@ -39,6 +54,8 @@ export async function listModels(opts?: ProviderBootOptions): Promise<string[]> 
  */
 export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance> {
   log.debug(opts?.url ? `Connecting to Copilot CLI at ${opts.url}` : "Starting Copilot CLI...");
+
+  const { CopilotClient, approveAll } = await loadCopilotSdk();
 
   const client = new CopilotClient({
     ...(opts?.url ? { cliUrl: opts.url } : {}),
@@ -124,7 +141,7 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
                 reject(new Error(`Copilot session error: ${event.data.message}`));
               });
             }),
-            300_000,
+            SESSION_READY_TIMEOUT_MS,
             "copilot session ready",
           );
         } finally {
