@@ -11,8 +11,8 @@ export const GITHUB_CLIENT_ID = "Ov23liUMP1Oyg811IF58";
 /** Azure AD application (client) ID. */
 export const AZURE_CLIENT_ID = "150a3098-01dd-4126-8b10-5e7f77492e5c";
 
-/** Azure AD tenant ID — "organizations" enables any Azure AD tenant. */
-export const AZURE_TENANT_ID = "organizations";
+/** Azure AD tenant ID — "common" enables any Azure AD tenant and personal Microsoft accounts. */
+export const AZURE_TENANT_ID = "common";
 
 /** Azure DevOps default API scope. */
 export const AZURE_DEVOPS_SCOPE = "499b84ac-1321-427f-aa17-267ca6975798/.default";
