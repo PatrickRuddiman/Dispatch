@@ -9,8 +9,7 @@ export default defineConfig({
   target: "node20",
   outDir: "dist",
   clean: true,
-  splitting: true,
-  noExternal: ["@github/copilot-sdk", "vscode-jsonrpc"],
+  splitting: false,
   sourcemap: true,
   dts: false,
   banner: {
