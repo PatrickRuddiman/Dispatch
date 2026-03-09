@@ -139,103 +139,53 @@ describe("createWorktree", () => {
     expect(result).toBe(join("/repo", ".dispatch", "worktrees", "issue-42"));
   });
 
-  it("removes a stale worktree before creating a new one", async () => {
+  it("reuses an existing worktree instead of recreating it", async () => {
     const worktreePath = join("/repo", ".dispatch", "worktrees", "issue-42");
     mockExistsSync.mockReturnValue(true);
-    mockExecFile
-      .mockResolvedValueOnce({ stdout: "" })
-      .mockResolvedValueOnce({ stdout: "" })
-      .mockResolvedValueOnce({ stdout: "" });
 
     const result = await createWorktree("/repo", "42-my-feature.md", "user/dispatch/42-my-feature");
 
-    expect(mockExecFile).toHaveBeenCalledTimes(3);
-    expect(mockExecFile).toHaveBeenNthCalledWith(
-      1,
-      "git",
-      ["worktree", "remove", worktreePath],
-      { cwd: "/repo", shell: SHELL },
-    );
-    expect(mockExecFile).toHaveBeenNthCalledWith(
-      2,
-      "git",
-      ["worktree", "prune"],
-      { cwd: "/repo", shell: SHELL },
-    );
-    expect(mockExecFile).toHaveBeenNthCalledWith(
-      3,
-      "git",
-      ["worktree", "add", worktreePath, "-b", "user/dispatch/42-my-feature"],
-      { cwd: "/repo", shell: SHELL },
-    );
+    // No git commands should be called — just returns the existing path
+    expect(mockExecFile).not.toHaveBeenCalled();
     expect(log.debug).toHaveBeenCalledWith(
-      `Detected stale worktree at ${worktreePath}; removing before creation`,
-    );
-    expect(log.debug).toHaveBeenCalledWith(
-      `Removed stale worktree at ${worktreePath}`,
+      `Reusing existing worktree at ${worktreePath}`,
     );
     expect(result).toBe(worktreePath);
   });
 
-  it("cleans up a stale worktree before retrying without -b", async () => {
-    const worktreePath = join("/repo", ".dispatch", "worktrees", "issue-42");
-    mockExistsSync
-      .mockReturnValueOnce(false)
-      .mockReturnValueOnce(true);
+  it("retries without -b when branch already exists and directory does not", async () => {
+    mockExistsSync.mockReturnValue(false);
     mockExecFile
-      .mockRejectedValueOnce(new Error("fatal: '/repo/.dispatch/worktrees/issue-42' already exists"))
-      .mockResolvedValueOnce({ stdout: "" })
-      .mockResolvedValueOnce({ stdout: "" })
-      .mockResolvedValueOnce({ stdout: "" });
-
-    const result = await createWorktree("/repo", "42-my-feature.md", "user/dispatch/42-my-feature");
-
-    expect(mockExecFile).toHaveBeenCalledTimes(4);
-    expect(mockExecFile).toHaveBeenNthCalledWith(
-      1,
-      "git",
-      ["worktree", "add", worktreePath, "-b", "user/dispatch/42-my-feature"],
-      { cwd: "/repo", shell: SHELL },
-    );
-    expect(mockExecFile).toHaveBeenNthCalledWith(
-      2,
-      "git",
-      ["worktree", "remove", worktreePath],
-      { cwd: "/repo", shell: SHELL },
-    );
-    expect(mockExecFile).toHaveBeenNthCalledWith(
-      3,
-      "git",
-      ["worktree", "prune"],
-      { cwd: "/repo", shell: SHELL },
-    );
-    expect(mockExecFile).toHaveBeenNthCalledWith(
-      4,
-      "git",
-      ["worktree", "add", worktreePath, "user/dispatch/42-my-feature"],
-      { cwd: "/repo", shell: SHELL },
-    );
-    expect(log.debug).toHaveBeenCalledWith(
-      `Detected stale worktree at ${worktreePath}; removing before creation`,
-    );
-    expect(log.debug).toHaveBeenCalledWith(
-      `Removed stale worktree at ${worktreePath}`,
-    );
-    expect(result).toBe(worktreePath);
-  });
-
-  it("continues with fallback when stale worktree cleanup fails", async () => {
-    const worktreePath = join("/repo", ".dispatch", "worktrees", "issue-42");
-
-    mockExistsSync
-      .mockReturnValueOnce(true)
-      .mockReturnValueOnce(false);
-
-    mockExecFile
-      .mockRejectedValueOnce(new Error("worktree is dirty"))
-      .mockRejectedValueOnce(new Error("force remove failed"))
       .mockRejectedValueOnce(new Error("fatal: a branch named 'x' already exists"))
       .mockResolvedValueOnce({ stdout: "" });
+
+    const result = await createWorktree("/repo", "42-my-feature.md", "user/dispatch/42-my-feature");
+
+    expect(mockExecFile).toHaveBeenCalledTimes(2);
+    expect(mockExecFile).toHaveBeenNthCalledWith(
+      1,
+      "git",
+      ["worktree", "add", join("/repo", ".dispatch", "worktrees", "issue-42"), "-b", "user/dispatch/42-my-feature"],
+      { cwd: "/repo", shell: SHELL },
+    );
+    expect(mockExecFile).toHaveBeenNthCalledWith(
+      2,
+      "git",
+      ["worktree", "add", join("/repo", ".dispatch", "worktrees", "issue-42"), "user/dispatch/42-my-feature"],
+      { cwd: "/repo", shell: SHELL },
+    );
+    expect(result).toBe(join("/repo", ".dispatch", "worktrees", "issue-42"));
+  });
+
+  it("prunes stale refs and retries when branch is locked to a stale worktree", async () => {
+    const worktreePath = join("/repo", ".dispatch", "worktrees", "issue-42");
+
+    mockExistsSync.mockReturnValue(false);
+
+    mockExecFile
+      .mockRejectedValueOnce(new Error("fatal: 'user/dispatch/42-my-feature' is already used by worktree at '/old/path'"))
+      .mockResolvedValueOnce({ stdout: "" })  // worktree prune
+      .mockResolvedValueOnce({ stdout: "" }); // worktree add (retry)
 
     const result = await createWorktree(
       "/repo",
@@ -243,33 +193,27 @@ describe("createWorktree", () => {
       "user/dispatch/42-my-feature",
     );
 
-    expect(mockExecFile).toHaveBeenCalledTimes(4);
+    expect(mockExecFile).toHaveBeenCalledTimes(3);
     expect(mockExecFile).toHaveBeenNthCalledWith(
       1,
-      "git",
-      ["worktree", "remove", worktreePath],
-      { cwd: "/repo", shell: SHELL },
-    );
-    expect(mockExecFile).toHaveBeenNthCalledWith(
-      2,
-      "git",
-      ["worktree", "remove", "--force", worktreePath],
-      { cwd: "/repo", shell: SHELL },
-    );
-    expect(mockExecFile).toHaveBeenNthCalledWith(
-      3,
       "git",
       ["worktree", "add", worktreePath, "-b", "user/dispatch/42-my-feature"],
       { cwd: "/repo", shell: SHELL },
     );
     expect(mockExecFile).toHaveBeenNthCalledWith(
-      4,
+      2,
+      "git",
+      ["worktree", "prune"],
+      { cwd: "/repo", shell: SHELL },
+    );
+    expect(mockExecFile).toHaveBeenNthCalledWith(
+      3,
       "git",
       ["worktree", "add", worktreePath, "user/dispatch/42-my-feature"],
       { cwd: "/repo", shell: SHELL },
     );
-    expect(log.warn).toHaveBeenCalledWith(
-      expect.stringContaining("Could not remove worktree issue-42"),
+    expect(log.debug).toHaveBeenCalledWith(
+      `Created worktree at ${worktreePath} after pruning stale ref`,
     );
     expect(result).toBe(worktreePath);
   });

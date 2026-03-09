@@ -62,9 +62,8 @@ export async function createWorktree(
   const worktreePath = join(repoRoot, WORKTREE_DIR, name);
 
   if (existsSync(worktreePath)) {
-    log.debug(`Detected stale worktree at ${worktreePath}; removing before creation`);
-    await removeWorktree(repoRoot, issueFilename);
-    log.debug(`Removed stale worktree at ${worktreePath}`);
+    log.debug(`Reusing existing worktree at ${worktreePath}`);
+    return worktreePath;
   }
 
   try {
@@ -74,15 +73,15 @@ export async function createWorktree(
     log.debug(`Created worktree at ${worktreePath} on branch ${branchName}`);
   } catch (err) {
     const message = log.extractMessage(err);
-    // If the branch already exists, try adding without -b
     if (message.includes("already exists")) {
-      if (existsSync(worktreePath)) {
-        log.debug(`Detected stale worktree at ${worktreePath}; removing before creation`);
-        await removeWorktree(repoRoot, issueFilename);
-        log.debug(`Removed stale worktree at ${worktreePath}`);
-      }
+      // Branch already exists — retry without -b to use the existing branch
       await git(["worktree", "add", worktreePath, branchName], repoRoot);
       log.debug(`Created worktree at ${worktreePath} using existing branch ${branchName}`);
+    } else if (message.includes("already used by worktree")) {
+      // Branch is locked to a stale worktree ref — prune and retry
+      await git(["worktree", "prune"], repoRoot);
+      await git(["worktree", "add", worktreePath, branchName], repoRoot);
+      log.debug(`Created worktree at ${worktreePath} after pruning stale ref`);
     } else {
       throw err;
     }
