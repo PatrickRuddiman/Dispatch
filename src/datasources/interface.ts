@@ -150,6 +150,18 @@ export interface Datasource {
   getDefaultBranch(opts: DispatchLifecycleOptions): Promise<string>;
 
   /**
+   * Get the name of the currently checked-out branch.
+   *
+   * Falls back to {@link getDefaultBranch} when the working tree is in
+   * detached-HEAD state (e.g. `git rev-parse --abbrev-ref HEAD` returns
+   * `"HEAD"`).
+   *
+   * @param opts - Lifecycle options (cwd)
+   * @returns The current branch name
+   */
+  getCurrentBranch(opts: DispatchLifecycleOptions): Promise<string>;
+
+  /**
    * Resolve the current git username for branch namespacing.
    *
    * @param opts - Lifecycle options (cwd)
@@ -209,6 +221,8 @@ export interface Datasource {
    * @param title - PR title
    * @param body - PR body/description content
    * @param opts - Lifecycle options (cwd)
+   * @param baseBranch - Optional target branch for the PR. When omitted the
+   *                     datasource falls back to {@link getDefaultBranch}.
    * @returns The URL of the created PR, or the existing PR URL if one already exists
    */
   createPullRequest(
@@ -217,5 +231,6 @@ export interface Datasource {
     title: string,
     body: string,
     opts: DispatchLifecycleOptions,
+    baseBranch?: string,
   ): Promise<string>;
 }
