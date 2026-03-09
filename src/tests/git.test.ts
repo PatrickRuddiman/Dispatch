@@ -7,12 +7,32 @@ const { mockExecFile } = vi.hoisted(() => ({
   mockExecFile: vi.fn(),
 }));
 
+const mockGitApiAzdo = vi.hoisted(() => ({
+  getRepositories: vi.fn(),
+  createPullRequest: vi.fn(),
+  getPullRequests: vi.fn(),
+}));
+
+const mockAzdoConnection = vi.hoisted(() => ({
+  getGitApi: vi.fn(),
+}));
+
+const mockGetAzureConnection = vi.hoisted(() => vi.fn());
+
 vi.mock("node:child_process", () => ({
   execFile: mockExecFile,
 }));
 
 vi.mock("node:util", () => ({
   promisify: () => mockExecFile,
+}));
+
+vi.mock("../helpers/auth.js", () => ({
+  getAzureConnection: mockGetAzureConnection,
+}));
+
+vi.mock("azure-devops-node-api/interfaces/GitInterfaces.js", () => ({
+  PullRequestStatus: { Active: 1 },
 }));
 
 // Import the actual datasource implementations AFTER mocking
@@ -25,8 +45,12 @@ import type { DispatchResult } from "../dispatcher.js";
 import type { IssueDetails } from "../datasources/interface.js";
 import { UnsupportedOperationError } from "../helpers/errors.js";
 
+const SHELL = process.platform === "win32";
+
 beforeEach(() => {
   vi.resetAllMocks();
+  mockGetAzureConnection.mockResolvedValue(mockAzdoConnection);
+  mockAzdoConnection.getGitApi.mockResolvedValue(mockGitApiAzdo);
 });
 
 // ─── Section A: GitHub — buildBranchName ────────────────────────────────────────
@@ -85,7 +109,7 @@ describe("GitHub datasource — getDefaultBranch", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["symbolic-ref", "refs/remotes/origin/HEAD"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
   });
 
@@ -132,7 +156,7 @@ describe("GitHub datasource — getUsername", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["config", "user.name"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
   });
 
@@ -174,7 +198,7 @@ describe("GitHub datasource — createAndSwitchBranch", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["checkout", "-b", "dispatch/42-feature"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
   });
 
@@ -196,13 +220,13 @@ describe("GitHub datasource — createAndSwitchBranch", () => {
       1,
       "git",
       ["checkout", "-b", "dispatch/42-feature"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
     expect(mockExecFile).toHaveBeenNthCalledWith(
       2,
       "git",
       ["checkout", "dispatch/42-feature"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
   });
 
@@ -228,7 +252,7 @@ describe("GitHub datasource — switchBranch", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["checkout", "main"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
   });
 
@@ -252,7 +276,7 @@ describe("GitHub datasource — pushBranch", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["push", "--set-upstream", "origin", "dispatch/42-feature"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
   });
 
@@ -283,19 +307,19 @@ describe("GitHub datasource — commitAllChanges", () => {
       1,
       "git",
       ["add", "-A"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
     expect(mockExecFile).toHaveBeenNthCalledWith(
       2,
       "git",
       ["diff", "--cached", "--stat"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
     expect(mockExecFile).toHaveBeenNthCalledWith(
       3,
       "git",
       ["commit", "-m", "feat: implement feature"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
   });
 
@@ -309,183 +333,6 @@ describe("GitHub datasource — commitAllChanges", () => {
     });
 
     expect(mockExecFile).toHaveBeenCalledTimes(2);
-  });
-});
-
-// ─── Section G: GitHub — createPullRequest ──────────────────────────────────────
-
-describe("GitHub datasource — createPullRequest", () => {
-  it("creates PR and returns URL", async () => {
-    mockExecFile.mockResolvedValue({
-      stdout: "https://github.com/org/repo/pull/1\n",
-    });
-
-    const result = await github.createPullRequest(
-      "dispatch/42-feature",
-      "42",
-      "feat: add user auth",
-      "",
-      { cwd: "/tmp/repo" },
-    );
-
-    expect(result).toBe("https://github.com/org/repo/pull/1");
-    expect(mockExecFile).toHaveBeenCalledWith(
-      "gh",
-      [
-        "pr",
-        "create",
-        "--title",
-        "feat: add user auth",
-        "--body",
-        "Closes #42",
-        "--head",
-        "dispatch/42-feature",
-      ],
-      { cwd: "/tmp/repo", shell: false },
-    );
-  });
-
-  it("passes provided body to gh pr create", async () => {
-    mockExecFile.mockResolvedValue({
-      stdout: "https://github.com/org/repo/pull/2\n",
-    });
-
-    const customBody = "## Summary\n\nImplemented user auth\n\nCloses #42";
-    const result = await github.createPullRequest(
-      "dispatch/42-feature",
-      "42",
-      "feat: add user auth",
-      customBody,
-      { cwd: "/tmp/repo" },
-    );
-
-    expect(result).toBe("https://github.com/org/repo/pull/2");
-    expect(mockExecFile).toHaveBeenCalledWith(
-      "gh",
-      [
-        "pr",
-        "create",
-        "--title",
-        "feat: add user auth",
-        "--body",
-        customBody,
-        "--head",
-        "dispatch/42-feature",
-      ],
-      { cwd: "/tmp/repo", shell: false },
-    );
-  });
-
-  it("returns existing PR URL when PR already exists", async () => {
-    mockExecFile
-      .mockRejectedValueOnce(
-        new Error(
-          "a pull request for branch 'dispatch/42-feature' already exists",
-        ),
-      )
-      .mockResolvedValueOnce({
-        stdout: "https://github.com/org/repo/pull/1\n",
-      });
-
-    const result = await github.createPullRequest(
-      "dispatch/42-feature",
-      "42",
-      "feat: add user auth",
-      "",
-      { cwd: "/tmp/repo" },
-    );
-
-    expect(result).toBe("https://github.com/org/repo/pull/1");
-    expect(mockExecFile).toHaveBeenNthCalledWith(
-      2,
-      "gh",
-      ["pr", "view", "dispatch/42-feature", "--json", "url", "--jq", ".url"],
-      { cwd: "/tmp/repo", shell: false },
-    );
-  });
-
-  it("re-throws non-'already exists' errors", async () => {
-    mockExecFile.mockRejectedValue(new Error("authentication failed"));
-
-    await expect(
-      github.createPullRequest("dispatch/42-feature", "42", "feat: auth", "", {
-        cwd: "/tmp/repo",
-      }),
-    ).rejects.toThrow("authentication failed");
-  });
-
-  it("passes multiline markdown body through to gh pr create", async () => {
-    mockExecFile.mockResolvedValue({
-      stdout: "https://github.com/org/repo/pull/3\n",
-    });
-
-    const multilineBody = [
-      "## Summary",
-      "",
-      "- feat: add login",
-      "- feat: add signup",
-      "",
-      "## Tasks",
-      "",
-      "- [x] Implement login",
-      "- [x] Implement signup",
-      "",
-      "Closes #42",
-    ].join("\n");
-
-    const result = await github.createPullRequest(
-      "dispatch/42-feature",
-      "42",
-      "feat: add user auth",
-      multilineBody,
-      { cwd: "/tmp/repo" },
-    );
-
-    expect(result).toBe("https://github.com/org/repo/pull/3");
-    expect(mockExecFile).toHaveBeenCalledWith(
-      "gh",
-      [
-        "pr",
-        "create",
-        "--title",
-        "feat: add user auth",
-        "--body",
-        multilineBody,
-        "--head",
-        "dispatch/42-feature",
-      ],
-      { cwd: "/tmp/repo", shell: false },
-    );
-  });
-
-  it("uses default body when body is empty string", async () => {
-    mockExecFile.mockResolvedValue({
-      stdout: "https://github.com/org/repo/pull/4\n",
-    });
-
-    const result = await github.createPullRequest(
-      "dispatch/99-bugfix",
-      "99",
-      "fix: resolve crash",
-      "",
-      { cwd: "/tmp/repo" },
-    );
-
-    expect(result).toBe("https://github.com/org/repo/pull/4");
-    expect(mockExecFile).toHaveBeenCalledWith(
-      "gh",
-      [
-        "pr",
-        "create",
-        "--title",
-        "fix: resolve crash",
-        "--body",
-        "Closes #99",
-        "--head",
-        "dispatch/99-bugfix",
-      ],
-      { cwd: "/tmp/repo", shell: false },
-    );
   });
 });
 
@@ -507,7 +354,7 @@ describe("GitHub datasource — getCommitMessages", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["log", "origin/main..HEAD", "--pretty=format:%s"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
   });
 
@@ -541,12 +388,22 @@ describe("GitHub datasource — getCommitMessages", () => {
 // ─── Section H: Azure DevOps — createPullRequest ────────────────────────────────
 
 describe("Azure DevOps datasource — createPullRequest", () => {
-  it("creates PR using az repos pr create and returns URL", async () => {
-    mockExecFile.mockResolvedValue({
-      stdout: JSON.stringify({
-        url: "https://dev.azure.com/org/project/_git/repo/pullrequest/1",
-      }),
-    });
+  const REMOTE_URL = "https://dev.azure.com/testorg/testproject/_git/testrepo";
+  const MOCK_REPO = { id: "repo-id-123", webUrl: REMOTE_URL };
+
+  function setupGitMocks() {
+    // 1st call: getOrgAndProject() → getGitRemoteUrl() reads the remote URL
+    mockExecFile.mockResolvedValueOnce({ stdout: `${REMOTE_URL}\n` });
+    // 2nd call: createPullRequest() → getGitRemoteUrl() reads the remote URL again
+    mockExecFile.mockResolvedValueOnce({ stdout: `${REMOTE_URL}\n` });
+    // 3rd call: getDefaultBranch() reads the symbolic ref
+    mockExecFile.mockResolvedValueOnce({ stdout: "refs/remotes/origin/main\n" });
+  }
+
+  it("creates PR using SDK and returns web URL", async () => {
+    setupGitMocks();
+    mockGitApiAzdo.getRepositories.mockResolvedValue([MOCK_REPO]);
+    mockGitApiAzdo.createPullRequest.mockResolvedValue({ pullRequestId: 1 });
 
     const result = await azdevops.createPullRequest(
       "dispatch/42-feature",
@@ -556,40 +413,25 @@ describe("Azure DevOps datasource — createPullRequest", () => {
       { cwd: "/tmp/repo" },
     );
 
-    expect(result).toBe(
-      "https://dev.azure.com/org/project/_git/repo/pullrequest/1",
-    );
-    expect(mockExecFile).toHaveBeenCalledWith(
-      "az",
-      [
-        "repos",
-        "pr",
-        "create",
-        "--title",
-        "feat: add auth",
-        "--description",
-        "Resolves AB#42",
-        "--source-branch",
-        "dispatch/42-feature",
-        "--work-items",
-        "42",
-        "--output",
-        "json",
-      ],
-      { cwd: "/tmp/repo", shell: false },
+    expect(result).toBe(`${REMOTE_URL}/pullrequest/1`);
+    expect(mockGitApiAzdo.createPullRequest).toHaveBeenCalledWith(
+      {
+        sourceRefName: "refs/heads/dispatch/42-feature",
+        targetRefName: "refs/heads/main",
+        title: "feat: add auth",
+        description: "Resolves AB#42",
+        workItemRefs: [{ id: "42" }],
+      },
+      "repo-id-123",
+      "testproject",
     );
   });
 
   it("returns existing PR URL when PR already exists", async () => {
-    mockExecFile
-      .mockRejectedValueOnce(new Error("already exists"))
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify([
-          {
-            url: "https://dev.azure.com/org/project/_git/repo/pullrequest/1",
-          },
-        ]),
-      });
+    setupGitMocks();
+    mockGitApiAzdo.getRepositories.mockResolvedValue([MOCK_REPO]);
+    mockGitApiAzdo.createPullRequest.mockRejectedValue(new Error("already exists"));
+    mockGitApiAzdo.getPullRequests.mockResolvedValue([{ pullRequestId: 5 }]);
 
     const result = await azdevops.createPullRequest(
       "dispatch/42-feature",
@@ -599,31 +441,19 @@ describe("Azure DevOps datasource — createPullRequest", () => {
       { cwd: "/tmp/repo" },
     );
 
-    expect(result).toBe(
-      "https://dev.azure.com/org/project/_git/repo/pullrequest/1",
-    );
-    expect(mockExecFile).toHaveBeenNthCalledWith(
-      2,
-      "az",
-      [
-        "repos",
-        "pr",
-        "list",
-        "--source-branch",
-        "dispatch/42-feature",
-        "--status",
-        "active",
-        "--output",
-        "json",
-      ],
-      { cwd: "/tmp/repo", shell: false },
+    expect(result).toBe(`${REMOTE_URL}/pullrequest/5`);
+    expect(mockGitApiAzdo.getPullRequests).toHaveBeenCalledWith(
+      "repo-id-123",
+      { sourceRefName: "refs/heads/dispatch/42-feature", status: 1 },
+      "testproject",
     );
   });
 
   it("returns empty string when PR already exists but none found", async () => {
-    mockExecFile
-      .mockRejectedValueOnce(new Error("already exists"))
-      .mockResolvedValueOnce({ stdout: "[]" });
+    setupGitMocks();
+    mockGitApiAzdo.getRepositories.mockResolvedValue([MOCK_REPO]);
+    mockGitApiAzdo.createPullRequest.mockRejectedValue(new Error("already exists"));
+    mockGitApiAzdo.getPullRequests.mockResolvedValue([]);
 
     const result = await azdevops.createPullRequest(
       "dispatch/42-feature",
@@ -637,21 +467,21 @@ describe("Azure DevOps datasource — createPullRequest", () => {
   });
 
   it("re-throws non-'already exists' errors", async () => {
-    mockExecFile.mockRejectedValue(new Error("auth failed"));
+    setupGitMocks();
+    mockGitApiAzdo.getRepositories.mockResolvedValue([MOCK_REPO]);
+    mockGitApiAzdo.createPullRequest.mockRejectedValue(new Error("network error"));
 
     await expect(
       azdevops.createPullRequest("dispatch/42-feature", "42", "feat: auth", "", {
         cwd: "/tmp/repo",
       }),
-    ).rejects.toThrow("auth failed");
+    ).rejects.toThrow("network error");
   });
 
-  it("passes provided body to az repos pr create --description", async () => {
-    mockExecFile.mockResolvedValue({
-      stdout: JSON.stringify({
-        url: "https://dev.azure.com/org/project/_git/repo/pullrequest/2",
-      }),
-    });
+  it("passes provided body as PR description", async () => {
+    setupGitMocks();
+    mockGitApiAzdo.getRepositories.mockResolvedValue([MOCK_REPO]);
+    mockGitApiAzdo.createPullRequest.mockResolvedValue({ pullRequestId: 2 });
 
     const customBody = "## Summary\n\nImplemented auth flow\n\nResolves AB#42";
     const result = await azdevops.createPullRequest(
@@ -662,36 +492,18 @@ describe("Azure DevOps datasource — createPullRequest", () => {
       { cwd: "/tmp/repo" },
     );
 
-    expect(result).toBe(
-      "https://dev.azure.com/org/project/_git/repo/pullrequest/2",
-    );
-    expect(mockExecFile).toHaveBeenCalledWith(
-      "az",
-      [
-        "repos",
-        "pr",
-        "create",
-        "--title",
-        "feat: add auth",
-        "--description",
-        customBody,
-        "--source-branch",
-        "dispatch/42-feature",
-        "--work-items",
-        "42",
-        "--output",
-        "json",
-      ],
-      { cwd: "/tmp/repo", shell: false },
+    expect(result).toBe(`${REMOTE_URL}/pullrequest/2`);
+    expect(mockGitApiAzdo.createPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ description: customBody }),
+      "repo-id-123",
+      "testproject",
     );
   });
 
   it("uses default description when body is empty string", async () => {
-    mockExecFile.mockResolvedValue({
-      stdout: JSON.stringify({
-        url: "https://dev.azure.com/org/project/_git/repo/pullrequest/3",
-      }),
-    });
+    setupGitMocks();
+    mockGitApiAzdo.getRepositories.mockResolvedValue([MOCK_REPO]);
+    mockGitApiAzdo.createPullRequest.mockResolvedValue({ pullRequestId: 3 });
 
     const result = await azdevops.createPullRequest(
       "dispatch/99-fix",
@@ -701,27 +513,11 @@ describe("Azure DevOps datasource — createPullRequest", () => {
       { cwd: "/tmp/repo" },
     );
 
-    expect(result).toBe(
-      "https://dev.azure.com/org/project/_git/repo/pullrequest/3",
-    );
-    expect(mockExecFile).toHaveBeenCalledWith(
-      "az",
-      [
-        "repos",
-        "pr",
-        "create",
-        "--title",
-        "fix: resolve bug",
-        "--description",
-        "Resolves AB#99",
-        "--source-branch",
-        "dispatch/99-fix",
-        "--work-items",
-        "99",
-        "--output",
-        "json",
-      ],
-      { cwd: "/tmp/repo", shell: false },
+    expect(result).toBe(`${REMOTE_URL}/pullrequest/3`);
+    expect(mockGitApiAzdo.createPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ description: "Resolves AB#99" }),
+      "repo-id-123",
+      "testproject",
     );
   });
 });
@@ -743,7 +539,7 @@ describe("MD datasource — git lifecycle methods", () => {
     mockExecFile.mockResolvedValueOnce({ stdout: "refs/remotes/origin/main\n", stderr: "" });
     const result = await md.getDefaultBranch({ cwd: "/tmp" });
     expect(result).toBe("main");
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], { cwd: "/tmp", shell: false });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], { cwd: "/tmp", shell: SHELL });
   });
 
   it("getDefaultBranch falls back to main when symbolic-ref fails", async () => {
@@ -764,7 +560,7 @@ describe("MD datasource — git lifecycle methods", () => {
     mockExecFile.mockResolvedValueOnce({ stdout: "John Doe\n", stderr: "" });
     const result = await md.getUsername({ cwd: "/tmp" });
     expect(result).toBe("john-doe");
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["config", "user.name"], { cwd: "/tmp", shell: false });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["config", "user.name"], { cwd: "/tmp", shell: SHELL });
   });
 
   it("getUsername falls back to 'local' on error", async () => {
@@ -783,7 +579,7 @@ describe("MD datasource — git lifecycle methods", () => {
   it("createAndSwitchBranch runs git checkout -b", async () => {
     mockExecFile.mockResolvedValueOnce({ stdout: "", stderr: "" });
     await md.createAndSwitchBranch("local/dispatch/1-feat", { cwd: "/tmp" });
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "-b", "local/dispatch/1-feat"], { cwd: "/tmp", shell: false });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "-b", "local/dispatch/1-feat"], { cwd: "/tmp", shell: SHELL });
   });
 
   it("createAndSwitchBranch falls back to checkout when branch exists", async () => {
@@ -791,13 +587,25 @@ describe("MD datasource — git lifecycle methods", () => {
     mockExecFile.mockResolvedValueOnce({ stdout: "", stderr: "" });
     await md.createAndSwitchBranch("local/dispatch/1-feat", { cwd: "/tmp" });
     expect(mockExecFile).toHaveBeenCalledTimes(2);
-    expect(mockExecFile).toHaveBeenLastCalledWith("git", ["checkout", "local/dispatch/1-feat"], { cwd: "/tmp", shell: false });
+    expect(mockExecFile).toHaveBeenLastCalledWith("git", ["checkout", "local/dispatch/1-feat"], { cwd: "/tmp", shell: SHELL });
+  });
+
+  it("createAndSwitchBranch prunes stale worktrees and retries checkout when branch is worktree-locked", async () => {
+    mockExecFile.mockRejectedValueOnce(new Error("fatal: a branch named 'local/dispatch/1-feat' already exists"));
+    mockExecFile.mockRejectedValueOnce(new Error("fatal: 'local/dispatch/1-feat' is already used by worktree at '/tmp/stale-worktree'"));
+    mockExecFile.mockResolvedValueOnce({ stdout: "", stderr: "" });
+    mockExecFile.mockResolvedValueOnce({ stdout: "", stderr: "" });
+    await md.createAndSwitchBranch("local/dispatch/1-feat", { cwd: "/tmp" });
+    expect(mockExecFile).toHaveBeenNthCalledWith(1, "git", ["checkout", "-b", "local/dispatch/1-feat"], { cwd: "/tmp", shell: SHELL });
+    expect(mockExecFile).toHaveBeenNthCalledWith(2, "git", ["checkout", "local/dispatch/1-feat"], { cwd: "/tmp", shell: SHELL });
+    expect(mockExecFile).toHaveBeenNthCalledWith(3, "git", ["worktree", "prune"], { cwd: "/tmp", shell: SHELL });
+    expect(mockExecFile).toHaveBeenNthCalledWith(4, "git", ["checkout", "local/dispatch/1-feat"], { cwd: "/tmp", shell: SHELL });
   });
 
   it("switchBranch runs git checkout", async () => {
     mockExecFile.mockResolvedValueOnce({ stdout: "", stderr: "" });
     await md.switchBranch("main", { cwd: "/tmp" });
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "main"], { cwd: "/tmp", shell: false });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["checkout", "main"], { cwd: "/tmp", shell: SHELL });
   });
 
   it("pushBranch is a no-op", async () => {
@@ -810,8 +618,8 @@ describe("MD datasource — git lifecycle methods", () => {
     mockExecFile.mockResolvedValueOnce({ stdout: " file.ts | 1 +\n", stderr: "" }); // git diff --cached --stat
     mockExecFile.mockResolvedValueOnce({ stdout: "", stderr: "" }); // git commit
     await md.commitAllChanges("feat: test", { cwd: "/tmp" });
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["add", "-A"], { cwd: "/tmp", shell: false });
-    expect(mockExecFile).toHaveBeenCalledWith("git", ["commit", "-m", "feat: test"], { cwd: "/tmp", shell: false });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["add", "-A"], { cwd: "/tmp", shell: SHELL });
+    expect(mockExecFile).toHaveBeenCalledWith("git", ["commit", "-m", "feat: test"], { cwd: "/tmp", shell: SHELL });
   });
 
   it("commitAllChanges skips commit when nothing staged", async () => {
@@ -864,7 +672,7 @@ describe("buildPrTitle", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["log", "main..HEAD", "--pretty=format:%s"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
   });
 

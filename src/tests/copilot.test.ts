@@ -243,7 +243,7 @@ describe("prompt", () => {
       vi.useRealTimers();
     });
 
-    it("rejects with TimeoutError when neither idle nor error fires within 5 minutes", async () => {
+    it("rejects with TimeoutError when neither idle nor error fires within 10 minutes", async () => {
       const unsubIdle = vi.fn();
       const unsubErr = vi.fn();
       mockSession.on.mockImplementation((eventName: string) => {
@@ -256,7 +256,7 @@ describe("prompt", () => {
       // Prevent unhandled rejection warning during timer advancement
       resultPromise.catch(() => {});
 
-      await vi.advanceTimersByTimeAsync(300_000);
+      await vi.advanceTimersByTimeAsync(600_000);
 
       await expect(resultPromise).rejects.toBeInstanceOf(TimeoutError);
       await expect(resultPromise).rejects.toThrow("copilot session ready");
@@ -275,7 +275,7 @@ describe("prompt", () => {
       // Prevent unhandled rejection warning during timer advancement
       resultPromise.catch(() => {});
 
-      await vi.advanceTimersByTimeAsync(300_000);
+      await vi.advanceTimersByTimeAsync(600_000);
 
       // Let the rejection settle
       await resultPromise.catch(() => {});

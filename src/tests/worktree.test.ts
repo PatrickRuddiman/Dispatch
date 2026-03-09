@@ -1,14 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { join } from "node:path";
 
+const SHELL = process.platform === "win32";
+
 // ─── Mock setup ────────────────────────────────────────────────────────────────
 
-const { mockExecFile } = vi.hoisted(() => ({
+const { mockExecFile, mockExistsSync } = vi.hoisted(() => ({
   mockExecFile: vi.fn(),
+  mockExistsSync: vi.fn(),
 }));
 
 vi.mock("node:child_process", () => ({
   execFile: mockExecFile,
+}));
+
+vi.mock("node:fs", () => ({
+  existsSync: mockExistsSync,
 }));
 
 vi.mock("node:util", () => ({
@@ -41,6 +48,8 @@ import {
 
 beforeEach(() => {
   mockExecFile.mockReset();
+  mockExistsSync.mockReset();
+  mockExistsSync.mockReturnValue(false);
   vi.mocked(log.warn).mockClear();
   vi.mocked(log.debug).mockClear();
 });
@@ -100,7 +109,7 @@ describe("createWorktree", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["worktree", "add", join("/repo", ".dispatch", "worktrees", "issue-42"), "-b", "user/dispatch/42-my-feature"],
-      { cwd: "/repo", shell: false },
+      { cwd: "/repo", shell: SHELL },
     );
     expect(result).toBe(join("/repo", ".dispatch", "worktrees", "issue-42"));
   });
@@ -114,6 +123,7 @@ describe("createWorktree", () => {
   });
 
   it("retries without -b when branch already exists", async () => {
+    mockExistsSync.mockReturnValue(false);
     mockExecFile
       .mockRejectedValueOnce(new Error("fatal: a branch named 'x' already exists"))
       .mockResolvedValueOnce({ stdout: "" });
@@ -124,9 +134,94 @@ describe("createWorktree", () => {
     expect(mockExecFile).toHaveBeenLastCalledWith(
       "git",
       ["worktree", "add", join("/repo", ".dispatch", "worktrees", "issue-42"), "user/dispatch/42-my-feature"],
-      { cwd: "/repo", shell: false },
+      { cwd: "/repo", shell: SHELL },
     );
     expect(result).toBe(join("/repo", ".dispatch", "worktrees", "issue-42"));
+  });
+
+  it("removes a stale worktree before creating a new one", async () => {
+    const worktreePath = join("/repo", ".dispatch", "worktrees", "issue-42");
+    mockExistsSync.mockReturnValue(true);
+    mockExecFile
+      .mockResolvedValueOnce({ stdout: "" })
+      .mockResolvedValueOnce({ stdout: "" })
+      .mockResolvedValueOnce({ stdout: "" });
+
+    const result = await createWorktree("/repo", "42-my-feature.md", "user/dispatch/42-my-feature");
+
+    expect(mockExecFile).toHaveBeenCalledTimes(3);
+    expect(mockExecFile).toHaveBeenNthCalledWith(
+      1,
+      "git",
+      ["worktree", "remove", worktreePath],
+      { cwd: "/repo", shell: SHELL },
+    );
+    expect(mockExecFile).toHaveBeenNthCalledWith(
+      2,
+      "git",
+      ["worktree", "prune"],
+      { cwd: "/repo", shell: SHELL },
+    );
+    expect(mockExecFile).toHaveBeenNthCalledWith(
+      3,
+      "git",
+      ["worktree", "add", worktreePath, "-b", "user/dispatch/42-my-feature"],
+      { cwd: "/repo", shell: SHELL },
+    );
+    expect(log.debug).toHaveBeenCalledWith(
+      `Detected stale worktree at ${worktreePath}; removing before creation`,
+    );
+    expect(log.debug).toHaveBeenCalledWith(
+      `Removed stale worktree at ${worktreePath}`,
+    );
+    expect(result).toBe(worktreePath);
+  });
+
+  it("cleans up a stale worktree before retrying without -b", async () => {
+    const worktreePath = join("/repo", ".dispatch", "worktrees", "issue-42");
+    mockExistsSync
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    mockExecFile
+      .mockRejectedValueOnce(new Error("fatal: '/repo/.dispatch/worktrees/issue-42' already exists"))
+      .mockResolvedValueOnce({ stdout: "" })
+      .mockResolvedValueOnce({ stdout: "" })
+      .mockResolvedValueOnce({ stdout: "" });
+
+    const result = await createWorktree("/repo", "42-my-feature.md", "user/dispatch/42-my-feature");
+
+    expect(mockExecFile).toHaveBeenCalledTimes(4);
+    expect(mockExecFile).toHaveBeenNthCalledWith(
+      1,
+      "git",
+      ["worktree", "add", worktreePath, "-b", "user/dispatch/42-my-feature"],
+      { cwd: "/repo", shell: SHELL },
+    );
+    expect(mockExecFile).toHaveBeenNthCalledWith(
+      2,
+      "git",
+      ["worktree", "remove", worktreePath],
+      { cwd: "/repo", shell: SHELL },
+    );
+    expect(mockExecFile).toHaveBeenNthCalledWith(
+      3,
+      "git",
+      ["worktree", "prune"],
+      { cwd: "/repo", shell: SHELL },
+    );
+    expect(mockExecFile).toHaveBeenNthCalledWith(
+      4,
+      "git",
+      ["worktree", "add", worktreePath, "user/dispatch/42-my-feature"],
+      { cwd: "/repo", shell: SHELL },
+    );
+    expect(log.debug).toHaveBeenCalledWith(
+      `Detected stale worktree at ${worktreePath}; removing before creation`,
+    );
+    expect(log.debug).toHaveBeenCalledWith(
+      `Removed stale worktree at ${worktreePath}`,
+    );
+    expect(result).toBe(worktreePath);
   });
 
   it("throws on non-branch-exists errors", async () => {
@@ -175,13 +270,13 @@ describe("removeWorktree", () => {
       1,
       "git",
       ["worktree", "remove", join("/repo", ".dispatch", "worktrees", "issue-42")],
-      { cwd: "/repo", shell: false },
+      { cwd: "/repo", shell: SHELL },
     );
     expect(mockExecFile).toHaveBeenNthCalledWith(
       2,
       "git",
       ["worktree", "prune"],
-      { cwd: "/repo", shell: false },
+      { cwd: "/repo", shell: SHELL },
     );
   });
 
@@ -198,13 +293,13 @@ describe("removeWorktree", () => {
       2,
       "git",
       ["worktree", "remove", "--force", join("/repo", ".dispatch", "worktrees", "issue-42")],
-      { cwd: "/repo", shell: false },
+      { cwd: "/repo", shell: SHELL },
     );
     expect(mockExecFile).toHaveBeenNthCalledWith(
       3,
       "git",
       ["worktree", "prune"],
-      { cwd: "/repo", shell: false },
+      { cwd: "/repo", shell: SHELL },
     );
   });
 
@@ -257,7 +352,7 @@ describe("removeWorktree", () => {
       3,
       "git",
       ["worktree", "prune"],
-      { cwd: "/repo", shell: false },
+      { cwd: "/repo", shell: SHELL },
     );
   });
 });
@@ -275,7 +370,7 @@ describe("listWorktrees", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["worktree", "list"],
-      { cwd: "/repo", shell: false },
+      { cwd: "/repo", shell: SHELL },
     );
   });
 

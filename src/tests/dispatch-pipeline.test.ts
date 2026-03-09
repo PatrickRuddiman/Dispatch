@@ -107,6 +107,13 @@ vi.mock("../datasources/index.js", () => ({
     commitAllChanges: vi.fn().mockResolvedValue(undefined),
     createPullRequest: vi.fn().mockResolvedValue("https://example.com/pr/1"),
   } satisfies Datasource),
+  getGitRemoteUrl: vi.fn().mockResolvedValue(null),
+  parseAzDevOpsRemoteUrl: vi.fn().mockReturnValue(null),
+}));
+
+vi.mock("../helpers/auth.js", () => ({
+  getGithubOctokit: vi.fn().mockResolvedValue({}),
+  getAzureConnection: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock("../tui.js", () => ({
@@ -211,6 +218,7 @@ vi.mock("glob", () => ({
 
 import { runDispatchPipeline, dryRunMode } from "../orchestrator/dispatch-pipeline.js";
 import { getDatasource } from "../datasources/index.js";
+import { getGithubOctokit, getAzureConnection } from "../helpers/auth.js";
 import { log } from "../helpers/logger.js";
 import { createTui } from "../tui.js";
 import { createWorktree, removeWorktree, worktreeName, generateFeatureBranchName } from "../helpers/worktree.js";
@@ -226,6 +234,14 @@ import { glob } from "glob";
 import { readFile } from "node:fs/promises";
 
 // ─── Helpers ────────────────────────────────────────────────────────
+
+const githubAuthMock = {} as Awaited<ReturnType<typeof getGithubOctokit>>;
+const azureAuthMock = {} as Awaited<ReturnType<typeof getAzureConnection>>;
+
+function resetAuthMocks() {
+  vi.mocked(getGithubOctokit).mockResolvedValue(githubAuthMock);
+  vi.mocked(getAzureConnection).mockResolvedValue(azureAuthMock);
+}
 
 function baseOpts(overrides?: Partial<Parameters<typeof runDispatchPipeline>[0]>) {
   return {
@@ -248,6 +264,7 @@ describe("planning timeout and retry", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    resetAuthMocks();
     // Reset the executor mock to default success
     mocks.mockExecute.mockResolvedValue({
       success: true,
@@ -458,6 +475,7 @@ describe("verbose mode", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    resetAuthMocks();
     mocks.mockExecute.mockResolvedValue({
       success: true,
       data: { dispatchResult: { task: TASK_FIXTURE, success: true } },
@@ -551,6 +569,7 @@ describe("verbose mode", () => {
 describe("dryRunMode", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetAuthMocks();
   });
 
   it("returns empty summary when no source is configured", async () => {
@@ -586,6 +605,7 @@ describe("runDispatchPipeline edge cases", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    resetAuthMocks();
     mocks.mockExecute.mockResolvedValue({
       success: true,
       data: { dispatchResult: { task: TASK_FIXTURE, success: true } },
@@ -697,6 +717,7 @@ describe("commitAllChanges safety-net", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    resetAuthMocks();
     mocks.mockExecute.mockResolvedValue({
       success: true,
       data: { dispatchResult: { task: TASK_FIXTURE, success: true } },
@@ -775,6 +796,7 @@ describe("branch creation failure", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    resetAuthMocks();
     mocks.mockExecute.mockResolvedValue({
       success: true,
       data: { dispatchResult: { task: TASK_FIXTURE, success: true } },
@@ -851,6 +873,7 @@ describe("supportsGit() guard behavior", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    resetAuthMocks();
     // Reset createAndSwitchBranch to clear any leftover mockRejectedValueOnce
     // from "branch creation failure" tests (clearAllMocks does not flush the once-queue).
     const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
@@ -922,6 +945,7 @@ describe("commit agent integration", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    resetAuthMocks();
     // Reset createAndSwitchBranch to clear any leftover mockRejectedValueOnce
     // from "branch creation failure" tests (clearAllMocks does not flush the once-queue).
     const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
@@ -1162,6 +1186,7 @@ describe("worktree dispatch pipeline", () => {
   describe("multi-issue worktree mode", () => {
     beforeEach(() => {
       vi.clearAllMocks();
+      resetAuthMocks();
       mocks.mockExecute.mockImplementation(async ({ task }: any) => ({
         success: true,
         data: { dispatchResult: { task, success: true } },
@@ -1354,6 +1379,7 @@ describe("worktree dispatch pipeline", () => {
   describe("serial fallback", () => {
     beforeEach(() => {
       vi.clearAllMocks();
+      resetAuthMocks();
       // Restore single-issue defaults overridden by setupMultiIssueScenario()
       vi.mocked(fetchItemsById).mockResolvedValue([ISSUE_1]);
       vi.mocked(writeItemsToTempDir).mockResolvedValue({
@@ -1509,6 +1535,7 @@ describe("worktree dispatch pipeline", () => {
     beforeEach(() => {
       vi.useFakeTimers();
       vi.clearAllMocks();
+      resetAuthMocks();
       // Restore single-issue defaults (may have been overridden by setupMultiIssueScenario)
       vi.mocked(fetchItemsById).mockResolvedValue([ISSUE_1]);
       vi.mocked(writeItemsToTempDir).mockResolvedValue({
@@ -1603,6 +1630,7 @@ describe("worktree dispatch pipeline", () => {
 describe("error-path handling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetAuthMocks();
     // Re-establish baseline mocks cleared by vi.clearAllMocks()
     vi.mocked(fetchItemsById).mockResolvedValue([{
       number: "1",
@@ -1698,6 +1726,7 @@ describe("error-path handling", () => {
 describe("feature branch workflow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetAuthMocks();
     setupMultiIssueScenario();
     mocks.mockExecute.mockImplementation(async ({ task }: any) => ({
       success: true,
@@ -2064,6 +2093,7 @@ describe("feature branch workflow", () => {
 describe("md-datasource sync fallback", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetAuthMocks();
     // Set up md-datasource-style issue with non-numeric filename as the number
     const mdIssue: IssueDetails = {
       number: "task-complete-md.md",
@@ -2134,6 +2164,7 @@ describe("glob expansion in dispatch pipeline", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    resetAuthMocks();
     mocks.mockExecute.mockResolvedValue({
       success: true,
       data: { dispatchResult: { task: TASK_FIXTURE, success: true } },
@@ -2328,4 +2359,3 @@ describe("glob expansion in dispatch pipeline", () => {
     expect(result.completed).toBe(1);
   });
 });
-
