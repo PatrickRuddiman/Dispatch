@@ -340,7 +340,9 @@ describe("auth prompt handler", () => {
       verificationUri: "https://microsoft.com/devicelogin",
     });
 
-    expect(handler).toHaveBeenCalledWith("To sign in, use a web browser...");
+    expect(handler).toHaveBeenCalledWith(
+      "Azure DevOps requires a work or school account (personal Microsoft accounts are not supported).\nTo sign in, use a web browser...",
+    );
   });
 
   it("falls back to log.info when no handler is set", async () => {

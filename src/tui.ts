@@ -144,7 +144,9 @@ function render(state: TuiState): string {
   // ── Notification banner (auth prompts, etc.) ─────────────
   if (state.notification) {
     lines.push("");
-    lines.push("  " + chalk.yellowBright("⚠ ") + chalk.yellow(state.notification));
+    for (const notifLine of state.notification.split("\n")) {
+      lines.push("  " + chalk.yellowBright("⚠ ") + chalk.yellow(notifLine));
+    }
   }
 
   // ── Phase + Timer ───────────────────────────────────────────

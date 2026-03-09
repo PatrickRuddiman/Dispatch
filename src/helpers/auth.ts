@@ -128,10 +128,14 @@ export async function getAzureConnection(
     tenantId: AZURE_TENANT_ID,
     clientId: AZURE_CLIENT_ID,
     userPromptCallback(deviceCodeInfo) {
+      // Azure DevOps only supports work/school accounts — prepend a note
+      // so users don't attempt to sign in with a personal Microsoft account.
+      const note = "Azure DevOps requires a work or school account (personal Microsoft accounts are not supported).";
+      const msg = `${note}\n${deviceCodeInfo.message}`;
       if (authPromptHandler) {
-        authPromptHandler(deviceCodeInfo.message);
+        authPromptHandler(msg);
       } else {
-        log.info(deviceCodeInfo.message);
+        log.info(msg);
       }
       open(deviceCodeInfo.verificationUri).catch(() => {});
     },
