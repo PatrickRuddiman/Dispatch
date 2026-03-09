@@ -372,6 +372,14 @@ export const datasource: Datasource = {
     }
   },
 
+  async getCurrentBranch(opts: DispatchLifecycleOptions): Promise<string> {
+    try {
+      const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], opts.cwd)).trim();
+      if (branch && branch !== "HEAD") return branch;
+    } catch { /* fall through */ }
+    return this.getDefaultBranch(opts);
+  },
+
   async getUsername(opts: DispatchLifecycleOptions): Promise<string> {
     try {
       const name = await git(["config", "user.name"], opts.cwd);
@@ -442,6 +450,7 @@ export const datasource: Datasource = {
     title: string,
     body: string,
     opts: DispatchLifecycleOptions,
+    baseBranch?: string,
   ): Promise<string> {
     const cwd = opts.cwd;
     const { orgUrl, project, connection } = await getOrgAndProject(opts);
@@ -468,13 +477,13 @@ export const datasource: Datasource = {
       throw new Error(`Could not find Azure DevOps repository matching remote URL: ${remoteUrl}`);
     }
 
-    const defaultBranch = await this.getDefaultBranch(opts);
+    const target = baseBranch ?? await this.getDefaultBranch(opts);
 
     try {
       const pr = await gitApi.createPullRequest(
         {
           sourceRefName: `refs/heads/${branchName}`,
-          targetRefName: `refs/heads/${defaultBranch}`,
+          targetRefName: `refs/heads/${target}`,
           title,
           description: body || `Resolves AB#${issueNumber}`,
           workItemRefs: [{ id: issueNumber }],

@@ -245,6 +245,18 @@ export const datasource: Datasource = {
     }
   },
 
+  async getCurrentBranch(opts: DispatchLifecycleOptions): Promise<string> {
+    try {
+      const { stdout } = await exec("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+        cwd: opts.cwd,
+        shell: process.platform === "win32",
+      });
+      const branch = stdout.trim();
+      if (branch && branch !== "HEAD") return branch;
+    } catch { /* fall through */ }
+    return this.getDefaultBranch(opts);
+  },
+
   async getUsername(opts: DispatchLifecycleOptions): Promise<string> {
     try {
       const { stdout } = await exec("git", ["config", "user.name"], { cwd: opts.cwd, shell: process.platform === "win32" });
@@ -324,6 +336,7 @@ export const datasource: Datasource = {
     _title: string,
     _body: string,
     _opts: DispatchLifecycleOptions,
+    _baseBranch?: string,
   ): Promise<string> {
     // No-op: MD datasource does not create pull requests
     return "";

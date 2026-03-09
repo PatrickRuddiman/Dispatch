@@ -240,6 +240,15 @@ export const datasource: Datasource = {
     return getDefaultBranch(opts.cwd);
   },
 
+  async getCurrentBranch(opts) {
+    try {
+      const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], opts.cwd)).trim();
+      // Detached HEAD returns the literal string "HEAD"
+      if (branch && branch !== "HEAD") return branch;
+    } catch { /* fall through */ }
+    return this.getDefaultBranch(opts);
+  },
+
   buildBranchName(issueNumber: string, title: string, username?: string): string {
     return buildBranchName(issueNumber, title, username ?? "unknown");
   },
@@ -287,21 +296,21 @@ export const datasource: Datasource = {
     await git(["commit", "-m", message], cwd);
   },
 
-  async createPullRequest(branchName, issueNumber, title, body, opts) {
+  async createPullRequest(branchName, issueNumber, title, body, opts, baseBranch?) {
     const cwd = opts.cwd;
     const { owner, repo } = await getOwnerRepo(cwd);
     const octokit = await getGithubOctokit();
     const prBody = body || `Closes #${issueNumber}`;
 
     try {
-      const defaultBranch = await getDefaultBranch(cwd);
+      const target = baseBranch ?? await getDefaultBranch(cwd);
       const { data: pr } = await octokit.rest.pulls.create({
         owner,
         repo,
         title,
         body: prBody,
         head: branchName,
-        base: defaultBranch,
+        base: target,
       });
       return pr.html_url;
     } catch (err: unknown) {

@@ -26,6 +26,7 @@ import { getDatasource, getGitRemoteUrl, parseAzDevOpsRemoteUrl, parseGitHubRemo
 import type { DatasourceName, DispatchLifecycleOptions, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
 import { getGithubOctokit, getAzureConnection } from "../helpers/auth.js";
 import type { OrchestrateRunOptions, DispatchSummary } from "./runner.js";
+import { setAuthPromptHandler } from "../helpers/auth.js";
 import {
   fetchItemsById,
   writeItemsToTempDir,
@@ -187,6 +188,12 @@ export async function runDispatchPipeline(
     tui = createTui();
     tui.state.provider = provider;
     tui.state.source = source;
+
+    // Route auth device-code prompts into the TUI notification banner
+    setAuthPromptHandler((msg) => {
+      tui.state.notification = msg;
+      tui.update();
+    });
   }
 
   try {
@@ -223,6 +230,10 @@ export async function runDispatchPipeline(
     } else {
       items = await datasource.list(fetchOpts);
     }
+
+    // Auth is complete — clear the notification banner and handler
+    tui.state.notification = undefined;
+    setAuthPromptHandler(null);
 
     if (items.length === 0) {
       tui.state.phase = "done";
@@ -321,6 +332,13 @@ export async function runDispatchPipeline(
 
     const lifecycleOpts: DispatchLifecycleOptions = { cwd };
 
+    // ── Capture the branch the user is currently on ────────────────
+    // This is used as the base for new branches, PR targets, and the
+    // branch to return to after completion.  When the user is on main
+    // this naturally resolves to main; when on release/1.4.3 it uses
+    // that branch instead.
+    const startingBranch = await datasource.getCurrentBranch(lifecycleOpts);
+
     // ── Feature-branch setup (when --feature) ──────────────────────
     let featureBranchName: string | undefined;
     let featureDefaultBranch: string | undefined;
@@ -340,12 +358,12 @@ export async function runDispatchPipeline(
       }
 
       try {
-        featureDefaultBranch = await datasource.getDefaultBranch(lifecycleOpts);
+        featureDefaultBranch = startingBranch;
 
-        // Ensure we are on the default branch so the feature branch starts from the correct commit
+        // Ensure we are on the starting branch so the feature branch starts from the correct commit
         await datasource.switchBranch(featureDefaultBranch, lifecycleOpts);
 
-        // Create the feature branch from the default branch (or switch to it if it already exists)
+        // Create the feature branch from the starting branch (or switch to it if it already exists)
         try {
           await datasource.createAndSwitchBranch(featureBranchName, lifecycleOpts);
           log.debug(`Created feature branch ${featureBranchName} from ${featureDefaultBranch}`);
@@ -366,7 +384,7 @@ export async function runDispatchPipeline(
           } catch { /* swallow */ }
         });
 
-        // Switch back to default branch so worktrees can be created from the main repo
+        // Switch back to starting branch so worktrees can be created from the main repo
         await datasource.switchBranch(featureDefaultBranch, lifecycleOpts);
         log.debug(`Switched back to ${featureDefaultBranch} for worktree creation`);
       } catch (err) {
@@ -401,7 +419,7 @@ export async function runDispatchPipeline(
       if (!noBranch && details) {
         fileLogger?.phase("Branch/worktree setup");
         try {
-          defaultBranch = feature ? featureBranchName! : await datasource.getDefaultBranch(lifecycleOpts);
+          defaultBranch = feature ? featureBranchName! : startingBranch;
           branchName = datasource.buildBranchName(details.number, details.title, username);
 
           if (useWorktrees) {
@@ -764,6 +782,7 @@ export async function runDispatchPipeline(
               prTitle,
               prBody,
               issueLifecycleOpts,
+              startingBranch,
             );
             if (prUrl) {
               log.success(`Created PR for issue #${details.number}: ${prUrl}`);
@@ -855,6 +874,7 @@ export async function runDispatchPipeline(
           prTitle,
           prBody,
           lifecycleOpts,
+          startingBranch,
         );
         if (prUrl) {
           log.success(`Created feature PR: ${prUrl}`);

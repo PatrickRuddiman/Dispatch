@@ -75,7 +75,7 @@ vi.mock("../helpers/logger.js", () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-import { getGithubOctokit, getAzureConnection } from "../helpers/auth.js";
+import { getGithubOctokit, getAzureConnection, setAuthPromptHandler } from "../helpers/auth.js";
 
 const realPlatform = process.platform;
 
@@ -85,6 +85,8 @@ beforeEach(() => {
   mockFs.mkdir.mockResolvedValue(undefined);
   mockFs.writeFile.mockResolvedValue(undefined);
   mockFs.chmod.mockResolvedValue(undefined);
+  mockOpen.mockResolvedValue(undefined);
+  setAuthPromptHandler(null);
 });
 
 describe("getGithubOctokit", () => {
@@ -294,5 +296,74 @@ describe("auth cache file operations", () => {
         configurable: true,
       });
     }
+  });
+});
+
+describe("auth prompt handler", () => {
+  it("routes GitHub device-code prompt to handler when set", async () => {
+    mockFs.readFile.mockRejectedValue(new Error("ENOENT"));
+    mockAuthFn.mockResolvedValue({ token: "gh-new-token" });
+
+    const handler = vi.fn();
+    setAuthPromptHandler(handler);
+
+    await getGithubOctokit();
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const createCall = (mockCreateOAuthDeviceAuth.mock.calls as any)[0][0];
+    createCall.onVerification({
+      user_code: "ABCD-1234",
+      verification_uri: "https://github.com/login/device",
+    });
+
+    expect(handler).toHaveBeenCalledWith(
+      "Enter code ABCD-1234 at https://github.com/login/device",
+    );
+  });
+
+  it("routes Azure device-code prompt to handler when set", async () => {
+    mockFs.readFile.mockRejectedValue(new Error("ENOENT"));
+    mockGetToken.mockResolvedValue({
+      token: "az-new-token",
+      expiresOnTimestamp: Date.now() + 3600000,
+    });
+
+    const handler = vi.fn();
+    setAuthPromptHandler(handler);
+
+    await getAzureConnection("https://dev.azure.com/myorg");
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const credentialCall = (mockDeviceCodeCredential.mock.calls as any)[0][0];
+    credentialCall.userPromptCallback({
+      message: "To sign in, use a web browser...",
+      verificationUri: "https://microsoft.com/devicelogin",
+    });
+
+    expect(handler).toHaveBeenCalledWith(
+      "Azure DevOps requires a work or school account (personal Microsoft accounts are not supported).\nTo sign in, use a web browser...",
+    );
+  });
+
+  it("falls back to log.info when no handler is set", async () => {
+    mockFs.readFile.mockRejectedValue(new Error("ENOENT"));
+    mockAuthFn.mockResolvedValue({ token: "gh-new-token" });
+
+    setAuthPromptHandler(null);
+
+    await getGithubOctokit();
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const createCall = (mockCreateOAuthDeviceAuth.mock.calls as any)[0][0];
+    createCall.onVerification({
+      user_code: "WXYZ-5678",
+      verification_uri: "https://github.com/login/device",
+    });
+
+    // log.info is mocked — import it to verify it was called
+    const { log } = await import("../helpers/logger.js");
+    expect(log.info).toHaveBeenCalledWith(
+      "Enter code WXYZ-5678 at https://github.com/login/device",
+    );
   });
 });
