@@ -83,6 +83,7 @@ vi.mock("../datasources/index.js", () => ({
     close: vi.fn().mockResolvedValue(undefined),
     create: vi.fn().mockResolvedValue({} as IssueDetails),
     getDefaultBranch: vi.fn().mockResolvedValue("main"),
+    getCurrentBranch: vi.fn().mockResolvedValue("main"),
     getUsername: vi.fn().mockResolvedValue("testuser"),
     buildBranchName: vi.fn().mockReturnValue("testuser/dispatch/1"),
     createAndSwitchBranch: vi.fn().mockResolvedValue(undefined),
