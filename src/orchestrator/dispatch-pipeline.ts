@@ -24,9 +24,8 @@ import type { ProviderName, ProviderInstance } from "../providers/interface.js";
 import { bootProvider } from "../providers/index.js";
 import { getDatasource, getGitRemoteUrl, parseAzDevOpsRemoteUrl, parseGitHubRemoteUrl } from "../datasources/index.js";
 import type { DatasourceName, DispatchLifecycleOptions, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
-import { getGithubOctokit, getAzureConnection } from "../helpers/auth.js";
+import { getGithubOctokit, getAzureConnection, setAuthPromptHandler } from "../helpers/auth.js";
 import type { OrchestrateRunOptions, DispatchSummary } from "./runner.js";
-import { setAuthPromptHandler } from "../helpers/auth.js";
 import {
   fetchItemsById,
   writeItemsToTempDir,

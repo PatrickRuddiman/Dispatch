@@ -116,6 +116,7 @@ vi.mock("../datasources/index.js", () => ({
 vi.mock("../helpers/auth.js", () => ({
   getGithubOctokit: vi.fn().mockResolvedValue({}),
   getAzureConnection: vi.fn().mockResolvedValue({}),
+  setAuthPromptHandler: vi.fn(),
 }));
 
 vi.mock("../tui.js", () => ({
