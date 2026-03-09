@@ -99,6 +99,7 @@ vi.mock("../datasources/index.js", () => ({
     close: vi.fn().mockResolvedValue(undefined),
     create: vi.fn().mockResolvedValue({} as IssueDetails),
     getDefaultBranch: vi.fn().mockResolvedValue("main"),
+    getCurrentBranch: vi.fn().mockResolvedValue("main"),
     getUsername: vi.fn().mockResolvedValue("testuser"),
     buildBranchName: vi.fn().mockReturnValue("testuser/dispatch/1"),
     createAndSwitchBranch: vi.fn().mockResolvedValue(undefined),
@@ -976,6 +977,7 @@ describe("commit agent integration", () => {
       "feat: add new feature for issue",
       "This PR adds a new feature",
       expect.any(Object),
+      "main",
     );
   });
 
@@ -1006,6 +1008,7 @@ describe("commit agent integration", () => {
       "PR title",
       "PR body",
       expect.any(Object),
+      "main",
     );
   });
 
@@ -1057,6 +1060,7 @@ describe("commit agent integration", () => {
       "PR title",
       "PR body",
       expect.any(Object),
+      "main",
     );
   });
 
@@ -1718,6 +1722,7 @@ describe("feature branch workflow", () => {
     vi.mocked(ds.pushBranch).mockReset().mockResolvedValue(undefined);
     vi.mocked(ds.createPullRequest).mockReset().mockResolvedValue("https://example.com/pr/feature");
     vi.mocked(ds.getDefaultBranch).mockReset().mockResolvedValue("main");
+    vi.mocked(ds.getCurrentBranch).mockReset().mockResolvedValue("main");
   });
 
   function featureOpts(overrides?: Partial<Parameters<typeof runDispatchPipeline>[0]>) {
@@ -1729,7 +1734,7 @@ describe("feature branch workflow", () => {
 
     expect(vi.mocked(generateFeatureBranchName)).toHaveBeenCalledOnce();
     const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
-    expect(ds.getDefaultBranch).toHaveBeenCalled();
+    expect(ds.getCurrentBranch).toHaveBeenCalled();
     expect(ds.createAndSwitchBranch).toHaveBeenCalledWith(
       "dispatch/feature-abcd1234",
       expect.any(Object),
@@ -1815,6 +1820,7 @@ describe("feature branch workflow", () => {
       expect.any(String),
       expect.any(String),
       expect.any(Object),
+      "main",
     );
   });
 
@@ -2047,6 +2053,7 @@ describe("feature branch workflow", () => {
       expect.any(String),
       expect.any(String),
       expect.any(Object),
+      "main",
     );
   });
 
