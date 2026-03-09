@@ -109,6 +109,7 @@ vi.mock("../datasources/index.js", () => ({
   } satisfies Datasource),
   getGitRemoteUrl: vi.fn().mockResolvedValue(null),
   parseAzDevOpsRemoteUrl: vi.fn().mockReturnValue(null),
+  parseGitHubRemoteUrl: vi.fn().mockReturnValue(null),
 }));
 
 vi.mock("../helpers/auth.js", () => ({

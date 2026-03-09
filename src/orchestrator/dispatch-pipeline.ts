@@ -22,7 +22,7 @@ import { isValidBranchName } from "../helpers/branch-validation.js";
 import { createTui, type TuiState } from "../tui.js";
 import type { ProviderName, ProviderInstance } from "../providers/interface.js";
 import { bootProvider } from "../providers/index.js";
-import { getDatasource, getGitRemoteUrl, parseAzDevOpsRemoteUrl } from "../datasources/index.js";
+import { getDatasource, getGitRemoteUrl, parseAzDevOpsRemoteUrl, parseGitHubRemoteUrl } from "../datasources/index.js";
 import type { DatasourceName, DispatchLifecycleOptions, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
 import { getGithubOctokit, getAzureConnection } from "../helpers/auth.js";
 import type { OrchestrateRunOptions, DispatchSummary } from "./runner.js";
@@ -138,8 +138,16 @@ export async function runDispatchPipeline(
   // Pre-authenticate before TUI starts so device codes are visible in the terminal.
   // For cached tokens this is instant; for new auth it runs the device flow
   // while stdout is still free.
+  // Validate the remote URL first to fail fast before triggering device auth.
   if (source === "github") {
-    await getGithubOctokit();
+    const remoteUrl = await getGitRemoteUrl(cwd);
+    if (remoteUrl && parseGitHubRemoteUrl(remoteUrl)) {
+      await getGithubOctokit();
+    } else if (!remoteUrl) {
+      log.warn("No git remote found — skipping GitHub pre-authentication");
+    } else {
+      log.warn("Remote URL is not a GitHub repository — skipping GitHub pre-authentication");
+    }
   } else if (source === "azdevops") {
     let orgUrl = org;
     if (!orgUrl) {

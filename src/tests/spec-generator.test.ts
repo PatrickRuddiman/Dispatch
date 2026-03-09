@@ -1584,6 +1584,16 @@ describe("inline text pipeline", () => {
 
   it("generates a spec file for inline text input", async () => {
     const mockDs = createMockDatasource("md");
+    vi.mocked(mockDs.create).mockResolvedValue({
+      number: "99",
+      title: "My Feature",
+      body: "Spec content",
+      labels: [],
+      state: "open",
+      url: `${OUTPUT_DIR}/99-my-feature.md`,
+      comments: [],
+      acceptanceCriteria: "",
+    });
     vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
 
@@ -1599,7 +1609,8 @@ describe("inline text pipeline", () => {
     expect(result.failed).toBe(0);
     expect(result.total).toBe(1);
     expect(result.files).toHaveLength(1);
-    expect(result.files[0]).toContain("my-feature-42.md");
+    // After create(), filepath is updated to the created spec file path
+    expect(result.files[0]).toContain("99-my-feature.md");
   });
 
   it("shows numeric ID in dispatch command for inline text with md datasource", async () => {
@@ -1648,6 +1659,16 @@ describe("inline text pipeline", () => {
 
   it("slugifies inline text into the output filename", async () => {
     const mockDs = createMockDatasource("md");
+    vi.mocked(mockDs.create).mockResolvedValue({
+      number: "99",
+      title: "My Feature",
+      body: "Spec content",
+      labels: [],
+      state: "open",
+      url: `${OUTPUT_DIR}/99-my-feature.md`,
+      comments: [],
+      acceptanceCriteria: "",
+    });
     vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
 
@@ -1660,8 +1681,8 @@ describe("inline text pipeline", () => {
     });
 
     expect(result.files).toHaveLength(1);
-    // Special chars become dashes, leading/trailing dashes stripped, lowercased
-    expect(result.files[0]).toContain("my-feature-42.md");
+    // After create(), filepath is updated to the created spec file path
+    expect(result.files[0]).toContain("99-my-feature.md");
   });
 
   it("passes inline text as fileContent to spec agent", async () => {
@@ -1852,6 +1873,16 @@ describe("H1-to-filename derivation", () => {
     vi.mocked(readFile).mockResolvedValue(specWithH1);
 
     const mockDs = createMockDatasource("md");
+    vi.mocked(mockDs.create).mockResolvedValue({
+      number: "99",
+      title: "Dark Mode Toggle for Settings",
+      body: specWithH1,
+      labels: [],
+      state: "open",
+      url: `${OUTPUT_DIR}/99-dark-mode-toggle-for-settings.md`,
+      comments: [],
+      acceptanceCriteria: "",
+    });
     vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
 
@@ -1864,8 +1895,8 @@ describe("H1-to-filename derivation", () => {
     });
 
     expect(result.generated).toBe(1);
-    // Should use H1-derived slug, not the raw input text
-    expect(result.files[0]).toContain("dark-mode-toggle-for-settings.md");
+    // After create(), filepath is updated to the created spec file path
+    expect(result.files[0]).toContain("99-dark-mode-toggle-for-settings.md");
     expect(rename).toHaveBeenCalled();
   });
 
@@ -1883,7 +1914,18 @@ describe("H1-to-filename derivation", () => {
     vi.mocked(readFile).mockResolvedValue(specContent);
     vi.mocked(globFn).mockResolvedValue(["/tmp/test-project/drafts/original.md"] as any);
 
+    const createdUrl = `${OUTPUT_DIR}/99-completely-different-title.md`;
     const mockDs = createMockDatasource("md");
+    vi.mocked(mockDs.create).mockResolvedValue({
+      number: "99",
+      title: "Completely Different Title",
+      body: specContent,
+      labels: [],
+      state: "open",
+      url: createdUrl,
+      comments: [],
+      acceptanceCriteria: "",
+    });
     vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
 
@@ -1897,9 +1939,9 @@ describe("H1-to-filename derivation", () => {
     });
 
     expect(result.generated).toBe(1);
-    // File should keep its original path (in-place overwrite)
-    expect(result.files[0]).toBe("/tmp/test-project/drafts/original.md");
-    // No rename for file/glob mode
+    // After create(), filepath is updated to the newly created spec file
+    expect(result.files[0]).toBe(createdUrl);
+    // No rename for file/glob mode (rename only runs for tracker/inline modes)
     expect(rename).not.toHaveBeenCalled();
   });
 });
