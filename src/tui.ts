@@ -32,6 +32,8 @@ export interface TuiState {
   source?: string;
   /** Currently-processing issue context (number + title) */
   currentIssue?: { number: string; title: string };
+  /** Persistent notification banner (e.g. auth device-code prompt) */
+  notification?: string;
 }
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -138,6 +140,12 @@ function render(state: TuiState): string {
   }
 
   lines.push(chalk.dim("  ─".repeat(24)));
+
+  // ── Notification banner (auth prompts, etc.) ─────────────
+  if (state.notification) {
+    lines.push("");
+    lines.push("  " + chalk.yellowBright("⚠ ") + chalk.yellow(state.notification));
+  }
 
   // ── Phase + Timer ───────────────────────────────────────────
   lines.push(`  ${phaseLabel(state.phase, state.provider)}` + chalk.dim(`  ${totalElapsed}`));

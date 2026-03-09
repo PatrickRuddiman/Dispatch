@@ -33,6 +33,18 @@ const AUTH_PATH = join(homedir(), ".dispatch", "auth.json");
 /** Five-minute buffer (ms) used to refresh Azure tokens before they expire. */
 const EXPIRY_BUFFER_MS = 5 * 60 * 1000;
 
+/** Optional callback for routing auth prompts into the TUI. */
+let authPromptHandler: ((message: string) => void) | null = null;
+
+/**
+ * Register a handler for auth device-code prompts.
+ * When set, prompts are routed to this handler instead of `log.info()`.
+ * Pass `null` to clear the handler.
+ */
+export function setAuthPromptHandler(handler: ((message: string) => void) | null): void {
+  authPromptHandler = handler;
+}
+
 async function loadAuthCache(): Promise<AuthCache> {
   try {
     const raw = await readFile(AUTH_PATH, "utf-8");
@@ -72,9 +84,12 @@ export async function getGithubOctokit(): Promise<Octokit> {
     clientType: "oauth-app",
     scopes: ["repo"],
     onVerification(verification) {
-      log.info(
-        `Enter code ${verification.user_code} at ${verification.verification_uri}`,
-      );
+      const msg = `Enter code ${verification.user_code} at ${verification.verification_uri}`;
+      if (authPromptHandler) {
+        authPromptHandler(msg);
+      } else {
+        log.info(msg);
+      }
       open(verification.verification_uri).catch(() => {});
     },
   });
@@ -113,7 +128,11 @@ export async function getAzureConnection(
     tenantId: AZURE_TENANT_ID,
     clientId: AZURE_CLIENT_ID,
     userPromptCallback(deviceCodeInfo) {
-      log.info(deviceCodeInfo.message);
+      if (authPromptHandler) {
+        authPromptHandler(deviceCodeInfo.message);
+      } else {
+        log.info(deviceCodeInfo.message);
+      }
       open(deviceCodeInfo.verificationUri).catch(() => {});
     },
   });

@@ -25,6 +25,7 @@ import { bootProvider } from "../providers/index.js";
 import { getDatasource } from "../datasources/index.js";
 import type { DatasourceName, DispatchLifecycleOptions, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
 import type { OrchestrateRunOptions, DispatchSummary } from "./runner.js";
+import { setAuthPromptHandler } from "../helpers/auth.js";
 import {
   fetchItemsById,
   writeItemsToTempDir,
@@ -161,6 +162,12 @@ export async function runDispatchPipeline(
     tui = createTui();
     tui.state.provider = provider;
     tui.state.source = source;
+
+    // Route auth device-code prompts into the TUI notification banner
+    setAuthPromptHandler((msg) => {
+      tui.state.notification = msg;
+      tui.update();
+    });
   }
 
   try {
@@ -197,6 +204,10 @@ export async function runDispatchPipeline(
     } else {
       items = await datasource.list(fetchOpts);
     }
+
+    // Auth is complete — clear the notification banner and handler
+    tui.state.notification = undefined;
+    setAuthPromptHandler(null);
 
     if (items.length === 0) {
       tui.state.phase = "done";
