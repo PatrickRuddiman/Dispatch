@@ -22,7 +22,7 @@ import { handleConfigCommand, CONFIG_BOUNDS } from "./config.js";
 
 export const MAX_CONCURRENCY = CONFIG_BOUNDS.concurrency.max;
 
-const HELP = `
+export const HELP = `
   dispatch — AI agent orchestration CLI
 
   Usage:
@@ -33,18 +33,18 @@ const HELP = `
     dispatch --respec <ids>          Regenerate specs for specific issues
     dispatch --respec <glob>         Regenerate specs matching a glob pattern
     dispatch --spec "description"    Generate a spec from an inline text description
-    dispatch --fix-tests             Run tests and fix failures via AI agent
-    dispatch --fix-tests <ids>       Fix tests on specific issue branches (in worktrees)
+    dispatch --fix-tests [issue-id...]  Run tests and fix failures via AI agent (optionally on specific issue branches)
 
-  Dispatch options:
+  Options:
     --dry-run              List tasks without dispatching (also works with --spec)
     --no-plan              Skip the planner agent, dispatch directly
     --no-branch            Skip branch creation, push, and PR lifecycle
     --no-worktree          Skip git worktree isolation for parallel issues
     --feature [name]       Group issues into a single feature branch and PR
-    --force              Ignore prior run state and re-run all tasks
+    --force                Ignore prior run state and re-run all tasks
     --concurrency <n>      Max parallel dispatches (default: min(cpus, freeMB/500), max: ${MAX_CONCURRENCY})
     --provider <name>      Agent backend: ${PROVIDER_NAMES.join(", ")} (default: opencode)
+    --source <name>        Issue source: ${DATASOURCE_NAMES.join(", ")} (optional; auto-detected from git remote)
     --server-url <url>     URL of a running provider server
     --plan-timeout <min>   Planning timeout in minutes (default: 10)
     --retries <n>          Retry attempts for all agents (default: 2)
@@ -53,13 +53,13 @@ const HELP = `
     --cwd <dir>            Working directory (default: cwd)
 
   Spec options:
-    --spec <value>         Comma-separated issue numbers or glob pattern for .md files (creates specs in configured datasource)
-    --respec [value]       Regenerate specs: issue numbers, glob, or omit to regenerate all existing specs
     --spec <value>         Comma-separated issue numbers, glob pattern for .md files, or inline text description
-    --source <name>        Issue source: ${DATASOURCE_NAMES.join(", ")} (optional; auto-detected from git remote, falls back to md)
+    --respec [value]       Regenerate specs: issue numbers, glob, or omit to regenerate all existing specs
+    --output-dir <dir>     Output directory for specs (default: .dispatch/specs)
+
+  Azure DevOps options:
     --org <url>            Azure DevOps organization URL
     --project <name>       Azure DevOps project name
-    --output-dir <dir>     Output directory for specs (default: .dispatch/specs)
 
   General:
     --verbose              Show detailed debug output for troubleshooting
@@ -102,6 +102,42 @@ export interface ParsedArgs extends Omit<RawCliArgs, "explicitFlags"> {
   version: boolean;
   feature?: string | boolean;
 }
+
+/**
+ * Maps Commander option attribute names to their corresponding `explicitFlags`
+ * key names. This is the single source of truth for all CLI options.
+ *
+ * Keys are Commander's camelCase attribute names (derived from the flag string).
+ * Values are the flag names used in `explicitFlags` and downstream code.
+ *
+ * Exported so tests can verify help-text completeness.
+ */
+export const CLI_OPTIONS_MAP: Record<string, string> = {
+  help: "help",
+  version: "version",
+  dryRun: "dryRun",
+  plan: "noPlan",
+  branch: "noBranch",
+  worktree: "noWorktree",
+  force: "force",
+  verbose: "verbose",
+  spec: "spec",
+  respec: "respec",
+  fixTests: "fixTests",
+  feature: "feature",
+  source: "issueSource",
+  provider: "provider",
+  concurrency: "concurrency",
+  serverUrl: "serverUrl",
+  planTimeout: "planTimeout",
+  retries: "retries",
+  planRetries: "planRetries",
+  testTimeout: "testTimeout",
+  cwd: "cwd",
+  org: "org",
+  project: "project",
+  outputDir: "outputDir",
+};
 
 export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
   const program = new Command();
@@ -241,34 +277,7 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
   // ── Derive explicitFlags from Commander option sources ─────
   const explicitFlags = new Set<string>();
 
-  const SOURCE_MAP: Record<string, string> = {
-    help: "help",
-    version: "version",
-    dryRun: "dryRun",
-    plan: "noPlan",
-    branch: "noBranch",
-    worktree: "noWorktree",
-    force: "force",
-    verbose: "verbose",
-    spec: "spec",
-    respec: "respec",
-    fixTests: "fixTests",
-    feature: "feature",
-    source: "issueSource",
-    provider: "provider",
-    concurrency: "concurrency",
-    serverUrl: "serverUrl",
-    planTimeout: "planTimeout",
-    retries: "retries",
-    planRetries: "planRetries",
-    testTimeout: "testTimeout",
-    cwd: "cwd",
-    org: "org",
-    project: "project",
-    outputDir: "outputDir",
-  };
-
-  for (const [attr, flag] of Object.entries(SOURCE_MAP)) {
+  for (const [attr, flag] of Object.entries(CLI_OPTIONS_MAP)) {
     if (program.getOptionValueSource(attr) === "cli") {
       explicitFlags.add(flag);
     }

@@ -699,7 +699,7 @@ describe("resolveCliConfig()", () => {
         expect.stringContaining("dispatch config"),
       );
       expect(log.dim).toHaveBeenCalledWith(
-        expect.stringContaining("--issue-source"),
+        expect.stringContaining("--source"),
       );
     });
 

@@ -46,7 +46,7 @@ vi.mock("../orchestrator/runner.js", () => ({
 vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
-import { parseArgs, MAX_CONCURRENCY } from "../cli.js";
+import { parseArgs, MAX_CONCURRENCY, HELP, CLI_OPTIONS_MAP } from "../cli.js";
 
 describe("parseArgs --respec", () => {
   it("sets respec to an empty array when --respec is passed with no arguments", () => {
@@ -589,5 +589,142 @@ describe("parseArgs error cases", () => {
   it("exits for unknown flag", () => {
     expect(() => parseArgs(["--unknown-flag"])).toThrow();
     expect(mockExit).toHaveBeenCalledWith(1);
+  });
+});
+
+// ─── Help text completeness ─────────────────────────────────────────
+//
+// These tests cross-reference the HELP string (shown by `dispatch -h`)
+// against CLI_OPTIONS_MAP (the definitive list of Commander options).
+// They fail when a flag is added to the parser but not documented, or
+// when the help text references a flag that doesn't exist in the parser.
+
+describe("help text completeness", () => {
+  /**
+   * Convert a Commander camelCase attribute name to its --kebab-case CLI flag.
+   *
+   * Commander derives attribute names from flags as follows:
+   *   --dry-run        → dryRun
+   *   --no-plan        → plan      (negated boolean, Commander strips "no-")
+   *   --no-branch      → branch
+   *   --no-worktree    → worktree
+   *   --fix-tests      → fixTests
+   *   --server-url     → serverUrl
+   *   --plan-timeout   → planTimeout
+   *   --plan-retries   → planRetries
+   *   --test-timeout   → testTimeout
+   *   --output-dir     → outputDir
+   *
+   * For the negated options (plan, branch, worktree), the CLI flag form is
+   * --no-plan, --no-branch, --no-worktree respectively.
+   */
+  const NEGATED_OPTIONS = new Set(["plan", "branch", "worktree"]);
+
+  function toCliFlag(commanderAttr: string): string {
+    const kebab = commanderAttr.replace(/([A-Z])/g, "-$1").toLowerCase();
+    if (NEGATED_OPTIONS.has(commanderAttr)) {
+      return `--no-${kebab}`;
+    }
+    return `--${kebab}`;
+  }
+
+  /**
+   * Extract the options/definition portion of the HELP text — everything
+   * before the "Examples:" section. This avoids false positives from flags
+   * used as example arguments (e.g. `dispatch 14 --provider copilot`).
+   */
+  function getHelpDefinitionSection(): string {
+    const examplesIdx = HELP.indexOf("Examples:");
+    return examplesIdx >= 0 ? HELP.slice(0, examplesIdx) : HELP;
+  }
+
+  /**
+   * Extract all unique --flag-name tokens from the options definition
+   * section of the help text. Matches --kebab-case flags including
+   * short aliases like -h and -v.
+   */
+  function extractHelpFlags(section: string): Set<string> {
+    const matches = section.match(/--[\w-]+/g) ?? [];
+    return new Set(matches);
+  }
+
+  // ── Every Commander option must appear in the help text ────────
+
+  it("documents every registered Commander option in the help text", () => {
+    const helpSection = getHelpDefinitionSection();
+    const missing: string[] = [];
+
+    for (const attr of Object.keys(CLI_OPTIONS_MAP)) {
+      const flag = toCliFlag(attr);
+      if (!helpSection.includes(flag)) {
+        missing.push(`${flag} (Commander attr: ${attr})`);
+      }
+    }
+
+    expect(missing).toEqual([]);
+  });
+
+  // ── Every flag in help text must exist in Commander ────────────
+
+  it("does not document flags that are missing from the Commander parser", () => {
+    const helpSection = getHelpDefinitionSection();
+    const helpFlags = extractHelpFlags(helpSection);
+
+    // Build the set of valid CLI flags from CLI_OPTIONS_MAP
+    const registeredFlags = new Set<string>();
+    for (const attr of Object.keys(CLI_OPTIONS_MAP)) {
+      registeredFlags.add(toCliFlag(attr));
+    }
+
+    const extra: string[] = [];
+    for (const flag of helpFlags) {
+      if (!registeredFlags.has(flag)) {
+        extra.push(flag);
+      }
+    }
+
+    expect(extra).toEqual([]);
+  });
+
+  // ── No duplicate flag definitions in help text ────────────────
+
+  it("does not define any flag more than once in the options sections", () => {
+    const helpSection = getHelpDefinitionSection();
+
+    // Match lines that define an option: leading whitespace + --flag
+    // (this avoids counting flags referenced in prose descriptions)
+    const definitionLines = helpSection
+      .split("\n")
+      .filter((line) => /^\s+--[\w-]/.test(line));
+
+    const flagCounts = new Map<string, number>();
+    for (const line of definitionLines) {
+      // Extract the primary flag from the start of the definition line
+      const match = line.match(/^\s+(--[\w-]+)/);
+      if (match) {
+        const flag = match[1];
+        flagCounts.set(flag, (flagCounts.get(flag) ?? 0) + 1);
+      }
+    }
+
+    const duplicates: string[] = [];
+    for (const [flag, count] of flagCounts) {
+      if (count > 1) {
+        duplicates.push(`${flag} (defined ${count} times)`);
+      }
+    }
+
+    expect(duplicates).toEqual([]);
+  });
+
+  // ── Short aliases documented in help match Commander ──────────
+
+  it("documents short aliases (-h, -v) that match their Commander definitions", () => {
+    const helpSection = getHelpDefinitionSection();
+
+    // -h should be documented alongside --help
+    expect(helpSection).toMatch(/-h,\s*--help/);
+    // -v should be documented alongside --version
+    expect(helpSection).toMatch(/-v,\s*--version/);
   });
 });
