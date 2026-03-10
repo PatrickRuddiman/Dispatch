@@ -17,15 +17,15 @@ The module exports two symbols:
 
 ## Why it exists
 
-The Dispatch CLI orchestrates AI agent planning steps that can take minutes
-to complete -- or hang indefinitely if the AI backend is unresponsive. Without
-a timeout mechanism, a stuck planning call would block the entire
+The Dispatch CLI orchestrates long-running async work at multiple boundaries:
+planner calls, spec generation attempts, datasource fetches, and provider-side
+event waits. Without a timeout mechanism, a single stalled operation could block the entire
 [dispatch pipeline](../cli-orchestration/orchestrator.md) with no feedback.
 
 `withTimeout` provides:
 
 - **Bounded execution** -- the orchestrator can enforce a maximum wall-clock
-  time per planning attempt.
+  time per planning attempt, spec attempt, or provider readiness wait.
 - **Labeled errors** -- the `TimeoutError` message includes the operation
   label (e.g., `"Plan generation"`) so log output identifies which step
   timed out.
@@ -80,8 +80,10 @@ timeout duration and retry behavior are configured at the orchestrator level:
 |-----------|----------|------------|---------|--------|
 | Plan timeout | [`--plan-timeout`](../cli-orchestration/cli.md) | `planTimeout` | **10 minutes** | Converted to ms via `(planTimeout ?? 10) * 60_000` |
 | Plan retries | [`--plan-retries`](../cli-orchestration/cli.md) | `planRetries` | **1** (2 total attempts) | Loop runs `(planRetries ?? 1) + 1` iterations |
+| Spec timeout | [`--spec-timeout`](../cli-orchestration/cli.md) | `specTimeout` | **10 minutes** | Converted to ms via `(specTimeout ?? DEFAULT_SPEC_TIMEOUT_MIN) * 60_000` |
+| Spec retries | [`--retries`](../cli-orchestration/cli.md) | `retries` | **2** (3 total attempts) | `withRetry()` wraps the timeout-bounded generation attempt |
 
-The retry loop in
+The planner retry loop in
 [`src/orchestrator/dispatch-pipeline.ts`](../../src/orchestrator/dispatch-pipeline.ts)
 (lines 205-241) implements a simple strategy:
 
@@ -93,6 +95,16 @@ The retry loop in
 There is no exponential backoff, jitter, or circuit-breaker pattern. The
 rationale is that planning timeouts are typically caused by transient AI
 backend slowness, and an immediate retry is usually sufficient.
+
+The spec pipeline uses the same primitives in a slightly different composition:
+
+1. Build a per-item label such as `specAgent.generate(#42)` or
+   `specAgent.generate(/abs/path/to/file.md)`.
+2. Wrap `specAgent.generate(...)` in `withTimeout(..., specTimeoutMs, label)`.
+3. Wrap that timed call in `withRetry(() => ..., retries, { label })`.
+4. Retry immediately on thrown errors, including `TimeoutError`.
+5. If retries are exhausted, mark only that item as failed and continue the
+   rest of the batch.
 
 ## Memory considerations
 
@@ -110,18 +122,24 @@ In practice the risk is low:
   outside the scope of `withTimeout` -- it is the caller's responsibility to
   ensure the underlying operation can be cancelled or will eventually settle.
 
-## Operations that could benefit from timeout wrapping
+## Current usage
 
-Currently only the plan generation step in
-[`dispatch-pipeline.ts`](../planning-and-dispatch/planner.md) uses
-`withTimeout`. Other potentially long-running async operations that are
-**not** timeout-bounded include:
+Current in-repo consumers include:
+
+| Operation | Location | Behavior |
+|-----------|----------|----------|
+| Plan generation | [`src/orchestrator/dispatch-pipeline.ts`](../../src/orchestrator/dispatch-pipeline.ts) | Bounds planner attempts and feeds retry logic |
+| Spec generation attempt | [`src/orchestrator/spec-pipeline.ts`](../../src/orchestrator/spec-pipeline.ts) | Bounds `specAgent.generate(...)` per item before retry |
+| Tracker datasource fetch | [`src/orchestrator/spec-pipeline.ts`](../../src/orchestrator/spec-pipeline.ts) | Applies the hardcoded `FETCH_TIMEOUT_MS = 30_000` per fetch |
+| Copilot session-ready wait | [`src/providers/copilot.ts`](../../src/providers/copilot.ts) | Fails stalled idle/error waits after 600 seconds |
+
+Other potentially long-running async operations that are **not** timeout-bounded include:
 
 | Operation | Location | Risk |
 |-----------|----------|------|
-| Spec agent generation | `src/orchestrator/spec-pipeline.ts` | AI agent call, can hang |
+| OpenCode SSE wait loop | [`src/providers/opencode.ts`](../../src/providers/opencode.ts) | Silent but still-open stream can wait until the caller's outer deadline fires |
 | Executor dispatch | [`src/orchestrator/dispatch-pipeline.ts`](../planning-and-dispatch/dispatcher.md) | AI agent call, can hang |
-| Datasource fetch/list | [`src/datasources/*.ts`](../datasource-system/overview.md) | Network I/O, can stall |
+| Datasource list operations | [`src/datasources/*.ts`](../datasource-system/overview.md) | Network I/O, can stall |
 
 Adding timeout wrapping to these operations would improve resilience but
 would also require corresponding retry logic and error handling.
@@ -152,16 +170,19 @@ these tests.
 - [Slugify](./slugify.md) -- The other shared utility module
 - [Testing](./testing.md) -- How to run slugify and timeout tests, fake
   timer details
-- [Configuration](../cli-orchestration/configuration.md) -- `planTimeout` and
-  `planRetries` configuration reference
-- [Orchestrator](../cli-orchestration/orchestrator.md) -- The dispatch
-  pipeline that consumes `withTimeout`
+- [Configuration](../cli-orchestration/configuration.md) -- `planTimeout`,
+  `planRetries`, `specTimeout`, and `retries` configuration reference
+- [Orchestrator](../cli-orchestration/orchestrator.md) -- The dispatch and spec
+  pipelines that consume `withTimeout`
 - [Planner](../planning-and-dispatch/planner.md) -- The planning phase
   subject to `withTimeout` deadline enforcement
-- [Dispatcher](../planning-and-dispatch/dispatcher.md) -- Uses `Promise.race()`
-  pattern similar to timeout wrapping
+- [Spec Generation](../spec-generation/overview.md) -- The spec pipeline's
+  per-attempt timeout and retry layering
+- [Dispatcher](../planning-and-dispatch/dispatcher.md) -- Consumes providers
+  whose internal prompt waits may use `withTimeout`
 - [Provider Interface](../shared-types/provider.md) -- The `ProviderInstance`
-  whose `prompt()` calls are timeout-wrapped
+  whose `prompt()` calls may be bounded by provider-local or pipeline-level
+  timeout wrappers
 - [Provider Tests](../testing/provider-tests.md) -- Unit tests for provider
   implementations that exercise the prompt interface
 - [Dispatch Pipeline](../cli-orchestration/dispatch-pipeline.md) -- The

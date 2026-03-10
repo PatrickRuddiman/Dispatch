@@ -15,7 +15,8 @@ app, or IDE extension. When used as a dispatch backend, it provides:
 - Local server mode with an HTTP API (OpenAPI 3.1 spec)
 - Session-based conversation isolation with multi-part responses
 - Asynchronous prompt execution with real-time SSE streaming, avoiding HTTP
-  timeout issues that affect long-running LLM calls
+  timeout issues that affect long-running LLM calls while still enforcing a
+  provider-level idle-stream deadline
 
 ## Prerequisites
 
@@ -204,16 +205,20 @@ to the OpenCode server's `GET /global/event` endpoint
 (`src/providers/opencode.ts:90-93`).
 
 **Step 3 -- Event filtering and waiting**: The provider iterates the SSE stream
-with `for await (const event of stream)`. Each event is checked with
-`isSessionEvent(event, sessionId)` to filter out events belonging to other
-sessions. The provider watches for three event types
-(`src/providers/opencode.ts:97-122`):
+with `for await (const event of stream)`, filters each event with
+`isSessionEvent(event, sessionId)`, and watches for three event types
+(`src/providers/opencode.ts:182-207`):
 
 | Event type | Action |
 |------------|--------|
 | `message.part.updated` (text) | Log the streaming delta length; continue waiting |
 | `session.error` | Throw an error with the error details |
 | `session.idle` | Break out of the loop -- the LLM has finished |
+
+There is no provider-local idle timeout in this loop. If the SSE connection
+actually drops, the later `session.messages()` call surfaces that failure. If
+the connection stays open but silent, the provider keeps waiting until the
+caller-level deadline fires.
 
 **Step 4 -- Fetch messages**: After `session.idle`, the provider calls
 `client.session.messages()` to retrieve all messages in the session
@@ -243,17 +248,33 @@ This is necessary because the OpenCode SDK uses different event schemas for
 different event types, and there is no single canonical location for the session
 ID across all event types.
 
-### Stream disconnect handling
+### Stream disconnect handling and cleanup
 
 The SSE stream is closed in a `finally` block by calling `controller.abort()`
-(`src/providers/opencode.ts:123-125`). This ensures the stream is closed whether
-the prompt completes successfully, throws an error, or encounters a
+(`src/providers/opencode.ts`). This ensures the stream is closed whether the
+prompt completes successfully, throws an error, or encounters a
 `session.error` event.
 
-If the SSE stream itself disconnects unexpectedly (e.g., the server crashes), the
-`for await` loop will terminate, the `finally` block will run `controller.abort()`
-(which is a no-op on an already-closed stream), and then the message fetch in
-step 4 will fail with a connection error, which propagates as a thrown error.
+If the SSE stream disconnects unexpectedly (for example because the server
+crashes), the `for await` loop terminates, the `finally` block aborts the
+subscription, and the subsequent `session.messages()` call fails with a
+connection error that propagates to the caller.
+
+### Two-layer resilience model
+
+OpenCode prompt handling is intentionally split across two layers:
+
+1. **Provider-local prompt lifecycle** -- the provider waits for `session.idle`
+   or `session.error`, filters cross-session SSE traffic, and aborts the event
+   subscription in `finally`.
+2. **Pipeline-level deadline** -- callers such as the spec pipeline wrap the
+   whole `specAgent.generate(...)` attempt in [`withTimeout()`](../shared-utilities/timeout.md).
+   In `runSpecPipeline()`, this is controlled by `--spec-timeout` / `specTimeout`
+   (default 10 minutes) and sits outside the provider.
+
+The result is that explicit `session.error` events and real disconnects surface
+immediately from the provider, while silent long-running prompts are still cut
+off by the pipeline's per-attempt deadline and retry logic.
 
 ## Response format
 
@@ -356,9 +377,9 @@ timeout expires.
 ### Server crash mid-session
 
 If the OpenCode server process crashes while a session is active, the SSE stream
-will terminate, the `for await` loop will exit, and the subsequent
-`client.session.messages()` call will fail with a connection error. The
-`@opencode-ai/sdk` does **not** provide automatic recovery or reconnection. The
+will terminate, the later `client.session.messages()` call will fail with a
+connection error, and the `@opencode-ai/sdk` does **not** provide automatic
+recovery or reconnection. The
 dispatch task that was in progress will fail with an error, and the [orchestrator](../cli-orchestration/orchestrator.md)
 will record it as a failed task.
 
@@ -367,8 +388,7 @@ files and only dispatch unchecked (incomplete) tasks.
 
 ### SSE stream stalls
 
-**Symptom**: A dispatch run appears to hang indefinitely after the prompt is
-accepted.
+**Symptom**: A prompt appears stuck after `promptAsync` is accepted.
 
 **Diagnosis**: The `promptAsync` call succeeded (204), but the SSE stream never
 delivers a `session.idle` or `session.error` event.
@@ -379,11 +399,16 @@ delivers a `session.idle` or `session.error` event.
 - The OpenCode server is deadlocked or the LLM provider API is unresponsive.
 - A network interruption silently broke the SSE connection without closing it.
 
-**Resolution**: Kill the dispatch process (Ctrl+C). There is no per-prompt
-timeout. The [timeout utility](../shared-utilities/timeout.md) is only applied
-to the planning phase, not to executor prompts. See
-[prompt timeouts](./overview.md#prompt-timeouts-and-cancellation) for
-the broader discussion of timeout limitations.
+**Resolution**:
+
+- In the spec pipeline, the outer `--spec-timeout` deadline eventually turns the
+  stalled attempt into a `TimeoutError`, retries that item, and records it as a
+  per-item failure if retries are exhausted.
+- If the stream actually disconnects, the follow-up `session.messages()` call
+  fails and the provider surfaces a prompt error immediately.
+- The provider itself does not impose a hardcoded idle timeout for a silent but
+  still-open stream, so other call sites must rely on their own orchestration
+  deadline or manual cancellation.
 
 ### Monitoring sessions
 
@@ -446,4 +471,4 @@ reference.
 - [Type Guards](../shared-utilities/guards.md) -- `hasProperty` function used
   for SSE event filtering in `isSessionEvent`
 - [Timeout Utility](../shared-utilities/timeout.md) -- deadline enforcement
-  applied to planning calls (note: executor prompts are not timeout-bounded)
+  shared by planning calls and OpenCode's session-ready wait

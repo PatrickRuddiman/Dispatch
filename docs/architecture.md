@@ -333,7 +333,7 @@ operations:
 | Scenario | Behavior | Detail page |
 |----------|----------|-------------|
 | Issue fetch fails | Logged, skipped; others continue | [Spec generation](spec-generation/overview.md#error-handling-and-exit-codes) |
-| Spec generation fails for one issue | `failed` counter incremented; others continue | [Spec generation](spec-generation/overview.md#error-handling-and-exit-codes) |
+| Spec generation fails for one issue | Per-attempt timeout/retries are exhausted for that item; `failed` counter increments and others continue | [Spec generation](spec-generation/overview.md#error-handling-and-exit-codes) |
 | Planner times out | Retried up to `--plan-retries` (default 1) with `--plan-timeout` (default 10 min) | [Orchestrator](cli-orchestration/orchestrator.md) |
 | Executor returns null | Task marked failed; pipeline continues | [Dispatcher](planning-and-dispatch/dispatcher.md) |
 | Datasource sync fails post-execution | Warning logged; task still counted as done | [Orchestrator](cli-orchestration/orchestrator.md) |
@@ -431,17 +431,31 @@ See [worktree management](git-and-worktree/worktree-management.md) and
 
 ### Timeout and retry
 
-The planner agent is wrapped in [`withTimeout()`](shared-utilities/timeout.md)
-with configurable bounds:
+Dispatch applies deadlines and retries at the orchestration boundary rather than
+inside the agents themselves. The two primary timeout surfaces are planning and
+spec generation:
 
-| Setting | CLI flag | Default |
-|---------|----------|---------|
-| Planning timeout | `--plan-timeout` | 10 minutes |
-| Planning retries | `--plan-retries` | 1 |
+| Setting | CLI flag | Config key | Default |
+|---------|----------|------------|---------|
+| Planning timeout | `--plan-timeout` | `planTimeout` | 10 minutes |
+| Planning retries | `--plan-retries` | `planRetries` | 1 |
+| Spec-generation timeout | `--spec-timeout` | `specTimeout` | 10 minutes |
+| Spec-generation retries | `--retries` | `retries` | 2 |
 
-On `TimeoutError`, the pipeline retries up to `maxPlanAttempts`. Non-timeout
-errors break immediately. Provider `prompt()` calls themselves have no timeout
-or cancellation mechanism — a hung agent blocks the pipeline indefinitely. See
+Planning retries timed-out attempts up to `maxPlanAttempts`. Spec generation
+uses the same boundary pattern in `runSpecPipeline()`: the pipeline converts
+`(specTimeout ?? 10) * 60_000` once, then wraps each
+`specAgent.generate(...)` attempt as `withRetry(() => withTimeout(...), retries)`.
+
+Architecturally, that means spec deadlines are per item and per attempt.
+`TimeoutError` enters the normal retry flow, exhausted retries fail only that
+item, concurrent batches continue, and successful items still preserve partial
+progress in the final summary.
+
+Provider-local safeguards complement these deadlines rather than replacing them:
+Copilot adds its own idle wait timeout, while OpenCode surfaces `session.error`
+events and stream disconnects during prompt execution. Overall planning/spec
+deadlines still belong to the orchestrator. See
 [provider timeouts](provider-system/overview.md#prompt-timeouts-and-cancellation).
 
 ### External tool dependencies
@@ -556,9 +570,12 @@ registered functions must be idempotent.
 The `withTimeout(promise, ms, label)` utility wraps async operations with a
 deadline, producing descriptive `TimeoutError` messages. The `withRetry(fn, n)`
 utility retries transient failures. Both are used by the dispatch pipeline
-(planner timeout + retry), spec pipeline (generation retry, datasource fetch
-timeout), and the test runner (test execution timeout). The pattern is
-consistent: the pipeline wraps the agent call, not the agent itself.
+(planner timeout + retry), spec pipeline (generation timeout + retry and
+datasource fetch timeout), and the test runner (test execution timeout). The
+pattern is consistent: the pipeline wraps the agent call, not the agent itself.
+For spec generation specifically, the orchestration order is
+`withRetry(() => withTimeout(specAgent.generate(...)))`, so timeouts become
+retryable per-item failures instead of batch-wide aborts.
 
 ### `AsyncLocalStorage` context scoping
 

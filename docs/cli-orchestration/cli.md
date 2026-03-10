@@ -99,7 +99,7 @@ argument parsing (`src/cli.ts:13`). Commander provides:
   options use Commander's variadic syntax to collect multiple arguments
   into arrays.
 - **Custom option processing**: Numeric options (`--concurrency`, `--plan-timeout`,
-  `--retries`, `--plan-retries`, `--test-timeout`) use Commander's custom
+  `--spec-timeout`, `--retries`, `--plan-retries`, `--test-timeout`) use Commander's custom
   processing callbacks to parse, validate, and coerce values in a single step.
 - **Negatable booleans**: `--no-plan`, `--no-branch`, and `--no-worktree` use
   Commander's built-in negatable boolean support (Commander automatically handles
@@ -176,6 +176,7 @@ required and the dispatch-specific flags (`--dry-run`, `--no-plan`,
 | `--output-dir <dir>` | string | `.dispatch/specs` | Output directory for generated spec files. Resolved to an absolute path. Validated for existence and writability via `fs.access()` with `W_OK` before pipeline execution. |
 | `--provider <name>` | string | `"opencode"` | AI agent backend (shared with dispatch mode) |
 | `--server-url <url>` | string | *none* | Connect to a running provider server (shared with dispatch mode) |
+| `--spec-timeout <min>` | float | `10` | Spec generation timeout in minutes. Must be a positive number. Parsed via `parseFloat`. |
 | `--plan-timeout <min>` | float | `10` | Planning timeout in minutes (shared with dispatch mode) |
 | `--plan-retries <n>` | integer | *(falls back to --retries)* | Retry attempts after planning timeout (shared with dispatch mode) |
 
@@ -553,6 +554,7 @@ boundary validation in Commander's custom processing callbacks:
 |-------|-----|-----|
 | `testTimeout` | 1 | 120 |
 | `planTimeout` | 1 | 120 |
+| `specTimeout` | 1 | 120 |
 | `concurrency` | 1 | 64 |
 
 The CLI exports `MAX_CONCURRENCY = CONFIG_BOUNDS.concurrency.max` (64) for

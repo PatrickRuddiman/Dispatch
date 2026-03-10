@@ -28,6 +28,7 @@ export interface DispatchConfig {
   source?: DatasourceName;
   testTimeout?: number;
   planTimeout?: number;
+  specTimeout?: number;
   concurrency?: number;
   org?: string;
   project?: string;
@@ -42,11 +43,12 @@ export interface DispatchConfig {
 export const CONFIG_BOUNDS = {
   testTimeout: { min: 1, max: 120 },
   planTimeout: { min: 1, max: 120 },
+  specTimeout: { min: 1, max: 120 },
   concurrency: { min: 1, max: 64 },
 } as const;
 
 /** Valid configuration key names. */
-export const CONFIG_KEYS = ["provider", "model", "source", "testTimeout", "planTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area"] as const;
+export const CONFIG_KEYS = ["provider", "model", "source", "testTimeout", "planTimeout", "specTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area"] as const;
 
 /** A valid configuration key name. */
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -125,6 +127,14 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
       const num = Number(value);
       if (!Number.isFinite(num) || num < CONFIG_BOUNDS.planTimeout.min || num > CONFIG_BOUNDS.planTimeout.max) {
         return `Invalid planTimeout "${value}". Must be a number between ${CONFIG_BOUNDS.planTimeout.min} and ${CONFIG_BOUNDS.planTimeout.max} (minutes)`;
+      }
+      return null;
+    }
+
+    case "specTimeout": {
+      const num = Number(value);
+      if (!Number.isFinite(num) || num < CONFIG_BOUNDS.specTimeout.min || num > CONFIG_BOUNDS.specTimeout.max) {
+        return `Invalid specTimeout "${value}". Must be a number between ${CONFIG_BOUNDS.specTimeout.min} and ${CONFIG_BOUNDS.specTimeout.max} (minutes)`;
       }
       return null;
     }
