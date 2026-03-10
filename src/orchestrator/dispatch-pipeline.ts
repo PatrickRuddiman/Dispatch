@@ -213,7 +213,7 @@ export async function runDispatchPipeline(
     // found, disable branching so the pipeline can still complete its work.
     if (source === "md" && !noBranch) {
       try {
-        await exec("git", ["rev-parse", "--git-dir"], { cwd });
+        await exec("git", ["rev-parse", "--git-dir"], { cwd, shell: process.platform === "win32" });
       } catch {
         noBranch = true;
         if (verbose) log.debug("No git repository found — skipping git operations for md datasource");
@@ -903,6 +903,7 @@ export async function runDispatchPipeline(
 
     return { total: allTasks.length, completed, failed, skipped: 0, results };
   } catch (err) {
+    setAuthPromptHandler(null);
     tui.stop();
     throw err;
   }

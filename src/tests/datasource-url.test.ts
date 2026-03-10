@@ -170,4 +170,33 @@ describe("parseGitHubRemoteUrl", () => {
     );
     expect(result).toEqual({ owner: "owner", repo: "repo" });
   });
+
+  // ── Fix 2: HTTPS URLs with userinfo (credentials) ──────────────
+  it("parses HTTPS URL with userinfo (user@host)", () => {
+    const result = parseGitHubRemoteUrl(
+      "https://user@github.com/owner/repo.git",
+    );
+    expect(result).toEqual({ owner: "owner", repo: "repo" });
+  });
+
+  it("parses HTTPS URL with user:password userinfo", () => {
+    const result = parseGitHubRemoteUrl(
+      "https://user:token@github.com/owner/repo.git",
+    );
+    expect(result).toEqual({ owner: "owner", repo: "repo" });
+  });
+
+  it("parses HTTPS URL with PAT token as userinfo", () => {
+    const result = parseGitHubRemoteUrl(
+      "https://x-access-token:ghp_abc123@github.com/myorg/myrepo",
+    );
+    expect(result).toEqual({ owner: "myorg", repo: "myrepo" });
+  });
+
+  it("parses HTTPS URL with userinfo and without .git suffix", () => {
+    const result = parseGitHubRemoteUrl(
+      "https://oauth2:token@github.com/owner/repo",
+    );
+    expect(result).toEqual({ owner: "owner", repo: "repo" });
+  });
 });

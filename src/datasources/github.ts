@@ -25,6 +25,13 @@ async function git(args: string[], cwd: string): Promise<string> {
   return stdout;
 }
 
+/**
+ * Redact userinfo (credentials) from a URL for safe inclusion in error messages.
+ */
+function redactUrl(url: string): string {
+  return url.replace(/\/\/[^@/]+@/, "//***@");
+}
+
 /** Resolve the GitHub owner and repo from the git remote URL. */
 async function getOwnerRepo(cwd: string): Promise<{ owner: string; repo: string }> {
   const remoteUrl = await getGitRemoteUrl(cwd);
@@ -33,7 +40,7 @@ async function getOwnerRepo(cwd: string): Promise<{ owner: string; repo: string 
   }
   const parsed = parseGitHubRemoteUrl(remoteUrl);
   if (!parsed) {
-    throw new Error(`Could not parse GitHub owner/repo from remote URL: ${remoteUrl}`);
+    throw new Error(`Could not parse GitHub owner/repo from remote URL: ${redactUrl(remoteUrl)}`);
   }
   return parsed;
 }
@@ -131,7 +138,7 @@ export const datasource: Datasource = {
         number: String(issue.number),
         title: issue.title ?? "",
         body: issue.body ?? "",
-        labels: (issue.labels ?? []).map((l) => (typeof l === "string" ? l : l.name ?? "")),
+        labels: (issue.labels ?? []).map((l) => (typeof l === "string" ? l : l.name ?? "")).filter(Boolean),
         state: issue.state ?? "open",
         url: issue.html_url ?? "",
         comments: [],
@@ -167,7 +174,7 @@ export const datasource: Datasource = {
       number: String(issue.number),
       title: issue.title ?? "",
       body: issue.body ?? "",
-      labels: (issue.labels ?? []).map((l) => (typeof l === "string" ? l : l.name ?? "")),
+      labels: (issue.labels ?? []).map((l) => (typeof l === "string" ? l : l.name ?? "")).filter(Boolean),
       state: issue.state ?? "open",
       url: issue.html_url ?? "",
       comments,
@@ -218,7 +225,7 @@ export const datasource: Datasource = {
       number: String(issue.number),
       title: issue.title ?? "",
       body: issue.body ?? "",
-      labels: (issue.labels ?? []).map((l) => (typeof l === "string" ? l : l.name ?? "")),
+      labels: (issue.labels ?? []).map((l) => (typeof l === "string" ? l : l.name ?? "")).filter(Boolean),
       state: issue.state ?? "open",
       url: issue.html_url ?? "",
       comments: [],

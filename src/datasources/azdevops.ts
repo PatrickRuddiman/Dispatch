@@ -17,6 +17,8 @@ import { InvalidBranchNameError, isValidBranchName } from "../helpers/branch-val
 import { getAzureConnection } from "../helpers/auth.js";
 import { getGitRemoteUrl, parseAzDevOpsRemoteUrl } from "./index.js";
 import type { WebApi } from "azure-devops-node-api";
+import type { TeamContext } from "azure-devops-node-api/interfaces/CoreInterfaces.js";
+import type { JsonPatchDocument } from "azure-devops-node-api/interfaces/common/VSSInterfaces.js";
 import { PullRequestStatus } from "azure-devops-node-api/interfaces/GitInterfaces.js";
 
 const exec = promisify(execFile);
@@ -26,6 +28,14 @@ const doneStateCache = new Map<string, string>();
 async function git(args: string[], cwd: string): Promise<string> {
   const { stdout } = await exec("git", args, { cwd, shell: process.platform === "win32" });
   return stdout;
+}
+
+/**
+ * Redact userinfo (credentials) from a URL for safe inclusion in error messages.
+ * Replaces `https://user:pass@host/...` or `https://user@host/...` with `https://***@host/...`.
+ */
+function redactUrl(url: string): string {
+  return url.replace(/\/\/[^@/]+@/, "//***@");
 }
 
 /**
@@ -52,11 +62,11 @@ async function getOrgAndProject(
     const parsed = parseAzDevOpsRemoteUrl(remoteUrl);
     if (!parsed) {
       throw new Error(
-        `Could not parse Azure DevOps org/project from remote URL: ${remoteUrl}`
+        `Could not parse Azure DevOps org/project from remote URL: ${redactUrl(remoteUrl)}`
       );
     }
-    orgUrl = orgUrl ?? parsed.orgUrl;
-    project = project ?? parsed.project;
+    orgUrl = orgUrl || parsed.orgUrl;
+    project = project || parsed.project;
   }
 
   const connection = await getAzureConnection(orgUrl);
@@ -222,7 +232,7 @@ export const datasource: Datasource = {
 
     const wiql = `SELECT [System.Id] FROM workitems WHERE ${conditions.join(" AND ")} ORDER BY [System.CreatedDate] DESC`;
 
-    const queryResult = await witApi.queryByWiql({ query: wiql }, { project });
+    const queryResult = await witApi.queryByWiql({ query: wiql }, { project } as TeamContext);
     const workItemRefs = queryResult.workItems ?? [];
     if (workItemRefs.length === 0) return [];
 
@@ -287,7 +297,7 @@ export const datasource: Datasource = {
       { op: "add", path: "/fields/System.Description", value: body },
     ];
     // customHeaders is the first arg (pass null), document second, id third
-    await witApi.updateWorkItem(null as any, document as any, Number(issueId));
+    await witApi.updateWorkItem(null as any, document as JsonPatchDocument, Number(issueId));
   },
 
   async close(
@@ -310,7 +320,7 @@ export const datasource: Datasource = {
     const document = [
       { op: "add", path: "/fields/System.State", value: state },
     ];
-    await witApi.updateWorkItem(null as any, document as any, Number(issueId));
+    await witApi.updateWorkItem(null as any, document as JsonPatchDocument, Number(issueId));
   },
 
   async create(
@@ -337,7 +347,7 @@ export const datasource: Datasource = {
 
     const item = await witApi.createWorkItem(
       null as any,
-      document as any,
+      document as JsonPatchDocument,
       project,
       workItemType
     );
@@ -351,10 +361,13 @@ export const datasource: Datasource = {
   },
 
   async getDefaultBranch(opts: DispatchLifecycleOptions): Promise<string> {
+    const PREFIX = "refs/remotes/origin/";
     try {
       const ref = await git(["symbolic-ref", "refs/remotes/origin/HEAD"], opts.cwd);
-      const parts = ref.trim().split("/");
-      const branch = parts[parts.length - 1];
+      const trimmed = ref.trim();
+      const branch = trimmed.startsWith(PREFIX)
+        ? trimmed.slice(PREFIX.length)
+        : trimmed;
       if (!isValidBranchName(branch)) {
         throw new InvalidBranchNameError(branch, "from symbolic-ref output");
       }
@@ -464,7 +477,7 @@ export const datasource: Datasource = {
 
     // Find the repository by matching remote URL
     const repos = await gitApi.getRepositories(project);
-    const normalizeUrl = (u: string) => u.replace(/\.git$/, "").replace(/\/$/, "").toLowerCase();
+    const normalizeUrl = (u: string) => u.replace(/\/\/[^@/]+@/, "//").replace(/\.git$/, "").replace(/\/$/, "").toLowerCase();
     const normalizedRemote = normalizeUrl(remoteUrl);
     const repo = repos.find(
       (r) =>
@@ -474,7 +487,7 @@ export const datasource: Datasource = {
     );
 
     if (!repo || !repo.id) {
-      throw new Error(`Could not find Azure DevOps repository matching remote URL: ${remoteUrl}`);
+      throw new Error(`Could not find Azure DevOps repository matching remote URL: ${redactUrl(remoteUrl)}`);
     }
 
     const target = baseBranch ?? await this.getDefaultBranch(opts);

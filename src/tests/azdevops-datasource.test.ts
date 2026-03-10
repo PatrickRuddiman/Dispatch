@@ -924,6 +924,20 @@ describe("azdevops datasource — getDefaultBranch", () => {
     const result = await datasource.getDefaultBranch({ cwd: "/tmp" });
     expect(result).toBe("master");
   });
+
+  it("handles slashed branch names like release/2024", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/release/2024\n" });
+
+    const result = await datasource.getDefaultBranch({ cwd: "/tmp" });
+    expect(result).toBe("release/2024");
+  });
+
+  it("handles deeply nested branch names like feature/team/sprint-1", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/feature/team/sprint-1\n" });
+
+    const result = await datasource.getDefaultBranch({ cwd: "/tmp" });
+    expect(result).toBe("feature/team/sprint-1");
+  });
 });
 
 describe("azdevops datasource — buildBranchName", () => {
@@ -1136,6 +1150,23 @@ describe("azdevops datasource — createPullRequest", () => {
       datasource.createPullRequest("b", "1", "T", "B", { cwd: "/tmp" }),
     ).rejects.toThrow("Could not find Azure DevOps repository");
   });
+
+  it("matches repository even when remote URL contains userinfo credentials", async () => {
+    // Override getGitRemoteUrl to return a URL with embedded credentials
+    const { getGitRemoteUrl } = await import("../datasources/index.js");
+    vi.mocked(getGitRemoteUrl).mockResolvedValueOnce(
+      "https://user:pat-token@dev.azure.com/testorg/testproject/_git/testrepo"
+    );
+    mockExecFile.mockResolvedValueOnce({ stdout: "refs/remotes/origin/main\n" });
+    mockGitApi.getRepositories.mockResolvedValueOnce([REPO]);
+    mockGitApi.createPullRequest.mockResolvedValueOnce({ pullRequestId: 10 });
+
+    const url = await datasource.createPullRequest(
+      "dispatch/42-feat", "42", "Title", "Body", { cwd: "/tmp" },
+    );
+
+    expect(url).toBe("https://dev.azure.com/testorg/testproject/_git/testrepo/pullrequest/10");
+  });
 });
 
 describe("azdevops datasource — getDefaultBranch validation", () => {
@@ -1260,5 +1291,69 @@ describe("azdevops datasource — createAndSwitchBranch validation", () => {
       datasource.createAndSwitchBranch("bad name", { cwd: "/tmp" })
     ).rejects.toThrow("Invalid branch name");
     expect(mockExecFile).not.toHaveBeenCalled();
+  });
+});
+
+describe("azdevops datasource — credential redaction in error messages", () => {
+  it("redacts credentials from remote URL when parse fails", async () => {
+    const { getGitRemoteUrl } = await import("../datasources/index.js");
+    vi.mocked(getGitRemoteUrl).mockResolvedValueOnce(
+      "https://user:secret-pat@some-unknown-host.com/repo.git"
+    );
+    // The real parseAzDevOpsRemoteUrl will return null for this non-Azure URL
+
+    await expect(
+      datasource.list({ cwd: "/tmp" }),
+    ).rejects.toThrow("***@");
+  });
+
+  it("does not include raw credentials in error messages", async () => {
+    const { getGitRemoteUrl } = await import("../datasources/index.js");
+    vi.mocked(getGitRemoteUrl).mockResolvedValueOnce(
+      "https://user:secret-pat@some-unknown-host.com/repo.git"
+    );
+
+    try {
+      await datasource.list({ cwd: "/tmp" });
+    } catch (err) {
+      expect(String(err)).not.toContain("secret-pat");
+      expect(String(err)).toContain("***@");
+    }
+  });
+
+  it("redacts credentials in createPullRequest error when no repo matches", async () => {
+    const { getGitRemoteUrl } = await import("../datasources/index.js");
+    const credUrl = "https://user:my-secret@dev.azure.com/testorg/testproject/_git/nonexistent";
+    // getOrgAndProject calls getGitRemoteUrl once, then createPullRequest calls it again
+    vi.mocked(getGitRemoteUrl)
+      .mockResolvedValueOnce(credUrl)
+      .mockResolvedValueOnce(credUrl);
+    mockExecFile.mockResolvedValueOnce({ stdout: "refs/remotes/origin/main\n" });
+    mockGitApi.getRepositories.mockResolvedValueOnce([]);
+
+    try {
+      await datasource.createPullRequest("b", "1", "T", "B", { cwd: "/tmp" });
+    } catch (err) {
+      expect(String(err)).not.toContain("my-secret");
+      expect(String(err)).toContain("***@");
+    }
+  });
+});
+
+describe("azdevops datasource — empty string fallback with || operator", () => {
+  it("falls back to parsed orgUrl when opts.org is empty string", async () => {
+    // getOrgAndProject uses || instead of ?? so empty string falls back to parsed value
+    // Ensure getGitRemoteUrl returns a valid Azure DevOps URL for this test
+    const { getGitRemoteUrl } = await import("../datasources/index.js");
+    vi.mocked(getGitRemoteUrl).mockResolvedValueOnce(
+      "https://dev.azure.com/testorg/testproject/_git/testrepo"
+    );
+    mockWitApi.queryByWiql.mockResolvedValueOnce({ workItems: [] });
+
+    // Pass empty string for org and project — should fall back to parsed values, not use ""
+    const result = await datasource.list({ cwd: "/tmp", org: "", project: "" });
+
+    // Should succeed (not throw) because empty string is treated as falsy
+    expect(result).toEqual([]);
   });
 });

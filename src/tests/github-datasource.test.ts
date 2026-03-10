@@ -76,6 +76,23 @@ describe("github datasource — list", () => {
     expect(result).toHaveLength(1);
     expect(result[0].number).toBe("1");
   });
+
+  it("filters out empty and null label names from list results", async () => {
+    mockOctokit.paginate.mockResolvedValue([
+      {
+        number: 1,
+        title: "Labeled Issue",
+        body: "desc",
+        labels: [{ name: "bug" }, { name: "" }, { name: null }, { name: "feature" }],
+        state: "open",
+        html_url: "https://github.com/o/r/issues/1",
+      },
+    ]);
+
+    const result = await datasource.list({ cwd: "/tmp" });
+
+    expect(result[0].labels).toEqual(["bug", "feature"]);
+  });
 });
 
 describe("github datasource — fetch", () => {
@@ -121,6 +138,23 @@ describe("github datasource — fetch", () => {
 
     const result = await datasource.fetch("1", { cwd: "/tmp" });
     expect(result.comments).toEqual(["**bob:** "]);
+  });
+
+  it("filters out empty and null label names from fetch results", async () => {
+    mockOctokit.rest.issues.get.mockResolvedValue({
+      data: {
+        number: 5,
+        title: "Test",
+        body: "Body",
+        labels: [{ name: "critical" }, { name: "" }, { name: null }, { name: "p1" }],
+        state: "open",
+        html_url: "https://github.com/o/r/issues/5",
+      },
+    });
+    mockOctokit.paginate.mockResolvedValue([]);
+
+    const result = await datasource.fetch("5", { cwd: "/tmp" });
+    expect(result.labels).toEqual(["critical", "p1"]);
   });
 });
 
@@ -173,6 +207,22 @@ describe("github datasource — create", () => {
     expect(result.number).toBe("99");
     expect(result.title).toBe("New Issue");
     expect(result.url).toBe("https://github.com/o/r/issues/99");
+  });
+
+  it("filters out empty and null label names from create results", async () => {
+    mockOctokit.rest.issues.create.mockResolvedValue({
+      data: {
+        number: 100,
+        title: "Created Issue",
+        body: "Body",
+        labels: [{ name: "enhancement" }, { name: "" }, { name: null }],
+        state: "open",
+        html_url: "https://github.com/o/r/issues/100",
+      },
+    });
+
+    const result = await datasource.create("Created Issue", "Body", { cwd: "/tmp" });
+    expect(result.labels).toEqual(["enhancement"]);
   });
 });
 
@@ -492,5 +542,22 @@ describe("getCommitMessages", () => {
     const msgs = await getCommitMessages("main", "/tmp");
 
     expect(msgs).toEqual([]);
+  });
+});
+
+describe("github datasource — credential redaction in error messages", () => {
+  it("redacts credentials when remote URL cannot be parsed as GitHub", async () => {
+    const { getGitRemoteUrl, parseGitHubRemoteUrl } = await import("../datasources/index.js");
+    vi.mocked(getGitRemoteUrl).mockResolvedValueOnce(
+      "https://user:secret-token@not-github.com/owner/repo.git"
+    );
+    vi.mocked(parseGitHubRemoteUrl).mockReturnValueOnce(null);
+
+    try {
+      await datasource.list({ cwd: "/tmp" });
+    } catch (err) {
+      expect(String(err)).not.toContain("secret-token");
+      expect(String(err)).toContain("***@");
+    }
   });
 });

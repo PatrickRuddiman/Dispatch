@@ -221,7 +221,7 @@ vi.mock("glob", () => ({
 
 import { runDispatchPipeline, dryRunMode } from "../orchestrator/dispatch-pipeline.js";
 import { getDatasource } from "../datasources/index.js";
-import { getGithubOctokit, getAzureConnection } from "../helpers/auth.js";
+import { getGithubOctokit, getAzureConnection, setAuthPromptHandler } from "../helpers/auth.js";
 import { log } from "../helpers/logger.js";
 import { createTui } from "../tui.js";
 import { createWorktree, removeWorktree, worktreeName, generateFeatureBranchName } from "../helpers/worktree.js";
@@ -2366,5 +2366,82 @@ describe("glob expansion in dispatch pipeline", () => {
 
     expect(vi.mocked(glob)).toHaveBeenCalledWith(["./my-specs/task.md"], { cwd: "/tmp/test", absolute: true });
     expect(result.completed).toBe(1);
+  });
+});
+
+describe("auth prompt handler cleanup on error", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    resetAuthMocks();
+    mocks.mockExecute.mockResolvedValue({
+      success: true,
+      data: { dispatchResult: { task: TASK_FIXTURE, success: true } },
+      durationMs: 100,
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("calls setAuthPromptHandler(null) when pipeline throws an error", async () => {
+    vi.mocked(fetchItemsById).mockRejectedValueOnce(new Error("network failure"));
+
+    await expect(
+      runDispatchPipeline(baseOpts(), "/tmp/test"),
+    ).rejects.toThrow("network failure");
+
+    expect(vi.mocked(setAuthPromptHandler)).toHaveBeenCalledWith(null);
+  });
+});
+
+describe("git rev-parse shell option for Windows compatibility", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    resetAuthMocks();
+    mocks.mockPlan.mockResolvedValue({
+      data: { prompt: "Execute step 1" },
+      success: true,
+      durationMs: 100,
+    });
+    mocks.mockExecute.mockResolvedValue({
+      success: true,
+      data: { dispatchResult: { task: TASK_FIXTURE, success: true } },
+      durationMs: 100,
+    });
+    mocks.mockGenerate.mockResolvedValue({
+      commitMessage: "",
+      prTitle: "",
+      prDescription: "",
+      success: false,
+      error: "mock: not configured",
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("passes shell option to git rev-parse --git-dir for md datasource", async () => {
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ source: "md", noBranch: false }),
+      "/tmp/test",
+    );
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.runAllTimersAsync();
+
+    await resultPromise;
+
+    // Verify execFile was called with shell option for git rev-parse
+    const execFileCalls = vi.mocked(execFile).mock.calls;
+    const revParseCall = execFileCalls.find(
+      (call) => call[0] === "git" && Array.isArray(call[1]) && call[1].includes("rev-parse"),
+    );
+    if (revParseCall) {
+      const options = revParseCall[2] as Record<string, unknown>;
+      expect(options).toHaveProperty("shell", process.platform === "win32");
+    }
   });
 });

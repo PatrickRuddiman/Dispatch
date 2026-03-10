@@ -9,15 +9,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import type { DatasourceName } from "../datasources/interface.js";
-
 const exec = promisify(execFile);
-
-/** Optional context for datasource-specific prerequisite checks. */
-export interface PrereqContext {
-  /** The resolved datasource name. */
-  datasource?: DatasourceName;
-}
 
 /** Minimum supported Node.js version (matches package.json engines field). */
 const MIN_NODE_VERSION = "20.12.0";
@@ -49,11 +41,10 @@ function semverGte(current: string, minimum: string): boolean {
  * 1. `git` is available on PATH (via `git --version`)
  * 2. Node.js version meets the `>=20.12.0` minimum
  *
- * @param context Optional datasource context for conditional CLI checks.
  * @returns An array of human-readable failure message strings.
  *          An empty array means all checks passed.
  */
-export async function checkPrereqs(context?: PrereqContext): Promise<string[]> {
+export async function checkPrereqs(): Promise<string[]> {
   const failures: string[] = [];
 
   // Check git availability

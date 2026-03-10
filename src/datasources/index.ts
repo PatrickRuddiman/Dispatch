@@ -162,9 +162,9 @@ export function parseAzDevOpsRemoteUrl(
 export function parseGitHubRemoteUrl(
   url: string
 ): { owner: string; repo: string } | null {
-  // HTTPS: https://github.com/{owner}/{repo}[.git]
+  // HTTPS: https://[user@]github.com/{owner}/{repo}[.git]
   const httpsMatch = url.match(
-    /^https?:\/\/github\.com\/([^/]+)\/([^/]+?)\/?$/i
+    /^https?:\/\/(?:[^@]+@)?github\.com\/([^/]+)\/([^/]+?)\/?$/i
   );
   if (httpsMatch) {
     const owner = decodeURIComponent(httpsMatch[1]);
