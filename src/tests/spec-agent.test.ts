@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { join, resolve } from "node:path";
-import type { ProviderInstance } from "../providers/interface.js";
+import type { ProviderInstance, ProviderProgressSnapshot } from "../providers/interface.js";
 import type { IssueDetails } from "../datasources/interface.js";
 
 vi.mock("node:fs/promises", () => ({
@@ -204,6 +204,64 @@ describe("generate", () => {
 
     expect(result.success).toBe(true);
     expect(provider.prompt).toHaveBeenCalledOnce();
+  });
+
+  it("forwards provider progress snapshots upward", async () => {
+    const onProgress = vi.fn<(snapshot: ProviderProgressSnapshot) => void>();
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockImplementation(async (_sessionId, _prompt, options) => {
+        options?.onProgress?.({ text: "Generating outline" });
+        return "AI response";
+      }),
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+      onProgress,
+    });
+
+    expect(result.success).toBe(true);
+    expect(onProgress).toHaveBeenCalledWith({ text: "Generating outline" });
+    expect(provider.prompt).toHaveBeenCalledWith(
+      "session-1",
+      expect.any(String),
+      expect.objectContaining({ onProgress }),
+    );
+  });
+
+  it("forwards multiple provider progress snapshots in order", async () => {
+    const snapshots: ProviderProgressSnapshot[] = [
+      { text: "Generating outline" },
+      { text: "Drafting tasks" },
+    ];
+    const onProgress = vi.fn<(snapshot: ProviderProgressSnapshot) => void>();
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockImplementation(async (_sessionId, _prompt, options) => {
+        for (const snapshot of snapshots) {
+          options?.onProgress?.(snapshot);
+        }
+        return "AI response";
+      }),
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+      onProgress,
+    });
+
+    expect(result.success).toBe(true);
+    expect(onProgress.mock.calls.map(([snapshot]) => snapshot)).toEqual(snapshots);
+    expect(provider.prompt).toHaveBeenCalledWith(
+      "session-1",
+      expect.any(String),
+      expect.objectContaining({ onProgress }),
+    );
   });
 
   it("returns failure when neither issue, inlineText, nor filePath+fileContent is provided", async () => {

@@ -22,7 +22,12 @@ import {
   type TextPart,
   type Event as SdkEvent,
 } from "@opencode-ai/sdk";
-import type { ProviderInstance, ProviderBootOptions } from "./interface.js";
+import type {
+  ProviderInstance,
+  ProviderBootOptions,
+  ProviderPromptOptions,
+} from "./interface.js";
+import { createProgressReporter } from "./progress.js";
 import { log } from "../helpers/logger.js";
 import { hasProperty } from "../helpers/guards.js";
 
@@ -150,10 +155,15 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
       }
     },
 
-    async prompt(sessionId: string, text: string): Promise<string | null> {
+    async prompt(
+      sessionId: string,
+      text: string,
+      options?: ProviderPromptOptions,
+    ): Promise<string | null> {
       log.debug(`Sending async prompt to session ${sessionId} (${text.length} chars)...`);
 
       let controller: AbortController | undefined;
+      const reporter = createProgressReporter(options?.onProgress);
 
       try {
         // ── 1. Fire-and-forget: start the LLM processing ──────────
@@ -189,6 +199,7 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
               const delta = event.properties.delta;
               if (delta) {
                 log.debug(`Streaming text (+${delta.length} chars)...`);
+                reporter.emit(delta);
               }
               continue;
             }

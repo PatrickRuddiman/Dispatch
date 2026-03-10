@@ -224,6 +224,147 @@ describe("opencode provider", () => {
       expect(result).toBe("Result text");
     });
 
+    it("emits sanitized, truncated progress updates without duplicates", async () => {
+      const progress: string[] = [];
+      const longDelta = `${"x".repeat(130)}\nsecond line`;
+      const events = [
+        {
+          type: "message.part.updated" as const,
+          properties: {
+            part: { type: "text", sessionID: "sess-1" },
+            delta: "\u001b[31mWorking\nthrough\u0007 spec\u001b[0m",
+          },
+        },
+        {
+          type: "message.part.updated" as const,
+          properties: {
+            part: { type: "text", sessionID: "sess-1" },
+            delta: " Working   through spec ",
+          },
+        },
+        {
+          type: "message.part.updated" as const,
+          properties: {
+            part: { type: "text", sessionID: "sess-1" },
+            delta: "\n\u0007  ",
+          },
+        },
+        {
+          type: "message.part.updated" as const,
+          properties: {
+            part: { type: "text", sessionID: "sess-1" },
+            delta: longDelta,
+          },
+        },
+        {
+          type: "session.idle" as const,
+          properties: { sessionID: "sess-1" },
+        },
+      ];
+
+      mocks.mockSessionPromptAsync.mockResolvedValue({});
+      mocks.mockEventSubscribe.mockResolvedValue({
+        stream: arrayToAsyncGenerator(events),
+      });
+      mocks.mockSessionMessages.mockResolvedValue({
+        data: [
+          {
+            info: { role: "assistant" as const },
+            parts: [{ type: "text" as const, text: "Result text" }],
+          },
+        ],
+      });
+
+      const instance = await boot({ url: "http://localhost:1234" });
+      await instance.prompt("sess-1", "do something", {
+        onProgress: (update) => progress.push(update.text),
+      });
+
+      expect(progress).toHaveLength(2);
+      expect(progress[0]).toBe("Working through spec");
+      expect(progress[1]).toHaveLength(120);
+      expect(progress[1]).toMatch(/^x+…$/);
+    });
+
+    it("emits progress snapshots during streamed prompt execution", async () => {
+      const onProgress = vi.fn();
+      const events = [
+        {
+          type: "message.part.updated" as const,
+          properties: {
+            part: { type: "text", sessionID: "sess-1" },
+            delta: "Working through the spec",
+          },
+        },
+        {
+          type: "session.idle" as const,
+          properties: { sessionID: "sess-1" },
+        },
+      ];
+
+      mocks.mockSessionPromptAsync.mockResolvedValue({});
+      mocks.mockEventSubscribe.mockResolvedValue({
+        stream: arrayToAsyncGenerator(events),
+      });
+      mocks.mockSessionMessages.mockResolvedValue({
+        data: [
+          {
+            info: { role: "assistant" as const },
+            parts: [{ type: "text" as const, text: "Result text" }],
+          },
+        ],
+      });
+
+      const instance = await boot({ url: "http://localhost:1234" });
+      const result = await instance.prompt("sess-1", "do something", { onProgress });
+
+      expect(result).toBe("Result text");
+      expect(onProgress).toHaveBeenCalledWith({ text: "Working through the spec" });
+    });
+
+    it("returns the final assistant text when no usable streamed progress is available", async () => {
+      const onProgress = vi.fn();
+      const events = [
+        {
+          type: "message.part.updated" as const,
+          properties: {
+            part: { type: "text", sessionID: "other-session" },
+            delta: "ignore me",
+          },
+        },
+        {
+          type: "message.part.updated" as const,
+          properties: {
+            part: { type: "text", sessionID: "sess-1" },
+            delta: "\n\u0007  ",
+          },
+        },
+        {
+          type: "session.idle" as const,
+          properties: { sessionID: "sess-1" },
+        },
+      ];
+
+      mocks.mockSessionPromptAsync.mockResolvedValue({});
+      mocks.mockEventSubscribe.mockResolvedValue({
+        stream: arrayToAsyncGenerator(events),
+      });
+      mocks.mockSessionMessages.mockResolvedValue({
+        data: [
+          {
+            info: { role: "assistant" as const },
+            parts: [{ type: "text" as const, text: "Final assistant message" }],
+          },
+        ],
+      });
+
+      const instance = await boot({ url: "http://localhost:1234" });
+      const result = await instance.prompt("sess-1", "do something", { onProgress });
+
+      expect(result).toBe("Final assistant message");
+      expect(onProgress).not.toHaveBeenCalled();
+    });
+
     it("throws when promptAsync returns an error", async () => {
       mocks.mockSessionPromptAsync.mockResolvedValue({
         error: { message: "bad request" },

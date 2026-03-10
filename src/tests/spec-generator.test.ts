@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { isIssueNumbers, isGlobOrFilePath, validateSpecStructure, extractSpecContent, resolveSource } from "../spec-generator.js";
 import { buildFileSpecPrompt, boot } from "../agents/spec.js";
 import * as datasourcesIndex from "../datasources/index.js";
-import type { ProviderInstance } from "../providers/interface.js";
+import type { ProviderInstance, ProviderProgressSnapshot } from "../providers/interface.js";
 import type { Datasource, IssueDetails } from "../datasources/interface.js";
 import { createMockDatasource } from "./fixtures.js";
 
@@ -1167,6 +1167,35 @@ describe("SpecAgent generate", () => {
 
     expect(result.success).toBe(true);
     expect(result.data!.valid).toBe(true);
+  });
+
+  it("forwards provider progress snapshots upward", async () => {
+    const onProgress = vi.fn<(snapshot: ProviderProgressSnapshot) => void>();
+    const snapshot = { text: "Generating outline" };
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockImplementation(async (_sessionId, _prompt, options) => {
+        options?.onProgress?.(snapshot);
+        return "AI response";
+      }),
+    });
+
+    vi.mocked(readFile).mockResolvedValue(VALID_SPEC);
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+      onProgress,
+    });
+
+    expect(result.success).toBe(true);
+    expect(onProgress).toHaveBeenCalledWith(snapshot);
+    expect(provider.prompt).toHaveBeenCalledWith(
+      "session-1",
+      expect.any(String),
+      expect.objectContaining({ onProgress }),
+    );
   });
 
   it("returns failure when AI returns null response", async () => {
