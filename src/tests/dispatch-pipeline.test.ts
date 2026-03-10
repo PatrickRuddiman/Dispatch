@@ -120,15 +120,17 @@ vi.mock("../helpers/auth.js", () => ({
 }));
 
 vi.mock("../tui.js", () => ({
-  createTui: vi.fn().mockReturnValue({
+  createTui: vi.fn().mockImplementation(() => ({
     state: {
       tasks: [],
       phase: "discovering",
       startTime: Date.now(),
       filesFound: 0,
     },
+    update: vi.fn(),
     stop: vi.fn(),
-  }),
+    waitForRecoveryAction: vi.fn().mockResolvedValue("quit"),
+  })),
 }));
 
 vi.mock("../helpers/cleanup.js", () => ({
@@ -259,6 +261,10 @@ function baseOpts(overrides?: Partial<Parameters<typeof runDispatchPipeline>[0]>
     planRetries: 1,   // 1 retry = 2 total attempts
     ...overrides,
   };
+}
+
+function getMockTui() {
+  return vi.mocked(createTui).mock.results[0]?.value;
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────
@@ -414,7 +420,7 @@ describe("planning timeout and retry", () => {
     expect(mocks.mockExecute).not.toHaveBeenCalled();
   });
 
-  it("uses default timeout (10 min) and retries (1) when not configured", async () => {
+  it("uses default timeout (15 min) and shared retries (3) when not configured", async () => {
     mocks.mockPlan.mockImplementation(
       () => new Promise<AgentResult<PlannerData>>(() => {}), // never resolves
     );
@@ -424,15 +430,17 @@ describe("planning timeout and retry", () => {
       "/tmp/test",
     );
 
-    // Default is 10 minutes = 600_000ms; advance past two attempts (default retries=1)
-    await vi.advanceTimersByTimeAsync(600_000); // first attempt timeout
-    await vi.advanceTimersByTimeAsync(600_000); // second attempt timeout
+    // Default is 15 minutes = 900_000ms; advance past four attempts (default retries=3)
+    await vi.advanceTimersByTimeAsync(900_000); // first attempt timeout
+    await vi.advanceTimersByTimeAsync(900_000); // second attempt timeout
+    await vi.advanceTimersByTimeAsync(900_000); // third attempt timeout
+    await vi.advanceTimersByTimeAsync(900_000); // fourth attempt timeout
     await vi.runAllTimersAsync();
 
     const result = await resultPromise;
 
     expect(result.failed).toBe(1);
-    expect(mocks.mockPlan).toHaveBeenCalledTimes(2); // 1 retry = 2 attempts
+    expect(mocks.mockPlan).toHaveBeenCalledTimes(4); // 3 retries = 4 attempts
   });
 
   it("falls back to general retries when planRetries is not set", async () => {
@@ -454,6 +462,26 @@ describe("planning timeout and retry", () => {
 
     expect(result.failed).toBe(1);
     expect(mocks.mockPlan).toHaveBeenCalledTimes(2); // 1 retry = 2 attempts
+  });
+
+  it("prefers planRetries over general retries for planning timeouts", async () => {
+    mocks.mockPlan.mockImplementation(
+      () => new Promise<AgentResult<PlannerData>>(() => {}),
+    );
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ planTimeout: 1, planRetries: 1, retries: 3 }),
+      "/tmp/test",
+    );
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result.failed).toBe(1);
+    expect(mocks.mockPlan).toHaveBeenCalledTimes(2);
   });
 
   it("fails immediately on non-timeout error without retrying", async () => {
@@ -564,6 +592,28 @@ describe("verbose mode", () => {
     await resultPromise;
 
     expect(createTui).toHaveBeenCalled();
+  });
+
+  it("fails predictably without recovery input when verbose mode exhausts retries", async () => {
+    log.verbose = true;
+    mocks.mockExecute.mockResolvedValue({
+      success: false,
+      data: { dispatchResult: { task: TASK_FIXTURE, success: false, error: "persistent error" } },
+      error: "persistent error",
+      durationMs: 50,
+    });
+
+    const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result.completed).toBe(0);
+    expect(result.failed).toBe(1);
+    expect(createTui).not.toHaveBeenCalled();
+    expect(vi.mocked(log.warn)).toHaveBeenCalledWith(expect.stringContaining("interactive terminal"));
+    expect(vi.mocked(log.warn)).toHaveBeenCalledWith(expect.stringContaining("will not wait for input"));
   });
 });
 
@@ -1592,6 +1642,8 @@ describe("worktree dispatch pipeline", () => {
     });
 
     it("fails the task when all executor attempts are exhausted", async () => {
+      const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+      const tui = getMockTui();
       mocks.mockExecute.mockResolvedValue({
         success: false,
         data: { dispatchResult: { task: TASK_FIXTURE, success: false, error: "persistent error" } },
@@ -1599,7 +1651,6 @@ describe("worktree dispatch pipeline", () => {
         durationMs: 50,
       });
 
-      const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
       await vi.advanceTimersByTimeAsync(100);
       await vi.runAllTimersAsync();
 
@@ -1607,8 +1658,30 @@ describe("worktree dispatch pipeline", () => {
 
       expect(result.completed).toBe(0);
       expect(result.failed).toBe(1);
-      // 2 retries + 1 initial = 3 total attempts
-      expect(mocks.mockExecute).toHaveBeenCalledTimes(3);
+      // 3 retries + 1 initial = 4 total attempts
+      expect(mocks.mockExecute).toHaveBeenCalledTimes(4);
+      expect(tui.waitForRecoveryAction).not.toHaveBeenCalled();
+      expect(vi.mocked(log.warn)).toHaveBeenCalledWith(expect.stringContaining("interactive terminal"));
+      expect(vi.mocked(log.warn)).toHaveBeenCalledWith(expect.stringContaining("will not wait for input"));
+    });
+
+    it("uses explicit general retries for executor attempts", async () => {
+      mocks.mockExecute.mockResolvedValue({
+        success: false,
+        data: { dispatchResult: { task: TASK_FIXTURE, success: false, error: "persistent error" } },
+        error: "persistent error",
+        durationMs: 50,
+      });
+
+      const resultPromise = runDispatchPipeline(baseOpts({ retries: 1 }), "/tmp/test");
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.runAllTimersAsync();
+
+      const result = await resultPromise;
+
+      expect(result.completed).toBe(0);
+      expect(result.failed).toBe(1);
+      expect(mocks.mockExecute).toHaveBeenCalledTimes(2);
     });
 
     it("does not retry when executor succeeds on first attempt", async () => {
@@ -1627,6 +1700,186 @@ describe("worktree dispatch pipeline", () => {
       expect(result.completed).toBe(1);
       expect(result.failed).toBe(0);
       expect(mocks.mockExecute).toHaveBeenCalledOnce();
+    });
+
+    it("pauses exhausted executor failure and reruns successfully", async () => {
+      const originalStdIn = process.stdin.isTTY;
+      const originalStdOut = process.stdout.isTTY;
+      Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+      Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+
+      let executeCalls = 0;
+      mocks.mockExecute.mockImplementation(async () => {
+        executeCalls++;
+        if (executeCalls <= 4) {
+          return {
+            success: false,
+            data: { dispatchResult: { task: TASK_FIXTURE, success: false, error: "persistent error" } },
+            error: "persistent error",
+            durationMs: 50,
+          };
+        }
+        return {
+          success: true,
+          data: { dispatchResult: { task: TASK_FIXTURE, success: true } },
+          durationMs: 50,
+        };
+      });
+
+      const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+      const tui = getMockTui();
+      vi.mocked(tui.waitForRecoveryAction).mockImplementationOnce(async () => {
+        expect(tui.state.recovery?.selectedAction).toBe("rerun");
+        return "rerun";
+      });
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.runAllTimersAsync();
+
+      const result = await resultPromise;
+
+      expect(result.completed).toBe(1);
+      expect(result.failed).toBe(0);
+      expect(mocks.mockPlan).toHaveBeenCalledTimes(2);
+      expect(mocks.mockExecute).toHaveBeenCalledTimes(5);
+      expect(tui.waitForRecoveryAction).toHaveBeenCalledOnce();
+      expect(tui.state.recovery).toBeUndefined();
+      expect(tui.state.tasks[0].status).toBe("done");
+
+      Object.defineProperty(process.stdin, "isTTY", { value: originalStdIn, configurable: true });
+      Object.defineProperty(process.stdout, "isTTY", { value: originalStdOut, configurable: true });
+    });
+
+    it("captures paused recovery metadata before waiting for input", async () => {
+      const originalStdIn = process.stdin.isTTY;
+      const originalStdOut = process.stdout.isTTY;
+      Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+      Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+
+      try {
+        setupMultiIssueScenario();
+        mocks.mockExecute.mockImplementation(async ({ task }: any) => {
+          if (task.file.includes("1-test")) {
+            return {
+              success: false,
+              data: { dispatchResult: { task, success: false, error: "persistent error" } },
+              error: "persistent error",
+              durationMs: 50,
+            };
+          }
+          return {
+            success: true,
+            data: { dispatchResult: { task, success: true } },
+            durationMs: 50,
+          };
+        });
+
+        const resultPromise = runDispatchPipeline(multiIssueOpts(), "/tmp/test");
+        const tui = getMockTui();
+        vi.mocked(tui.waitForRecoveryAction).mockImplementationOnce(async () => {
+          expect(tui.state.phase).toBe("paused");
+          expect(tui.state.tasks[0].status).toBe("paused");
+          expect(tui.state.recovery).toMatchObject({
+            taskIndex: 0,
+            taskText: "Implement the feature",
+            error: "persistent error",
+            selectedAction: "rerun",
+            issue: { number: "1", title: "Test" },
+            worktree: "1-test",
+          });
+          return "quit";
+        });
+
+        const result = await resultPromise;
+
+        expect(result.completed).toBe(0);
+        expect(result.failed).toBe(1);
+        expect(tui.waitForRecoveryAction).toHaveBeenCalledOnce();
+        expect(tui.state.recovery).toBeUndefined();
+        expect(tui.state.tasks[0].status).toBe("failed");
+      } finally {
+        Object.defineProperty(process.stdin, "isTTY", { value: originalStdIn, configurable: true });
+        Object.defineProperty(process.stdout, "isTTY", { value: originalStdOut, configurable: true });
+      }
+    });
+
+    it("re-enters planning for each rerun and fails cleanly after repeated recovery", async () => {
+      const originalStdIn = process.stdin.isTTY;
+      const originalStdOut = process.stdout.isTTY;
+      Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+      Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+
+      try {
+        mocks.mockExecute.mockResolvedValue({
+          success: false,
+          data: { dispatchResult: { task: TASK_FIXTURE, success: false, error: "persistent error" } },
+          error: "persistent error",
+          durationMs: 50,
+        });
+
+        const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+        const tui = getMockTui();
+        vi.mocked(tui.waitForRecoveryAction)
+          .mockResolvedValueOnce("rerun")
+          .mockResolvedValueOnce("rerun")
+          .mockResolvedValueOnce("quit");
+
+        await vi.advanceTimersByTimeAsync(100);
+        await vi.runAllTimersAsync();
+
+        const result = await resultPromise;
+
+        expect(result.completed).toBe(0);
+        expect(result.failed).toBe(1);
+        expect(mocks.mockPlan).toHaveBeenCalledTimes(3);
+        expect(mocks.mockExecute).toHaveBeenCalledTimes(12);
+        expect(tui.waitForRecoveryAction).toHaveBeenCalledTimes(3);
+        expect(tui.state.tasks[0].status).toBe("failed");
+        expect(tui.state.recovery).toBeUndefined();
+      } finally {
+        Object.defineProperty(process.stdin, "isTTY", { value: originalStdIn, configurable: true });
+        Object.defineProperty(process.stdout, "isTTY", { value: originalStdOut, configurable: true });
+      }
+    });
+
+    it("quitting recovery stops remaining work and preserves context", async () => {
+      const originalStdIn = process.stdin.isTTY;
+      const originalStdOut = process.stdout.isTTY;
+      Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+      Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+
+      setupMultiIssueScenario();
+      mocks.mockExecute.mockImplementation(async ({ task }: any) => {
+        if (task.file.includes("1-test")) {
+          return {
+            success: false,
+            data: { dispatchResult: { task, success: false, error: "persistent error" } },
+            error: "persistent error",
+            durationMs: 50,
+          };
+        }
+        return {
+          success: true,
+          data: { dispatchResult: { task, success: true } },
+          durationMs: 50,
+        };
+      });
+
+      const resultPromise = runDispatchPipeline(multiIssueOpts(), "/tmp/test");
+      const tui = getMockTui();
+      vi.mocked(tui.waitForRecoveryAction).mockImplementationOnce(async () => {
+        expect(tui.state.recovery?.selectedAction).toBe("rerun");
+        return "quit";
+      });
+      const result = await resultPromise;
+
+      expect(result.completed).toBe(0);
+      expect(result.failed).toBe(1);
+      expect(mocks.mockExecute.mock.calls.some((call: any[]) => call[0].task.file.includes("2-bugfix"))).toBe(false);
+      expect(vi.mocked(removeWorktree)).not.toHaveBeenCalled();
+      expect(tui.state.tasks[0].status).toBe("failed");
+
+      Object.defineProperty(process.stdin, "isTTY", { value: originalStdIn, configurable: true });
+      Object.defineProperty(process.stdout, "isTTY", { value: originalStdOut, configurable: true });
     });
   });
 });
@@ -1948,8 +2201,9 @@ describe("feature branch workflow", () => {
 
     const result = await runDispatchPipeline(featureOpts(), "/tmp/test");
 
-    // Should continue despite merge failure
-    expect(result.completed).toBe(2);
+    // Merge failure is terminal and converts the issue results to failed
+    expect(result.completed).toBe(0);
+    expect(result.failed).toBe(2);
     expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
       expect.stringContaining("Could not merge"),
     );

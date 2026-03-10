@@ -78,8 +78,8 @@ timeout duration and retry behavior are configured at the orchestrator level:
 
 | Parameter | CLI flag | Config key | Default | Effect |
 |-----------|----------|------------|---------|--------|
-| Plan timeout | [`--plan-timeout`](../cli-orchestration/cli.md) | `planTimeout` | **10 minutes** | Converted to ms via `(planTimeout ?? 10) * 60_000` |
-| Plan retries | [`--plan-retries`](../cli-orchestration/cli.md) | `planRetries` | **1** (2 total attempts) | Loop runs `(planRetries ?? 1) + 1` iterations |
+| Plan timeout | [`--plan-timeout`](../cli-orchestration/cli.md) | `planTimeout` | **15 minutes** | Converted to ms via `(planTimeout ?? 15) * 60_000` |
+| Plan retries | [`--plan-retries`](../cli-orchestration/cli.md) | `planRetries` | **falls back to `--retries`, then shared default 3** (4 total attempts) | Loop runs `(planRetries ?? resolvedRetries) + 1` iterations |
 
 The retry loop in
 [`src/orchestrator/dispatch-pipeline.ts`](../../src/orchestrator/dispatch-pipeline.ts)
@@ -93,6 +93,9 @@ The retry loop in
 There is no exponential backoff, jitter, or circuit-breaker pattern. The
 rationale is that planning timeouts are typically caused by transient AI
 backend slowness, and an immediate retry is usually sufficient.
+
+This timeout-driven retry loop is intentionally planner-specific. It does not
+introduce retries for unrelated planner failures.
 
 ## Memory considerations
 

@@ -826,13 +826,13 @@ describe("runSpecPipeline", () => {
       expect(result.failed).toBe(1);
     });
 
-    it("uses default retries of 2 when not specified", async () => {
+    it("uses default retries of 3 when not specified", async () => {
       mocks.mockGenerate.mockRejectedValue(new Error("Always fails"));
 
       const result = await runSpecPipeline(baseOpts({ issues: "1", concurrency: 1 }));
 
-      // Default retries = 2, so 3 total attempts
-      expect(mocks.mockGenerate).toHaveBeenCalledTimes(3);
+      // Default retries = 3, so 4 total attempts
+      expect(mocks.mockGenerate).toHaveBeenCalledTimes(4);
       expect(result.generated).toBe(0);
       expect(result.failed).toBe(1);
     });

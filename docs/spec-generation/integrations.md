@@ -175,7 +175,7 @@ behavior depends on the provider backend:
 
 In both cases:
 
-1. The failed spec is retried up to `--retries` times (default 2) via
+1. The failed spec is retried up to `--retries` times (default 3) via
    `withRetry()`.
 2. If all retries fail, the item is counted as `failed` in the summary.
 3. Other items in the batch continue processing independently — a provider

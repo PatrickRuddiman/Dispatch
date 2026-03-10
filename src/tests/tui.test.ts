@@ -1,8 +1,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Task } from "../parser.js";
+import { PassThrough } from "node:stream";
 
 let writeSpy: ReturnType<typeof vi.spyOn>;
-let tui: { state: import("../tui.js").TuiState; update: () => void; stop: () => void };
+let tui: { state: import("../tui.js").TuiState; update: () => void; stop: () => void; waitForRecoveryAction: () => Promise<"rerun" | "quit"> };
+
+function createMockInput() {
+  const input = new PassThrough() as PassThrough & {
+    isTTY: boolean;
+    isRaw?: boolean;
+    setRawMode: ReturnType<typeof vi.fn>;
+  };
+  input.isTTY = true;
+  input.isRaw = false;
+  input.setRawMode = vi.fn((value: boolean) => {
+    input.isRaw = value;
+  });
+  return input;
+}
 
 function lastOutput(): string {
   const calls = writeSpy.mock.calls;
@@ -37,9 +52,9 @@ afterEach(() => {
 });
 
 // Dynamic import so mocks are in place
-async function setup() {
+async function setup(options?: Parameters<(typeof import("../tui.js"))["createTui"]>[0]) {
   const mod = await import("../tui.js");
-  tui = mod.createTui();
+  tui = mod.createTui(options);
   return tui;
 }
 
@@ -146,6 +161,13 @@ describe("phase rendering", () => {
     expect(lastOutput()).toContain("Complete");
   });
 
+  it("shows paused phase label", async () => {
+    await setup();
+    tui.state.phase = "paused";
+    tui.update();
+    expect(lastOutput()).toContain("Waiting for rerun");
+  });
+
   it("shows found files count when not dispatching", async () => {
     await setup();
     tui.state.filesFound = 5;
@@ -193,6 +215,14 @@ describe("task status rendering", () => {
     addTask("failed", "A failed task", 0);
     tui.update();
     expect(lastOutput()).toContain("failed");
+  });
+
+  it("renders paused task with 'paused' label", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    addTask("paused", "A paused task", 0);
+    tui.update();
+    expect(lastOutput()).toContain("paused");
   });
 
   it("renders task index as 1-based #N", async () => {
@@ -265,6 +295,144 @@ describe("progress bar and summary", () => {
     addTask("pending", "Task B", 1);
     tui.update();
     expect(lastOutput()).toContain("remaining");
+  });
+});
+
+describe("recovery rendering and input", () => {
+  it("shows a play-style rerun affordance and selected action in paused mode", async () => {
+    await setup();
+    tui.state.phase = "paused";
+    addTask("paused", "Broken task", 0, { error: "boom" });
+    tui.state.recovery = {
+      taskIndex: 0,
+      taskText: "Broken task",
+      error: "boom",
+      issue: { number: "42", title: "Fix it" },
+      worktree: "42-fix-it",
+      selectedAction: "rerun",
+    };
+    tui.update();
+
+    const output = lastOutput();
+    expect(output).toContain("[▶ rerun]");
+    expect(output).toContain("q quit");
+    expect(output).toContain("Enter/Space runs selection");
+    expect(output).toContain("Broken task");
+    expect(output).toContain("boom");
+  });
+
+  it("resolves rerun on enter with the default selection", async () => {
+    const input = createMockInput();
+    const output = { columns: 80, write: vi.fn(() => true) };
+
+    await setup({ input: input as any, output: output as any });
+    tui.state.phase = "paused";
+    tui.state.recovery = {
+      taskIndex: 0,
+      taskText: "Broken task",
+      error: "boom",
+      selectedAction: "rerun",
+    };
+    const promise = tui.waitForRecoveryAction();
+    input.emit("keypress", "\r", { name: "return" });
+
+    await expect(promise).resolves.toBe("rerun");
+    expect(input.setRawMode).toHaveBeenNthCalledWith(1, true);
+    expect(input.setRawMode).toHaveBeenLastCalledWith(false);
+    expect(input.listenerCount("keypress")).toBe(0);
+  });
+
+  it("switches selection with tab and resolves quit on enter", async () => {
+    const input = createMockInput();
+    const output = { columns: 80, write: vi.fn(() => true) };
+
+    await setup({ input: input as any, output: output as any });
+    tui.state.phase = "paused";
+    tui.state.recovery = {
+      taskIndex: 0,
+      taskText: "Broken task",
+      error: "boom",
+      selectedAction: "rerun",
+    };
+    const promise = tui.waitForRecoveryAction();
+    input.emit("keypress", "\t", { name: "tab" });
+    expect(tui.state.recovery?.selectedAction).toBe("quit");
+    input.emit("keypress", "\r", { name: "return" });
+
+    await expect(promise).resolves.toBe("quit");
+  });
+
+  it("switches selection with arrows", async () => {
+    const input = createMockInput();
+
+    await setup({ input: input as any, output: { columns: 80, write: vi.fn(() => true) } as any });
+    tui.state.phase = "paused";
+    tui.state.recovery = {
+      taskIndex: 0,
+      taskText: "Broken task",
+      error: "boom",
+      selectedAction: "rerun",
+    };
+    const promise = tui.waitForRecoveryAction();
+    input.emit("keypress", undefined, { name: "left" });
+    expect(tui.state.recovery?.selectedAction).toBe("quit");
+    input.emit("keypress", undefined, { name: "right" });
+    expect(tui.state.recovery?.selectedAction).toBe("rerun");
+    input.emit("keypress", "q", { name: "q" });
+
+    await expect(promise).resolves.toBe("quit");
+  });
+
+  it("resolves rerun on r", async () => {
+    const input = createMockInput();
+
+    await setup({ input: input as any, output: { columns: 80, write: vi.fn(() => true) } as any });
+    tui.state.phase = "paused";
+    tui.state.recovery = {
+      taskIndex: 0,
+      taskText: "Broken task",
+      error: "boom",
+      selectedAction: "quit",
+    };
+    const promise = tui.waitForRecoveryAction();
+    input.emit("keypress", "r", { name: "r" });
+
+    await expect(promise).resolves.toBe("rerun");
+  });
+
+  it("resolves quit on q", async () => {
+    const input = createMockInput();
+
+    await setup({ input: input as any, output: { columns: 80, write: vi.fn(() => true) } as any });
+    tui.state.phase = "paused";
+    tui.state.recovery = {
+      taskIndex: 0,
+      taskText: "Broken task",
+      error: "boom",
+      selectedAction: "rerun",
+    };
+    const promise = tui.waitForRecoveryAction();
+    input.emit("keypress", "q", { name: "q" });
+
+    await expect(promise).resolves.toBe("quit");
+  });
+
+  it("maps ctrl+c to quit", async () => {
+    const input = createMockInput();
+
+    await setup({ input: input as any, output: { columns: 80, write: vi.fn(() => true) } as any });
+    tui.state.phase = "paused";
+    tui.state.recovery = {
+      taskIndex: 0,
+      taskText: "Broken task",
+      error: "boom",
+      selectedAction: "rerun",
+    };
+    const promise = tui.waitForRecoveryAction();
+    input.emit("keypress", "\u0003", { name: "c", ctrl: true });
+
+    await expect(promise).resolves.toBe("quit");
+    expect(input.listenerCount("keypress")).toBe(0);
   });
 });
 
@@ -354,6 +522,36 @@ describe("worktree indicator rendering", () => {
     expect(output).toContain("#123");
     expect(output).toContain("#456");
     // Old-style [wt:...] tags must not appear
+    expect(output).not.toContain("[wt:");
+  });
+
+  it("renders paused recovery details in grouped worktree mode", async () => {
+    await setup();
+    tui.state.phase = "paused";
+    addTask("paused", "Retry auth flow", 0, {
+      worktree: "123-fix-auth",
+      error: "auth still failing",
+    });
+    addTask("running", "Add feature flag", 1, {
+      worktree: "456-add-feature",
+      elapsed: Date.now(),
+    });
+    tui.state.recovery = {
+      taskIndex: 0,
+      taskText: "Retry auth flow",
+      error: "auth still failing",
+      issue: { number: "123", title: "Fix auth" },
+      worktree: "123-fix-auth",
+      selectedAction: "rerun",
+    };
+    tui.update();
+
+    const output = lastOutput();
+    expect(output).toContain("#123");
+    expect(output).toContain("#456");
+    expect(output).toContain("Retry auth flow");
+    expect(output).toContain("Worktree: 123-fix-auth");
+    expect(output).toContain("[▶ rerun]");
     expect(output).not.toContain("[wt:");
   });
 });

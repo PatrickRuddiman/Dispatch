@@ -275,6 +275,15 @@ describe("runFromCli()", () => {
     expect(runDispatchPipeline).not.toHaveBeenCalled();
   });
 
+  it("forwards retries to spec generation", async () => {
+    const runner = await boot({ cwd: "/tmp/test" });
+    await runner.runFromCli(createRawCliArgs({ spec: "1,2", retries: 3 }));
+
+    expect(runSpecPipeline).toHaveBeenCalledWith(
+      expect.objectContaining({ issues: "1,2", retries: 3 }),
+    );
+  });
+
   it("routes to fix-tests pipeline when --fix-tests is set", async () => {
     const runner = await boot({ cwd: "/tmp/test" });
     await runner.runFromCli(createRawCliArgs({ fixTests: true }));

@@ -322,7 +322,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
           issues: m.spec, issueSource: m.issueSource, provider: m.provider,
           model: m.model, serverUrl: m.serverUrl, cwd: m.cwd, outputDir: m.outputDir,
           org: m.org, project: m.project, workItemType: m.workItemType, iteration: m.iteration, area: m.area, concurrency: m.concurrency,
-          dryRun: m.dryRun,
+          dryRun: m.dryRun, retries: m.retries,
         });
       }
 
@@ -360,7 +360,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
           issues, issueSource: m.issueSource, provider: m.provider,
           model: m.model, serverUrl: m.serverUrl, cwd: m.cwd, outputDir: m.outputDir,
           org: m.org, project: m.project, workItemType: m.workItemType, iteration: m.iteration, area: m.area, concurrency: m.concurrency,
-          dryRun: m.dryRun,
+          dryRun: m.dryRun, retries: m.retries,
         });
       }
 

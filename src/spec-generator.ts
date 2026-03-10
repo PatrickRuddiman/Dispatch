@@ -67,7 +67,7 @@ export interface SpecOptions {
   concurrency?: number;
   /** When true, log a preview of what would be generated without booting the provider or writing files. */
   dryRun?: boolean;
-  /** Number of retry attempts for spec generation (default: 2) */
+  /** Number of retry attempts for spec generation (default: 3) */
   retries?: number;
 }
 
@@ -303,4 +303,3 @@ export interface SpecSummary {
   /** Per-file generation durations in milliseconds (filepath → ms) */
   fileDurationsMs: Record<string, number>;
 }
-

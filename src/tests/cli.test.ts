@@ -727,4 +727,13 @@ describe("help text completeness", () => {
     // -v should be documented alongside --version
     expect(helpSection).toMatch(/-v,\s*--version/);
   });
+
+  it("advertises the updated planning timeout and retry defaults", () => {
+    expect(HELP).toContain("Planning timeout in minutes (default: 15)");
+    expect(HELP).toMatch(/--retries <n>\s+Retry attempts for all agents \(default: 3\)/);
+  });
+
+  it("documents paused rerun recovery for interactive dispatch help", () => {
+    expect(HELP).toContain("Interactive dispatch runs pause exhausted failed tasks");
+  });
 });
