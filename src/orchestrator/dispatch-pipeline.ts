@@ -22,8 +22,9 @@ import { isValidBranchName } from "../helpers/branch-validation.js";
 import { createTui, type TuiState } from "../tui.js";
 import type { ProviderName, ProviderInstance } from "../providers/interface.js";
 import { bootProvider } from "../providers/index.js";
-import { getDatasource } from "../datasources/index.js";
+import { getDatasource, getGitRemoteUrl, parseAzDevOpsRemoteUrl, parseGitHubRemoteUrl } from "../datasources/index.js";
 import type { DatasourceName, DispatchLifecycleOptions, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
+import { getGithubOctokit, getAzureConnection, setAuthPromptHandler } from "../helpers/auth.js";
 import type { OrchestrateRunOptions, DispatchSummary } from "./runner.js";
 import {
   fetchItemsById,
@@ -106,7 +107,7 @@ export async function runDispatchPipeline(
     dryRun,
     serverUrl,
     noPlan,
-    noBranch,
+    noBranch: noBranchOpt,
     noWorktree,
     feature,
     provider = "opencode",
@@ -121,6 +122,7 @@ export async function runDispatchPipeline(
     planRetries,
     retries,
   } = opts;
+  let noBranch = noBranchOpt;
 
   // Planning timeout/retry defaults
   const planTimeoutMs = (planTimeout ?? DEFAULT_PLAN_TIMEOUT_MIN) * 60_000;
@@ -131,6 +133,31 @@ export async function runDispatchPipeline(
   // Dry-run mode uses simple log output
   if (dryRun) {
     return dryRunMode(issueIds, cwd, source, org, project, workItemType, iteration, area);
+  }
+
+  // Pre-authenticate before TUI starts so device codes are visible in the terminal.
+  // For cached tokens this is instant; for new auth it runs the device flow
+  // while stdout is still free.
+  // Validate the remote URL first to fail fast before triggering device auth.
+  if (source === "github") {
+    const remoteUrl = await getGitRemoteUrl(cwd);
+    if (remoteUrl && parseGitHubRemoteUrl(remoteUrl)) {
+      await getGithubOctokit();
+    } else if (!remoteUrl) {
+      log.warn("No git remote found — skipping GitHub pre-authentication");
+    } else {
+      log.warn("Remote URL is not a GitHub repository — skipping GitHub pre-authentication");
+    }
+  } else if (source === "azdevops") {
+    let orgUrl = org;
+    if (!orgUrl) {
+      const remoteUrl = await getGitRemoteUrl(cwd);
+      if (remoteUrl) {
+        const parsed = parseAzDevOpsRemoteUrl(remoteUrl);
+        if (parsed) orgUrl = parsed.orgUrl;
+      }
+    }
+    if (orgUrl) await getAzureConnection(orgUrl);
   }
 
   // ── Start TUI (or inline logging for verbose mode) ──────────
@@ -160,6 +187,12 @@ export async function runDispatchPipeline(
     tui = createTui();
     tui.state.provider = provider;
     tui.state.source = source;
+
+    // Route auth device-code prompts into the TUI notification banner
+    setAuthPromptHandler((msg) => {
+      tui.state.notification = msg;
+      tui.update();
+    });
   }
 
   try {
@@ -168,12 +201,26 @@ export async function runDispatchPipeline(
 
     if (!source) {
       tui.state.phase = "done";
+      setAuthPromptHandler(null);
       tui.stop();
       log.error("No datasource configured. Use --source or run 'dispatch config' to set up defaults.");
       return { total: 0, completed: 0, failed: 0, skipped: 0, results: [] };
     }
 
     const datasource = getDatasource(source);
+
+    // When using the md datasource, git operations are optional — they only
+    // work when dispatch is run from inside a git repository. If no repo is
+    // found, disable branching so the pipeline can still complete its work.
+    if (source === "md" && !noBranch) {
+      try {
+        await exec("git", ["rev-parse", "--git-dir"], { cwd, shell: process.platform === "win32" });
+      } catch {
+        noBranch = true;
+        if (verbose) log.debug("No git repository found — skipping git operations for md datasource");
+      }
+    }
+
     const fetchOpts: IssueFetchOptions = { cwd, org, project, workItemType, iteration, area };
     let items: IssueDetails[];
     if (issueIds.length > 0 && source === "md" && issueIds.some(id => isGlobOrFilePath(id))) {
@@ -184,8 +231,13 @@ export async function runDispatchPipeline(
       items = await datasource.list(fetchOpts);
     }
 
+    // Auth is complete — clear the notification banner and handler
+    tui.state.notification = undefined;
+    setAuthPromptHandler(null);
+
     if (items.length === 0) {
       tui.state.phase = "done";
+      setAuthPromptHandler(null);
       tui.stop();
       const label = issueIds.length > 0 ? `issue(s) ${issueIds.join(", ")}` : `datasource: ${source}`;
       log.warn("No work items found from " + label);
@@ -218,6 +270,7 @@ export async function runDispatchPipeline(
 
     if (allTasks.length === 0) {
       tui.state.phase = "done";
+      setAuthPromptHandler(null);
       tui.stop();
       log.warn("No unchecked tasks found");
       return { total: 0, completed: 0, failed: 0, skipped: 0, results: [] };
@@ -281,6 +334,13 @@ export async function runDispatchPipeline(
 
     const lifecycleOpts: DispatchLifecycleOptions = { cwd };
 
+    // ── Capture the branch the user is currently on ────────────────
+    // This is used as the base for new branches, PR targets, and the
+    // branch to return to after completion.  When the user is on main
+    // this naturally resolves to main; when on release/1.4.3 it uses
+    // that branch instead.
+    const startingBranch = await datasource.getCurrentBranch(lifecycleOpts);
+
     // ── Feature-branch setup (when --feature) ──────────────────────
     let featureBranchName: string | undefined;
     let featureDefaultBranch: string | undefined;
@@ -300,12 +360,12 @@ export async function runDispatchPipeline(
       }
 
       try {
-        featureDefaultBranch = await datasource.getDefaultBranch(lifecycleOpts);
+        featureDefaultBranch = startingBranch;
 
-        // Ensure we are on the default branch so the feature branch starts from the correct commit
+        // Ensure we are on the starting branch so the feature branch starts from the correct commit
         await datasource.switchBranch(featureDefaultBranch, lifecycleOpts);
 
-        // Create the feature branch from the default branch (or switch to it if it already exists)
+        // Create the feature branch from the starting branch (or switch to it if it already exists)
         try {
           await datasource.createAndSwitchBranch(featureBranchName, lifecycleOpts);
           log.debug(`Created feature branch ${featureBranchName} from ${featureDefaultBranch}`);
@@ -326,7 +386,7 @@ export async function runDispatchPipeline(
           } catch { /* swallow */ }
         });
 
-        // Switch back to default branch so worktrees can be created from the main repo
+        // Switch back to starting branch so worktrees can be created from the main repo
         await datasource.switchBranch(featureDefaultBranch, lifecycleOpts);
         log.debug(`Switched back to ${featureDefaultBranch} for worktree creation`);
       } catch (err) {
@@ -361,7 +421,7 @@ export async function runDispatchPipeline(
       if (!noBranch && details) {
         fileLogger?.phase("Branch/worktree setup");
         try {
-          defaultBranch = feature ? featureBranchName! : await datasource.getDefaultBranch(lifecycleOpts);
+          defaultBranch = feature ? featureBranchName! : startingBranch;
           branchName = datasource.buildBranchName(details.number, details.title, username);
 
           if (useWorktrees) {
@@ -724,6 +784,7 @@ export async function runDispatchPipeline(
               prTitle,
               prBody,
               issueLifecycleOpts,
+              startingBranch,
             );
             if (prUrl) {
               log.success(`Created PR for issue #${details.number}: ${prUrl}`);
@@ -815,6 +876,7 @@ export async function runDispatchPipeline(
           prTitle,
           prBody,
           lifecycleOpts,
+          startingBranch,
         );
         if (prUrl) {
           log.success(`Created feature PR: ${prUrl}`);
@@ -844,6 +906,7 @@ export async function runDispatchPipeline(
 
     return { total: allTasks.length, completed, failed, skipped: 0, results };
   } catch (err) {
+    setAuthPromptHandler(null);
     tui.stop();
     throw err;
   }

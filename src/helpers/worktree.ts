@@ -10,6 +10,7 @@ import { join, basename } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { slugify } from "./slugify.js";
 import { log } from "./logger.js";
 
@@ -60,6 +61,11 @@ export async function createWorktree(
   const name = worktreeName(issueFilename);
   const worktreePath = join(repoRoot, WORKTREE_DIR, name);
 
+  if (existsSync(worktreePath)) {
+    log.debug(`Reusing existing worktree at ${worktreePath}`);
+    return worktreePath;
+  }
+
   try {
     const args = ["worktree", "add", worktreePath, "-b", branchName];
     if (startPoint) args.push(startPoint);
@@ -67,10 +73,29 @@ export async function createWorktree(
     log.debug(`Created worktree at ${worktreePath} on branch ${branchName}`);
   } catch (err) {
     const message = log.extractMessage(err);
-    // If the branch already exists, try adding without -b
     if (message.includes("already exists")) {
+      // Branch already exists — retry without -b to use the existing branch.
+      // If this also fails (e.g. worktree path conflict), fall through to
+      // prune-and-retry before giving up.
+      try {
+        await git(["worktree", "add", worktreePath, branchName], repoRoot);
+        log.debug(`Created worktree at ${worktreePath} using existing branch ${branchName}`);
+        return worktreePath;
+      } catch (retryErr) {
+        const retryMsg = log.extractMessage(retryErr);
+        if (retryMsg.includes("already used by worktree")) {
+          await git(["worktree", "prune"], repoRoot);
+          await git(["worktree", "add", worktreePath, branchName], repoRoot);
+          log.debug(`Created worktree at ${worktreePath} after pruning stale ref`);
+        } else {
+          throw retryErr;
+        }
+      }
+    } else if (message.includes("already used by worktree")) {
+      // Branch is locked to a stale worktree ref — prune and retry
+      await git(["worktree", "prune"], repoRoot);
       await git(["worktree", "add", worktreePath, branchName], repoRoot);
-      log.debug(`Created worktree at ${worktreePath} using existing branch ${branchName}`);
+      log.debug(`Created worktree at ${worktreePath} after pruning stale ref`);
     } else {
       throw err;
     }

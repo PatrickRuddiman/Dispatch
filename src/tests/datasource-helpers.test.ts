@@ -38,6 +38,9 @@ import { log } from "../helpers/logger.js";
 beforeEach(() => {
   mockExecFile.mockReset();
 });
+
+const SHELL = process.platform === "win32";
+
 import {
   parseIssueFilename,
   fetchItemsById,
@@ -63,6 +66,7 @@ function createMockDatasource(overrides?: Partial<Datasource>): Datasource {
     close: vi.fn<Datasource["close"]>().mockResolvedValue(undefined),
     create: vi.fn<Datasource["create"]>().mockResolvedValue({} as IssueDetails),
     getDefaultBranch: vi.fn<Datasource["getDefaultBranch"]>().mockResolvedValue("main"),
+    getCurrentBranch: vi.fn<Datasource["getCurrentBranch"]>().mockResolvedValue("main"),
     getUsername: vi.fn<Datasource["getUsername"]>().mockResolvedValue("testuser"),
     buildBranchName: vi.fn<Datasource["buildBranchName"]>().mockReturnValue("testuser/dispatch/1"),
     createAndSwitchBranch: vi.fn<Datasource["createAndSwitchBranch"]>().mockResolvedValue(undefined),
@@ -682,7 +686,7 @@ describe("buildPrTitle", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["log", "main..HEAD", "--pretty=format:%s"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
   });
 
@@ -941,7 +945,7 @@ describe("getBranchDiff", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["diff", "main..HEAD"],
-      { cwd: "/tmp/repo", maxBuffer: 10 * 1024 * 1024, shell: false },
+      { cwd: "/tmp/repo", maxBuffer: 10 * 1024 * 1024, shell: SHELL },
     );
   });
 
@@ -973,7 +977,7 @@ describe("amendCommitMessage", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["commit", "--amend", "-m", "feat: new message"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
   });
 
@@ -998,17 +1002,17 @@ describe("squashBranchCommits", () => {
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["merge-base", "main", "HEAD"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["reset", "--soft", "abc123"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
     expect(mockExecFile).toHaveBeenCalledWith(
       "git",
       ["commit", "-m", "feat: squashed"],
-      { cwd: "/tmp/repo", shell: false },
+      { cwd: "/tmp/repo", shell: SHELL },
     );
   });
 

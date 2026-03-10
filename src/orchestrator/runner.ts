@@ -264,7 +264,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
       const m = await resolveCliConfig(args);
 
       // ── Prerequisite checks ───────────────────────────────────
-      const prereqFailures = await checkPrereqs({ datasource: m.issueSource });
+      const prereqFailures = await checkPrereqs();
       if (prereqFailures.length > 0) {
         for (const msg of prereqFailures) {
           log.error(msg);

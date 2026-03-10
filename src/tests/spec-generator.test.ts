@@ -1496,7 +1496,7 @@ describe("spec output formatting", () => {
     expect(runLine).not.toContain("drafts/b.md");
   });
 
-  it("shows file paths in dispatch command for file/glob mode with md datasource", async () => {
+  it("shows numeric ID in dispatch command for file/glob mode with md datasource", async () => {
     const mockDs = createMockDatasource("md");
     vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
@@ -1515,8 +1515,8 @@ describe("spec output formatting", () => {
     const runLine = dimCalls.find((msg) => typeof msg === "string" && msg.includes("dispatch"));
 
     expect(runLine).toBeDefined();
-    // Should show file paths for md datasource
-    expect(runLine).toContain("/tmp/test-project/drafts/feature.md");
+    // After create(), identifier is numeric — dispatch hint shows the ID
+    expect(runLine).toContain("dispatch 99");
   });
 
   it("shows single issue number for tracker mode with one issue", async () => {
@@ -1584,6 +1584,16 @@ describe("inline text pipeline", () => {
 
   it("generates a spec file for inline text input", async () => {
     const mockDs = createMockDatasource("md");
+    vi.mocked(mockDs.create).mockResolvedValue({
+      number: "99",
+      title: "My Feature",
+      body: "Spec content",
+      labels: [],
+      state: "open",
+      url: `${OUTPUT_DIR}/99-my-feature.md`,
+      comments: [],
+      acceptanceCriteria: "",
+    });
     vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
 
@@ -1599,10 +1609,11 @@ describe("inline text pipeline", () => {
     expect(result.failed).toBe(0);
     expect(result.total).toBe(1);
     expect(result.files).toHaveLength(1);
-    expect(result.files[0]).toContain("my-feature-42.md");
+    // After create(), filepath is updated to the created spec file path
+    expect(result.files[0]).toContain("99-my-feature.md");
   });
 
-  it("shows file path in dispatch command for inline text with md datasource", async () => {
+  it("shows numeric ID in dispatch command for inline text with md datasource", async () => {
     const mockDs = createMockDatasource("md");
     vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
@@ -1619,9 +1630,8 @@ describe("inline text pipeline", () => {
     const runLine = dimCalls.find((msg) => typeof msg === "string" && msg.includes("dispatch"));
 
     expect(runLine).toBeDefined();
-    expect(runLine).toContain("my-feature-42.md");
-    // File paths (non-numeric identifiers) should be quoted in the output
-    expect(runLine).toContain('"');
+    // After create(), identifier is numeric — dispatch hint shows the ID
+    expect(runLine).toContain("dispatch 99");
   });
 
   it("truncates long inline text in spec title", async () => {
@@ -1649,6 +1659,16 @@ describe("inline text pipeline", () => {
 
   it("slugifies inline text into the output filename", async () => {
     const mockDs = createMockDatasource("md");
+    vi.mocked(mockDs.create).mockResolvedValue({
+      number: "99",
+      title: "My Feature",
+      body: "Spec content",
+      labels: [],
+      state: "open",
+      url: `${OUTPUT_DIR}/99-my-feature.md`,
+      comments: [],
+      acceptanceCriteria: "",
+    });
     vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
 
@@ -1661,8 +1681,8 @@ describe("inline text pipeline", () => {
     });
 
     expect(result.files).toHaveLength(1);
-    // Special chars become dashes, leading/trailing dashes stripped, lowercased
-    expect(result.files[0]).toContain("my-feature-42.md");
+    // After create(), filepath is updated to the created spec file path
+    expect(result.files[0]).toContain("99-my-feature.md");
   });
 
   it("passes inline text as fileContent to spec agent", async () => {
@@ -1724,10 +1744,11 @@ describe("inline text pipeline", () => {
 
     expect(result.identifiers).toBeDefined();
     expect(result.identifiers).toHaveLength(1);
-    // Identifier should be the file path (md datasource, not a tracker)
-    expect(result.identifiers![0]).toContain("my-feature-42.md");
-    // No issue numbers should be created for md datasource
-    expect(result.issueNumbers).toHaveLength(0);
+    // Identifier should be the numeric ID assigned by datasource.create()
+    expect(result.identifiers![0]).toBe("99");
+    // Issue number should be created via datasource.create()
+    expect(result.issueNumbers).toHaveLength(1);
+    expect(result.issueNumbers).toContain("99");
   });
 });
 
@@ -1852,6 +1873,16 @@ describe("H1-to-filename derivation", () => {
     vi.mocked(readFile).mockResolvedValue(specWithH1);
 
     const mockDs = createMockDatasource("md");
+    vi.mocked(mockDs.create).mockResolvedValue({
+      number: "99",
+      title: "Dark Mode Toggle for Settings",
+      body: specWithH1,
+      labels: [],
+      state: "open",
+      url: `${OUTPUT_DIR}/99-dark-mode-toggle-for-settings.md`,
+      comments: [],
+      acceptanceCriteria: "",
+    });
     vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
 
@@ -1864,8 +1895,8 @@ describe("H1-to-filename derivation", () => {
     });
 
     expect(result.generated).toBe(1);
-    // Should use H1-derived slug, not the raw input text
-    expect(result.files[0]).toContain("dark-mode-toggle-for-settings.md");
+    // After create(), filepath is updated to the created spec file path
+    expect(result.files[0]).toContain("99-dark-mode-toggle-for-settings.md");
     expect(rename).toHaveBeenCalled();
   });
 
@@ -1883,7 +1914,18 @@ describe("H1-to-filename derivation", () => {
     vi.mocked(readFile).mockResolvedValue(specContent);
     vi.mocked(globFn).mockResolvedValue(["/tmp/test-project/drafts/original.md"] as any);
 
+    const createdUrl = `${OUTPUT_DIR}/99-completely-different-title.md`;
     const mockDs = createMockDatasource("md");
+    vi.mocked(mockDs.create).mockResolvedValue({
+      number: "99",
+      title: "Completely Different Title",
+      body: specContent,
+      labels: [],
+      state: "open",
+      url: createdUrl,
+      comments: [],
+      acceptanceCriteria: "",
+    });
     vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
 
@@ -1897,9 +1939,9 @@ describe("H1-to-filename derivation", () => {
     });
 
     expect(result.generated).toBe(1);
-    // File should keep its original path (in-place overwrite)
-    expect(result.files[0]).toBe("/tmp/test-project/drafts/original.md");
-    // No rename for file/glob mode
+    // After create(), filepath is updated to the newly created spec file
+    expect(result.files[0]).toBe(createdUrl);
+    // No rename for file/glob mode (rename only runs for tracker/inline modes)
     expect(rename).not.toHaveBeenCalled();
   });
 });

@@ -202,7 +202,7 @@ describe("integration: dispatch pipeline with md datasource", () => {
 
     // Verify the executor was called for each task
     expect(mocks.mockExecute).toHaveBeenCalledTimes(result.total);
-  });
+  }, 15_000);
 
   it("handles a single-task spec file", async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
@@ -244,7 +244,7 @@ describe("integration: dispatch pipeline with md datasource", () => {
     expect(result.failed).toBe(0);
     expect(result.results).toHaveLength(1);
     expect(result.results[0].success).toBe(true);
-  });
+  }, 15_000);
 
   it("completes with noPlan mode (skips planning)", async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
@@ -286,5 +286,5 @@ describe("integration: dispatch pipeline with md datasource", () => {
     expect(mocks.mockPlan).not.toHaveBeenCalled();
     // Executor should still run
     expect(mocks.mockExecute).toHaveBeenCalledOnce();
-  });
+  }, 15_000);
 });

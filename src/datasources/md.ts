@@ -245,6 +245,18 @@ export const datasource: Datasource = {
     }
   },
 
+  async getCurrentBranch(opts: DispatchLifecycleOptions): Promise<string> {
+    try {
+      const { stdout } = await exec("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+        cwd: opts.cwd,
+        shell: process.platform === "win32",
+      });
+      const branch = stdout.trim();
+      if (branch && branch !== "HEAD") return branch;
+    } catch { /* fall through */ }
+    return this.getDefaultBranch(opts);
+  },
+
   async getUsername(opts: DispatchLifecycleOptions): Promise<string> {
     try {
       const { stdout } = await exec("git", ["config", "user.name"], { cwd: opts.cwd, shell: process.platform === "win32" });
@@ -258,6 +270,22 @@ export const datasource: Datasource = {
 
   buildBranchName(issueNumber: string, title: string, username: string): string {
     const slug = slugify(title, 50);
+
+    // When issueNumber is a file path, extract a clean identifier from the filename
+    if (issueNumber.includes("/") || issueNumber.includes("\\")) {
+      // Normalize backslashes so basename() works correctly on POSIX
+      const normalized = issueNumber.replaceAll("\\", "/");
+      const filename = basename(normalized);
+      const idMatch = /^(\d+)-(.+)\.md$/.exec(filename);
+      if (idMatch) {
+        return `${username}/dispatch/file-${idMatch[1]}-${slug}`;
+      }
+      // Fallback: use slugified basename without extension
+      const nameWithoutExt = parsePath(filename).name;
+      const slugifiedName = slugify(nameWithoutExt, 50);
+      return `${username}/dispatch/file-${slugifiedName}-${slug}`;
+    }
+
     return `${username}/dispatch/${issueNumber}-${slug}`;
   },
 
@@ -267,7 +295,17 @@ export const datasource: Datasource = {
     } catch (err) {
       const message = log.extractMessage(err);
       if (message.includes("already exists")) {
-        await git(["checkout", branchName], opts.cwd);
+        try {
+          await git(["checkout", branchName], opts.cwd);
+        } catch (checkoutErr) {
+          const checkoutMessage = log.extractMessage(checkoutErr);
+          if (checkoutMessage.includes("already used by worktree")) {
+            await git(["worktree", "prune"], opts.cwd);
+            await git(["checkout", branchName], opts.cwd);
+          } else {
+            throw checkoutErr;
+          }
+        }
       } else {
         throw err;
       }
@@ -298,6 +336,7 @@ export const datasource: Datasource = {
     _title: string,
     _body: string,
     _opts: DispatchLifecycleOptions,
+    _baseBranch?: string,
   ): Promise<string> {
     // No-op: MD datasource does not create pull requests
     return "";

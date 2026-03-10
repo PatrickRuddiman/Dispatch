@@ -114,7 +114,7 @@ export async function resolveCliConfig(args: RawCliArgs): Promise<RawCliArgs> {
       log.error("Datasource auto-detection failed — could not determine issue source from git remote.");
       log.dim(`  Available datasources: ${DATASOURCE_NAMES.join(", ")}`);
       log.dim("  Run 'dispatch config' to configure defaults interactively.");
-      log.dim("  Or pass it as a CLI flag: --issue-source <name>");
+      log.dim("  Or pass it as a CLI flag: --source <name>");
       process.exit(1);
     }
   }
