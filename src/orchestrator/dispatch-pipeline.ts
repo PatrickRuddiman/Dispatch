@@ -201,6 +201,7 @@ export async function runDispatchPipeline(
 
     if (!source) {
       tui.state.phase = "done";
+      setAuthPromptHandler(null);
       tui.stop();
       log.error("No datasource configured. Use --source or run 'dispatch config' to set up defaults.");
       return { total: 0, completed: 0, failed: 0, skipped: 0, results: [] };
@@ -236,6 +237,7 @@ export async function runDispatchPipeline(
 
     if (items.length === 0) {
       tui.state.phase = "done";
+      setAuthPromptHandler(null);
       tui.stop();
       const label = issueIds.length > 0 ? `issue(s) ${issueIds.join(", ")}` : `datasource: ${source}`;
       log.warn("No work items found from " + label);
@@ -268,6 +270,7 @@ export async function runDispatchPipeline(
 
     if (allTasks.length === 0) {
       tui.state.phase = "done";
+      setAuthPromptHandler(null);
       tui.stop();
       log.warn("No unchecked tasks found");
       return { total: 0, completed: 0, failed: 0, skipped: 0, results: [] };

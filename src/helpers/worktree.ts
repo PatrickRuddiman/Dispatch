@@ -74,9 +74,23 @@ export async function createWorktree(
   } catch (err) {
     const message = log.extractMessage(err);
     if (message.includes("already exists")) {
-      // Branch already exists — retry without -b to use the existing branch
-      await git(["worktree", "add", worktreePath, branchName], repoRoot);
-      log.debug(`Created worktree at ${worktreePath} using existing branch ${branchName}`);
+      // Branch already exists — retry without -b to use the existing branch.
+      // If this also fails (e.g. worktree path conflict), fall through to
+      // prune-and-retry before giving up.
+      try {
+        await git(["worktree", "add", worktreePath, branchName], repoRoot);
+        log.debug(`Created worktree at ${worktreePath} using existing branch ${branchName}`);
+        return worktreePath;
+      } catch (retryErr) {
+        const retryMsg = log.extractMessage(retryErr);
+        if (retryMsg.includes("already used by worktree")) {
+          await git(["worktree", "prune"], repoRoot);
+          await git(["worktree", "add", worktreePath, branchName], repoRoot);
+          log.debug(`Created worktree at ${worktreePath} after pruning stale ref`);
+        } else {
+          throw retryErr;
+        }
+      }
     } else if (message.includes("already used by worktree")) {
       // Branch is locked to a stale worktree ref — prune and retry
       await git(["worktree", "prune"], repoRoot);
