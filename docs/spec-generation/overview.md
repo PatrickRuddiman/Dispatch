@@ -229,7 +229,7 @@ sequenceDiagram
     Agent-->>Pipeline: SpecAgent { generate, cleanup }
 
     loop For each item (concurrent, capped by defaultConcurrency)
-        Pipeline->>Pipeline: withRetry(() => withTimeout(generate, specTimeoutMs), retries)
+        Pipeline->>Pipeline: withRetry(() => withTimeout(generate, specTimeoutMs), retries=3)
         Pipeline->>Agent: generate(item, outputPath, cwd)
 
         Note over Agent: Path traversal guard
@@ -414,11 +414,11 @@ batch-sequential loop runs. Very large batches (500+ items) may encounter:
 ### Retry strategy
 
 Each spec generation is wrapped in `withRetry()` (`src/helpers/retry.ts`) with
-`retries = 2` (default). Key characteristics:
+`retries = 3` (default). Key characteristics:
 
 - **Immediate retry** — no exponential backoff or delay between attempts.
-- Retries `maxRetries` additional times (so up to 3 total attempts with
-  `retries = 2`).
+- Retries `maxRetries` additional times (so up to 4 total attempts with
+  `retries = 3`).
 - The last error is re-thrown if all attempts fail.
 - Applies to each individual spec, not the entire batch.
 - Configurable via the `--retries` CLI flag or `retries` option.
@@ -707,7 +707,7 @@ independently, and failures do not block subsequent items:
   error message. Processing continues.
 - **Generation failures:** If the AI returns empty content, the session fails,
   the temp file is not written, or the per-attempt spec timeout fires, the
-  error is caught, retried up to 2 times by default, then recorded as failed.
+  error is caught, retried up to 3 times by default, then recorded as failed.
   Processing continues.
 - **Path traversal failures:** If the output path resolves outside `cwd`, the
   generation returns an error immediately without creating an AI session.

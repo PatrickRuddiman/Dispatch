@@ -9,7 +9,7 @@ visually rich display that updates in place.
 
 The TUI provides a live-updating terminal display that shows:
 
-- The current [pipeline phase](../planning-and-dispatch/overview.md#pipeline-stages) (discovering, parsing, booting, dispatching, done)
+- The current [pipeline phase](../planning-and-dispatch/overview.md#pipeline-stages) (discovering, parsing, booting, dispatching, paused, done)
 - A progress bar with completion percentage
 - A windowed task list showing recent completions, active tasks, and upcoming
   tasks
@@ -37,6 +37,9 @@ stateDiagram-v2
     discovering --> parsing : files found
     parsing --> booting : tasks parsed
     booting --> dispatching : provider ready
+    dispatching --> paused : retries exhausted
+    paused --> dispatching : rerun selected
+    paused --> done : quit or non-interactive stop
     dispatching --> done : all batches complete
     discovering --> done : no files / error
     parsing --> done : no tasks / error
@@ -54,9 +57,12 @@ stateDiagram-v2
     pending --> planning : planner starts
     pending --> running : --no-plan mode
     planning --> running : plan succeeded
-    planning --> failed : plan failed
+    planning --> paused : retries exhausted
     running --> done : dispatch succeeded
-    running --> failed : dispatch failed
+    running --> paused : retries exhausted
+    paused --> planning : rerun with planner
+    paused --> running : rerun in --no-plan mode
+    paused --> failed : quit or non-interactive stop
 ```
 
 Each task in `tui.state.tasks[]` has a `status` field that tracks its
@@ -341,7 +347,7 @@ for exit code conventions, double-signal behavior, and troubleshooting.
 
 ### TaskStatus
 
-Union type for per-task states: `"pending" | "planning" | "running" | "done" | "failed"`
+Union type for per-task states: `"pending" | "planning" | "running" | "paused" | "done" | "failed"`
 
 ### TaskState
 
@@ -381,7 +387,7 @@ depending on whether the task is still running or has completed.
 | Field | Type | Description |
 |-------|------|-------------|
 | `tasks` | `TaskState[]` | All tasks with their current states |
-| `phase` | `"discovering" \| "parsing" \| "booting" \| "dispatching" \| "done"` | Current pipeline phase (union type) |
+| `phase` | `"discovering" \| "parsing" \| "booting" \| "dispatching" \| "paused" \| "done"` | Current pipeline phase (union type) |
 | `startTime` | `number` | Timestamp when TUI was created |
 | `filesFound` | `number` | Count of discovered files |
 | `serverUrl` | `string?` | Provider server URL if connecting to existing server |
@@ -389,6 +395,7 @@ depending on whether the task is still running or has completed.
 | `model` | `string?` | Model identifier reported by the provider (e.g. `"gpt-4o"`) |
 | `source` | `string?` | Datasource name (e.g. `"github"`, `"azdevops"`, `"md"`) |
 | `currentIssue` | `{ number: string; title: string }?` | Currently-processing issue context, shown as a header line |
+| `recovery` | `TuiRecoveryState?` | Active paused-task recovery context including error, issue, and worktree |
 
 The `model`, `source`, and `currentIssue` fields were added to give operators
 visibility into which AI model and datasource are active, and which issue is
@@ -414,6 +421,14 @@ This means the TUI state machine still progresses through phases (the `state`
 object is still mutated), but no terminal output is produced from the TUI
 module itself. All output in verbose mode goes through the
 [logger](../shared-types/logger.md) instead.
+
+## Recovery prompt
+
+When a task exhausts its automatic retries, the orchestrator moves the TUI into `paused` phase and sets `state.recovery`. The renderer keeps the failed task context visible, shows a play-style rerun affordance next to the failure marker, and highlights the currently selected recovery action.
+
+`createTui()` exposes `waitForRecoveryAction()`, which defaults the selection to `rerun` and supports `Tab` or left/right arrows to switch between rerun and quit. `Enter` or `Space` triggers the selected action, while `r`/`R` reruns immediately and `q`/`Q` or `Ctrl+C` quits immediately. The listener is prompt-scoped: raw mode and keypress handlers are attached only while waiting and are restored immediately afterward.
+
+In verbose or non-interactive sessions, the orchestrator does not wait on the prompt. It logs that manual rerun requires an interactive terminal, explicitly notes that verbose or non-TTY runs will not wait for input, marks the paused task failed, and stops further dispatch while preserving the current branch/worktree context.
 
 ## Data flow
 

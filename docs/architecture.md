@@ -334,8 +334,8 @@ operations:
 |----------|----------|-------------|
 | Issue fetch fails | Logged, skipped; others continue | [Spec generation](spec-generation/overview.md#error-handling-and-exit-codes) |
 | Spec generation fails for one issue | Per-attempt timeout/retries are exhausted for that item; `failed` counter increments and others continue | [Spec generation](spec-generation/overview.md#error-handling-and-exit-codes) |
-| Planner times out | Retried up to `--plan-retries` (default 1) with `--plan-timeout` (default 10 min) | [Orchestrator](cli-orchestration/orchestrator.md) |
-| Executor returns null | Task marked failed; pipeline continues | [Dispatcher](planning-and-dispatch/dispatcher.md) |
+| Planner times out | Retried up to `--plan-retries` (or shared `--retries`, default 3) with `--plan-timeout` (default 15 min); exhausted retries pause interactive dispatch runs for manual rerun, while verbose or non-TTY runs fail predictably without waiting | [Orchestrator](cli-orchestration/orchestrator.md) |
+| Executor returns null / exhausts retries | Interactive dispatch runs enter paused recovery for manual rerun or quit; verbose or non-TTY runs finalize the task as failed and stop predictably | [Dispatcher](planning-and-dispatch/dispatcher.md) |
 | Datasource sync fails post-execution | Warning logged; task still counted as done | [Orchestrator](cli-orchestration/orchestrator.md) |
 | Provider boot fails | Entire run aborts (misconfiguration — no retry) | [Provider error recovery](provider-system/overview.md#error-recovery-on-boot-failure) |
 | PR already exists for branch | Falls back to returning existing PR URL | [Datasource overview](datasource-system/overview.md#existing-pr-handling) |
@@ -351,13 +351,16 @@ Dispatch provides three output channels with no external monitoring integration:
 
 - **[TUI dashboard](cli-orchestration/tui.md)**: Real-time terminal rendering
   with spinner, progress bar, per-task status tracking, and elapsed time.
-  Tracks both per-task states (pending → planning → running → done/failed) and
-  global phase states (discovering → parsing → booting → dispatching → done).
+  Tracks both per-task states (pending → planning → running → paused →
+  done/failed) and global phase states (discovering → parsing → booting →
+  dispatching → paused → done), including in-session rerun recovery.
 - **[Console logger](shared-types/logger.md)**: Structured chalk-formatted
   output with `--verbose` for debug-level messages. `formatErrorChain()`
   traverses nested `.cause` properties up to five levels. Active in dry-run,
-  non-TTY, and spec generation contexts. Level controlled by `LOG_LEVEL` env
-  var, `DEBUG` env var, or the `--verbose` CLI flag.
+  verbose, non-TTY, and spec generation contexts, and it is the deliberate
+  non-waiting fallback when paused recovery cannot prompt for input. Level
+  controlled by `LOG_LEVEL` env var, `DEBUG` env var, or the `--verbose` CLI
+  flag.
 - **[File logger](shared-types/file-logger.md)**: Per-issue structured log
   files at `.dispatch/logs/issue-{id}.log`, scoped via Node.js
   `AsyncLocalStorage`. When verbose mode is active, every `log.*` call mirrors
@@ -437,10 +440,10 @@ spec generation:
 
 | Setting | CLI flag | Config key | Default |
 |---------|----------|------------|---------|
-| Planning timeout | `--plan-timeout` | `planTimeout` | 10 minutes |
-| Planning retries | `--plan-retries` | `planRetries` | 1 |
+| Planning timeout | `--plan-timeout` | `planTimeout` | 15 minutes |
+| Planning retries | `--plan-retries` | `planRetries` | falls back to `--retries` (default 3) |
 | Spec-generation timeout | `--spec-timeout` | `specTimeout` | 10 minutes |
-| Spec-generation retries | `--retries` | `retries` | 2 |
+| Spec-generation retries | `--retries` | `retries` | 3 |
 
 Planning retries timed-out attempts up to `maxPlanAttempts`. Spec generation
 uses the same boundary pattern in `runSpecPipeline()`: the pipeline converts
@@ -457,6 +460,11 @@ Copilot adds its own idle wait timeout, while OpenCode surfaces `session.error`
 events and stream disconnects during prompt execution. Overall planning/spec
 deadlines still belong to the orchestrator. See
 [provider timeouts](provider-system/overview.md#prompt-timeouts-and-cancellation).
+
+In interactive dispatch runs, exhausting those retries no longer always means an
+immediate terminal failure: the task can enter a paused recovery state for a
+manual rerun, while verbose or non-TTY contexts still fail predictably without
+waiting for input.
 
 ### External tool dependencies
 

@@ -25,7 +25,7 @@ import { FileLogger, fileLoggerStorage } from "../helpers/file-logger.js";
 import { confirmLargeBatch } from "../helpers/confirm-large-batch.js";
 import chalk from "chalk";
 import { elapsed, renderHeaderLines } from "../helpers/format.js";
-import { withRetry } from "../helpers/retry.js";
+import { DEFAULT_RETRY_COUNT, withRetry } from "../helpers/retry.js";
 import { withTimeout } from "../helpers/timeout.js";
 import { slugify, MAX_SLUG_LENGTH } from "../helpers/slugify.js";
 import { parseIssueFilename } from "./datasource-helpers.js";
@@ -539,7 +539,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     area,
     concurrency = defaultConcurrency(),
     dryRun,
-    retries = 2,
+    retries = DEFAULT_RETRY_COUNT,
     specTimeout,
   } = opts;
 

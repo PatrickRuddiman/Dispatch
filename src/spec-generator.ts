@@ -70,7 +70,7 @@ export interface SpecOptions {
   concurrency?: number;
   /** When true, log a preview of what would be generated without booting the provider or writing files. */
   dryRun?: boolean;
-  /** Number of retry attempts for spec generation (default: 2) */
+  /** Number of retry attempts for spec generation (default: 3) */
   retries?: number;
   /** Spec generation timeout in minutes (default: 10) */
   specTimeout?: number;

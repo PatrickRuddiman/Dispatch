@@ -78,10 +78,10 @@ timeout duration and retry behavior are configured at the orchestrator level:
 
 | Parameter | CLI flag | Config key | Default | Effect |
 |-----------|----------|------------|---------|--------|
-| Plan timeout | [`--plan-timeout`](../cli-orchestration/cli.md) | `planTimeout` | **10 minutes** | Converted to ms via `(planTimeout ?? 10) * 60_000` |
-| Plan retries | [`--plan-retries`](../cli-orchestration/cli.md) | `planRetries` | **1** (2 total attempts) | Loop runs `(planRetries ?? 1) + 1` iterations |
+| Plan timeout | [`--plan-timeout`](../cli-orchestration/cli.md) | `planTimeout` | **15 minutes** | Converted to ms via `(planTimeout ?? 15) * 60_000` |
+| Plan retries | [`--plan-retries`](../cli-orchestration/cli.md) | `planRetries` | **falls back to `--retries`, then shared default 3** (4 total attempts) | Loop runs `(planRetries ?? resolvedRetries) + 1` iterations |
 | Spec timeout | [`--spec-timeout`](../cli-orchestration/cli.md) | `specTimeout` | **10 minutes** | Converted to ms via `(specTimeout ?? DEFAULT_SPEC_TIMEOUT_MIN) * 60_000` |
-| Spec retries | [`--retries`](../cli-orchestration/cli.md) | `retries` | **2** (3 total attempts) | `withRetry()` wraps the timeout-bounded generation attempt |
+| Spec retries | [`--retries`](../cli-orchestration/cli.md) | `retries` | **3** (4 total attempts) | `withRetry()` wraps the timeout-bounded generation attempt |
 
 The planner retry loop in
 [`src/orchestrator/dispatch-pipeline.ts`](../../src/orchestrator/dispatch-pipeline.ts)
@@ -105,6 +105,9 @@ The spec pipeline uses the same primitives in a slightly different composition:
 4. Retry immediately on thrown errors, including `TimeoutError`.
 5. If retries are exhausted, mark only that item as failed and continue the
    rest of the batch.
+
+This timeout-driven retry loop is intentionally planner-specific for the planning path. It does not
+introduce retries for unrelated planner failures.
 
 ## Memory considerations
 
