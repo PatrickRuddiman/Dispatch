@@ -85,6 +85,13 @@ vi.mock("../../helpers/cleanup.js", () => ({
   registerCleanup: vi.fn(),
 }));
 
+vi.mock("../../helpers/auth.js", () => ({
+  getGithubOctokit: vi.fn().mockResolvedValue({}),
+  getAzureConnection: vi.fn().mockResolvedValue({}),
+  setAuthPromptHandler: vi.fn(),
+  ensureAuthReady: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("../../helpers/worktree.js", () => ({
   createWorktree: vi.fn().mockResolvedValue("/tmp/mock-worktree"),
   removeWorktree: vi.fn().mockResolvedValue(undefined),
@@ -343,6 +350,8 @@ describe("integration: dispatch pipeline with md datasource", () => {
       tmpDir,
     );
 
+    // Flush the ensureAuthReady microtask so createTui() runs synchronously after
+    await Promise.resolve();
     const tui = vi.mocked(createTui).mock.results[0]!.value;
     vi.mocked(tui.waitForRecoveryAction).mockImplementationOnce(async () => {
       expect(tui.state.recovery?.selectedAction).toBe("rerun");

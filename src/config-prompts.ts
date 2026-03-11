@@ -184,7 +184,7 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
 
   // ── Authenticate tracker-backed datasource ────────────────
   try {
-    await ensureAuthReady(effectiveSource, process.cwd(), org);
+    await ensureAuthReady(effectiveSource ?? undefined, process.cwd(), org);
   } catch (err) {
     log.warn(`Authentication failed: ${err instanceof Error ? err.message : String(err)}`);
     log.warn("You can re-run 'dispatch config' or authenticate later at runtime.");

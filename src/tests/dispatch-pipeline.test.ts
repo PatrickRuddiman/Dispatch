@@ -1644,6 +1644,7 @@ describe("worktree dispatch pipeline", () => {
 
     it("fails the task when all executor attempts are exhausted", async () => {
       const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+      await vi.advanceTimersByTimeAsync(0); // flush ensureAuthReady microtask so createTui runs
       const tui = getMockTui();
       mocks.mockExecute.mockResolvedValue({
         success: false,
@@ -1728,6 +1729,7 @@ describe("worktree dispatch pipeline", () => {
       });
 
       const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+      await vi.advanceTimersByTimeAsync(0); // flush ensureAuthReady microtask so createTui runs
       const tui = getMockTui();
       vi.mocked(tui.waitForRecoveryAction).mockImplementationOnce(async () => {
         expect(tui.state.recovery?.selectedAction).toBe("rerun");
@@ -1775,6 +1777,7 @@ describe("worktree dispatch pipeline", () => {
         });
 
         const resultPromise = runDispatchPipeline(multiIssueOpts(), "/tmp/test");
+        await vi.advanceTimersByTimeAsync(0); // flush ensureAuthReady microtask so createTui runs
         const tui = getMockTui();
         vi.mocked(tui.waitForRecoveryAction).mockImplementationOnce(async () => {
           expect(tui.state.phase).toBe("paused");
@@ -1818,6 +1821,7 @@ describe("worktree dispatch pipeline", () => {
         });
 
         const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+        await vi.advanceTimersByTimeAsync(0); // flush ensureAuthReady microtask so createTui runs
         const tui = getMockTui();
         vi.mocked(tui.waitForRecoveryAction)
           .mockResolvedValueOnce("rerun")
@@ -1866,6 +1870,7 @@ describe("worktree dispatch pipeline", () => {
       });
 
       const resultPromise = runDispatchPipeline(multiIssueOpts(), "/tmp/test");
+      await vi.advanceTimersByTimeAsync(0); // flush ensureAuthReady microtask so createTui runs
       const tui = getMockTui();
       vi.mocked(tui.waitForRecoveryAction).mockImplementationOnce(async () => {
         expect(tui.state.recovery?.selectedAction).toBe("rerun");
