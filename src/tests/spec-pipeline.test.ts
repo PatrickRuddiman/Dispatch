@@ -57,6 +57,7 @@ vi.mock("../helpers/slugify.js", () => ({
 }));
 
 vi.mock("../spec-generator.js", () => ({
+  DEFAULT_SPEC_TIMEOUT_MIN: 10,
   isIssueNumbers: vi.fn(),
   isGlobOrFilePath: vi.fn(),
   resolveSource: vi.fn(),
@@ -926,6 +927,122 @@ describe("runSpecPipeline", () => {
       expect(mocks.mockGenerate).toHaveBeenCalledTimes(3);
       expect(result.generated).toBe(0);
       expect(result.failed).toBe(1);
+    });
+  });
+
+  describe("spec generation timeouts", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("uses the default spec timeout when specTimeout is omitted", async () => {
+      mocks.mockGenerate.mockImplementation(() => new Promise(() => {}));
+
+      const resultPromise = runSpecPipeline(
+        baseOpts({ issues: "1", retries: 0, specTimeout: undefined, concurrency: 1 }),
+      );
+
+      await vi.advanceTimersByTimeAsync(600_000);
+      await vi.runAllTimersAsync();
+
+      const result = await resultPromise;
+
+      expect(mocks.mockGenerate).toHaveBeenCalledTimes(1);
+      expect(result.generated).toBe(0);
+      expect(result.failed).toBe(1);
+      expect(mocks.mockUpdate).not.toHaveBeenCalled();
+      expect(
+        vi.mocked(log.error).mock.calls.some(
+          ([message]) =>
+            typeof message === "string" &&
+            message.includes("Timed out after 600000ms") &&
+            message.includes("specAgent.generate(#1)"),
+        ),
+      ).toBe(true);
+    });
+
+    it("retries after a spec generation timeout and succeeds on the next attempt", async () => {
+      mocks.mockGenerate
+        .mockImplementationOnce(() => new Promise(() => {}))
+        .mockResolvedValueOnce({
+          data: {
+            content: "# Generated Spec\n\n## Tasks\n\n- [ ] Do something",
+            valid: true,
+          },
+          success: true,
+        });
+
+      const resultPromise = runSpecPipeline(
+        baseOpts({ issues: "1", retries: 1, specTimeout: 0.001, concurrency: 1 }),
+      );
+
+      await vi.advanceTimersByTimeAsync(60);
+      await vi.runAllTimersAsync();
+
+      const result = await resultPromise;
+
+      expect(mocks.mockGenerate).toHaveBeenCalledTimes(2);
+      expect(result.generated).toBe(1);
+      expect(result.failed).toBe(0);
+      expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
+        expect.stringContaining("Attempt 1/2 failed [specAgent.generate(#1)]"),
+      );
+    });
+
+    it("runs cleanup and counts the timed out item once when generation times out", async () => {
+      mocks.mockGenerate.mockImplementation(() => new Promise(() => {}));
+
+      const resultPromise = runSpecPipeline(
+        baseOpts({ issues: "1", retries: 0, specTimeout: 0.001, concurrency: 1 }),
+      );
+
+      await vi.advanceTimersByTimeAsync(60);
+      await vi.runAllTimersAsync();
+
+      const result = await resultPromise;
+
+      expect(result.generated).toBe(0);
+      expect(result.failed).toBe(1);
+      expect(mocks.mockAgentCleanup).toHaveBeenCalledOnce();
+      expect(mocks.mockProviderCleanup).toHaveBeenCalledOnce();
+      expect(mocks.mockUpdate).not.toHaveBeenCalled();
+      expect(unlink).not.toHaveBeenCalled();
+    });
+
+    it("fails only the timed out item and still completes the rest of the batch", async () => {
+      mocks.mockGenerate
+        .mockImplementationOnce(() => new Promise(() => {}))
+        .mockResolvedValueOnce({
+          data: {
+            content: "# Generated Spec\n\n## Tasks\n\n- [ ] Do something",
+            valid: true,
+          },
+          success: true,
+        })
+        .mockImplementationOnce(() => new Promise(() => {}));
+
+      const resultPromise = runSpecPipeline(
+        baseOpts({ issues: "1,2", retries: 1, specTimeout: 0.001, concurrency: 2 }),
+      );
+
+      await vi.advanceTimersByTimeAsync(60);
+      await vi.advanceTimersByTimeAsync(60);
+      await vi.runAllTimersAsync();
+
+      const result = await resultPromise;
+
+      expect(result.total).toBe(2);
+      expect(result.generated).toBe(1);
+      expect(result.failed).toBe(1);
+      expect(mocks.mockGenerate).toHaveBeenCalledTimes(3);
+      expect(mocks.mockUpdate).toHaveBeenCalledTimes(1);
+      expect(unlink).toHaveBeenCalledTimes(1);
+      expect(mocks.mockAgentCleanup).toHaveBeenCalledOnce();
+      expect(mocks.mockProviderCleanup).toHaveBeenCalledOnce();
     });
   });
 });

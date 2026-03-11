@@ -55,6 +55,7 @@ export const HELP = `
   Spec options:
     --spec <value>         Comma-separated issue numbers, glob pattern for .md files, or inline text description
     --respec [value]       Regenerate specs: issue numbers, glob, or omit to regenerate all existing specs
+    --spec-timeout <min>   Spec generation timeout in minutes (default: 10)
     --output-dir <dir>     Output directory for specs (default: .dispatch/specs)
 
   Azure DevOps options:
@@ -130,6 +131,7 @@ export const CLI_OPTIONS_MAP: Record<string, string> = {
   concurrency: "concurrency",
   serverUrl: "serverUrl",
   planTimeout: "planTimeout",
+  specTimeout: "specTimeout",
   retries: "retries",
   planRetries: "planRetries",
   testTimeout: "testTimeout",
@@ -187,6 +189,20 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
         const n = parseFloat(val);
         if (isNaN(n) || n < CONFIG_BOUNDS.planTimeout.min) throw new CommanderError(1, "commander.invalidArgument", "--plan-timeout must be a positive number (minutes)");
         if (n > CONFIG_BOUNDS.planTimeout.max) throw new CommanderError(1, "commander.invalidArgument", `--plan-timeout must not exceed ${CONFIG_BOUNDS.planTimeout.max}`);
+        return n;
+      },
+    )
+    .option(
+      "--spec-timeout <min>",
+      "Spec generation timeout in minutes",
+      (val: string): number => {
+        const n = parseFloat(val);
+        if (isNaN(n) || n < CONFIG_BOUNDS.specTimeout.min) {
+          throw new CommanderError(1, "commander.invalidArgument", "--spec-timeout must be a positive number (minutes)");
+        }
+        if (n > CONFIG_BOUNDS.specTimeout.max) {
+          throw new CommanderError(1, "commander.invalidArgument", `--spec-timeout must not exceed ${CONFIG_BOUNDS.specTimeout.max}`);
+        }
         return n;
       },
     )
@@ -267,6 +283,7 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
   if (opts.concurrency !== undefined) args.concurrency = opts.concurrency;
   if (opts.serverUrl !== undefined) args.serverUrl = opts.serverUrl;
   if (opts.planTimeout !== undefined) args.planTimeout = opts.planTimeout;
+  if (opts.specTimeout !== undefined) args.specTimeout = opts.specTimeout;
   if (opts.retries !== undefined) args.retries = opts.retries;
   if (opts.planRetries !== undefined) args.planRetries = opts.planRetries;
   if (opts.testTimeout !== undefined) args.testTimeout = opts.testTimeout;
