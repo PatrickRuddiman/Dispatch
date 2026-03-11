@@ -197,6 +197,43 @@ describe("prompt", () => {
     expect(result).toBe("response text");
   });
 
+    it("emits sparse lifecycle progress snapshots", async () => {
+      const onProgress = vi.fn();
+      const unsubIdle = vi.fn();
+      const unsubErr = vi.fn();
+
+    mockSession.on.mockImplementation(
+      (eventName: string, handler: Function) => {
+        if (eventName === "session.idle") {
+          setTimeout(() => handler(), 0);
+          return unsubIdle;
+        }
+
+        return unsubErr;
+      },
+    );
+    mockSession.getMessages.mockResolvedValue([
+      {
+        type: "assistant.message",
+        data: { content: "response text" },
+      },
+    ]);
+
+    const instance = await boot();
+    const sessionId = await instance.createSession();
+    const result = await instance.prompt(sessionId, "hello", { onProgress });
+
+      expect(result).toBe("response text");
+      expect(onProgress).toHaveBeenCalledWith({ text: "Waiting for Copilot response" });
+      expect(onProgress).toHaveBeenCalledWith({ text: "Finalizing response" });
+      expect(onProgress.mock.calls.map(([update]) => update.text)).toEqual([
+        "Waiting for Copilot response",
+        "Finalizing response",
+      ]);
+      expect(unsubIdle).toHaveBeenCalled();
+      expect(unsubErr).toHaveBeenCalled();
+    });
+
   it("returns null when no assistant message found", async () => {
     mockSession.on.mockImplementation(
       (eventName: string, handler: Function) => {

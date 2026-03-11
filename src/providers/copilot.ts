@@ -11,7 +11,12 @@
  */
 
 import type { AssistantMessageEvent, CopilotSession } from "@github/copilot-sdk";
-import type { ProviderInstance, ProviderBootOptions } from "./interface.js";
+import type {
+  ProviderInstance,
+  ProviderBootOptions,
+  ProviderPromptOptions,
+} from "./interface.js";
+import { createProgressReporter } from "./progress.js";
 import { log } from "../helpers/logger.js";
 import { withTimeout } from "../helpers/timeout.js";
 
@@ -115,41 +120,43 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
       }
     },
 
-    async prompt(sessionId: string, text: string): Promise<string | null> {
+    async prompt(
+      sessionId: string,
+      text: string,
+      options?: ProviderPromptOptions,
+    ): Promise<string | null> {
       const session = sessions.get(sessionId);
       if (!session) {
         throw new Error(`Copilot session ${sessionId} not found`);
       }
 
       log.debug(`Sending prompt to session ${sessionId} (${text.length} chars)...`);
+      const reporter = createProgressReporter(options?.onProgress);
+      let unsubIdle: (() => void) | undefined;
+      let unsubErr: (() => void) | undefined;
       try {
         // ── 1. Fire-and-forget: start LLM processing ──────────────
         await session.send({ prompt: text });
         log.debug("Async prompt accepted, waiting for session to become idle...");
+        reporter.emit("Waiting for Copilot response");
 
         // ── 2. Wait for session.idle or session.error ─────────────
-        let unsubIdle: (() => void) | undefined;
-        let unsubErr: (() => void) | undefined;
-        try {
-          await withTimeout(
-            new Promise<void>((resolve, reject) => {
-              unsubIdle = session.on("session.idle", () => {
-                resolve();
-              });
+        await withTimeout(
+          new Promise<void>((resolve, reject) => {
+            unsubIdle = session.on("session.idle", () => {
+              resolve();
+            });
 
-              unsubErr = session.on("session.error", (event) => {
-                reject(new Error(`Copilot session error: ${event.data.message}`));
-              });
-            }),
-            SESSION_READY_TIMEOUT_MS,
-            "copilot session ready",
-          );
-        } finally {
-          unsubIdle?.();
-          unsubErr?.();
-        }
+            unsubErr = session.on("session.error", (event) => {
+              reject(new Error(`Copilot session error: ${event.data.message}`));
+            });
+          }),
+          SESSION_READY_TIMEOUT_MS,
+          "copilot session ready",
+        );
 
         log.debug("Session went idle, fetching result...");
+        reporter.emit("Finalizing response");
 
         // ── 3. Fetch the completed messages ───────────────────────
         const events = await session.getMessages();
@@ -163,6 +170,9 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
       } catch (err) {
         log.debug(`Prompt failed: ${log.formatErrorChain(err)}`);
         throw err;
+      } finally {
+        unsubIdle?.();
+        unsubErr?.();
       }
     },
 

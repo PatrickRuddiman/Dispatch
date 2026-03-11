@@ -201,6 +201,17 @@ describe("task status rendering", () => {
     expect(lastOutput()).toContain("executing");
   });
 
+  it("renders generating and syncing labels", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    tui.state.mode = "spec";
+    addTask("generating", "Generating task", 0, { elapsed: Date.now(), feedback: "Drafting" });
+    addTask("syncing", "Syncing task", 1, { elapsed: Date.now() });
+    tui.update();
+    expect(lastOutput()).toContain("generating");
+    expect(lastOutput()).toContain("syncing");
+  });
+
   it("renders done task with 'done' label", async () => {
     await setup();
     tui.state.phase = "dispatching";
@@ -247,6 +258,71 @@ describe("task status rendering", () => {
     addTask("failed", "Broken task", 0, { error: "something broke" });
     tui.update();
     expect(lastOutput()).toContain("something broke");
+  });
+
+  it("renders one subordinate feedback line for generating rows", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    tui.state.mode = "spec";
+    addTask("generating", "Generate spec", 0, { elapsed: Date.now(), feedback: "Drafting outline" });
+    tui.update();
+    expect(lastOutput()).toContain("└─ Drafting outline");
+  });
+
+  it("sanitizes and truncates feedback lines", async () => {
+    await setup();
+    Object.defineProperty(process.stdout, "columns", { value: 40, configurable: true });
+    tui.state.phase = "dispatching";
+    tui.state.mode = "spec";
+    addTask("generating", "Generate spec", 0, {
+      elapsed: Date.now(),
+      feedback: "\u001b[31mLine one\nline two with extra text that keeps going\u0007\u001b[0m",
+    });
+    tui.update();
+    const output = lastOutput();
+    expect(output).toContain("└─ Line one line two");
+    expect(output).not.toContain("\u001b[31m");
+  });
+
+  it("does not render a subordinate line for sanitized-empty feedback", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    tui.state.mode = "spec";
+    addTask("generating", "Generate spec", 0, {
+      elapsed: Date.now(),
+      feedback: "\u001b[31m \n \u0007\u001b[0m",
+    });
+    tui.update();
+
+    expect(lastOutput()).not.toContain("└─");
+  });
+
+  it("renders compact feedback as a single sanitized subordinate line", async () => {
+    await setup();
+    Object.defineProperty(process.stdout, "columns", { value: 44, configurable: true });
+    tui.state.phase = "dispatching";
+    tui.state.mode = "spec";
+    addTask("generating", "Generate spec", 0, {
+      elapsed: Date.now(),
+      feedback: "\u001b[31mLine one\n  line   two\u0007\nline three\u001b[0m",
+    });
+    tui.update();
+
+    const output = lastOutput();
+    const feedbackLines = output.split("\n").filter((line) => line.includes("└─"));
+
+    expect(feedbackLines).toHaveLength(1);
+    expect(feedbackLines[0]).toMatch(/└─ Line one line two/);
+    expect(feedbackLines[0]).not.toContain("\u001b[31m");
+    expect(feedbackLines[0]).not.toContain("\u0007");
+  });
+
+  it("does not render feedback for non-generating rows", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    addTask("syncing", "Sync row", 0, { elapsed: Date.now(), feedback: "Should stay hidden" });
+    tui.update();
+    expect(lastOutput()).not.toContain("Should stay hidden");
   });
 });
 

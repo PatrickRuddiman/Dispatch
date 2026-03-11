@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
 import type { Agent, AgentBootOptions } from "./interface.js";
 import type { AgentResult, SpecData } from "./types.js";
 import type { IssueDetails } from "../datasources/interface.js";
+import type { ProviderProgressSnapshot } from "../providers/interface.js";
 import { extractSpecContent, validateSpecStructure } from "../spec-generator.js";
 import { extractTitle } from "../datasources/md.js";
 import { log } from "../helpers/logger.js";
@@ -39,6 +40,8 @@ export interface SpecGenerateOptions {
   outputPath: string;
   /** Worktree root directory for isolation, if operating in a worktree */
   worktreeRoot?: string;
+  /** Optional provider progress callback */
+  onProgress?: (snapshot: ProviderProgressSnapshot) => void;
 }
 
 /**
@@ -70,7 +73,7 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
     name: "spec",
 
     async generate(genOpts: SpecGenerateOptions): Promise<AgentResult<SpecData>> {
-      const { issue, filePath, fileContent, inlineText, cwd: workingDir, outputPath } = genOpts;
+      const { issue, filePath, fileContent, inlineText, cwd: workingDir, outputPath, onProgress } = genOpts;
       const startTime = Date.now();
 
       try {
@@ -119,7 +122,7 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
         // 4. Create a session via the provider and send the prompt
         const sessionId = await provider.createSession();
         log.debug(`Spec prompt built (${prompt.length} chars)`);
-        const response = await provider.prompt(sessionId, prompt);
+        const response = await provider.prompt(sessionId, prompt, { onProgress });
 
         if (response === null) {
           return {

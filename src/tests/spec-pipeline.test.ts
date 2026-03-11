@@ -131,6 +131,16 @@ import { createMockDatasource } from "./fixtures.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 function baseOpts(overrides?: Partial<SpecOptions>): SpecOptions {
   return {
     issues: "1,2",
@@ -577,6 +587,95 @@ describe("runSpecPipeline", () => {
 
       expect(mocks.mockAgentCleanup).toHaveBeenCalledOnce();
       expect(mocks.mockProviderCleanup).toHaveBeenCalledOnce();
+    });
+
+    it("completes successfully when spec generation emits no intermediate feedback", async () => {
+      const result = await runSpecPipeline(baseOpts({ issues: "1", concurrency: 1 }));
+
+      expect(result.total).toBe(1);
+      expect(result.generated).toBe(1);
+      expect(result.failed).toBe(0);
+      expect(mocks.mockUpdate).toHaveBeenCalledOnce();
+      expect(mocks.mockAgentCleanup).toHaveBeenCalledOnce();
+      expect(mocks.mockProviderCleanup).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe("concurrent spec generation", () => {
+    it("processes concurrent generations without cross-wiring item results", async () => {
+      const pendingByIssue = new Map<string, ReturnType<typeof deferred<{ data: { content: string; valid: boolean }; success: true }>>>();
+
+      mocks.mockFetch
+        .mockResolvedValueOnce({
+          number: "1",
+          title: "Test Issue 1",
+          body: "Issue body 1",
+          labels: [],
+          state: "open",
+          url: "https://example.com/1",
+          comments: [],
+          acceptanceCriteria: "",
+        })
+        .mockResolvedValueOnce({
+          number: "2",
+          title: "Test Issue 2",
+          body: "Issue body 2",
+          labels: [],
+          state: "open",
+          url: "https://example.com/2",
+          comments: [],
+          acceptanceCriteria: "",
+        });
+
+      mocks.mockGenerate.mockImplementation((options: { issue?: { number: string } }) => {
+        const issueNumber = options.issue?.number ?? "unknown";
+        const pending = deferred<{
+          data: { content: string; valid: boolean };
+          success: true;
+        }>();
+        pendingByIssue.set(issueNumber, pending);
+        return pending.promise;
+      });
+
+      const resultPromise = runSpecPipeline(baseOpts({ issues: "1,2", concurrency: 2 }));
+
+      await vi.waitFor(() => {
+        expect(mocks.mockGenerate).toHaveBeenCalledTimes(2);
+      });
+
+      expect(mocks.mockGenerate.mock.calls.map(([options]) => options.issue?.number)).toEqual(["1", "2"]);
+
+      pendingByIssue.get("2")?.resolve({
+        success: true,
+        data: { content: "# Generated Spec Two\n\n## Tasks\n\n- [ ] Ship second", valid: true },
+      });
+      pendingByIssue.get("1")?.resolve({
+        success: true,
+        data: { content: "# Generated Spec One\n\n## Tasks\n\n- [ ] Ship first", valid: true },
+      });
+
+      const result = await resultPromise;
+
+      expect(result.total).toBe(2);
+      expect(result.generated).toBe(2);
+      expect(result.failed).toBe(0);
+      expect(mocks.mockUpdate).toHaveBeenCalledTimes(2);
+      expect(mocks.mockUpdate.mock.calls).toEqual(
+        expect.arrayContaining([
+          [
+            "1",
+            "Test Issue 1",
+            expect.stringContaining("# Generated Spec One"),
+            expect.any(Object),
+          ],
+          [
+            "2",
+            "Test Issue 2",
+            expect.stringContaining("# Generated Spec Two"),
+            expect.any(Object),
+          ],
+        ]),
+      );
     });
   });
 

@@ -22,7 +22,12 @@ import {
   type TextPart,
   type Event as SdkEvent,
 } from "@opencode-ai/sdk";
-import type { ProviderInstance, ProviderBootOptions } from "./interface.js";
+import type {
+  ProviderInstance,
+  ProviderBootOptions,
+  ProviderPromptOptions,
+} from "./interface.js";
+import { createProgressReporter } from "./progress.js";
 import { log } from "../helpers/logger.js";
 import { hasProperty } from "../helpers/guards.js";
 import { withTimeout } from "../helpers/timeout.js";
@@ -154,10 +159,15 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
       }
     },
 
-    async prompt(sessionId: string, text: string): Promise<string | null> {
+    async prompt(
+      sessionId: string,
+      text: string,
+      options?: ProviderPromptOptions,
+    ): Promise<string | null> {
       log.debug(`Sending async prompt to session ${sessionId} (${text.length} chars)...`);
 
       let controller: AbortController | undefined;
+      const reporter = createProgressReporter(options?.onProgress);
 
       try {
         // ── 1. Fire-and-forget: start the LLM processing ──────────
@@ -184,7 +194,7 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
 
           // ── 3. Wait for session to become idle or error ───────────
           await withTimeout(
-            waitForSessionReady(stream, sessionId),
+            waitForSessionReady(stream, sessionId, reporter),
             SESSION_READY_TIMEOUT_MS,
             "opencode session ready",
           );
@@ -249,6 +259,7 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
 async function waitForSessionReady(
   stream: AsyncIterable<SdkEvent>,
   sessionId: string,
+  reporter?: { emit: (delta: string) => void },
 ): Promise<void> {
   for await (const event of stream) {
     if (!isSessionEvent(event, sessionId)) continue;
@@ -260,6 +271,7 @@ async function waitForSessionReady(
       const delta = event.properties.delta;
       if (delta) {
         log.debug(`Streaming text (+${delta.length} chars)...`);
+        reporter?.emit(delta);
       }
       continue;
     }
