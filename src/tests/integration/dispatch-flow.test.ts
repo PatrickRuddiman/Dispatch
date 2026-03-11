@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -68,7 +68,7 @@ vi.mock("../../agents/executor.js", () => ({
 }));
 
 vi.mock("../../tui.js", () => ({
-  createTui: vi.fn().mockReturnValue({
+  createTui: vi.fn().mockImplementation(() => ({
     state: {
       tasks: [],
       phase: "discovering",
@@ -77,7 +77,8 @@ vi.mock("../../tui.js", () => ({
     },
     update: vi.fn(),
     stop: vi.fn(),
-  }),
+    waitForRecoveryAction: vi.fn().mockResolvedValue("quit"),
+  })),
 }));
 
 vi.mock("../../helpers/cleanup.js", () => ({
@@ -110,6 +111,8 @@ vi.mock("../../helpers/logger.js", () => ({
 // ─── Import function under test (after mocks) ──────────────────────
 
 import { runDispatchPipeline } from "../../orchestrator/dispatch-pipeline.js";
+import { createTui } from "../../tui.js";
+import { log } from "../../helpers/logger.js";
 
 // ─── Test suite ─────────────────────────────────────────────────────
 
@@ -286,5 +289,131 @@ describe("integration: dispatch pipeline with md datasource", () => {
     expect(mocks.mockPlan).not.toHaveBeenCalled();
     // Executor should still run
     expect(mocks.mockExecute).toHaveBeenCalledOnce();
+  }, 15_000);
+
+  it("reruns a paused task from the normal lifecycle entry point", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
+
+    const specsDir = join(tmpDir, ".dispatch", "specs");
+    await mkdir(specsDir, { recursive: true });
+    await writeFile(join(specsDir, "rerun-spec.md"), "# Rerun\n\n- [ ] Recover the task\n", "utf-8");
+
+    execFileSync("git", ["init"], { cwd: tmpDir });
+    execFileSync("git", ["config", "user.name", "Test User"], { cwd: tmpDir });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: tmpDir });
+    execFileSync("git", ["add", "."], { cwd: tmpDir });
+    execFileSync("git", ["commit", "-m", "initial"], { cwd: tmpDir });
+
+    const originalStdIn = process.stdin.isTTY;
+    const originalStdOut = process.stdout.isTTY;
+    Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+    Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+
+    let executeCalls = 0;
+    mocks.mockExecute.mockImplementation(async (input: { task: Task; cwd: string; plan: string | null }): Promise<AgentResult<ExecutorData>> => {
+      executeCalls++;
+      if (executeCalls <= 4) {
+        return {
+          data: null,
+          success: false,
+          error: "retry me",
+          durationMs: 50,
+        };
+      }
+      await markTaskComplete(input.task);
+      return {
+        data: { dispatchResult: { task: input.task, success: true } },
+        success: true,
+        durationMs: 50,
+      };
+    });
+
+    const resultPromise = runDispatchPipeline(
+      {
+        issueIds: [],
+        concurrency: 1,
+        dryRun: false,
+        noPlan: false,
+        noBranch: true,
+        provider: "opencode",
+        source: "md",
+        planTimeout: 1,
+        planRetries: 0,
+      },
+      tmpDir,
+    );
+
+    const tui = vi.mocked(createTui).mock.results[0]!.value;
+    vi.mocked(tui.waitForRecoveryAction).mockImplementationOnce(async () => {
+      expect(tui.state.recovery?.selectedAction).toBe("rerun");
+      return "rerun";
+    });
+
+    const result = await resultPromise;
+
+    expect(result.completed).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(mocks.mockPlan).toHaveBeenCalledTimes(2);
+    expect(mocks.mockExecute).toHaveBeenCalledTimes(5);
+
+    Object.defineProperty(process.stdin, "isTTY", { value: originalStdIn, configurable: true });
+    Object.defineProperty(process.stdout, "isTTY", { value: originalStdOut, configurable: true });
+  }, 15_000);
+
+  it("fails cleanly without recovery input when retries exhaust in non-interactive mode", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
+
+    const specsDir = join(tmpDir, ".dispatch", "specs");
+    await mkdir(specsDir, { recursive: true });
+    const specPath = join(specsDir, "non-interactive-recovery.md");
+    await writeFile(specPath, "# Retry\n\n- [ ] Leave this unchecked\n", "utf-8");
+
+    execFileSync("git", ["init"], { cwd: tmpDir });
+    execFileSync("git", ["config", "user.name", "Test User"], { cwd: tmpDir });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: tmpDir });
+    execFileSync("git", ["add", "."], { cwd: tmpDir });
+    execFileSync("git", ["commit", "-m", "initial"], { cwd: tmpDir });
+
+    const originalStdIn = process.stdin.isTTY;
+    const originalStdOut = process.stdout.isTTY;
+    Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
+    Object.defineProperty(process.stdout, "isTTY", { value: false, configurable: true });
+
+    try {
+      mocks.mockExecute.mockResolvedValue({
+        data: null,
+        success: false,
+        error: "retry me later",
+        durationMs: 50,
+      });
+
+      const result = await runDispatchPipeline(
+        {
+          issueIds: [],
+          concurrency: 1,
+          dryRun: false,
+          noPlan: false,
+          noBranch: true,
+          provider: "opencode",
+          source: "md",
+          planTimeout: 1,
+          planRetries: 0,
+        },
+        tmpDir,
+      );
+
+      expect(result.completed).toBe(0);
+      expect(result.failed).toBe(1);
+
+      const tui = vi.mocked(createTui).mock.results[0]!.value;
+      expect(tui.waitForRecoveryAction).not.toHaveBeenCalled();
+      expect(vi.mocked(log.warn)).toHaveBeenCalledWith(expect.stringContaining("interactive terminal"));
+
+      const persistedSpec = await readFile(specPath, "utf-8");
+      expect(persistedSpec).toContain("- [ ] Leave this unchecked");
+    } finally {
+      Object.defineProperty(process.stdin, "isTTY", { value: originalStdIn, configurable: true });
+      Object.defineProperty(process.stdout, "isTTY", { value: originalStdOut, configurable: true });
+    }
   }, 15_000);
 });

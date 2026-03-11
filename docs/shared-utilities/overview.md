@@ -17,7 +17,7 @@ guards, custom error types, and startup prerequisite validation.
 ## Why these utilities exist
 
 Dispatch generates git branch names and spec filenames from user-supplied
-issue titles, runs AI agent planning steps that can hang indefinitely, and
+issue titles, runs AI planning/spec steps that need bounded execution, and
 processes loosely-typed data from external AI providers. These operations
 need small, well-tested building blocks:
 
@@ -26,9 +26,10 @@ need small, well-tested building blocks:
   casing, punctuation, or Unicode content. These identifiers are used for
   [branch naming](../datasource-system/overview.md#branch-naming-convention)
   and [temp file naming](../datasource-system/datasource-helpers.md#writeitemstotempdir).
-- **withTimeout** ensures that a planning step that exceeds its deadline is
-  interrupted with a descriptive `TimeoutError`, enabling the retry loop in
-  the [orchestrator](../cli-orchestration/orchestrator.md) to attempt recovery.
+- **withTimeout** ensures that a planning step, spec-generation attempt, or
+  other guarded async operation that exceeds its deadline is interrupted with a
+  descriptive `TimeoutError`, enabling the [orchestrator](../cli-orchestration/orchestrator.md)
+  to attempt recovery or record a per-item failure.
 - **UnsupportedOperationError** lets datasource implementations signal that
   an interface method is structurally unsupported (e.g., the markdown
   datasource cannot create git branches). See [Errors](./errors.md).

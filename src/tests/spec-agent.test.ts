@@ -86,6 +86,13 @@ const ISSUE_FIXTURE: IssueDetails = {
   acceptanceCriteria: "",
 };
 
+function expectSingleSourceScopeInstructions(prompt: string): void {
+  expect(prompt).toContain("Each invocation is scoped to exactly one source item.");
+  expect(prompt).toContain("The source item for this invocation is the single passed issue, file, or inline request shown below.");
+  expect(prompt).toContain("Treat other repository materials — including existing spec files, sibling issues, and future work — as context only unless the passed source explicitly references them as required context.");
+  expect(prompt).toContain("Do not merge unrelated specs, issues, files, or requests into the generated output.");
+}
+
 // ---------------------------------------------------------------------------
 // boot
 // ---------------------------------------------------------------------------
@@ -551,6 +558,11 @@ describe("buildSpecPrompt", () => {
     expect(prompt).toContain("Operating System");
     expect(prompt).toContain("run commands directly");
   });
+
+  it("includes shared scope isolation instructions", () => {
+    const prompt = buildSpecPrompt(ISSUE_FIXTURE, "/tmp/project", "/tmp/output.md");
+    expectSingleSourceScopeInstructions(prompt);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -609,6 +621,11 @@ describe("buildFileSpecPrompt", () => {
     expect(prompt).toContain("Operating System");
     expect(prompt).toContain("run commands directly");
   });
+
+  it("includes shared scope isolation instructions", () => {
+    const prompt = buildFileSpecPrompt("/tmp/project/feature.md", "content", "/tmp/project");
+    expectSingleSourceScopeInstructions(prompt);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -662,5 +679,10 @@ describe("buildInlineTextSpecPrompt", () => {
     expect(prompt).toContain("## Environment");
     expect(prompt).toContain("Operating System");
     expect(prompt).toContain("run commands directly");
+  });
+
+  it("includes shared scope isolation instructions", () => {
+    const prompt = buildInlineTextSpecPrompt("text", "/tmp/project", "/tmp/output.md");
+    expectSingleSourceScopeInstructions(prompt);
   });
 });

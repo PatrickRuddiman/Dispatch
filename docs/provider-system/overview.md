@@ -96,9 +96,9 @@ stateDiagram-v2
 
         CopilotPath --> SendFired: session.send()
         SendFired --> ListeningForIdle: session.on("session.idle")
-        ListeningForIdle --> CopilotFetchMessages: idle fires (within 300s)
+        ListeningForIdle --> CopilotFetchMessages: idle fires (within 600s)
         ListeningForIdle --> ErrorState: session.error fires
-        ListeningForIdle --> ErrorState: 300s timeout
+        ListeningForIdle --> ErrorState: 600s timeout
         CopilotFetchMessages --> ResponseReceived: session.getMessages()
 
         OpenCodePath --> FireAndForget: promptAsync()
@@ -107,6 +107,7 @@ stateDiagram-v2
         FilteringEvents --> FilteringEvents: wrong session / streaming delta
         FilteringEvents --> OpenCodeFetchMessages: session.idle
         FilteringEvents --> ErrorState: session.error
+        OpenCodeFetchMessages --> ErrorState: message fetch fails after disconnect
         OpenCodeFetchMessages --> ResponseReceived: messages fetched
     }
 
@@ -327,8 +328,8 @@ transport mechanisms:
 | Execution model | Asynchronous (fire-and-forget + SSE stream) | Asynchronous (fire-and-forget + event listeners) |
 | HTTP timeout risk | None (204 returns immediately) | None (send() returns immediately) |
 | Progress visibility | Streaming deltas via SSE events | None until idle event fires |
-| Failure detection | `session.error` event or SSE disconnect | `session.error` event or 300-second timeout |
-| Prompt timeout | None (waits indefinitely) | 300 seconds via `withTimeout()` |
+| Failure detection | `session.error`, stream disconnect surfaced by the follow-up message fetch, and caller-level deadlines | `session.error` event, 600-second idle timeout, and caller-level deadlines |
+| Prompt timeout / idle timeout | No provider-local timeout; caller-level deadlines still bound planning/spec attempts | 600 seconds via `withTimeout()` plus caller-level deadlines |
 | Resource overhead | SSE connection + AbortController per prompt | Event listeners unsubscribed in `finally` block |
 
 See [OpenCode async prompt model](./opencode-backend.md#asynchronous-prompt-model)
@@ -339,22 +340,28 @@ for implementation details.
 
 The `ProviderInstance` interface's `prompt()` signature returns
 `Promise<string | null>` with no timeout parameter. However, individual
-backends implement their own timeout strategies:
+backends and calling pipelines layer resilience in different places:
 
 - **Copilot provider** (`src/providers/copilot.ts:127`): Wraps the idle/error
-  event listener in `withTimeout(promise, 300_000, "copilot session ready")`,
-  imposing a **300-second (5-minute) hard timeout**. This value is hardcoded and
+  event listener in `withTimeout(promise, 600_000, "copilot session ready")`,
+  imposing a **600-second (10-minute) hard timeout**. This value is hardcoded and
   not configurable via CLI flags. It is separate from the `--plan-timeout` flag,
   which controls the planner agent timeout at the orchestrator level. If the
   timeout fires, the promise rejects with a descriptive error message.
-- **OpenCode provider**: The SSE stream will wait indefinitely for a
-  `session.idle` or `session.error` event. The SDK's `createOpencode()` accepts
-  a `timeout` option (default 5000ms) for *server startup*, but not for
-  individual prompts.
+- **OpenCode provider** (`src/providers/opencode.ts:153`): Watches the SSE
+  stream for `session.idle` and `session.error`, filters out events from other
+  sessions, and always aborts the subscription in a `finally` block. Unexpected
+  stream disconnects surface as prompt failures when the provider later tries to
+  fetch session messages. The provider does **not** apply a hardcoded idle
+  timeout for a silent but still-open stream.
+- **Orchestrator-level deadlines**: The planning and spec pipelines own the
+  overall wall-clock budget for one attempt. `--plan-timeout` bounds planner
+  attempts, while `--spec-timeout` bounds each `specAgent.generate(...)`
+  attempt before `--retries` logic runs.
 
-If an OpenCode prompt hangs indefinitely, the dispatch run will also hang. If
-this becomes a problem in production, the recommended approach would be to add a
-`withTimeout()` wrapper similar to Copilot's implementation.
+This layering matters: provider-local guards catch transport-specific failures,
+but pipeline-level deadlines are still the mechanism that turns a slow or stuck
+attempt into a retryable, per-item failure.
 
 ## Response format differences
 

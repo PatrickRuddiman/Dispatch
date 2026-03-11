@@ -270,7 +270,9 @@ phase.
 
 This means a planning failure is a hard stop for that task — there is no
 fallback to unplanned execution. However, the orchestrator may retry the
-planner up to `--plan-retries` times (default 1) on timeout errors. See
+planner up to `--plan-retries` times, falling back to `--retries` and then the
+shared default of 3 on timeout errors only. Non-timeout planner failures still
+fail immediately. See
 [timeout and retry](../cli-orchestration/orchestrator.md#the-filetimeout)
 in the orchestrator documentation.
 

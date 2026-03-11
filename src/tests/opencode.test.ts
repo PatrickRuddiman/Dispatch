@@ -49,6 +49,7 @@ vi.mock("../helpers/logger.js", () => ({
 // ── Import under test ──────────────────────────────────────────────
 import { boot } from "../providers/opencode.js";
 import { log } from "../helpers/logger.js";
+import { TimeoutError } from "../helpers/timeout.js";
 
 // ── Helpers ────────────────────────────────────────────────────────
 function createMockClient() {
@@ -67,6 +68,17 @@ async function* arrayToAsyncGenerator<T>(items: T[]): AsyncGenerator<T> {
   for (const item of items) {
     yield item;
   }
+}
+
+async function* neverAsyncGenerator<T>(): AsyncGenerator<T> {
+  await new Promise(() => {});
+}
+
+async function* stalledAsyncGenerator<T>(items: T[] = []): AsyncGenerator<T> {
+  for (const item of items) {
+    yield item;
+  }
+  await new Promise(() => {});
 }
 
 // ── Tests ──────────────────────────────────────────────────────────
@@ -600,6 +612,114 @@ describe("opencode provider", () => {
 
       expect(abortSpy).toHaveBeenCalled();
       abortSpy.mockRestore();
+    });
+
+    describe("timeout", () => {
+      beforeEach(() => {
+        vi.useFakeTimers();
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it("rejects with TimeoutError when the SSE stream stalls before session.idle/session.error", async () => {
+        const abortSpy = vi.spyOn(AbortController.prototype, "abort");
+
+        mocks.mockSessionPromptAsync.mockResolvedValue({});
+        mocks.mockEventSubscribe.mockResolvedValue({
+          stream: stalledAsyncGenerator(),
+        });
+
+        const instance = await boot({ url: "http://localhost:1234" });
+        const resultPromise = instance.prompt("sess-1", "do something");
+        resultPromise.catch(() => {});
+
+        await vi.advanceTimersByTimeAsync(600_000);
+        await vi.runAllTimersAsync();
+
+        const error = await resultPromise.catch((err) => err);
+
+        expect(error).toBeInstanceOf(TimeoutError);
+        expect(error).toHaveProperty("label", "opencode session ready");
+        expect(error).toHaveProperty(
+          "message",
+          expect.stringContaining("opencode session ready"),
+        );
+        expect(abortSpy).toHaveBeenCalled();
+        expect(mocks.mockSessionMessages).not.toHaveBeenCalled();
+
+        abortSpy.mockRestore();
+      });
+
+      it("aborts the AbortController when the SSE wait times out", async () => {
+        const abortSpy = vi.spyOn(AbortController.prototype, "abort");
+
+        mocks.mockSessionPromptAsync.mockResolvedValue({});
+        mocks.mockEventSubscribe.mockResolvedValue({
+          stream: stalledAsyncGenerator(),
+        });
+
+        const instance = await boot({ url: "http://localhost:1234" });
+        const resultPromise = instance.prompt("sess-1", "do something");
+        resultPromise.catch(() => {});
+
+        await vi.advanceTimersByTimeAsync(600_000);
+        await vi.runAllTimersAsync();
+        await resultPromise.catch(() => {});
+
+        expect(abortSpy).toHaveBeenCalled();
+
+        abortSpy.mockRestore();
+      });
+
+      it("times out after stream activity stops and aborts the stalled stream", async () => {
+        const abortSpy = vi.spyOn(AbortController.prototype, "abort");
+
+        mocks.mockSessionPromptAsync.mockResolvedValue({});
+        mocks.mockEventSubscribe.mockResolvedValue({
+          stream: stalledAsyncGenerator([
+            {
+              type: "message.part.updated" as const,
+              properties: {
+                part: { type: "text", sessionID: "sess-1" },
+                delta: "still working",
+              },
+            },
+          ]),
+        });
+
+        const instance = await boot({ url: "http://localhost:1234" });
+        const resultPromise = instance.prompt("sess-1", "do something");
+        resultPromise.catch(() => {});
+
+        await vi.advanceTimersByTimeAsync(600_000);
+        await vi.runAllTimersAsync();
+
+        const error = await resultPromise.catch((err) => err);
+
+        expect(error).toBeInstanceOf(TimeoutError);
+        expect(error).toHaveProperty(
+          "message",
+          expect.stringContaining("opencode session ready"),
+        );
+        expect(abortSpy).toHaveBeenCalled();
+
+        abortSpy.mockRestore();
+      });
+    });
+
+    it("throws when the SSE stream ends before the session becomes idle", async () => {
+      mocks.mockSessionPromptAsync.mockResolvedValue({});
+      mocks.mockEventSubscribe.mockResolvedValue({
+        stream: arrayToAsyncGenerator([]),
+      });
+
+      const instance = await boot({ url: "http://localhost:1234" });
+      await expect(instance.prompt("sess-1", "do something")).rejects.toThrow(
+        "OpenCode event stream ended before session became idle",
+      );
+      expect(mocks.mockSessionMessages).not.toHaveBeenCalled();
     });
   });
 

@@ -30,6 +30,10 @@ import type {
 import { createProgressReporter } from "./progress.js";
 import { log } from "../helpers/logger.js";
 import { hasProperty } from "../helpers/guards.js";
+import { withTimeout } from "../helpers/timeout.js";
+
+/** Maximum time (ms) to wait for an OpenCode session to become idle after sending a prompt. */
+const SESSION_READY_TIMEOUT_MS = 600_000;
 
 /**
  * List available OpenCode models for configured providers.
@@ -189,36 +193,16 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
           });
 
           // ── 3. Wait for session to become idle or error ───────────
-          for await (const event of stream) {
-            if (!isSessionEvent(event, sessionId)) continue;
-
-            if (
-              event.type === "message.part.updated" &&
-              event.properties.part.type === "text"
-            ) {
-              const delta = event.properties.delta;
-              if (delta) {
-                log.debug(`Streaming text (+${delta.length} chars)...`);
-                reporter.emit(delta);
-              }
-              continue;
-            }
-
-            if (event.type === "session.error") {
-              const err = event.properties.error;
-              throw new Error(
-                `OpenCode session error: ${err ? JSON.stringify(err) : "unknown error"}`
-              );
-            }
-
-            if (event.type === "session.idle") {
-              log.debug("Session went idle, fetching result...");
-              break;
-            }
-          }
+          await withTimeout(
+            waitForSessionReady(stream, sessionId, reporter),
+            SESSION_READY_TIMEOUT_MS,
+            "opencode session ready",
+          );
         } finally {
           if (controller && !controller.signal.aborted) controller.abort();
         }
+
+        log.debug("Session went idle, fetching result...");
 
         // ── 4. Fetch the completed message ────────────────────────
         const { data: messages } = await client.session.messages({
@@ -270,6 +254,41 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
       }
     },
   };
+}
+
+async function waitForSessionReady(
+  stream: AsyncIterable<SdkEvent>,
+  sessionId: string,
+  reporter?: { emit: (delta: string) => void },
+): Promise<void> {
+  for await (const event of stream) {
+    if (!isSessionEvent(event, sessionId)) continue;
+
+    if (
+      event.type === "message.part.updated" &&
+      event.properties.part.type === "text"
+    ) {
+      const delta = event.properties.delta;
+      if (delta) {
+        log.debug(`Streaming text (+${delta.length} chars)...`);
+        reporter?.emit(delta);
+      }
+      continue;
+    }
+
+    if (event.type === "session.error") {
+      const err = event.properties.error;
+      throw new Error(
+        `OpenCode session error: ${err ? JSON.stringify(err) : "unknown error"}`
+      );
+    }
+
+    if (event.type === "session.idle") {
+      return;
+    }
+  }
+
+  throw new Error("OpenCode event stream ended before session became idle");
 }
 
 /**

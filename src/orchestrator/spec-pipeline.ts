@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { mkdir, readFile, rename, unlink } from "node:fs/promises";
 import { glob } from "glob";
 import type { SpecOptions, SpecSummary } from "../spec-generator.js";
-import { isIssueNumbers, isGlobOrFilePath, resolveSource, defaultConcurrency } from "../spec-generator.js";
+import { isIssueNumbers, isGlobOrFilePath, resolveSource, defaultConcurrency, DEFAULT_SPEC_TIMEOUT_MIN } from "../spec-generator.js";
 import type { IssueDetails, IssueFetchOptions, Datasource, DatasourceName } from "../datasources/interface.js";
 import { getDatasource } from "../datasources/index.js";
 import { extractTitle } from "../datasources/md.js";
@@ -25,7 +25,7 @@ import { FileLogger, fileLoggerStorage } from "../helpers/file-logger.js";
 import { confirmLargeBatch } from "../helpers/confirm-large-batch.js";
 import chalk from "chalk";
 import { elapsed, renderHeaderLines } from "../helpers/format.js";
-import { withRetry } from "../helpers/retry.js";
+import { DEFAULT_RETRY_COUNT, withRetry } from "../helpers/retry.js";
 import { withTimeout } from "../helpers/timeout.js";
 import { slugify, MAX_SLUG_LENGTH } from "../helpers/slugify.js";
 import { parseIssueFilename } from "./datasource-helpers.js";
@@ -304,6 +304,7 @@ async function generateSpecsBatch(
   specCwd: string,
   concurrency: number,
   retries: number,
+  specTimeoutMs: number,
 ): Promise<GenerationResults> {
   await mkdir(outputDir, { recursive: true });
 
@@ -346,17 +347,22 @@ async function generateSpecsBatch(
           try {
             fileLoggerStorage.getStore()?.info(`Starting spec generation for ${isTrackerMode ? `#${id}` : filepath}`);
             log.info(`Generating spec for ${isTrackerMode ? `#${id}` : filepath}: ${details.title}...`);
+            const generateLabel = `specAgent.generate(${isTrackerMode ? `#${id}` : filepath})`;
 
             const result = await withRetry(
-              () => specAgent.generate({
-                issue: isTrackerMode ? details : undefined,
-                filePath: isTrackerMode ? undefined : id,
-                fileContent: isTrackerMode ? undefined : details.body,
-                cwd: specCwd,
-                outputPath: filepath,
-              }),
+              () => withTimeout(
+                specAgent.generate({
+                  issue: isTrackerMode ? details : undefined,
+                  filePath: isTrackerMode ? undefined : id,
+                  fileContent: isTrackerMode ? undefined : details.body,
+                  cwd: specCwd,
+                  outputPath: filepath,
+                }),
+                specTimeoutMs,
+                generateLabel,
+              ),
               retries,
-              { label: `specAgent.generate(${isTrackerMode ? `#${id}` : filepath})` },
+              { label: generateLabel },
             );
 
             if (!result.success) {
@@ -533,10 +539,13 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     area,
     concurrency = defaultConcurrency(),
     dryRun,
-    retries = 2,
+    retries = DEFAULT_RETRY_COUNT,
+    specTimeout,
   } = opts;
 
   const pipelineStart = Date.now();
+  const specTimeoutMs = (specTimeout ?? DEFAULT_SPEC_TIMEOUT_MIN) * 60_000;
+  log.debug(`Spec timeout: ${specTimeout ?? DEFAULT_SPEC_TIMEOUT_MIN}m (${specTimeoutMs}ms)`);
 
   // ── Resolve datasource ─────────────────────────────────────
   const resolved = await resolveDatasource(issues, opts.issueSource, specCwd, org, project, workItemType, iteration, area);
@@ -590,7 +599,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     validItems, items, specAgent, instance,
     isTrackerMode, isInlineText,
     datasource, fetchOpts, outputDir, specCwd,
-    concurrency, retries,
+    concurrency, retries, specTimeoutMs,
   );
 
   // ── Cleanup ────────────────────────────────────────────────
