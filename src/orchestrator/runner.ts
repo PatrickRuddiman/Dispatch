@@ -7,7 +7,7 @@ import type { AgentBootOptions } from "../agents/interface.js";
 import type { ProviderName } from "../providers/interface.js";
 import type { DatasourceName } from "../datasources/interface.js";
 import type { SpecOptions, SpecSummary } from "../spec-generator.js";
-import { defaultConcurrency, resolveSource } from "../spec-generator.js";
+import { defaultConcurrency, DEFAULT_SPEC_TIMEOUT_MIN, resolveSource } from "../spec-generator.js";
 import { getDatasource } from "../datasources/index.js";
 import { fetchItemsById } from "./datasource-helpers.js";
 import { createWorktree, removeWorktree } from "../helpers/worktree.js";
@@ -70,6 +70,7 @@ export interface RawCliArgs {
   iteration?: string;
   area?: string;
   planTimeout?: number;
+  specTimeout?: number;
   planRetries?: number;
   testTimeout?: number;
   retries?: number;
@@ -323,6 +324,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
           model: m.model, serverUrl: m.serverUrl, cwd: m.cwd, outputDir: m.outputDir,
           org: m.org, project: m.project, workItemType: m.workItemType, iteration: m.iteration, area: m.area, concurrency: m.concurrency,
           dryRun: m.dryRun, retries: m.retries,
+          specTimeout: m.specTimeout ?? DEFAULT_SPEC_TIMEOUT_MIN,
         });
       }
 
@@ -361,6 +363,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
           model: m.model, serverUrl: m.serverUrl, cwd: m.cwd, outputDir: m.outputDir,
           org: m.org, project: m.project, workItemType: m.workItemType, iteration: m.iteration, area: m.area, concurrency: m.concurrency,
           dryRun: m.dryRun, retries: m.retries,
+          specTimeout: m.specTimeout ?? DEFAULT_SPEC_TIMEOUT_MIN,
         });
       }
 

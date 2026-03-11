@@ -238,6 +238,38 @@ describe("validateConfigValue", () => {
     expect(validateConfigValue("planTimeout", "NaN")).not.toBe(null);
   });
 
+  it("accepts valid specTimeout (within bounds)", () => {
+    expect(validateConfigValue("specTimeout", String(CONFIG_BOUNDS.specTimeout.min))).toBe(null);
+    expect(validateConfigValue("specTimeout", "10")).toBe(null);
+    expect(validateConfigValue("specTimeout", "1.5")).toBe(null);
+    expect(validateConfigValue("specTimeout", String(CONFIG_BOUNDS.specTimeout.max))).toBe(null);
+  });
+
+  it("rejects specTimeout below minimum", () => {
+    const zero = validateConfigValue("specTimeout", "0");
+    expect(zero).not.toBe(null);
+    expect(zero).toContain("between");
+
+    const negative = validateConfigValue("specTimeout", "-1");
+    expect(negative).not.toBe(null);
+  });
+
+  it("rejects specTimeout above maximum", () => {
+    const result = validateConfigValue("specTimeout", String(CONFIG_BOUNDS.specTimeout.max + 1));
+    expect(result).not.toBe(null);
+    expect(result).toContain("between");
+  });
+
+  it("rejects non-numeric specTimeout", () => {
+    expect(validateConfigValue("specTimeout", "abc")).not.toBe(null);
+    expect(validateConfigValue("specTimeout", "")).not.toBe(null);
+  });
+
+  it("rejects Infinity and NaN for specTimeout", () => {
+    expect(validateConfigValue("specTimeout", "Infinity")).not.toBe(null);
+    expect(validateConfigValue("specTimeout", "NaN")).not.toBe(null);
+  });
+
   it("accepts valid concurrency (within bounds)", () => {
     expect(validateConfigValue("concurrency", String(CONFIG_BOUNDS.concurrency.min))).toBe(null);
     expect(validateConfigValue("concurrency", "4")).toBe(null);
@@ -333,6 +365,7 @@ describe("merge precedence", () => {
     provider: "provider",
     model: "model",
     source: "issueSource",
+    specTimeout: "specTimeout",
   };
 
   /** Applies the merge logic: config fills in where CLI flag is not explicit. */
@@ -378,15 +411,18 @@ describe("merge precedence", () => {
       provider: "opencode",
       model: "",
       issueSource: "github",
+      specTimeout: undefined,
     };
     const config: DispatchConfig = {
       model: "claude-sonnet-4-5",
       source: "azdevops",
+      specTimeout: 12,
     };
     const explicitFlags = new Set<string>();
     applyMerge(args, config, explicitFlags);
     expect(args.model).toBe("claude-sonnet-4-5");
     expect(args.issueSource).toBe("azdevops");
+    expect(args.specTimeout).toBe(12);
   });
 
   it("partially explicit flags still allow config for other fields", () => {

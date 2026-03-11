@@ -22,6 +22,7 @@ vi.mock("../orchestrator/cli-config.js", () => ({
 }));
 
 vi.mock("../spec-generator.js", () => ({
+  DEFAULT_SPEC_TIMEOUT_MIN: 10,
   resolveSource: vi.fn().mockResolvedValue("md"),
   defaultConcurrency: vi.fn().mockReturnValue(2),
   isIssueNumbers: vi.fn(),
@@ -76,7 +77,7 @@ vi.mock("../orchestrator/datasource-helpers.js", () => ({
 import { boot, type RawCliArgs } from "../orchestrator/runner.js";
 import { log } from "../helpers/logger.js";
 import { resolveCliConfig } from "../orchestrator/cli-config.js";
-import { resolveSource } from "../spec-generator.js";
+import { DEFAULT_SPEC_TIMEOUT_MIN, resolveSource } from "../spec-generator.js";
 import { runSpecPipeline } from "../orchestrator/spec-pipeline.js";
 import { runDispatchPipeline } from "../orchestrator/dispatch-pipeline.js";
 import { runFixTestsPipeline } from "../orchestrator/fix-tests-pipeline.js";
@@ -270,7 +271,7 @@ describe("runFromCli()", () => {
     await runner.runFromCli(createRawCliArgs({ spec: "1,2" }));
 
     expect(runSpecPipeline).toHaveBeenCalledWith(
-      expect.objectContaining({ issues: "1,2", provider: "copilot", cwd: "/tmp/test-cwd" }),
+      expect.objectContaining({ issues: "1,2", provider: "copilot", cwd: "/tmp/test-cwd", specTimeout: DEFAULT_SPEC_TIMEOUT_MIN }),
     );
     expect(runDispatchPipeline).not.toHaveBeenCalled();
   });
@@ -281,6 +282,42 @@ describe("runFromCli()", () => {
 
     expect(runSpecPipeline).toHaveBeenCalledWith(
       expect.objectContaining({ issues: "1,2", retries: 3 }),
+    );
+  });
+
+  it("forwards explicit specTimeout to spec pipeline", async () => {
+    const runner = await boot({ cwd: "/tmp/test" });
+    await runner.runFromCli(createRawCliArgs({ spec: "1,2", specTimeout: 7.5 }));
+
+    expect(runSpecPipeline).toHaveBeenCalledWith(
+      expect.objectContaining({ issues: "1,2", specTimeout: 7.5 }),
+    );
+  });
+
+  it("uses default specTimeout when omitted in spec mode", async () => {
+    const runner = await boot({ cwd: "/tmp/test" });
+    await runner.runFromCli(createRawCliArgs({ spec: "1,2", specTimeout: undefined }));
+
+    expect(runSpecPipeline).toHaveBeenCalledWith(
+      expect.objectContaining({ issues: "1,2", specTimeout: DEFAULT_SPEC_TIMEOUT_MIN }),
+    );
+  });
+
+  it("forwards explicit specTimeout to spec pipeline for --respec", async () => {
+    const runner = await boot({ cwd: "/tmp/test" });
+    await runner.runFromCli(createRawCliArgs({ respec: "7", specTimeout: 7.5 }));
+
+    expect(runSpecPipeline).toHaveBeenCalledWith(
+      expect.objectContaining({ issues: "7", specTimeout: 7.5 }),
+    );
+  });
+
+  it("uses default specTimeout when omitted in respec mode", async () => {
+    const runner = await boot({ cwd: "/tmp/test" });
+    await runner.runFromCli(createRawCliArgs({ respec: "7", specTimeout: undefined }));
+
+    expect(runSpecPipeline).toHaveBeenCalledWith(
+      expect.objectContaining({ issues: "7", specTimeout: DEFAULT_SPEC_TIMEOUT_MIN }),
     );
   });
 

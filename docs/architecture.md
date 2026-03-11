@@ -333,7 +333,7 @@ operations:
 | Scenario | Behavior | Detail page |
 |----------|----------|-------------|
 | Issue fetch fails | Logged, skipped; others continue | [Spec generation](spec-generation/overview.md#error-handling-and-exit-codes) |
-| Spec generation fails for one issue | `failed` counter incremented; others continue | [Spec generation](spec-generation/overview.md#error-handling-and-exit-codes) |
+| Spec generation fails for one issue | Per-attempt timeout/retries are exhausted for that item; `failed` counter increments and others continue | [Spec generation](spec-generation/overview.md#error-handling-and-exit-codes) |
 | Planner times out | Retried up to `--plan-retries` (or shared `--retries`, default 3) with `--plan-timeout` (default 15 min); exhausted retries pause interactive dispatch runs for manual rerun, while verbose or non-TTY runs fail predictably without waiting | [Orchestrator](cli-orchestration/orchestrator.md) |
 | Executor returns null / exhausts retries | Interactive dispatch runs enter paused recovery for manual rerun or quit; verbose or non-TTY runs finalize the task as failed and stop predictably | [Dispatcher](planning-and-dispatch/dispatcher.md) |
 | Datasource sync fails post-execution | Warning logged; task still counted as done | [Orchestrator](cli-orchestration/orchestrator.md) |
@@ -434,17 +434,31 @@ See [worktree management](git-and-worktree/worktree-management.md) and
 
 ### Timeout and retry
 
-The planner agent is wrapped in [`withTimeout()`](shared-utilities/timeout.md)
-with configurable bounds:
+Dispatch applies deadlines and retries at the orchestration boundary rather than
+inside the agents themselves. The two primary timeout surfaces are planning and
+spec generation:
 
-| Setting | CLI flag | Default |
-|---------|----------|---------|
-| Planning timeout | `--plan-timeout` | 15 minutes |
-| Planning retries | `--plan-retries` | falls back to `--retries` (default 3) |
+| Setting | CLI flag | Config key | Default |
+|---------|----------|------------|---------|
+| Planning timeout | `--plan-timeout` | `planTimeout` | 15 minutes |
+| Planning retries | `--plan-retries` | `planRetries` | falls back to `--retries` (default 3) |
+| Spec-generation timeout | `--spec-timeout` | `specTimeout` | 10 minutes |
+| Spec-generation retries | `--retries` | `retries` | 3 |
 
-On `TimeoutError`, the pipeline retries up to `maxPlanAttempts`. Non-timeout
-errors break immediately. Provider `prompt()` calls themselves have no timeout
-or cancellation mechanism — a hung agent blocks the pipeline indefinitely. See
+Planning retries timed-out attempts up to `maxPlanAttempts`. Spec generation
+uses the same boundary pattern in `runSpecPipeline()`: the pipeline converts
+`(specTimeout ?? 10) * 60_000` once, then wraps each
+`specAgent.generate(...)` attempt as `withRetry(() => withTimeout(...), retries)`.
+
+Architecturally, that means spec deadlines are per item and per attempt.
+`TimeoutError` enters the normal retry flow, exhausted retries fail only that
+item, concurrent batches continue, and successful items still preserve partial
+progress in the final summary.
+
+Provider-local safeguards complement these deadlines rather than replacing them:
+Copilot adds its own idle wait timeout, while OpenCode surfaces `session.error`
+events and stream disconnects during prompt execution. Overall planning/spec
+deadlines still belong to the orchestrator. See
 [provider timeouts](provider-system/overview.md#prompt-timeouts-and-cancellation).
 
 In interactive dispatch runs, exhausting those retries no longer always means an
@@ -564,9 +578,12 @@ registered functions must be idempotent.
 The `withTimeout(promise, ms, label)` utility wraps async operations with a
 deadline, producing descriptive `TimeoutError` messages. The `withRetry(fn, n)`
 utility retries transient failures. Both are used by the dispatch pipeline
-(planner timeout + retry), spec pipeline (generation retry, datasource fetch
-timeout), and the test runner (test execution timeout). The pattern is
-consistent: the pipeline wraps the agent call, not the agent itself.
+(planner timeout + retry), spec pipeline (generation timeout + retry and
+datasource fetch timeout), and the test runner (test execution timeout). The
+pattern is consistent: the pipeline wraps the agent call, not the agent itself.
+For spec generation specifically, the orchestration order is
+`withRetry(() => withTimeout(specAgent.generate(...)))`, so timeouts become
+retryable per-item failures instead of batch-wide aborts.
 
 ### `AsyncLocalStorage` context scoping
 

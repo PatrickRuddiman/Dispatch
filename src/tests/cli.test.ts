@@ -29,6 +29,7 @@ vi.mock("../config.js", () => ({
   CONFIG_BOUNDS: {
     testTimeout: { min: 1, max: 120 },
     planTimeout: { min: 1, max: 120 },
+    specTimeout: { min: 1, max: 120 },
     concurrency: { min: 1, max: 64 },
   },
 }));
@@ -450,6 +451,17 @@ describe("parseArgs value flags", () => {
     expect(args.planTimeout).toBe(1.5);
   });
 
+  it("parses --spec-timeout <n>", () => {
+    const [args, flags] = parseArgs(["--spec-timeout", "5"]);
+    expect(args.specTimeout).toBe(5);
+    expect(flags.has("specTimeout")).toBe(true);
+  });
+
+  it("parses --spec-timeout with decimal", () => {
+    const [args] = parseArgs(["--spec-timeout", "1.5"]);
+    expect(args.specTimeout).toBe(1.5);
+  });
+
   it("parses --test-timeout <n>", () => {
     const [args, flags] = parseArgs(["--test-timeout", "5"]);
     expect(args.testTimeout).toBe(5);
@@ -548,6 +560,21 @@ describe("parseArgs error cases", () => {
 
   it("exits for --plan-timeout exceeding maximum", () => {
     expect(() => parseArgs(["--plan-timeout", "121"])).toThrow();
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
+
+  it("exits for non-positive --spec-timeout", () => {
+    expect(() => parseArgs(["--spec-timeout", "0"])).toThrow();
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
+
+  it("exits for non-numeric --spec-timeout", () => {
+    expect(() => parseArgs(["--spec-timeout", "abc"])).toThrow();
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
+
+  it("exits for --spec-timeout exceeding maximum", () => {
+    expect(() => parseArgs(["--spec-timeout", "121"])).toThrow();
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
