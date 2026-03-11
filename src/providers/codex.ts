@@ -174,6 +174,19 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
       }
     },
 
+    async send(sessionId: string, text: string): Promise<void> {
+      const state = sessions.get(sessionId);
+      if (!state) {
+        throw new Error(`Codex session ${sessionId} not found`);
+      }
+
+      log.debug(
+        `Codex provider does not support non-blocking send — ` +
+        `agent.run() is blocking. Ignoring follow-up for session ${sessionId} ` +
+        `(${text.length} chars).`,
+      );
+    },
+
     async cleanup(): Promise<void> {
       log.debug("Cleaning up Codex provider...");
       for (const state of sessions.values()) {

@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { mkdir, readFile, rename, unlink } from "node:fs/promises";
 import { glob } from "glob";
 import type { SpecOptions, SpecSummary } from "../spec-generator.js";
-import { isIssueNumbers, isGlobOrFilePath, resolveSource, defaultConcurrency, DEFAULT_SPEC_TIMEOUT_MIN } from "../spec-generator.js";
+import { isIssueNumbers, isGlobOrFilePath, resolveSource, defaultConcurrency, DEFAULT_SPEC_WARN_MIN, DEFAULT_SPEC_KILL_MIN } from "../spec-generator.js";
 import type { IssueDetails, IssueFetchOptions, Datasource, DatasourceName } from "../datasources/interface.js";
 import { getDatasource } from "../datasources/index.js";
 import { extractTitle } from "../datasources/md.js";
@@ -305,7 +305,8 @@ async function generateSpecsBatch(
   specCwd: string,
   concurrency: number,
   retries: number,
-  specTimeoutMs: number,
+  specWarnMs: number,
+  specKillMs: number,
 ): Promise<GenerationResults> {
   await mkdir(outputDir, { recursive: true });
 
@@ -358,8 +359,10 @@ async function generateSpecsBatch(
                   fileContent: isTrackerMode ? undefined : details.body,
                   cwd: specCwd,
                   outputPath: filepath,
+                  timeboxWarnMs: specWarnMs,
+                  timeboxKillMs: specKillMs,
                 }),
-                specTimeoutMs,
+                specWarnMs + specKillMs,
                 generateLabel,
               ),
               retries,
@@ -541,12 +544,13 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     concurrency = defaultConcurrency(),
     dryRun,
     retries = DEFAULT_RETRY_COUNT,
-    specTimeout,
   } = opts;
 
   const pipelineStart = Date.now();
-  const specTimeoutMs = (specTimeout ?? DEFAULT_SPEC_TIMEOUT_MIN) * 60_000;
-  log.debug(`Spec timeout: ${specTimeout ?? DEFAULT_SPEC_TIMEOUT_MIN}m (${specTimeoutMs}ms)`);
+  const specWarnMs = (opts.specWarnTimeout ?? DEFAULT_SPEC_WARN_MIN) * 60_000;
+  const specKillMs = (opts.specKillTimeout ?? DEFAULT_SPEC_KILL_MIN) * 60_000;
+  const specTimeoutMs = specWarnMs + specKillMs;
+  log.debug(`Spec timebox: warn=${opts.specWarnTimeout ?? DEFAULT_SPEC_WARN_MIN}m, kill=${opts.specKillTimeout ?? DEFAULT_SPEC_KILL_MIN}m, total=${specTimeoutMs}ms`);
 
   // ── Resolve datasource ─────────────────────────────────────
   const resolved = await resolveDatasource(issues, opts.issueSource, specCwd, org, project, workItemType, iteration, area);
@@ -603,7 +607,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     validItems, items, specAgent, instance,
     isTrackerMode, isInlineText,
     datasource, fetchOpts, outputDir, specCwd,
-    concurrency, retries, specTimeoutMs,
+    concurrency, retries, specWarnMs, specKillMs,
   );
 
   // ── Cleanup ────────────────────────────────────────────────

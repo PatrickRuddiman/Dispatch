@@ -176,6 +176,17 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
       }
     },
 
+    async send(sessionId: string, text: string): Promise<void> {
+      const session = sessions.get(sessionId);
+      if (!session) {
+        throw new Error(`Copilot session ${sessionId} not found`);
+      }
+
+      log.debug(`Sending follow-up to session ${sessionId} (${text.length} chars)...`);
+      await session.send({ prompt: text });
+      log.debug("Follow-up message sent");
+    },
+
     async cleanup(): Promise<void> {
       log.debug("Cleaning up Copilot provider...");
       // Destroy all active sessions before stopping the server

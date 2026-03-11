@@ -71,6 +71,13 @@ export interface ProviderInstance {
   ): Promise<string | null>;
 
   /**
+   * Inject a follow-up message into a running session without blocking
+   * for a response. Used to send time-warning nudges to the agent.
+   * Optional — providers that don't support mid-session messaging can omit this.
+   */
+  send?(sessionId: string, text: string): Promise<void>;
+
+  /**
    * Tear down the provider — stop servers, release resources.
    * Safe to call multiple times.
    */

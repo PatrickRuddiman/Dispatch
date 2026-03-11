@@ -30,6 +30,12 @@ export const MB_PER_CONCURRENT_TASK = 500;
 /** Default spec-generation timeout in minutes when not specified by the user. */
 export const DEFAULT_SPEC_TIMEOUT_MIN = 10;
 
+/** Default spec-generation warn-phase duration in minutes (agent receives a "wrap up" message). */
+export const DEFAULT_SPEC_WARN_MIN = 10;
+
+/** Default spec-generation kill-phase duration in minutes (hard termination after warn). */
+export const DEFAULT_SPEC_KILL_MIN = 10;
+
 /** Recognized H2 section headings used to detect spec structure boundaries. */
 export const RECOGNIZED_H2 = new Set([
   "## Context",
@@ -74,6 +80,10 @@ export interface SpecOptions {
   retries?: number;
   /** Spec generation timeout in minutes (default: 10) */
   specTimeout?: number;
+  /** Warn-phase timeout in minutes — agent receives a "wrap up" message after this duration (default: 10) */
+  specWarnTimeout?: number;
+  /** Kill-phase timeout in minutes — hard termination after the warn phase expires (default: 10) */
+  specKillTimeout?: number;
 }
 
 /**
