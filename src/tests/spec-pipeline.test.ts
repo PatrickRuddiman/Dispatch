@@ -115,6 +115,11 @@ vi.mock("../helpers/confirm-large-batch.js", () => ({
   confirmLargeBatch: vi.fn().mockResolvedValue(true),
 }));
 
+vi.mock("../helpers/auth.js", () => ({
+  ensureAuthReady: vi.fn().mockResolvedValue(undefined),
+  setAuthPromptHandler: vi.fn(),
+}));
+
 // ─── Import function under test (after mocks) ──────────────────────
 
 import { runSpecPipeline } from "../orchestrator/spec-pipeline.js";
@@ -126,6 +131,7 @@ import { readFile, mkdir, rename, unlink } from "node:fs/promises";
 import { extractTitle } from "../datasources/md.js";
 import { confirmLargeBatch } from "../helpers/confirm-large-batch.js";
 import { bootProvider } from "../providers/index.js";
+import { setAuthPromptHandler } from "../helpers/auth.js";
 import type { SpecOptions } from "../spec-generator.js";
 import { createMockDatasource } from "./fixtures.js";
 
@@ -1026,6 +1032,16 @@ describe("runSpecPipeline", () => {
       expect(mocks.mockGenerate).toHaveBeenCalledTimes(4);
       expect(result.generated).toBe(0);
       expect(result.failed).toBe(1);
+    });
+  });
+
+  describe("auth prompt handler", () => {
+    it("does not set or clear the auth prompt handler (spec mode uses log output)", async () => {
+      await runSpecPipeline(baseOpts({ issues: "1", concurrency: 1 }));
+
+      // Spec pipeline has no TUI, so it should never touch the auth prompt handler.
+      // Auth prompts fall through to log.info() which is appropriate for CLI output.
+      expect(setAuthPromptHandler).not.toHaveBeenCalled();
     });
   });
 

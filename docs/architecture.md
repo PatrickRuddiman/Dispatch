@@ -298,6 +298,14 @@ external CLI tools and SDKs:
 | OpenCode provider | Server-level config; no credentials passed by dispatch | [OpenCode SDK](provider-system/opencode-backend.md) |
 | Copilot provider | `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`, or logged-in `gh` CLI user | [Copilot SDK](provider-system/copilot-backend.md) |
 
+For tracker-backed datasources (GitHub and Azure DevOps), Dispatch also
+performs its own OAuth device-flow authentication via `src/helpers/auth.ts`,
+caching tokens at `~/.dispatch/auth.json`. This authentication runs **early
+in the lifecycle** — during `dispatch config`, or at startup for dispatch and
+spec pipelines — so device-code prompts appear before pipeline work begins.
+Cached tokens make the check instant. The lazy auth inside individual
+datasource methods remains as a safety net.
+
 There is no secrets rotation mechanism within Dispatch. Token lifecycle is
 managed by the underlying tools. For CI/CD environments, use environment
 variables instead of interactive login. The only persistent data is

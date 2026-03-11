@@ -320,6 +320,9 @@ sequenceDiagram
         User-->>Wizard: area (or empty to skip)
     end
 
+    Wizard->>Wizard: ensureAuthReady(source, cwd, org)
+    Note over Wizard: Authenticate tracker-backed datasource<br/>(instant if tokens are cached)
+
     Wizard->>User: Display summary
     Wizard->>User: confirm("Save?")
     User-->>Wizard: yes / no
@@ -372,7 +375,17 @@ sequenceDiagram
    returns `null` or `parseAzDevOpsRemoteUrl()` cannot parse the URL, the
    fields default to their existing config values (if any) or remain empty.
 
-6. **Summary and save**: Displays the full configuration summary and asks for
+6. **Tracker authentication**: After datasource selection (and Azure DevOps
+   fields if applicable), the wizard calls `ensureAuthReady()` to
+   pre-authenticate the selected tracker datasource. For GitHub, this
+   validates the git remote and runs the OAuth device flow if no cached
+   token exists. For Azure DevOps, it uses the configured organization URL.
+   For the markdown datasource, no authentication is needed and the step is
+   skipped. If authentication fails, a warning is logged and the wizard
+   continues — the user can re-run `dispatch config` or authenticate later
+   at runtime.
+
+7. **Summary and save**: Displays the full configuration summary and asks for
    confirmation. On "yes", writes the config via `saveConfig()`. On "no",
    exits without saving.
 

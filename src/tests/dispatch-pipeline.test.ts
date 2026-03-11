@@ -117,6 +117,7 @@ vi.mock("../helpers/auth.js", () => ({
   getGithubOctokit: vi.fn().mockResolvedValue({}),
   getAzureConnection: vi.fn().mockResolvedValue({}),
   setAuthPromptHandler: vi.fn(),
+  ensureAuthReady: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../tui.js", () => ({
@@ -1643,6 +1644,7 @@ describe("worktree dispatch pipeline", () => {
 
     it("fails the task when all executor attempts are exhausted", async () => {
       const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+      await vi.advanceTimersByTimeAsync(0); // flush ensureAuthReady microtask so createTui runs
       const tui = getMockTui();
       mocks.mockExecute.mockResolvedValue({
         success: false,
@@ -1727,6 +1729,7 @@ describe("worktree dispatch pipeline", () => {
       });
 
       const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+      await vi.advanceTimersByTimeAsync(0); // flush ensureAuthReady microtask so createTui runs
       const tui = getMockTui();
       vi.mocked(tui.waitForRecoveryAction).mockImplementationOnce(async () => {
         expect(tui.state.recovery?.selectedAction).toBe("rerun");
@@ -1774,6 +1777,7 @@ describe("worktree dispatch pipeline", () => {
         });
 
         const resultPromise = runDispatchPipeline(multiIssueOpts(), "/tmp/test");
+        await vi.advanceTimersByTimeAsync(0); // flush ensureAuthReady microtask so createTui runs
         const tui = getMockTui();
         vi.mocked(tui.waitForRecoveryAction).mockImplementationOnce(async () => {
           expect(tui.state.phase).toBe("paused");
@@ -1817,6 +1821,7 @@ describe("worktree dispatch pipeline", () => {
         });
 
         const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+        await vi.advanceTimersByTimeAsync(0); // flush ensureAuthReady microtask so createTui runs
         const tui = getMockTui();
         vi.mocked(tui.waitForRecoveryAction)
           .mockResolvedValueOnce("rerun")
@@ -1865,6 +1870,7 @@ describe("worktree dispatch pipeline", () => {
       });
 
       const resultPromise = runDispatchPipeline(multiIssueOpts(), "/tmp/test");
+      await vi.advanceTimersByTimeAsync(0); // flush ensureAuthReady microtask so createTui runs
       const tui = getMockTui();
       vi.mocked(tui.waitForRecoveryAction).mockImplementationOnce(async () => {
         expect(tui.state.recovery?.selectedAction).toBe("rerun");
@@ -2646,6 +2652,17 @@ describe("auth prompt handler cleanup on error", () => {
       runDispatchPipeline(baseOpts(), "/tmp/test"),
     ).rejects.toThrow("network failure");
 
+    expect(vi.mocked(setAuthPromptHandler)).toHaveBeenCalledWith(null);
+  });
+
+  it("calls setAuthPromptHandler(null) on normal pipeline completion", async () => {
+    const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result).toBeDefined();
     expect(vi.mocked(setAuthPromptHandler)).toHaveBeenCalledWith(null);
   });
 });

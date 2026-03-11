@@ -58,6 +58,10 @@ Before `runFromCli()` delegates to the dispatch or spec pipeline, it calls
    (CLI flags always win).
 3. Validates that the mandatory field (`provider`) is configured.
 4. Enables verbose logging if `--verbose` was passed.
+5. Both the dispatch and spec pipelines call `ensureAuthReady()` before
+   starting pipeline work, pre-authenticating the configured tracker
+   datasource (GitHub or Azure DevOps) so device-code prompts appear before
+   the TUI or batch processing begins. Cached tokens make this instant.
 
 See [Configuration — Three-tier precedence](configuration.md#three-tier-configuration-precedence)
 for the full merge algorithm and precedence rules.

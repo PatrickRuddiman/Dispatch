@@ -25,6 +25,7 @@ import { FileLogger, fileLoggerStorage } from "../helpers/file-logger.js";
 import { confirmLargeBatch } from "../helpers/confirm-large-batch.js";
 import chalk from "chalk";
 import { elapsed, renderHeaderLines } from "../helpers/format.js";
+import { ensureAuthReady } from "../helpers/auth.js";
 import { DEFAULT_RETRY_COUNT, withRetry } from "../helpers/retry.js";
 import { withTimeout } from "../helpers/timeout.js";
 import { slugify, MAX_SLUG_LENGTH } from "../helpers/slugify.js";
@@ -553,6 +554,9 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     return { total: 0, generated: 0, failed: 0, files: [], issueNumbers: [], durationMs: Date.now() - pipelineStart, fileDurationsMs: {} };
   }
   const { source, datasource, fetchOpts } = resolved;
+
+  // Pre-authenticate so device-code prompts appear before batch processing.
+  await ensureAuthReady(source, specCwd, org);
 
   // ── Determine items to process ─────────────────────────────
   const isTrackerMode = isIssueNumbers(issues);
