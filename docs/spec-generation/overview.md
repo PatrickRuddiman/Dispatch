@@ -210,6 +210,9 @@ sequenceDiagram
     Pipeline->>SG: resolveSource(options)
     SG-->>Pipeline: "github"
 
+    Pipeline->>Pipeline: ensureAuthReady(source, cwd, org)
+    Note over Pipeline: Pre-authenticate tracker datasource<br/>(instant if tokens cached)
+
     Pipeline->>DS: fetchIssues([42, 43])
     DS-->>Pipeline: IssueDetails[]
 

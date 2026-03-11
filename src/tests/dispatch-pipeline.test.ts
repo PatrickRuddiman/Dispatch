@@ -117,6 +117,7 @@ vi.mock("../helpers/auth.js", () => ({
   getGithubOctokit: vi.fn().mockResolvedValue({}),
   getAzureConnection: vi.fn().mockResolvedValue({}),
   setAuthPromptHandler: vi.fn(),
+  ensureAuthReady: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../tui.js", () => ({
@@ -2392,6 +2393,17 @@ describe("auth prompt handler cleanup on error", () => {
       runDispatchPipeline(baseOpts(), "/tmp/test"),
     ).rejects.toThrow("network failure");
 
+    expect(vi.mocked(setAuthPromptHandler)).toHaveBeenCalledWith(null);
+  });
+
+  it("calls setAuthPromptHandler(null) on normal pipeline completion", async () => {
+    const resultPromise = runDispatchPipeline(baseOpts(), "/tmp/test");
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result).toBeDefined();
     expect(vi.mocked(setAuthPromptHandler)).toHaveBeenCalledWith(null);
   });
 });

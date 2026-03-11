@@ -144,7 +144,7 @@ On first use (or when a cached token is missing/expired), Dispatch will:
 2. You sign in and authorize Dispatch in the browser.
 3. The token is cached locally at **`~/.dispatch/auth.json`** for future runs.
 
-Authentication is triggered automatically when you run `dispatch` with `--source github` or `--source azdevops`. No separate login step is needed.
+Authentication happens **early in the CLI lifecycle** — during `dispatch config` (right after datasource selection) or at startup for `dispatch` and `dispatch --spec` runs — before any pipeline work begins. If tokens are already cached the check is instant; otherwise the device-code prompt appears while the terminal is still free, so it is never buried under pipeline output. No separate login step is needed.
 
 **Re-authenticating:** Delete `~/.dispatch/auth.json` (or just the relevant platform key inside it) and run `dispatch` again to re-trigger the device flow.
 
