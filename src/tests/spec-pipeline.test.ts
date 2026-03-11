@@ -86,13 +86,17 @@ vi.mock("../providers/index.js", () => ({
   }),
 }));
 
-vi.mock("../agents/spec.js", () => ({
-  boot: vi.fn().mockResolvedValue({
-    name: "spec",
-    generate: mocks.mockGenerate,
-    cleanup: mocks.mockAgentCleanup,
-  }),
-}));
+vi.mock("../agents/spec.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../agents/spec.js")>();
+  return {
+    ...actual,
+    boot: vi.fn().mockResolvedValue({
+      name: "spec",
+      generate: mocks.mockGenerate,
+      cleanup: mocks.mockAgentCleanup,
+    }),
+  };
+});
 
 vi.mock("node:fs/promises", () => ({
   mkdir: vi.fn().mockResolvedValue(undefined),
@@ -113,6 +117,7 @@ vi.mock("../helpers/confirm-large-batch.js", () => ({
 // ─── Import function under test (after mocks) ──────────────────────
 
 import { runSpecPipeline } from "../orchestrator/spec-pipeline.js";
+import { buildSpecPrompt } from "../agents/spec.js";
 import { log } from "../helpers/logger.js";
 import { isIssueNumbers, isGlobOrFilePath, resolveSource } from "../spec-generator.js";
 import { getDatasource } from "../datasources/index.js";
@@ -292,6 +297,92 @@ describe("runSpecPipeline", () => {
         expect.stringContaining("Could not sync"),
       );
       expect(result.generated).toBe(1);
+    });
+
+    it("keeps multi-item tracker generation scoped per item and preserves batch semantics", async () => {
+      const prompts = new Map<string, string>();
+
+      mocks.mockFetch
+        .mockResolvedValueOnce({
+          number: "1",
+          title: "Test Issue 1",
+          body: "Issue body 1",
+          labels: [],
+          state: "open",
+          url: "https://example.com/1",
+          comments: [],
+          acceptanceCriteria: "",
+        })
+        .mockResolvedValueOnce({
+          number: "2",
+          title: "Test Issue 2",
+          body: "Issue body 2",
+          labels: [],
+          state: "open",
+          url: "https://example.com/2",
+          comments: [],
+          acceptanceCriteria: "",
+        });
+
+      mocks.mockGenerate.mockImplementation(async ({ issue, cwd, outputPath }) => {
+        prompts.set(issue.number, buildSpecPrompt(issue, cwd, outputPath));
+
+        return {
+          data: {
+            content: "# Generated Spec\n\n## Tasks\n\n- [ ] Do something",
+            valid: true,
+          },
+          success: true,
+        };
+      });
+
+      const result = await runSpecPipeline(baseOpts({ issues: "1,2", concurrency: 2 }));
+
+      expect(result.total).toBe(2);
+      expect(result.generated).toBe(2);
+      expect(result.failed).toBe(0);
+      expect(mocks.mockGenerate).toHaveBeenCalledTimes(2);
+      expect(mocks.mockUpdate).toHaveBeenCalledTimes(2);
+
+      const generateCalls = mocks.mockGenerate.mock.calls;
+      const issueNumbers = generateCalls
+        .map(([opts]) => opts.issue?.number)
+        .filter((issueNumber): issueNumber is string => issueNumber != null)
+        .sort();
+      const outputPaths = generateCalls
+        .map(([opts]) => opts.outputPath)
+        .sort();
+
+      expect(issueNumbers).toEqual(["1", "2"]);
+      expect(outputPaths).toEqual([
+        expect.stringContaining("1-test-issue-1.md"),
+        expect.stringContaining("2-test-issue-2.md"),
+      ]);
+
+      const prompt1 = prompts.get("1");
+      const prompt2 = prompts.get("2");
+
+      expect(prompt1).toBeDefined();
+      expect(prompt2).toBeDefined();
+
+      for (const prompt of [prompt1, prompt2]) {
+        expect(prompt).toContain("scoped to exactly one source item");
+        expect(prompt).toContain("single passed issue, file, or inline request");
+        expect(prompt).toContain("context only unless the passed source explicitly references them");
+        expect(prompt).toContain("Do not merge unrelated specs, issues, files, or requests into the generated output");
+      }
+
+      expect(prompt1).toContain("#1");
+      expect(prompt1).toContain("Test Issue 1");
+      expect(prompt1).toContain("Issue body 1");
+      expect(prompt1).not.toContain("Test Issue 2");
+      expect(prompt1).not.toContain("Issue body 2");
+
+      expect(prompt2).toContain("#2");
+      expect(prompt2).toContain("Test Issue 2");
+      expect(prompt2).toContain("Issue body 2");
+      expect(prompt2).not.toContain("Test Issue 1");
+      expect(prompt2).not.toContain("Issue body 1");
     });
   });
 
