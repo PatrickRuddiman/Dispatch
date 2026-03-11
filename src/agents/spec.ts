@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
 import type { Agent, AgentBootOptions } from "./interface.js";
 import type { AgentResult, SpecData } from "./types.js";
 import type { IssueDetails } from "../datasources/interface.js";
+import type { ProviderProgressSnapshot } from "../providers/interface.js";
 import { extractSpecContent, validateSpecStructure } from "../spec-generator.js";
 import { extractTitle } from "../datasources/md.js";
 import { log } from "../helpers/logger.js";
@@ -39,6 +40,8 @@ export interface SpecGenerateOptions {
   outputPath: string;
   /** Worktree root directory for isolation, if operating in a worktree */
   worktreeRoot?: string;
+  /** Optional provider progress callback */
+  onProgress?: (snapshot: ProviderProgressSnapshot) => void;
 }
 
 /**
@@ -70,7 +73,7 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
     name: "spec",
 
     async generate(genOpts: SpecGenerateOptions): Promise<AgentResult<SpecData>> {
-      const { issue, filePath, fileContent, inlineText, cwd: workingDir, outputPath } = genOpts;
+      const { issue, filePath, fileContent, inlineText, cwd: workingDir, outputPath, onProgress } = genOpts;
       const startTime = Date.now();
 
       try {
@@ -119,7 +122,7 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
         // 4. Create a session via the provider and send the prompt
         const sessionId = await provider.createSession();
         log.debug(`Spec prompt built (${prompt.length} chars)`);
-        const response = await provider.prompt(sessionId, prompt);
+        const response = await provider.prompt(sessionId, prompt, { onProgress });
 
         if (response === null) {
           return {
@@ -311,6 +314,10 @@ function buildCommonSpecInstructions(params: {
     `2. A **coder agent** follows that detailed plan to make the actual code changes.`,
     ``,
     `Because the planner agent handles low-level details, your spec must stay **high-level and strategic**. Focus on the WHAT, WHY, and HOW — not exact code or line numbers.`,
+    ``,
+    `**Scope:** Each invocation is scoped to exactly one source item. The source item for this invocation is the single passed issue, file, or inline request shown below.`,
+    `Treat other repository materials — including existing spec files, sibling issues, and future work — as context only unless the passed source explicitly references them as required context.`,
+    `Do not merge unrelated specs, issues, files, or requests into the generated output.`,
     ``,
     `**CRITICAL — Output constraints (read carefully):**`,
     `The file you write must contain ONLY the structured spec content described below. You MUST NOT include:`,

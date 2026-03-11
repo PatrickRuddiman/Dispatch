@@ -33,7 +33,7 @@ Regardless of input mode, the pipeline:
    [provider abstraction](../provider-system/overview.md).
 4. **Boots a spec agent** that wraps the provider with spec-specific prompt
    construction, temp-file orchestration, and post-processing.
-5. **Generates specs concurrently** in batches, with retry on failure.
+5. **Generates specs concurrently** in batches, with per-attempt timeout and retry on failure.
 6. **Post-processes output** — extracts spec content from AI response,
    validates structure, renames files based on generated H1 title.
 7. **Syncs with datasource** — updates tracker issues or manages local files
@@ -232,7 +232,7 @@ sequenceDiagram
     Agent-->>Pipeline: SpecAgent { generate, cleanup }
 
     loop For each item (concurrent, capped by defaultConcurrency)
-        Pipeline->>Pipeline: withRetry(retries=2)
+        Pipeline->>Pipeline: withRetry(() => withTimeout(generate, specTimeoutMs), retries=3)
         Pipeline->>Agent: generate(item, outputPath, cwd)
 
         Note over Agent: Path traversal guard
@@ -417,16 +417,42 @@ batch-sequential loop runs. Very large batches (500+ items) may encounter:
 ### Retry strategy
 
 Each spec generation is wrapped in `withRetry()` (`src/helpers/retry.ts`) with
-`retries = 2` (default). Key characteristics:
+`retries = 3` (default). Key characteristics:
 
 - **Immediate retry** — no exponential backoff or delay between attempts.
-- Retries `maxRetries` additional times (so up to 3 total attempts with
-  `retries = 2`).
+- Retries `maxRetries` additional times (so up to 4 total attempts with
+  `retries = 3`).
 - The last error is re-thrown if all attempts fail.
 - Applies to each individual spec, not the entire batch.
 - Configurable via the `--retries` CLI flag or `retries` option.
 - Retry attempts are logged with a `[specAgent.generate(...)]` label for
   diagnostics.
+
+### Spec-generation timeout
+
+Each generation attempt is wrapped in [`withTimeout()`](../shared-utilities/timeout.md)
+before `withRetry()` runs. The timeout surface is:
+
+| Setting | CLI flag | Config key | Default |
+|---------|----------|------------|---------|
+| Spec timeout | `--spec-timeout` | `specTimeout` | 10 minutes |
+
+Implementation details in `src/orchestrator/spec-pipeline.ts`:
+
+- The pipeline computes `specTimeoutMs = (specTimeout ?? DEFAULT_SPEC_TIMEOUT_MIN) * 60_000` once at startup.
+- Each item attempt is labeled as `specAgent.generate(#<id>)` in tracker mode or
+  `specAgent.generate(<filepath>)` in file/inline mode.
+- The orchestration order is `withRetry(() => withTimeout(specAgent.generate(...), specTimeoutMs, label), retries, { label })`.
+
+That ordering gives spec generation its resilience model:
+
+- **Per-attempt deadline** -- every retry gets its own full timeout budget.
+- **Per-item failure semantics** -- if all attempts time out or throw, only that
+  item becomes a failure.
+- **Batch continuation** -- other items in the same batch keep running and later
+  batches still execute.
+- **Partial progress preservation** -- completed specs still write, sync, and
+  appear in the final summary even when some items exhaust their retries.
 
 ### Fetch timeout
 
@@ -434,7 +460,8 @@ Datasource fetch operations in tracker mode are wrapped in [`withTimeout()`](../
 with a hardcoded `FETCH_TIMEOUT_MS = 30000` (30 seconds). This prevents a
 single slow or hung datasource call from blocking the entire pipeline. If a
 fetch exceeds 30 seconds, it is aborted and the item is marked as failed.
-This timeout is **not configurable** via CLI flags.
+This timeout is **not configurable** via CLI flags and is separate from the
+user-configurable generation timeout above.
 
 ## Dry-run mode
 
@@ -682,8 +709,9 @@ independently, and failures do not block subsequent items:
 - **Fetch failures:** If an issue cannot be fetched, it is recorded with an
   error message. Processing continues.
 - **Generation failures:** If the AI returns empty content, the session fails,
-  or the temp file is not written, the error is caught, retried up to 2 times,
-  then recorded as failed. Processing continues.
+  the temp file is not written, or the per-attempt spec timeout fires, the
+  error is caught, retried up to 3 times by default, then recorded as failed.
+  Processing continues.
 - **Path traversal failures:** If the output path resolves outside `cwd`, the
   generation returns an error immediately without creating an AI session.
 - **All fetches fail:** If no items could be prepared at all, the pipeline

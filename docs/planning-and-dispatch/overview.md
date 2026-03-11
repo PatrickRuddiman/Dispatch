@@ -29,12 +29,14 @@ flowchart TD
     C -- "No" --> D["Build Filtered Context<br/>(parser.ts: buildTaskContext)"]
     D --> F["Plan Task<br/>(planner.ts)"]
     F --> G{"Plan succeeded?"}
-    G -- "No" --> H["Task Failed<br/>(report error)"]
+    G -- "No" --> H["Task Paused<br/>(wait for rerun or quit)"]
     G -- "Yes" --> I["Build Planned Prompt<br/>(dispatcher.ts)"]
     E --> J["Dispatch to AI Agent<br/>(dispatcher.ts)"]
     I --> J
     J --> K{"Agent succeeded?"}
     K -- "No" --> H
+    H --> F["Rerun from planner entry"]
+    H --> Z["Task Failed"]
     K -- "Yes" --> L["Mark Task Complete<br/>(parser.ts: markTaskComplete)"]
     L --> M["Commit Changes<br/>(git.ts: commitTask)"]
     M --> N["Task Done"]
@@ -55,15 +57,18 @@ stateDiagram-v2
     pending --> planning : plan phase starts
     pending --> running : --no-plan mode
     planning --> running : plan succeeded
-    planning --> failed : plan error
+    planning --> paused : retries exhausted
     running --> done : agent succeeded
-    running --> failed : agent error or null response
+    running --> paused : retries exhausted
+    paused --> planning : rerun with planner
+    paused --> running : rerun in --no-plan mode
+    paused --> failed : quit or non-interactive fallback
     done --> [*]
     failed --> [*]
 ```
 
 State transitions are managed by the [orchestrator](../cli-orchestration/orchestrator.md)
-(`src/orchestrator.ts`) and reflected in the [TUI](../cli-orchestration/tui.md) via `TaskState` updates.
+(`src/orchestrator.ts`) and reflected in the [TUI](../cli-orchestration/tui.md) via `TaskState` updates. Exhausted automatic retries now move a task into an in-session `paused` recovery state instead of immediately finalizing it as terminal. The interactive TUI surfaces a selectable rerun affordance for that paused state, while verbose or non-TTY runs fall back to a terminal failure without waiting. A manual rerun re-enters the normal lifecycle entry point, including the planner when planning is enabled.
 
 ## Prompt construction chain
 

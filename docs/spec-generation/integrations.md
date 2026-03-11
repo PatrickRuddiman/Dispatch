@@ -159,6 +159,7 @@ unhandled errors.
 | Provider connection refused | External server not running at specified URL | Start the server first, then re-run |
 | Orphaned server process | Error before cleanup ran | Manually kill the provider process; cleanup registry should handle most cases |
 | Null response from `prompt()` | Provider returned empty/null | Spec marked as failed; retried up to `--retries` times |
+| `Timed out after ... [specAgent.generate(...)]` | The overall generation attempt exceeded `--spec-timeout` | Increase `--spec-timeout`, reduce prompt scope, or retry the item |
 
 ### What happens if the provider dies mid-prompt
 
@@ -166,16 +167,17 @@ If the AI provider server crashes or becomes unreachable while the spec agent
 is waiting for a response (`provider.prompt(sessionId, specPrompt)`), the
 behavior depends on the provider backend:
 
-- **OpenCode:** The SSE event stream disconnects. The `prompt()` call rejects
-  with a connection error. The spec agent's outer `try/catch`
-  (`src/agents/spec.ts:179-188`) catches the error, logs it with a stack
-  trace via the file logger, and returns `{ success: false }`.
+- **OpenCode:** If the SSE event stream disconnects, the follow-up
+  `session.messages()` fetch fails and `prompt()` rejects with a connection
+  error. If the stream stays open but silent, the provider itself has no idle
+  timeout; in spec-generation runs the outer `--spec-timeout` deadline still
+  bounds the whole attempt.
 - **Copilot:** The event listener promise rejects (either from a `session.error`
-  event or the 300-second timeout). Same catch behavior applies.
+  event or the 600-second timeout). Same catch behavior applies.
 
 In both cases:
 
-1. The failed spec is retried up to `--retries` times (default 2) via
+1. The failed spec is retried up to `--retries` times (default 3) via
    `withRetry()`.
 2. If all retries fail, the item is counted as `failed` in the summary.
 3. Other items in the batch continue processing independently — a provider
@@ -188,10 +190,13 @@ all subsequent specs in the batch will also fail. The pipeline does not attempt
 to reboot the provider mid-run. Manual intervention (restarting the server,
 or re-running the command) is required.
 
-**No per-prompt timeout:** Unlike the 30-second fetch timeout, there is no
-timeout on `provider.prompt()` calls. A hung provider that neither responds
-nor disconnects will block the spec agent indefinitely. Use Ctrl+C to
-terminate, or set up an external watchdog. See
+**Timeout layering:** Unlike the hardcoded 30-second fetch timeout, provider
+prompt handling is split across layers. Copilot has a provider-local idle
+timeout, OpenCode surfaces stream errors/disconnects, and the spec pipeline also
+wraps each `specAgent.generate(...)` attempt in the user-configurable
+`--spec-timeout` deadline. If that deadline fires, the item is retried up to
+`--retries` times and then counted as failed without aborting healthy items in
+the same batch. See
 [Provider Timeouts](../provider-system/overview.md#prompt-timeouts-and-cancellation)
 for details.
 

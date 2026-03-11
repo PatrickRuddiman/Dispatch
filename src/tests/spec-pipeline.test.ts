@@ -57,6 +57,7 @@ vi.mock("../helpers/slugify.js", () => ({
 }));
 
 vi.mock("../spec-generator.js", () => ({
+  DEFAULT_SPEC_TIMEOUT_MIN: 10,
   isIssueNumbers: vi.fn(),
   isGlobOrFilePath: vi.fn(),
   resolveSource: vi.fn(),
@@ -86,13 +87,17 @@ vi.mock("../providers/index.js", () => ({
   }),
 }));
 
-vi.mock("../agents/spec.js", () => ({
-  boot: vi.fn().mockResolvedValue({
-    name: "spec",
-    generate: mocks.mockGenerate,
-    cleanup: mocks.mockAgentCleanup,
-  }),
-}));
+vi.mock("../agents/spec.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../agents/spec.js")>();
+  return {
+    ...actual,
+    boot: vi.fn().mockResolvedValue({
+      name: "spec",
+      generate: mocks.mockGenerate,
+      cleanup: mocks.mockAgentCleanup,
+    }),
+  };
+});
 
 vi.mock("node:fs/promises", () => ({
   mkdir: vi.fn().mockResolvedValue(undefined),
@@ -118,6 +123,7 @@ vi.mock("../helpers/auth.js", () => ({
 // ─── Import function under test (after mocks) ──────────────────────
 
 import { runSpecPipeline } from "../orchestrator/spec-pipeline.js";
+import { buildSpecPrompt } from "../agents/spec.js";
 import { log } from "../helpers/logger.js";
 import { isIssueNumbers, isGlobOrFilePath, resolveSource } from "../spec-generator.js";
 import { getDatasource } from "../datasources/index.js";
@@ -130,6 +136,16 @@ import type { SpecOptions } from "../spec-generator.js";
 import { createMockDatasource } from "./fixtures.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
 
 function baseOpts(overrides?: Partial<SpecOptions>): SpecOptions {
   return {
@@ -298,6 +314,92 @@ describe("runSpecPipeline", () => {
         expect.stringContaining("Could not sync"),
       );
       expect(result.generated).toBe(1);
+    });
+
+    it("keeps multi-item tracker generation scoped per item and preserves batch semantics", async () => {
+      const prompts = new Map<string, string>();
+
+      mocks.mockFetch
+        .mockResolvedValueOnce({
+          number: "1",
+          title: "Test Issue 1",
+          body: "Issue body 1",
+          labels: [],
+          state: "open",
+          url: "https://example.com/1",
+          comments: [],
+          acceptanceCriteria: "",
+        })
+        .mockResolvedValueOnce({
+          number: "2",
+          title: "Test Issue 2",
+          body: "Issue body 2",
+          labels: [],
+          state: "open",
+          url: "https://example.com/2",
+          comments: [],
+          acceptanceCriteria: "",
+        });
+
+      mocks.mockGenerate.mockImplementation(async ({ issue, cwd, outputPath }) => {
+        prompts.set(issue.number, buildSpecPrompt(issue, cwd, outputPath));
+
+        return {
+          data: {
+            content: "# Generated Spec\n\n## Tasks\n\n- [ ] Do something",
+            valid: true,
+          },
+          success: true,
+        };
+      });
+
+      const result = await runSpecPipeline(baseOpts({ issues: "1,2", concurrency: 2 }));
+
+      expect(result.total).toBe(2);
+      expect(result.generated).toBe(2);
+      expect(result.failed).toBe(0);
+      expect(mocks.mockGenerate).toHaveBeenCalledTimes(2);
+      expect(mocks.mockUpdate).toHaveBeenCalledTimes(2);
+
+      const generateCalls = mocks.mockGenerate.mock.calls;
+      const issueNumbers = generateCalls
+        .map(([opts]) => opts.issue?.number)
+        .filter((issueNumber): issueNumber is string => issueNumber != null)
+        .sort();
+      const outputPaths = generateCalls
+        .map(([opts]) => opts.outputPath)
+        .sort();
+
+      expect(issueNumbers).toEqual(["1", "2"]);
+      expect(outputPaths).toEqual([
+        expect.stringContaining("1-test-issue-1.md"),
+        expect.stringContaining("2-test-issue-2.md"),
+      ]);
+
+      const prompt1 = prompts.get("1");
+      const prompt2 = prompts.get("2");
+
+      expect(prompt1).toBeDefined();
+      expect(prompt2).toBeDefined();
+
+      for (const prompt of [prompt1, prompt2]) {
+        expect(prompt).toContain("scoped to exactly one source item");
+        expect(prompt).toContain("single passed issue, file, or inline request");
+        expect(prompt).toContain("context only unless the passed source explicitly references them");
+        expect(prompt).toContain("Do not merge unrelated specs, issues, files, or requests into the generated output");
+      }
+
+      expect(prompt1).toContain("#1");
+      expect(prompt1).toContain("Test Issue 1");
+      expect(prompt1).toContain("Issue body 1");
+      expect(prompt1).not.toContain("Test Issue 2");
+      expect(prompt1).not.toContain("Issue body 2");
+
+      expect(prompt2).toContain("#2");
+      expect(prompt2).toContain("Test Issue 2");
+      expect(prompt2).toContain("Issue body 2");
+      expect(prompt2).not.toContain("Test Issue 1");
+      expect(prompt2).not.toContain("Issue body 1");
     });
   });
 
@@ -491,6 +593,95 @@ describe("runSpecPipeline", () => {
 
       expect(mocks.mockAgentCleanup).toHaveBeenCalledOnce();
       expect(mocks.mockProviderCleanup).toHaveBeenCalledOnce();
+    });
+
+    it("completes successfully when spec generation emits no intermediate feedback", async () => {
+      const result = await runSpecPipeline(baseOpts({ issues: "1", concurrency: 1 }));
+
+      expect(result.total).toBe(1);
+      expect(result.generated).toBe(1);
+      expect(result.failed).toBe(0);
+      expect(mocks.mockUpdate).toHaveBeenCalledOnce();
+      expect(mocks.mockAgentCleanup).toHaveBeenCalledOnce();
+      expect(mocks.mockProviderCleanup).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe("concurrent spec generation", () => {
+    it("processes concurrent generations without cross-wiring item results", async () => {
+      const pendingByIssue = new Map<string, ReturnType<typeof deferred<{ data: { content: string; valid: boolean }; success: true }>>>();
+
+      mocks.mockFetch
+        .mockResolvedValueOnce({
+          number: "1",
+          title: "Test Issue 1",
+          body: "Issue body 1",
+          labels: [],
+          state: "open",
+          url: "https://example.com/1",
+          comments: [],
+          acceptanceCriteria: "",
+        })
+        .mockResolvedValueOnce({
+          number: "2",
+          title: "Test Issue 2",
+          body: "Issue body 2",
+          labels: [],
+          state: "open",
+          url: "https://example.com/2",
+          comments: [],
+          acceptanceCriteria: "",
+        });
+
+      mocks.mockGenerate.mockImplementation((options: { issue?: { number: string } }) => {
+        const issueNumber = options.issue?.number ?? "unknown";
+        const pending = deferred<{
+          data: { content: string; valid: boolean };
+          success: true;
+        }>();
+        pendingByIssue.set(issueNumber, pending);
+        return pending.promise;
+      });
+
+      const resultPromise = runSpecPipeline(baseOpts({ issues: "1,2", concurrency: 2 }));
+
+      await vi.waitFor(() => {
+        expect(mocks.mockGenerate).toHaveBeenCalledTimes(2);
+      });
+
+      expect(mocks.mockGenerate.mock.calls.map(([options]) => options.issue?.number)).toEqual(["1", "2"]);
+
+      pendingByIssue.get("2")?.resolve({
+        success: true,
+        data: { content: "# Generated Spec Two\n\n## Tasks\n\n- [ ] Ship second", valid: true },
+      });
+      pendingByIssue.get("1")?.resolve({
+        success: true,
+        data: { content: "# Generated Spec One\n\n## Tasks\n\n- [ ] Ship first", valid: true },
+      });
+
+      const result = await resultPromise;
+
+      expect(result.total).toBe(2);
+      expect(result.generated).toBe(2);
+      expect(result.failed).toBe(0);
+      expect(mocks.mockUpdate).toHaveBeenCalledTimes(2);
+      expect(mocks.mockUpdate.mock.calls).toEqual(
+        expect.arrayContaining([
+          [
+            "1",
+            "Test Issue 1",
+            expect.stringContaining("# Generated Spec One"),
+            expect.any(Object),
+          ],
+          [
+            "2",
+            "Test Issue 2",
+            expect.stringContaining("# Generated Spec Two"),
+            expect.any(Object),
+          ],
+        ]),
+      );
     });
   });
 
@@ -832,13 +1023,13 @@ describe("runSpecPipeline", () => {
       expect(result.failed).toBe(1);
     });
 
-    it("uses default retries of 2 when not specified", async () => {
+    it("uses default retries of 3 when not specified", async () => {
       mocks.mockGenerate.mockRejectedValue(new Error("Always fails"));
 
       const result = await runSpecPipeline(baseOpts({ issues: "1", concurrency: 1 }));
 
-      // Default retries = 2, so 3 total attempts
-      expect(mocks.mockGenerate).toHaveBeenCalledTimes(3);
+      // Default retries = 3, so 4 total attempts
+      expect(mocks.mockGenerate).toHaveBeenCalledTimes(4);
       expect(result.generated).toBe(0);
       expect(result.failed).toBe(1);
     });
@@ -851,6 +1042,122 @@ describe("runSpecPipeline", () => {
       // Spec pipeline has no TUI, so it should never touch the auth prompt handler.
       // Auth prompts fall through to log.info() which is appropriate for CLI output.
       expect(setAuthPromptHandler).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("spec generation timeouts", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("uses the default spec timeout when specTimeout is omitted", async () => {
+      mocks.mockGenerate.mockImplementation(() => new Promise(() => {}));
+
+      const resultPromise = runSpecPipeline(
+        baseOpts({ issues: "1", retries: 0, specTimeout: undefined, concurrency: 1 }),
+      );
+
+      await vi.advanceTimersByTimeAsync(600_000);
+      await vi.runAllTimersAsync();
+
+      const result = await resultPromise;
+
+      expect(mocks.mockGenerate).toHaveBeenCalledTimes(1);
+      expect(result.generated).toBe(0);
+      expect(result.failed).toBe(1);
+      expect(mocks.mockUpdate).not.toHaveBeenCalled();
+      expect(
+        vi.mocked(log.error).mock.calls.some(
+          ([message]) =>
+            typeof message === "string" &&
+            message.includes("Timed out after 600000ms") &&
+            message.includes("specAgent.generate(#1)"),
+        ),
+      ).toBe(true);
+    });
+
+    it("retries after a spec generation timeout and succeeds on the next attempt", async () => {
+      mocks.mockGenerate
+        .mockImplementationOnce(() => new Promise(() => {}))
+        .mockResolvedValueOnce({
+          data: {
+            content: "# Generated Spec\n\n## Tasks\n\n- [ ] Do something",
+            valid: true,
+          },
+          success: true,
+        });
+
+      const resultPromise = runSpecPipeline(
+        baseOpts({ issues: "1", retries: 1, specTimeout: 0.001, concurrency: 1 }),
+      );
+
+      await vi.advanceTimersByTimeAsync(60);
+      await vi.runAllTimersAsync();
+
+      const result = await resultPromise;
+
+      expect(mocks.mockGenerate).toHaveBeenCalledTimes(2);
+      expect(result.generated).toBe(1);
+      expect(result.failed).toBe(0);
+      expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
+        expect.stringContaining("Attempt 1/2 failed [specAgent.generate(#1)]"),
+      );
+    });
+
+    it("runs cleanup and counts the timed out item once when generation times out", async () => {
+      mocks.mockGenerate.mockImplementation(() => new Promise(() => {}));
+
+      const resultPromise = runSpecPipeline(
+        baseOpts({ issues: "1", retries: 0, specTimeout: 0.001, concurrency: 1 }),
+      );
+
+      await vi.advanceTimersByTimeAsync(60);
+      await vi.runAllTimersAsync();
+
+      const result = await resultPromise;
+
+      expect(result.generated).toBe(0);
+      expect(result.failed).toBe(1);
+      expect(mocks.mockAgentCleanup).toHaveBeenCalledOnce();
+      expect(mocks.mockProviderCleanup).toHaveBeenCalledOnce();
+      expect(mocks.mockUpdate).not.toHaveBeenCalled();
+      expect(unlink).not.toHaveBeenCalled();
+    });
+
+    it("fails only the timed out item and still completes the rest of the batch", async () => {
+      mocks.mockGenerate
+        .mockImplementationOnce(() => new Promise(() => {}))
+        .mockResolvedValueOnce({
+          data: {
+            content: "# Generated Spec\n\n## Tasks\n\n- [ ] Do something",
+            valid: true,
+          },
+          success: true,
+        })
+        .mockImplementationOnce(() => new Promise(() => {}));
+
+      const resultPromise = runSpecPipeline(
+        baseOpts({ issues: "1,2", retries: 1, specTimeout: 0.001, concurrency: 2 }),
+      );
+
+      await vi.advanceTimersByTimeAsync(60);
+      await vi.advanceTimersByTimeAsync(60);
+      await vi.runAllTimersAsync();
+
+      const result = await resultPromise;
+
+      expect(result.total).toBe(2);
+      expect(result.generated).toBe(1);
+      expect(result.failed).toBe(1);
+      expect(mocks.mockGenerate).toHaveBeenCalledTimes(3);
+      expect(mocks.mockUpdate).toHaveBeenCalledTimes(1);
+      expect(unlink).toHaveBeenCalledTimes(1);
+      expect(mocks.mockAgentCleanup).toHaveBeenCalledOnce();
+      expect(mocks.mockProviderCleanup).toHaveBeenCalledOnce();
     });
   });
 });

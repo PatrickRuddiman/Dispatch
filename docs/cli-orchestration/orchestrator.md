@@ -418,26 +418,35 @@ approach is simpler but can leave capacity idle between batches.
 ### Promise.all and failure semantics
 
 `Promise.all()` rejects as soon as **any** promise rejects. However, the
-individual task handlers catch their own errors internally:
+individual task handlers still absorb expected planner and executor failures so
+the recovery path can be managed deliberately by the dispatch pipeline:
 
-- **Planning failure**: If `planner.plan()` throws
-  or returns `success: false`, the task is marked `"failed"` in the TUI and
-  the handler returns a failed `DispatchResult`. It does **not** throw, so
-  `Promise.all` does **not** reject. Other tasks in the batch continue
-  independently.
-- **Dispatch failure**: If `executor.execute()`
-  returns `success: false`, the task is marked failed similarly. No throw.
-- **Unexpected exception**: If an exception escapes the handler (e.g., from
-  the datasource sync step), it **would** cause `Promise.all` to reject, which
-  would propagate to the outer `try/catch` and stop the entire pipeline.
-  However, the datasource sync is wrapped in its own `try/catch`
-  (`src/orchestrator/dispatch-pipeline.ts:225-228`), so in practice sync
-  failures are logged as warnings and do not propagate.
+- **Planning timeout exhaustion or planner failure result**: The handler does
+  not throw into `Promise.all()`. In an interactive terminal, the task enters a
+  `paused` recovery state so the TUI can offer a manual rerun or quit action.
+  While that paused recovery is unresolved, downstream execution does not
+  proceed.
+- **Executor retry exhaustion or failed execution result**: The handler follows
+  the same paused recovery path. Choosing rerun re-enters the normal lifecycle
+  entry point for the task, including the planner unless `--no-plan` is active.
+  Choosing quit finalizes the task as failed and halts further dispatch for that
+  issue/run.
+- **Verbose or non-TTY fallback**: The pipeline does not wait for recovery
+  input when there is no interactive terminal. It logs that verbose or non-TTY
+  runs will not wait for input, finalizes the task as failed, and stops further
+  dispatch predictably instead of hanging.
+- **Unexpected exception**: If an exception escapes the handler (for example,
+  from code outside the guarded planner/executor paths), it would still cause
+  `Promise.all()` to reject and propagate to the outer `try/catch`. The
+  datasource sync remains wrapped in its own `try/catch`
+  (`src/orchestrator/dispatch-pipeline.ts:225-228`), so sync failures are still
+  logged as warnings instead of aborting the batch.
 
-**Key insight**: A planning failure in one task does **not** block other tasks
-in the same batch. Tasks are independent within a batch. A failure in one group
-does **not** prevent subsequent groups from running (unless an uncaught
-exception reaches `Promise.all`).
+**Key insight**: `Promise.all()` still governs concurrent batch execution, but
+exhausted automatic retries are no longer treated as an immediate "record a
+failure and keep going" outcome. Interactive runs pause for in-session manual
+recovery, and non-interactive contexts use an explicit terminal-failure
+fallback.
 
 ## The fileContentMap
 

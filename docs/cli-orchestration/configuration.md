@@ -69,6 +69,7 @@ The config file is a plain JSON object with optional fields:
   "source": "github",
   "testTimeout": 10,
   "planTimeout": 15,
+  "specTimeout": 10,
   "concurrency": 4
 }
 ```
@@ -165,6 +166,7 @@ different developers may need different provider or model settings.
 | `source` | string | `"github"`, `"azdevops"`, `"md"` | Default datasource for issue fetching (see [Datasource System](../datasource-system/overview.md)) |
 | `testTimeout` | number | 1–120 (minutes) | Test timeout in minutes for the `--fix-tests` mode. |
 | `planTimeout` | number | 1–120 (minutes) | Planning timeout in minutes for the planner agent (see [Timeout Utility](../shared-utilities/timeout.md)). |
+| `specTimeout` | number | 1–120 (minutes) | Spec generation timeout in minutes for `--spec` and `--respec` runs. |
 | `concurrency` | number | 1–64 (integer) | Maximum parallel dispatches per batch. |
 | `org` | string | Any non-empty string | Azure DevOps organization URL (e.g., `"https://dev.azure.com/myorg"`). See [Azure DevOps Datasource](../datasource-system/azdevops-datasource.md). |
 | `project` | string | Any non-empty string | Azure DevOps project name. |
@@ -191,6 +193,9 @@ different developers may need different provider or model settings.
 - **`planTimeout`** must be a finite number between 1 and 120 (inclusive).
   Uses the same validation logic as `testTimeout`. The error message is:
   `Invalid planTimeout "<value>". Must be a number between 1 and 120 (minutes)`
+- **`specTimeout`** must be a finite number between 1 and 120 (inclusive).
+  Uses the same validation logic as `testTimeout`. The error message is:
+  `Invalid specTimeout "<value>". Must be a number between 1 and 120 (minutes)`
 - **`concurrency`** must be an integer between 1 and 64 (inclusive).
   Non-integers (e.g., `"1.5"`) are rejected even if within range. The error
   message is:
@@ -208,6 +213,7 @@ for numeric configuration values:
 |-----|-----|-----|------|-------------|
 | `testTimeout` | 1 | 120 | number | Minutes |
 | `planTimeout` | 1 | 120 | number | Minutes |
+| `specTimeout` | 1 | 120 | number | Minutes |
 | `concurrency` | 1 | 64 | integer | Parallel tasks |
 
 These bounds are used by `validateConfigValue()` and also imported by the
@@ -224,6 +230,7 @@ The config system uses different key names than the CLI in some cases:
 | `source` | `--source` | `issueSource` |
 | `testTimeout` | `--test-timeout` | `testTimeout` |
 | `planTimeout` | `--plan-timeout` | `planTimeout` |
+| `specTimeout` | `--spec-timeout` | `specTimeout` |
 | `concurrency` | `--concurrency` | `concurrency` |
 | `org` | `--org` | `org` |
 | `project` | `--project` | `project` |
@@ -831,7 +838,7 @@ If the config file is deleted between `loadConfig()` and a subsequent
 ### Config keys reference
 
 The interactive wizard supports the following config keys: `provider`,
-`model`, `source`, `testTimeout`, `planTimeout`, `concurrency`, `org`,
+`model`, `source`, `testTimeout`, `planTimeout`, `specTimeout`, `concurrency`, `org`,
 `project`, `workItemType`, `iteration`, `area`.
 Keys like `dryRun`, `noPlan`, `noBranch`, `noWorktree`, `force`, and
 `verbose` are CLI-only flags and cannot be persisted via `dispatch config`.

@@ -27,6 +27,9 @@ import { log } from "./helpers/logger.js";
 /** Estimated memory (in MB) required per concurrent spec-generation task. */
 export const MB_PER_CONCURRENT_TASK = 500;
 
+/** Default spec-generation timeout in minutes when not specified by the user. */
+export const DEFAULT_SPEC_TIMEOUT_MIN = 10;
+
 /** Recognized H2 section headings used to detect spec structure boundaries. */
 export const RECOGNIZED_H2 = new Set([
   "## Context",
@@ -67,8 +70,10 @@ export interface SpecOptions {
   concurrency?: number;
   /** When true, log a preview of what would be generated without booting the provider or writing files. */
   dryRun?: boolean;
-  /** Number of retry attempts for spec generation (default: 2) */
+  /** Number of retry attempts for spec generation (default: 3) */
   retries?: number;
+  /** Spec generation timeout in minutes (default: 10) */
+  specTimeout?: number;
 }
 
 /**
@@ -303,4 +308,3 @@ export interface SpecSummary {
   /** Per-file generation durations in milliseconds (filepath → ms) */
   fileDurationsMs: Record<string, number>;
 }
-

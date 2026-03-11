@@ -22,6 +22,7 @@ vi.mock("../orchestrator/cli-config.js", () => ({
 }));
 
 vi.mock("../spec-generator.js", () => ({
+  DEFAULT_SPEC_TIMEOUT_MIN: 10,
   resolveSource: vi.fn().mockResolvedValue("md"),
   defaultConcurrency: vi.fn().mockReturnValue(2),
   isIssueNumbers: vi.fn(),
@@ -192,6 +193,9 @@ describe("--respec routing in runFromCli()", () => {
       dryRun: false,
       model: undefined,
       workItemType: undefined,
+      iteration: undefined,
+      area: undefined,
+      specTimeout: 10,
     });
   });
 
@@ -217,6 +221,9 @@ describe("--respec routing in runFromCli()", () => {
       dryRun: false,
       model: undefined,
       workItemType: undefined,
+      iteration: undefined,
+      area: undefined,
+      specTimeout: 10,
     });
   });
 
@@ -238,6 +245,9 @@ describe("--respec routing in runFromCli()", () => {
       dryRun: false,
       model: undefined,
       workItemType: undefined,
+      iteration: undefined,
+      area: undefined,
+      specTimeout: 10,
     });
   });
 

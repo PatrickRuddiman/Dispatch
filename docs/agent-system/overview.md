@@ -193,10 +193,10 @@ dispatch pipeline (`src/orchestrator/dispatch-pipeline.ts`) implement retry
 logic based on these codes:
 
 - **`TIMEOUT`**: Retried up to `--plan-retries` times (default: value of
-  `--retries`). The `withTimeout()` wrapper throws a `TimeoutError` that is
+  `--retries`, which defaults to 3). The `withTimeout()` wrapper throws a `TimeoutError` that is
   caught and classified as `TIMEOUT`.
 - **`PROVIDER_ERROR`**: May be retried depending on the pipeline — the spec
-  pipeline uses `withRetry()` with 2 retries by default.
+  pipeline uses `withRetry()` with 3 retries by default.
 - **`NO_RESPONSE`**: Treated as a failure. The task is marked failed in the
   TUI and the pipeline continues with the next task.
 - **`VALIDATION_FAILED`**: In the spec pipeline, this produces `valid: false`

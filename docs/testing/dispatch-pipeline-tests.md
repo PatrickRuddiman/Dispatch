@@ -47,15 +47,17 @@ Verifies the planning retry loop at `dispatch-pipeline.ts:386-415`:
 - **Succeeds on first attempt** — planner returns success within timeout
 - **Retries on timeout** — `TimeoutError` triggers retry, succeeds on second
   attempt
-- **All attempts exhausted** — two timeouts produce a failed task
+- **All attempts exhausted** — four default timeout attempts produce a failed task
 - **Non-timeout errors skip retry** — non-`TimeoutError` errors fail
   immediately
 - **`--no-plan` skips planning** — executor receives `null` plan
 - **`planRetries: 0`** — exactly one attempt, no retry
-- **Default timeout and retries** — uses `DEFAULT_PLAN_TIMEOUT_MIN` (10 min)
-  and `DEFAULT_PLAN_RETRIES` (1)
+- **Default timeout and retries** — uses the shared defaults of 15 minutes
+  and 3 retries (4 total attempts)
 - **Fallback to general retries** — when `planRetries` is unset, uses the
   `retries` option
+- **`planRetries` precedence** — explicit planner retry budget still overrides
+  the general `retries` value
 - **Immediate failure on non-timeout** — verifies no retry for generic errors
 
 #### Verbose mode (4 tests)
@@ -143,9 +145,14 @@ The largest test suite, covering worktree-parallel execution:
 - Single shared provider when `useWorktrees` is false
 - Planner and executor booted once with shared provider
 
-**Executor retry (3 tests):**
+**Executor retry and recovery (5+ tests):**
 - Retries executor on failure and succeeds on retry
-- Fails the task when all executor attempts are exhausted
+- Fails the task when all executor attempts are exhausted using the shared
+  default of 3 retries (4 total attempts)
+- Exhausted retries pause the task, expose TUI recovery state with rerun selected by default, and can rerun successfully
+- Quitting recovery halts downstream work while preserving the active branch/worktree context
+- Non-interactive recovery fallback stops predictably without hanging
+- Respects explicit `retries` values for executor attempt count
 - Does not retry when executor succeeds on first attempt
 
 #### Error-path handling (2 tests)
@@ -209,6 +216,7 @@ executor's behavior of checking off tasks after completion.
 | Test | What it verifies |
 |------|-----------------|
 | Full dispatch with multi-task spec | End-to-end: discover → parse → plan → execute → summary. Verifies task count, completion count, planner call count, executor call count. |
+| Manual rerun recovery | First pass exhausts automatic retries, the paused TUI recovery control defaults to rerun, `waitForRecoveryAction()` returns `rerun`, and markdown task completion still happens through the normal lifecycle. |
 | Single-task spec file | Minimal happy path with one task. |
 | `noPlan` mode | Skips planning phase entirely — verifies planner is NOT called but executor still runs. |
 
