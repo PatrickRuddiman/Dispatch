@@ -8,7 +8,12 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { ProviderInstance, ProviderBootOptions } from "./interface.js";
+import type {
+  ProviderInstance,
+  ProviderBootOptions,
+  ProviderPromptOptions,
+} from "./interface.js";
+import { createProgressReporter } from "./progress.js";
 import { log } from "../helpers/logger.js";
 
 /**
@@ -49,7 +54,15 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
   const { AgentLoop } = await loadAgentLoop();
 
   type AgentLoopInstance = InstanceType<typeof AgentLoop>;
-  const sessions = new Map<string, AgentLoopInstance>();
+
+  interface CodexSessionState {
+    agent: AgentLoopInstance;
+    onProgress?: ProviderPromptOptions["onProgress"];
+    reporter: ReturnType<typeof createProgressReporter>;
+    loadingReported: boolean;
+  }
+
+  const sessions = new Map<string, CodexSessionState>();
 
   return {
     name: "codex",
@@ -59,6 +72,12 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
       log.debug("Creating Codex session...");
       try {
         const sessionId = randomUUID();
+        const state: CodexSessionState = {
+          agent: undefined as never,
+          reporter: createProgressReporter(),
+          loadingReported: false,
+        };
+
         const agent = new AgentLoop({
           model,
           config: { model, instructions: "" },
@@ -66,11 +85,41 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
           ...(opts?.cwd ? { rootDir: opts.cwd } : {}),
           additionalWritableRoots: [],
           getCommandConfirmation: async () => ({ approved: true }),
-          onItem: () => {},
-          onLoading: () => {},
+          onItem: (item: unknown) => {
+            if (
+              item &&
+              typeof item === "object" &&
+              "type" in item &&
+              item.type === "message" &&
+              "content" in item &&
+              Array.isArray(item.content)
+            ) {
+              const itemText = item.content
+                .filter(
+                  (block): block is { type: string; text?: string } =>
+                    Boolean(block) &&
+                    typeof block === "object" &&
+                    "type" in block &&
+                    block.type === "output_text"
+                )
+                .map((block) => block.text ?? "")
+                .join("");
+              if (itemText) {
+                state.reporter.emit(itemText);
+              }
+            }
+          },
+          onLoading: () => {
+            if (state.loadingReported) return;
+
+            state.loadingReported = true;
+            state.reporter.emit("thinking");
+          },
           onLastResponseId: () => {},
         });
-        sessions.set(sessionId, agent);
+
+        state.agent = agent;
+        sessions.set(sessionId, state);
         log.debug(`Session created: ${sessionId}`);
         return sessionId;
       } catch (err) {
@@ -79,15 +128,23 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
       }
     },
 
-    async prompt(sessionId: string, text: string): Promise<string | null> {
-      const agent = sessions.get(sessionId);
-      if (!agent) {
+    async prompt(
+      sessionId: string,
+      text: string,
+      options?: ProviderPromptOptions,
+    ): Promise<string | null> {
+      const state = sessions.get(sessionId);
+      if (!state) {
         throw new Error(`Codex session ${sessionId} not found`);
       }
 
       log.debug(`Sending prompt to session ${sessionId} (${text.length} chars)...`);
+      state.onProgress = options?.onProgress;
+      state.reporter = createProgressReporter(state.onProgress);
+      state.loadingReported = false;
       try {
-        const items = await agent.run([text]);
+        state.reporter.emit("Waiting for Codex response");
+        const items = await state.agent.run([text]);
 
         const parts: string[] = [];
         for (const item of items) {
@@ -97,23 +154,45 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
               .filter((block: { type: string }) => block.type === "output_text")
               .map((block: { type: string; text?: string }) => block.text ?? "")
               .join("");
-            if (itemText) parts.push(itemText);
+            if (itemText) {
+              parts.push(itemText);
+            }
           }
         }
 
+        state.reporter.emit("Finalizing response");
         const result = parts.join("") || null;
         log.debug(`Prompt response received (${result?.length ?? 0} chars)`);
         return result;
       } catch (err) {
         log.debug(`Prompt failed: ${log.formatErrorChain(err)}`);
         throw err;
+      } finally {
+        state.onProgress = undefined;
+        state.reporter = createProgressReporter();
+        state.loadingReported = false;
       }
+    },
+
+    async send(sessionId: string, text: string): Promise<void> {
+      const state = sessions.get(sessionId);
+      if (!state) {
+        throw new Error(`Codex session ${sessionId} not found`);
+      }
+
+      log.debug(
+        `Codex provider does not support non-blocking send — ` +
+        `agent.run() is blocking. Ignoring follow-up for session ${sessionId} ` +
+        `(${text.length} chars).`,
+      );
     },
 
     async cleanup(): Promise<void> {
       log.debug("Cleaning up Codex provider...");
-      for (const agent of sessions.values()) {
-        try { agent.terminate(); } catch {}
+      for (const state of sessions.values()) {
+        try {
+          state.agent.terminate();
+        } catch {}
       }
       sessions.clear();
     },

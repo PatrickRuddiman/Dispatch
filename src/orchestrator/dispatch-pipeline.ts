@@ -22,9 +22,9 @@ import { isValidBranchName } from "../helpers/branch-validation.js";
 import { createTui, type TuiState } from "../tui.js";
 import type { ProviderName, ProviderInstance } from "../providers/interface.js";
 import { bootProvider } from "../providers/index.js";
-import { getDatasource, getGitRemoteUrl, parseAzDevOpsRemoteUrl, parseGitHubRemoteUrl } from "../datasources/index.js";
+import { getDatasource } from "../datasources/index.js";
 import type { DatasourceName, DispatchLifecycleOptions, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
-import { getGithubOctokit, getAzureConnection, setAuthPromptHandler } from "../helpers/auth.js";
+import { ensureAuthReady, setAuthPromptHandler } from "../helpers/auth.js";
 import type { OrchestrateRunOptions, DispatchSummary } from "./runner.js";
 import {
   fetchItemsById,
@@ -37,8 +37,9 @@ import {
   getBranchDiff,
   squashBranchCommits,
 } from "./datasource-helpers.js";
-import { withTimeout, TimeoutError } from "../helpers/timeout.js";
-import { withRetry } from "../helpers/retry.js";
+import { DEFAULT_PLAN_TIMEOUT_MIN, withTimeout, TimeoutError } from "../helpers/timeout.js";
+import { DEFAULT_RETRY_COUNT, withRetry } from "../helpers/retry.js";
+import { runWithConcurrency } from "../helpers/concurrency.js";
 import { isGlobOrFilePath } from "../spec-generator.js";
 import { extractTitle } from "../datasources/md.js";
 import chalk from "chalk";
@@ -86,12 +87,6 @@ async function resolveGlobItems(
   return items;
 }
 
-/** Default planning timeout in minutes when not specified by the user. */
-const DEFAULT_PLAN_TIMEOUT_MIN = 10;
-
-/** Default number of planning retries when not specified by the user. */
-const DEFAULT_PLAN_RETRIES = 1;
-
 /**
  * Run the full dispatch pipeline: discover tasks from a datasource,
  * optionally plan them via the planner agent, execute via the executor
@@ -103,7 +98,7 @@ export async function runDispatchPipeline(
 ): Promise<DispatchSummary> {
   const {
     issueIds,
-    concurrency,
+    concurrency = 1,
     dryRun,
     serverUrl,
     noPlan,
@@ -125,10 +120,13 @@ export async function runDispatchPipeline(
   let noBranch = noBranchOpt;
 
   // Planning timeout/retry defaults
-  const planTimeoutMs = (planTimeout ?? DEFAULT_PLAN_TIMEOUT_MIN) * 60_000;
-  const maxPlanAttempts = (planRetries ?? retries ?? DEFAULT_PLAN_RETRIES) + 1; // retries + initial attempt
+  const resolvedRetries = retries ?? DEFAULT_RETRY_COUNT;
+  const resolvedPlanTimeoutMin = planTimeout ?? DEFAULT_PLAN_TIMEOUT_MIN;
+  const planTimeoutMs = resolvedPlanTimeoutMin * 60_000;
+  const resolvedPlanRetries = planRetries ?? resolvedRetries;
+  const maxPlanAttempts = resolvedPlanRetries + 1; // retries + initial attempt
 
-  log.debug(`Plan timeout: ${planTimeout ?? DEFAULT_PLAN_TIMEOUT_MIN}m (${planTimeoutMs}ms), max attempts: ${maxPlanAttempts}`);
+  log.debug(`Plan timeout: ${resolvedPlanTimeoutMin}m (${planTimeoutMs}ms), max attempts: ${maxPlanAttempts}`);
 
   // Dry-run mode uses simple log output
   if (dryRun) {
@@ -138,30 +136,11 @@ export async function runDispatchPipeline(
   // Pre-authenticate before TUI starts so device codes are visible in the terminal.
   // For cached tokens this is instant; for new auth it runs the device flow
   // while stdout is still free.
-  // Validate the remote URL first to fail fast before triggering device auth.
-  if (source === "github") {
-    const remoteUrl = await getGitRemoteUrl(cwd);
-    if (remoteUrl && parseGitHubRemoteUrl(remoteUrl)) {
-      await getGithubOctokit();
-    } else if (!remoteUrl) {
-      log.warn("No git remote found — skipping GitHub pre-authentication");
-    } else {
-      log.warn("Remote URL is not a GitHub repository — skipping GitHub pre-authentication");
-    }
-  } else if (source === "azdevops") {
-    let orgUrl = org;
-    if (!orgUrl) {
-      const remoteUrl = await getGitRemoteUrl(cwd);
-      if (remoteUrl) {
-        const parsed = parseAzDevOpsRemoteUrl(remoteUrl);
-        if (parsed) orgUrl = parsed.orgUrl;
-      }
-    }
-    if (orgUrl) await getAzureConnection(orgUrl);
-  }
+  await ensureAuthReady(source, cwd, org);
 
   // ── Start TUI (or inline logging for verbose mode) ──────────
   const verbose = log.verbose;
+  const canRecoverInteractively = !verbose && process.stdin.isTTY === true && process.stdout.isTTY === true;
   let tui: ReturnType<typeof createTui>;
 
   if (verbose) {
@@ -182,7 +161,12 @@ export async function runDispatchPipeline(
       provider,
       source,
     };
-    tui = { state, update: () => {}, stop: () => {} };
+    tui = {
+      state,
+      update: () => {},
+      stop: () => {},
+      waitForRecoveryAction: async () => "quit",
+    };
   } else {
     tui = createTui();
     tui.state.provider = provider;
@@ -237,7 +221,6 @@ export async function runDispatchPipeline(
 
     if (items.length === 0) {
       tui.state.phase = "done";
-      setAuthPromptHandler(null);
       tui.stop();
       const label = issueIds.length > 0 ? `issue(s) ${issueIds.join(", ")}` : `datasource: ${source}`;
       log.warn("No work items found from " + label);
@@ -270,7 +253,6 @@ export async function runDispatchPipeline(
 
     if (allTasks.length === 0) {
       tui.state.phase = "done";
-      setAuthPromptHandler(null);
       tui.stop();
       log.warn("No unchecked tasks found");
       return { total: 0, completed: 0, failed: 0, skipped: 0, results: [] };
@@ -329,8 +311,7 @@ export async function runDispatchPipeline(
     tui.state.phase = "dispatching";
     if (verbose) log.info(`Dispatching ${allTasks.length} task(s)...`);
     const results: DispatchResult[] = [];
-    let completed = 0;
-    let failed = 0;
+    let halted = false;
 
     const lifecycleOpts: DispatchLifecycleOptions = { cwd };
 
@@ -407,450 +388,524 @@ export async function runDispatchPipeline(
 
     // Process a single issue file's tasks — handles both worktree and
     // serial branch modes, parameterised by useWorktrees.
-    const processIssueFile = async (file: string, fileTasks: typeof allTasks) => {
+    const processIssueFile = async (file: string, fileTasks: typeof allTasks): Promise<{ halted: boolean }> => {
       const details = issueDetailsByFile.get(file);
       const fileLogger = verbose && details ? new FileLogger(details.number, cwd) : null;
 
       const body = async () => {
-      let defaultBranch: string | undefined;
-      let branchName: string | undefined;
-      let worktreePath: string | undefined;
-      let issueCwd = cwd;
+        let defaultBranch: string | undefined;
+        let branchName: string | undefined;
+        let worktreePath: string | undefined;
+        let issueCwd = cwd;
+        let preserveContext = false;
 
-      // ── Branch / worktree setup (unless --no-branch) ────────────
-      if (!noBranch && details) {
-        fileLogger?.phase("Branch/worktree setup");
-        try {
-          defaultBranch = feature ? featureBranchName! : startingBranch;
-          branchName = datasource.buildBranchName(details.number, details.title, username);
-
-          if (useWorktrees) {
-            worktreePath = await createWorktree(cwd, file, branchName, ...(feature && featureBranchName ? [featureBranchName] : []));
-            registerCleanup(async () => { await removeWorktree(cwd, file); });
-            issueCwd = worktreePath;
-            log.debug(`Created worktree for issue #${details.number} at ${worktreePath}`);
-            fileLogger?.info(`Worktree created at ${worktreePath}`);
-
-            // Tag TUI tasks with worktree name for display
-            const wtName = worktreeName(file);
-            for (const task of fileTasks) {
-              const tuiTask = tui.state.tasks.find((t) => t.task === task);
-              if (tuiTask) tuiTask.worktree = wtName;
-            }
-          } else if (datasource.supportsGit()) {
-            await datasource.createAndSwitchBranch(branchName, lifecycleOpts);
-            log.debug(`Switched to branch ${branchName}`);
-            fileLogger?.info(`Switched to branch ${branchName}`);
+        const upsertResult = (collection: DispatchResult[], result: DispatchResult) => {
+          const index = collection.findIndex((entry) => entry.task === result.task);
+          if (index >= 0) {
+            collection[index] = result;
+          } else {
+            collection.push(result);
           }
-        } catch (err) {
-          const errorMsg = `Branch creation failed for issue #${details.number}: ${log.extractMessage(err)}`;
-          fileLogger?.error(`Branch creation failed: ${log.extractMessage(err)}${err instanceof Error && err.stack ? `\n${err.stack}` : ""}`);
-          log.error(errorMsg);
-          for (const task of fileTasks) {
-            const tuiTask = tui.state.tasks.find((t) => t.task === task);
-            if (tuiTask) {
-              tuiTask.status = "failed";
-              tuiTask.error = errorMsg;
-            }
-            results.push({ task, success: false, error: errorMsg });
-          }
-          failed += fileTasks.length;
-          return;
-        }
-      }
+        };
 
-      const worktreeRoot = useWorktrees ? worktreePath : undefined;
-      const issueLifecycleOpts: DispatchLifecycleOptions = { cwd: issueCwd };
-
-      // ── Boot per-worktree provider and agents (or use shared ones) ──
-      fileLogger?.phase("Provider/agent boot");
-      let localInstance: ProviderInstance;
-      let localPlanner: PlannerAgent | null;
-      let localExecutor: ExecutorAgent;
-      let localCommitAgent: CommitAgent;
-
-      if (useWorktrees) {
-        localInstance = await bootProvider(provider, { url: serverUrl, cwd: issueCwd, model });
-        registerCleanup(() => localInstance.cleanup());
-        if (localInstance.model && !tui.state.model) {
-          tui.state.model = localInstance.model;
-        }
-        if (verbose && localInstance.model) log.debug(`Model: ${localInstance.model}`);
-        localPlanner = noPlan ? null : await bootPlanner({ provider: localInstance, cwd: issueCwd });
-        localExecutor = await bootExecutor({ provider: localInstance, cwd: issueCwd });
-        localCommitAgent = await bootCommit({ provider: localInstance, cwd: issueCwd });
-        fileLogger?.info(`Provider booted: ${localInstance.model ?? provider}`);
-      } else {
-        localInstance = instance!;
-        localPlanner = planner;
-        localExecutor = executor!;
-        localCommitAgent = commitAgent!;
-      }
-
-      // ── Dispatch file's tasks ─────────────────────────────────
-      const groups = groupTasksByMode(fileTasks);
-      const issueResults: DispatchResult[] = [];
-
-      for (const group of groups) {
-        const groupQueue = [...group];
-
-        while (groupQueue.length > 0) {
-          const batch = groupQueue.splice(0, concurrency);
-          const batchResults = await Promise.all(
-            batch.map(async (task) => {
-              const tuiTask = tui.state.tasks.find((t) => t.task === task)!;
-              const startTime = Date.now();
-              tuiTask.elapsed = startTime;
-
-              // ── Phase A: Plan (unless --no-plan) ─────────────────
-              let plan: string | undefined;
-              if (localPlanner) {
-                tuiTask.status = "planning";
-                fileLogger?.phase(`Planning task: ${task.text}`);
-              if (verbose) log.info(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: planning — "${task.text}"`);
-                const rawContent = fileContentMap.get(task.file);
-                const fileContext = rawContent ? buildTaskContext(rawContent, task) : undefined;
-
-                let planResult: AgentResult<PlannerData> | undefined;
-
-                for (let attempt = 1; attempt <= maxPlanAttempts; attempt++) {
-                  try {
-                    planResult = await withTimeout(
-                      localPlanner.plan(task, fileContext, issueCwd, worktreeRoot),
-                      planTimeoutMs,
-                      "planner.plan()",
-                    );
-                    break; // success — exit retry loop
-                  } catch (err) {
-                    if (err instanceof TimeoutError) {
-                      log.warn(
-                        `Planning timed out for task "${task.text}" (attempt ${attempt}/${maxPlanAttempts})`,
-                      );
-                      fileLogger?.warn(`Planning timeout (attempt ${attempt}/${maxPlanAttempts})`);
-                      if (attempt < maxPlanAttempts) {
-                        log.debug(`Retrying planning (attempt ${attempt + 1}/${maxPlanAttempts})`);
-                        fileLogger?.info(`Retrying planning (attempt ${attempt + 1}/${maxPlanAttempts})`);
-                      }
-                    } else {
-                      // Non-timeout error — do not retry, surface immediately
-                      planResult = {
-                        data: null,
-                        success: false,
-                        error: log.extractMessage(err),
-                        durationMs: 0,
-                      };
-                      break;
-                    }
-                  }
-                }
-
-                // All attempts exhausted with timeout — produce failure result
-                if (!planResult) {
-                  const timeoutMin = planTimeout ?? 10;
-                  planResult = {
-                    data: null,
-                    success: false,
-                    error: `Planning timed out after ${timeoutMin}m (${maxPlanAttempts} attempts)`,
-                    durationMs: 0,
-                  };
-                }
-
-                if (!planResult.success) {
-                  tuiTask.status = "failed";
-                  tuiTask.error = `Planning failed: ${planResult.error}`;
-                  fileLogger?.error(`Planning failed: ${planResult.error}`);
-                  tuiTask.elapsed = Date.now() - startTime;
-                  if (verbose) log.error(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: failed — ${tuiTask.error} (${elapsed(tuiTask.elapsed)})`);
-                  failed++;
-                  return { task, success: false, error: tuiTask.error } as DispatchResult;
-                }
-
-                plan = planResult.data.prompt;
-                fileLogger?.info(`Planning completed (${planResult.durationMs ?? 0}ms)`);
-              }
-
-              // ── Phase B: Execute via executor agent ──────────────
-              tuiTask.status = "running";
-              fileLogger?.phase(`Executing task: ${task.text}`);
-              if (verbose) log.info(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: executing — "${task.text}"`);
-              const execRetries = 2;
-              const execResult = await withRetry(
-                async () => {
-                  const result = await localExecutor.execute({
-                    task,
-                    cwd: issueCwd,
-                    plan: plan ?? null,
-                    worktreeRoot,
-                  });
-                  if (!result.success) {
-                    throw new Error(result.error ?? "Execution failed");
-                  }
-                  return result;
-                },
-                execRetries,
-                { label: `executor "${task.text}"` },
-              ).catch((err): AgentResult<ExecutorData> => ({
-                data: null,
-                success: false,
-                error: log.extractMessage(err),
-                durationMs: 0,
-              }));
-
-              if (execResult.success) {
-                fileLogger?.info(`Execution completed successfully (${Date.now() - startTime}ms)`);
-                // Sync checked-off state back to the datasource
-                try {
-                  const parsed = parseIssueFilename(task.file);
-                  const updatedContent = await readFile(task.file, "utf-8");
-                  if (parsed) {
-                    const issueDetails = issueDetailsByFile.get(task.file);
-                    const title = issueDetails?.title ?? parsed.slug;
-                    await datasource.update(parsed.issueId, title, updatedContent, fetchOpts);
-                    log.success(`Synced task completion to issue #${parsed.issueId}`);
-                  } else {
-                    const issueDetails = issueDetailsByFile.get(task.file);
-                    if (issueDetails) {
-                      await datasource.update(issueDetails.number, issueDetails.title, updatedContent, fetchOpts);
-                      log.success(`Synced task completion to issue #${issueDetails.number}`);
-                    }
-                  }
-                } catch (err) {
-                  log.warn(`Could not sync task completion to datasource: ${log.formatErrorChain(err)}`);
-                }
-
-                tuiTask.status = "done";
-                tuiTask.elapsed = Date.now() - startTime;
-                if (verbose) log.success(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: done — "${task.text}" (${elapsed(tuiTask.elapsed)})`);
-                completed++;
-              } else {
-                fileLogger?.error(`Execution failed: ${execResult.error}`);
-                tuiTask.status = "failed";
-                tuiTask.error = execResult.error;
-                tuiTask.elapsed = Date.now() - startTime;
-                if (verbose) log.error(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: failed — "${task.text}" (${elapsed(tuiTask.elapsed)})${tuiTask.error ? `: ${tuiTask.error}` : ""}`);
-                failed++;
-              }
-
-              const dispatchResult: DispatchResult = execResult.success
-                ? execResult.data.dispatchResult
-                : {
-                    task,
-                    success: false,
-                    error: execResult.error ?? "Executor failed without returning a dispatch result.",
-                  };
-              return dispatchResult;
-            })
-          );
-
-          issueResults.push(...batchResults);
-
-          // Update TUI once the provider detects the actual model (lazy detection)
-          if (!tui.state.model && localInstance.model) {
-            tui.state.model = localInstance.model;
-          }
-        }
-      }
-
-      results.push(...issueResults);
-
-      // ── Safety-net commit (stage any uncommitted changes) ─────
-      if (!noBranch && branchName && defaultBranch && details && datasource.supportsGit()) {
-        try {
-          await datasource.commitAllChanges(
-            `chore: stage uncommitted changes for issue #${details.number}`,
-            issueLifecycleOpts,
-          );
-          log.debug(`Staged uncommitted changes for issue #${details.number}`);
-        } catch (err) {
-          log.warn(`Could not commit uncommitted changes for issue #${details.number}: ${log.formatErrorChain(err)}`);
-        }
-      }
-
-      // ── Commit agent (rewrite commits + generate PR metadata) ───
-      fileLogger?.phase("Commit generation");
-      let commitAgentResult: import("../agents/commit.js").CommitResult | undefined;
-      if (!noBranch && branchName && defaultBranch && details && datasource.supportsGit()) {
-        try {
-          const branchDiff = await getBranchDiff(defaultBranch, issueCwd);
-          if (branchDiff) {
-            const result = await localCommitAgent.generate({
-              branchDiff,
-              issue: details,
-              taskResults: issueResults,
-              cwd: issueCwd,
-              worktreeRoot,
-            });
-            if (result.success) {
-              commitAgentResult = result;
-              fileLogger?.info(`Commit message generated for issue #${details.number}`);
-              // Rewrite commit history with the generated message
-              try {
-                await squashBranchCommits(defaultBranch, result.commitMessage, issueCwd);
-                log.debug(`Rewrote commit message for issue #${details.number}`);
-                fileLogger?.info(`Rewrote commit history for issue #${details.number}`);
-              } catch (err) {
-                log.warn(`Could not rewrite commit message for issue #${details.number}: ${log.formatErrorChain(err)}`);
-              }
-            } else {
-              log.warn(`Commit agent failed for issue #${details.number}: ${result.error}`);
-              fileLogger?.warn(`Commit agent failed: ${result.error}`);
-            }
-          }
-        } catch (err) {
-          log.warn(`Commit agent error for issue #${details.number}: ${log.formatErrorChain(err)}`);
-        }
-      }
-
-      // ── Branch teardown (push, PR, cleanup) ──────────────────
-      fileLogger?.phase("PR lifecycle");
-      if (!noBranch && branchName && defaultBranch && details) {
-        if (feature && featureBranchName) {
-          // ── Feature mode: merge working branch into feature branch ──
-          if (worktreePath) {
-            try {
-              await removeWorktree(cwd, file);
-            } catch (err) {
-              log.warn(`Could not remove worktree for issue #${details.number}: ${log.formatErrorChain(err)}`);
-            }
-          }
-
+        // ── Branch / worktree setup (unless --no-branch) ────────────
+        if (!noBranch && details) {
+          fileLogger?.phase("Branch/worktree setup");
           try {
-            await datasource.switchBranch(featureBranchName, lifecycleOpts);
-            await exec("git", ["merge", branchName, "--no-ff", "-m", `merge: issue #${details.number}`], { cwd, shell: process.platform === "win32" });
-            log.debug(`Merged ${branchName} into ${featureBranchName}`);
+            defaultBranch = feature ? featureBranchName! : startingBranch;
+            branchName = datasource.buildBranchName(details.number, details.title, username);
+
+            if (useWorktrees) {
+              worktreePath = await createWorktree(cwd, file, branchName, ...(feature && featureBranchName ? [featureBranchName] : []));
+              registerCleanup(async () => { await removeWorktree(cwd, file); });
+              issueCwd = worktreePath;
+              log.debug(`Created worktree for issue #${details.number} at ${worktreePath}`);
+              fileLogger?.info(`Worktree created at ${worktreePath}`);
+
+              const wtName = worktreeName(file);
+              for (const task of fileTasks) {
+                const tuiTask = tui.state.tasks.find((t) => t.task === task);
+                if (tuiTask) tuiTask.worktree = wtName;
+              }
+            } else if (datasource.supportsGit()) {
+              await datasource.createAndSwitchBranch(branchName, lifecycleOpts);
+              log.debug(`Switched to branch ${branchName}`);
+              fileLogger?.info(`Switched to branch ${branchName}`);
+            }
           } catch (err) {
-            const mergeError = `Could not merge ${branchName} into feature branch: ${log.formatErrorChain(err)}`;
-            log.warn(mergeError);
-            // Abort the failed merge so the repo is left in a clean state
-            try {
-              await exec("git", ["merge", "--abort"], { cwd, shell: process.platform === "win32" });
-            } catch { /* merge --abort may fail if there's nothing to abort */ }
-            // Record every task in this issue as failed
+            const errorMsg = `Branch creation failed for issue #${details.number}: ${log.extractMessage(err)}`;
+            fileLogger?.error(`Branch creation failed: ${log.extractMessage(err)}${err instanceof Error && err.stack ? `\n${err.stack}` : ""}`);
+            log.error(errorMsg);
             for (const task of fileTasks) {
               const tuiTask = tui.state.tasks.find((t) => t.task === task);
               if (tuiTask) {
                 tuiTask.status = "failed";
-                tuiTask.error = mergeError;
+                tuiTask.error = errorMsg;
               }
-              const existingResult = results.find((r) => r.task === task);
-              if (existingResult) {
-                existingResult.success = false;
-                existingResult.error = mergeError;
-              }
+              upsertResult(results, { task, success: false, error: errorMsg });
             }
-            return;
+            return { halted: false };
           }
+        }
 
-          try {
-            await exec("git", ["branch", "-d", branchName], { cwd, shell: process.platform === "win32" });
-            log.debug(`Deleted local branch ${branchName}`);
-          } catch (err) {
-            log.warn(`Could not delete local branch ${branchName}: ${log.formatErrorChain(err)}`);
-          }
+        const worktreeRoot = useWorktrees ? worktreePath : undefined;
+        const issueLifecycleOpts: DispatchLifecycleOptions = { cwd: issueCwd };
 
-          try {
-            await datasource.switchBranch(featureDefaultBranch!, lifecycleOpts);
-          } catch (err) {
-            log.warn(`Could not switch back to ${featureDefaultBranch}: ${log.formatErrorChain(err)}`);
+        fileLogger?.phase("Provider/agent boot");
+        let localInstance: ProviderInstance;
+        let localPlanner: PlannerAgent | null;
+        let localExecutor: ExecutorAgent;
+        let localCommitAgent: CommitAgent;
+
+        if (useWorktrees) {
+          localInstance = await bootProvider(provider, { url: serverUrl, cwd: issueCwd, model });
+          registerCleanup(() => localInstance.cleanup());
+          if (localInstance.model && !tui.state.model) {
+            tui.state.model = localInstance.model;
           }
+          if (verbose && localInstance.model) log.debug(`Model: ${localInstance.model}`);
+          localPlanner = noPlan ? null : await bootPlanner({ provider: localInstance, cwd: issueCwd });
+          localExecutor = await bootExecutor({ provider: localInstance, cwd: issueCwd });
+          localCommitAgent = await bootCommit({ provider: localInstance, cwd: issueCwd });
+          fileLogger?.info(`Provider booted: ${localInstance.model ?? provider}`);
         } else {
-          // ── Normal mode: push and create per-issue PR ──
-          if (datasource.supportsGit()) {
-            try {
-              await datasource.pushBranch(branchName, issueLifecycleOpts);
-              log.debug(`Pushed branch ${branchName}`);
-              fileLogger?.info(`Pushed branch ${branchName}`);
-            } catch (err) {
-              log.warn(`Could not push branch ${branchName}: ${log.formatErrorChain(err)}`);
+          localInstance = instance!;
+          localPlanner = planner;
+          localExecutor = executor!;
+          localCommitAgent = commitAgent!;
+        }
+
+        const issueResults: DispatchResult[] = [];
+
+        const pauseTask = (task: Task, error: string) => {
+          const tuiTask = tui.state.tasks.find((entry) => entry.task === task)!;
+          tuiTask.status = "paused";
+          tuiTask.error = error;
+          tui.state.phase = "paused";
+          tui.state.recovery = {
+            taskIndex: tui.state.tasks.indexOf(tuiTask),
+            taskText: task.text,
+            error,
+            issue: details ? { number: details.number, title: details.title } : undefined,
+            worktree: tuiTask.worktree ?? worktreeRoot,
+            selectedAction: "rerun",
+          };
+          tui.update();
+          return tuiTask;
+        };
+
+        const clearRecovery = () => {
+          tui.state.recovery = undefined;
+          tui.state.phase = "dispatching";
+          tui.update();
+        };
+
+        const runTaskLifecycle = async (task: Task): Promise<
+          | { kind: "success"; result: DispatchResult }
+          | { kind: "paused"; error: string }
+        > => {
+          const tuiTask = tui.state.tasks.find((entry) => entry.task === task)!;
+          const startTime = Date.now();
+          let plan: string | undefined;
+
+          tuiTask.elapsed = startTime;
+          tuiTask.error = undefined;
+
+          if (localPlanner) {
+            tuiTask.status = "planning";
+            fileLogger?.phase(`Planning task: ${task.text}`);
+            if (verbose) log.info(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: planning — "${task.text}"`);
+            const rawContent = fileContentMap.get(task.file);
+            const fileContext = rawContent ? buildTaskContext(rawContent, task) : undefined;
+
+            let planResult: AgentResult<PlannerData> | undefined;
+
+            for (let attempt = 1; attempt <= maxPlanAttempts; attempt++) {
+              try {
+                planResult = await withTimeout(
+                  localPlanner.plan(task, fileContext, issueCwd, worktreeRoot),
+                  planTimeoutMs,
+                  "planner.plan()",
+                );
+                break;
+              } catch (err) {
+                if (err instanceof TimeoutError) {
+                  log.warn(`Planning timed out for task "${task.text}" (attempt ${attempt}/${maxPlanAttempts})`);
+                  fileLogger?.warn(`Planning timeout (attempt ${attempt}/${maxPlanAttempts})`);
+                  if (attempt < maxPlanAttempts) {
+                    log.debug(`Retrying planning (attempt ${attempt + 1}/${maxPlanAttempts})`);
+                    fileLogger?.info(`Retrying planning (attempt ${attempt + 1}/${maxPlanAttempts})`);
+                  }
+                } else {
+                  planResult = {
+                    data: null,
+                    success: false,
+                    error: log.extractMessage(err),
+                    durationMs: 0,
+                  };
+                  break;
+                }
+              }
             }
+
+            if (!planResult) {
+              planResult = {
+                data: null,
+                success: false,
+                error: `Planning timed out after ${resolvedPlanTimeoutMin}m (${maxPlanAttempts} attempts)`,
+                durationMs: 0,
+              };
+            }
+
+            if (!planResult.success) {
+              const error = `Planning failed: ${planResult.error}`;
+              fileLogger?.error(error);
+              tuiTask.elapsed = Date.now() - startTime;
+              pauseTask(task, error);
+              if (verbose) log.error(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: paused — ${error} (${elapsed(tuiTask.elapsed)})`);
+              return { kind: "paused", error };
+            }
+
+            plan = planResult.data.prompt;
+            fileLogger?.info(`Planning completed (${planResult.durationMs ?? 0}ms)`);
           }
 
-          if (datasource.supportsGit()) {
+          tuiTask.status = "running";
+          fileLogger?.phase(`Executing task: ${task.text}`);
+          if (verbose) log.info(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: executing — "${task.text}"`);
+          const execResult = await withRetry(
+            async () => {
+              const result = await localExecutor.execute({
+                task,
+                cwd: issueCwd,
+                plan: plan ?? null,
+                worktreeRoot,
+              });
+              if (!result.success) {
+                throw new Error(result.error ?? "Execution failed");
+              }
+              return result;
+            },
+            resolvedRetries,
+            { label: `executor "${task.text}"` },
+          ).catch((err): AgentResult<ExecutorData> => ({
+            data: null,
+            success: false,
+            error: log.extractMessage(err),
+            durationMs: 0,
+          }));
+
+          if (!execResult.success) {
+            const error = execResult.error ?? "Executor failed without returning a dispatch result.";
+            fileLogger?.error(`Execution failed: ${error}`);
+            tuiTask.elapsed = Date.now() - startTime;
+            pauseTask(task, error);
+            if (verbose) log.error(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: paused — "${task.text}" (${elapsed(tuiTask.elapsed)})${error ? `: ${error}` : ""}`);
+            return { kind: "paused", error };
+          }
+
+          fileLogger?.info(`Execution completed successfully (${Date.now() - startTime}ms)`);
           try {
-            const prTitle = commitAgentResult?.prTitle
-              || await buildPrTitle(details.title, defaultBranch, issueLifecycleOpts.cwd);
-            const prBody = commitAgentResult?.prDescription
-              || await buildPrBody(
-                details,
-                fileTasks,
-                issueResults,
-                defaultBranch,
-                datasource.name,
-                issueLifecycleOpts.cwd,
-              );
-            const prUrl = await datasource.createPullRequest(
-              branchName,
-              details.number,
-              prTitle,
-              prBody,
-              issueLifecycleOpts,
-              startingBranch,
-            );
-            if (prUrl) {
-              log.success(`Created PR for issue #${details.number}: ${prUrl}`);
-              fileLogger?.info(`Created PR: ${prUrl}`);
+            const parsed = parseIssueFilename(task.file);
+            const updatedContent = await readFile(task.file, "utf-8");
+            if (parsed) {
+              const issueDetails = issueDetailsByFile.get(task.file);
+              const title = issueDetails?.title ?? parsed.slug;
+              await datasource.update(parsed.issueId, title, updatedContent, fetchOpts);
+              log.success(`Synced task completion to issue #${parsed.issueId}`);
+            } else {
+              const issueDetails = issueDetailsByFile.get(task.file);
+              if (issueDetails) {
+                await datasource.update(issueDetails.number, issueDetails.title, updatedContent, fetchOpts);
+                log.success(`Synced task completion to issue #${issueDetails.number}`);
+              }
             }
           } catch (err) {
-            log.warn(`Could not create PR for issue #${details.number}: ${log.formatErrorChain(err)}`);
-            fileLogger?.warn(`PR creation failed: ${log.extractMessage(err)}`);
-          }
+            log.warn(`Could not sync task completion to datasource: ${log.formatErrorChain(err)}`);
           }
 
-          if (useWorktrees && worktreePath) {
-            try {
-              await removeWorktree(cwd, file);
-            } catch (err) {
-              log.warn(`Could not remove worktree for issue #${details.number}: ${log.formatErrorChain(err)}`);
+          tuiTask.status = "done";
+          tuiTask.error = undefined;
+          tuiTask.elapsed = Date.now() - startTime;
+          if (verbose) log.success(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: done — "${task.text}" (${elapsed(tuiTask.elapsed)})`);
+          return { kind: "success", result: execResult.data.dispatchResult };
+        };
+
+        const recoverPausedTask = async (task: Task, error: string): Promise<{ halted: boolean; result: DispatchResult }> => {
+          while (true) {
+            const tuiTask = pauseTask(task, error);
+
+            if (!canRecoverInteractively) {
+              log.warn("Manual rerun requires an interactive terminal; verbose or non-TTY runs will not wait for input, and the current branch/worktree will be left intact.");
+              tuiTask.status = "failed";
+              clearRecovery();
+              return { halted: true, result: { task, success: false, error } };
             }
-          } else if (!useWorktrees && datasource.supportsGit()) {
+
+            const action = await tui.waitForRecoveryAction();
+            if (action === "quit") {
+              tuiTask.status = "failed";
+              clearRecovery();
+              return { halted: true, result: { task, success: false, error } };
+            }
+
+            clearRecovery();
+            const rerun = await runTaskLifecycle(task);
+            if (rerun.kind === "success") {
+              return { halted: false, result: rerun.result };
+            }
+            error = rerun.error;
+          }
+        };
+
+        const groups = groupTasksByMode(fileTasks);
+        let stopAfterIssue = false;
+
+        for (const group of groups) {
+          const groupResults = await runWithConcurrency({
+            items: group,
+            concurrency,
+            worker: async (task) => runTaskLifecycle(task),
+            shouldStop: () => stopAfterIssue,
+          });
+
+          const pausedTasks: Array<{ task: Task; error: string }> = [];
+
+          for (let i = 0; i < group.length; i++) {
+            const result = groupResults[i];
+            if (result.status === "rejected") {
+              // Unexpected rejection — treat as a paused task
+              pausedTasks.push({ task: group[i], error: String(result.reason) });
+              continue;
+            }
+            const outcome = result.value;
+            if (outcome.kind === "success") {
+              upsertResult(issueResults, outcome.result);
+              upsertResult(results, outcome.result);
+            } else {
+              pausedTasks.push({ task: group[i], error: outcome.error });
+            }
+          }
+
+          for (const pausedTask of pausedTasks) {
+            const resolution = await recoverPausedTask(pausedTask.task, pausedTask.error);
+            upsertResult(issueResults, resolution.result);
+            upsertResult(results, resolution.result);
+            if (resolution.halted) {
+              preserveContext = true;
+              stopAfterIssue = true;
+              halted = true;
+              break;
+            }
+          }
+
+          if (!tui.state.model && localInstance.model) {
+            tui.state.model = localInstance.model;
+          }
+
+          if (stopAfterIssue) break;
+        }
+
+        if (!preserveContext) {
+          if (!noBranch && branchName && defaultBranch && details && datasource.supportsGit()) {
             try {
-              await datasource.switchBranch(defaultBranch, lifecycleOpts);
-              log.debug(`Switched back to ${defaultBranch}`);
+              await datasource.commitAllChanges(
+                `chore: stage uncommitted changes for issue #${details.number}`,
+                issueLifecycleOpts,
+              );
+              log.debug(`Staged uncommitted changes for issue #${details.number}`);
             } catch (err) {
-              log.warn(`Could not switch back to ${defaultBranch}: ${log.formatErrorChain(err)}`);
+              log.warn(`Could not commit uncommitted changes for issue #${details.number}: ${log.formatErrorChain(err)}`);
+            }
+          }
+
+          fileLogger?.phase("Commit generation");
+          let commitAgentResult: import("../agents/commit.js").CommitResult | undefined;
+          if (!noBranch && branchName && defaultBranch && details && datasource.supportsGit()) {
+            try {
+              const branchDiff = await getBranchDiff(defaultBranch, issueCwd);
+              if (branchDiff) {
+                const result = await localCommitAgent.generate({
+                  branchDiff,
+                  issue: details,
+                  taskResults: issueResults,
+                  cwd: issueCwd,
+                  worktreeRoot,
+                });
+                if (result.success) {
+                  commitAgentResult = result;
+                  fileLogger?.info(`Commit message generated for issue #${details.number}`);
+                  try {
+                    await squashBranchCommits(defaultBranch, result.commitMessage, issueCwd);
+                    log.debug(`Rewrote commit message for issue #${details.number}`);
+                    fileLogger?.info(`Rewrote commit history for issue #${details.number}`);
+                  } catch (err) {
+                    log.warn(`Could not rewrite commit message for issue #${details.number}: ${log.formatErrorChain(err)}`);
+                  }
+                } else {
+                  log.warn(`Commit agent failed for issue #${details.number}: ${result.error}`);
+                  fileLogger?.warn(`Commit agent failed: ${result.error}`);
+                }
+              }
+            } catch (err) {
+              log.warn(`Commit agent error for issue #${details.number}: ${log.formatErrorChain(err)}`);
+            }
+          }
+
+          fileLogger?.phase("PR lifecycle");
+          if (!noBranch && branchName && defaultBranch && details) {
+            if (feature && featureBranchName) {
+              if (worktreePath) {
+                try {
+                  await removeWorktree(cwd, file);
+                } catch (err) {
+                  log.warn(`Could not remove worktree for issue #${details.number}: ${log.formatErrorChain(err)}`);
+                }
+              }
+
+              try {
+                await datasource.switchBranch(featureBranchName, lifecycleOpts);
+                await exec("git", ["merge", branchName, "--no-ff", "-m", `merge: issue #${details.number}`], { cwd, shell: process.platform === "win32" });
+                log.debug(`Merged ${branchName} into ${featureBranchName}`);
+              } catch (err) {
+                const mergeError = `Could not merge ${branchName} into feature branch: ${log.formatErrorChain(err)}`;
+                log.warn(mergeError);
+                try {
+                  await exec("git", ["merge", "--abort"], { cwd, shell: process.platform === "win32" });
+                } catch { }
+                for (const task of fileTasks) {
+                  const tuiTask = tui.state.tasks.find((t) => t.task === task);
+                  if (tuiTask) {
+                    tuiTask.status = "failed";
+                    tuiTask.error = mergeError;
+                  }
+                  upsertResult(results, { task, success: false, error: mergeError });
+                }
+                return { halted: false };
+              }
+
+              try {
+                await exec("git", ["branch", "-d", branchName], { cwd, shell: process.platform === "win32" });
+                log.debug(`Deleted local branch ${branchName}`);
+              } catch (err) {
+                log.warn(`Could not delete local branch ${branchName}: ${log.formatErrorChain(err)}`);
+              }
+
+              try {
+                await datasource.switchBranch(featureDefaultBranch!, lifecycleOpts);
+              } catch (err) {
+                log.warn(`Could not switch back to ${featureDefaultBranch}: ${log.formatErrorChain(err)}`);
+              }
+            } else {
+              if (datasource.supportsGit()) {
+                try {
+                  await datasource.pushBranch(branchName, issueLifecycleOpts);
+                  log.debug(`Pushed branch ${branchName}`);
+                  fileLogger?.info(`Pushed branch ${branchName}`);
+                } catch (err) {
+                  log.warn(`Could not push branch ${branchName}: ${log.formatErrorChain(err)}`);
+                }
+              }
+
+              if (datasource.supportsGit()) {
+                try {
+                  const prTitle = commitAgentResult?.prTitle || await buildPrTitle(details.title, defaultBranch, issueLifecycleOpts.cwd);
+                  const prBody = commitAgentResult?.prDescription || await buildPrBody(
+                    details,
+                    fileTasks,
+                    issueResults,
+                    defaultBranch,
+                    datasource.name,
+                    issueLifecycleOpts.cwd,
+                  );
+                  const prUrl = await datasource.createPullRequest(
+                    branchName,
+                    details.number,
+                    prTitle,
+                    prBody,
+                    issueLifecycleOpts,
+                    startingBranch,
+                  );
+                  if (prUrl) {
+                    log.success(`Created PR for issue #${details.number}: ${prUrl}`);
+                    fileLogger?.info(`Created PR: ${prUrl}`);
+                  }
+                } catch (err) {
+                  log.warn(`Could not create PR for issue #${details.number}: ${log.formatErrorChain(err)}`);
+                  fileLogger?.warn(`PR creation failed: ${log.extractMessage(err)}`);
+                }
+              }
+
+              if (useWorktrees && worktreePath) {
+                try {
+                  await removeWorktree(cwd, file);
+                } catch (err) {
+                  log.warn(`Could not remove worktree for issue #${details.number}: ${log.formatErrorChain(err)}`);
+                }
+              } else if (!useWorktrees && datasource.supportsGit()) {
+                try {
+                  await datasource.switchBranch(defaultBranch, lifecycleOpts);
+                  log.debug(`Switched back to ${defaultBranch}`);
+                } catch (err) {
+                  log.warn(`Could not switch back to ${defaultBranch}: ${log.formatErrorChain(err)}`);
+                }
+              }
             }
           }
         }
-      }
 
-      // ── Per-worktree resource cleanup ───────────────────────────
-      fileLogger?.phase("Resource cleanup");
-      if (useWorktrees) {
-        await localExecutor.cleanup();
-        await localPlanner?.cleanup();
-        await localInstance.cleanup();
-      }
+        fileLogger?.phase("Resource cleanup");
+        if (useWorktrees) {
+          await localExecutor.cleanup();
+          await localPlanner?.cleanup();
+          await localInstance.cleanup();
+        }
+
+        return { halted: stopAfterIssue };
       };
 
       if (fileLogger) {
-        await fileLoggerStorage.run(fileLogger, async () => {
+        return fileLoggerStorage.run(fileLogger, async () => {
           try {
-            await body();
+            return await body();
           } finally {
             fileLogger.close();
           }
         });
-      } else {
-        await body();
       }
+
+      return body();
     };
 
     // Execute issues: parallel via worktrees, or serial fallback
     // Feature mode forces serial execution to avoid merge conflicts
     if (useWorktrees && !feature) {
-      await Promise.all(
-        Array.from(tasksByFile).map(([file, fileTasks]) =>
-          processIssueFile(file, fileTasks)
-        )
-      );
+      // Sliding-window concurrency: up to `concurrency` issues in parallel
+      const issueEntries = Array.from(tasksByFile.entries());
+      const concurrencyResults = await runWithConcurrency({
+        items: issueEntries,
+        concurrency,
+        worker: async ([file, fileTasks]) => processIssueFile(file, fileTasks),
+        shouldStop: () => halted,
+      });
+      for (const result of concurrencyResults) {
+        if (result?.status === "fulfilled" && result.value?.halted) {
+          halted = true;
+        }
+      }
     } else {
+      // Sequential: non-worktree mode or feature mode
       for (const [file, fileTasks] of tasksByFile) {
-        await processIssueFile(file, fileTasks);
+        const issueResult = await processIssueFile(file, fileTasks);
+        if (issueResult?.halted) {
+          halted = true;
+          break;
+        }
       }
     }
 
     // ── Feature branch finalization (push + aggregated PR) ──────
-    if (feature && featureBranchName && featureDefaultBranch) {
+    if (!halted && feature && featureBranchName && featureDefaultBranch) {
       try {
         await datasource.switchBranch(featureBranchName, lifecycleOpts);
         log.debug(`Switched to feature branch ${featureBranchName}`);
@@ -900,7 +955,11 @@ export async function runDispatchPipeline(
     await planner?.cleanup();
     await instance?.cleanup();
 
+    const completed = results.filter((result) => result.success).length;
+    const failed = results.filter((result) => !result.success).length;
+
     tui.state.phase = "done";
+    setAuthPromptHandler(null);
     tui.stop();
     if (verbose) log.success(`Done — ${completed} completed, ${failed} failed (${elapsed(Date.now() - tui.state.startTime)})`);
 

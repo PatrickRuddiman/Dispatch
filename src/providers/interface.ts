@@ -10,6 +10,10 @@
 
 export type ProviderName = "opencode" | "copilot" | "claude" | "codex";
 
+export interface ProviderProgressSnapshot {
+  text: string;
+}
+
 /**
  * Options passed when booting a provider.
  */
@@ -26,6 +30,10 @@ export interface ProviderBootOptions {
    * When omitted the provider uses its auto-detected default.
    */
   model?: string;
+}
+
+export interface ProviderPromptOptions {
+  onProgress?: (snapshot: ProviderProgressSnapshot) => void;
 }
 
 /**
@@ -56,7 +64,18 @@ export interface ProviderInstance {
    * Send a prompt to an existing session and wait for the agent to finish.
    * Returns the agent's text response, or null if no response was produced.
    */
-  prompt(sessionId: string, text: string): Promise<string | null>;
+  prompt(
+    sessionId: string,
+    text: string,
+    options?: ProviderPromptOptions,
+  ): Promise<string | null>;
+
+  /**
+   * Inject a follow-up message into a running session without blocking
+   * for a response. Used to send time-warning nudges to the agent.
+   * Optional — providers that don't support mid-session messaging can omit this.
+   */
+  send?(sessionId: string, text: string): Promise<void>;
 
   /**
    * Tear down the provider — stop servers, release resources.

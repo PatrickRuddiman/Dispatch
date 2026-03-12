@@ -144,7 +144,7 @@ On first use (or when a cached token is missing/expired), Dispatch will:
 2. You sign in and authorize Dispatch in the browser.
 3. The token is cached locally at **`~/.dispatch/auth.json`** for future runs.
 
-Authentication is triggered automatically when you run `dispatch` with `--source github` or `--source azdevops`. No separate login step is needed.
+Authentication happens **early in the CLI lifecycle** — during `dispatch config` (right after datasource selection) or at startup for `dispatch` and `dispatch --spec` runs — before any pipeline work begins. If tokens are already cached the check is instant; otherwise the device-code prompt appears while the terminal is still free, so it is never buried under pipeline output. No separate login step is needed.
 
 **Re-authenticating:** Delete `~/.dispatch/auth.json` (or just the relevant platform key inside it) and run `dispatch` again to re-trigger the device flow.
 
@@ -206,7 +206,7 @@ Config is stored at `.dispatch/config.json` (relative to the working directory w
 | `model` | Model to use when spawning agents (provider-specific format) |
 | `source` | Issue tracker: `github`, `azdevops`, or `md` |
 | `testTimeout` | Test execution timeout in minutes (default: 5, range: 1–120) |
-| `planTimeout` | Planning timeout in minutes (default: 10, range: 1–120) |
+| `planTimeout` | Planning timeout in minutes (default: 15, range: 1–120) |
 | `concurrency` | Max parallel dispatches (range: 1–64) |
 | `org` | Azure DevOps organization URL |
 | `project` | Azure DevOps project name |
@@ -230,13 +230,15 @@ Config is stored at `.dispatch/config.json` (relative to the working directory w
 | `--feature [name]` | *(off)* | Group issues into a single feature branch and PR |
 | `--force` | `false` | Ignore prior run state and re-run all tasks |
 | `--concurrency <n>` | *(cpu/memory)* | Max parallel dispatches (max: 64) |
-| `--plan-timeout <min>` | `10` | Planning timeout in minutes |
-| `--retries <n>` | `2` | Retry attempts for all agents |
+| `--plan-timeout <min>` | `15` | Planning timeout in minutes |
+| `--retries <n>` | `3` | Retry attempts for all agents |
 | `--plan-retries <n>` | *(from --retries)* | Retry attempts for the planner agent (overrides `--retries`) |
 | `--test-timeout <min>` | `5` | Test timeout in minutes |
 | `--server-url <url>` | *(none)* | Connect to a running provider server |
 | `--cwd <dir>` | `process.cwd()` | Working directory |
 | `--verbose` | `false` | Show detailed debug output |
+
+In interactive dispatch runs, exhausted automatic retries pause the failed task in the dispatch UI so you can manually rerun it in place. A rerun re-enters the normal task lifecycle, including planning unless `--no-plan` is set; verbose or non-interactive runs will not wait for input and instead stop predictably with the task left failed.
 
 ### Spec mode
 
