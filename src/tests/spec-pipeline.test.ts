@@ -58,6 +58,8 @@ vi.mock("../helpers/slugify.js", () => ({
 
 vi.mock("../spec-generator.js", () => ({
   DEFAULT_SPEC_TIMEOUT_MIN: 10,
+  DEFAULT_SPEC_WARN_MIN: 10,
+  DEFAULT_SPEC_KILL_MIN: 10,
   isIssueNumbers: vi.fn(),
   isGlobOrFilePath: vi.fn(),
   resolveSource: vi.fn(),
@@ -1054,14 +1056,15 @@ describe("runSpecPipeline", () => {
       vi.useRealTimers();
     });
 
-    it("uses the default spec timeout when specTimeout is omitted", async () => {
+    it("uses the default spec timeout when specWarnTimeout/specKillTimeout are omitted", async () => {
       mocks.mockGenerate.mockImplementation(() => new Promise(() => {}));
 
       const resultPromise = runSpecPipeline(
-        baseOpts({ issues: "1", retries: 0, specTimeout: undefined, concurrency: 1 }),
+        baseOpts({ issues: "1", retries: 0, concurrency: 1 }),
       );
 
-      await vi.advanceTimersByTimeAsync(600_000);
+      // Default timebox = DEFAULT_SPEC_WARN_MIN(10) + DEFAULT_SPEC_KILL_MIN(10) = 20 min = 1,200,000ms
+      await vi.advanceTimersByTimeAsync(1_200_000);
       await vi.runAllTimersAsync();
 
       const result = await resultPromise;
@@ -1074,7 +1077,7 @@ describe("runSpecPipeline", () => {
         vi.mocked(log.error).mock.calls.some(
           ([message]) =>
             typeof message === "string" &&
-            message.includes("Timed out after 600000ms") &&
+            message.includes("Timed out after 1200000ms") &&
             message.includes("specAgent.generate(#1)"),
         ),
       ).toBe(true);
@@ -1092,7 +1095,7 @@ describe("runSpecPipeline", () => {
         });
 
       const resultPromise = runSpecPipeline(
-        baseOpts({ issues: "1", retries: 1, specTimeout: 0.001, concurrency: 1 }),
+        baseOpts({ issues: "1", retries: 1, specWarnTimeout: 0.001, specKillTimeout: 0, concurrency: 1 }),
       );
 
       await vi.advanceTimersByTimeAsync(60);
@@ -1112,7 +1115,7 @@ describe("runSpecPipeline", () => {
       mocks.mockGenerate.mockImplementation(() => new Promise(() => {}));
 
       const resultPromise = runSpecPipeline(
-        baseOpts({ issues: "1", retries: 0, specTimeout: 0.001, concurrency: 1 }),
+        baseOpts({ issues: "1", retries: 0, specWarnTimeout: 0.001, specKillTimeout: 0, concurrency: 1 }),
       );
 
       await vi.advanceTimersByTimeAsync(60);
@@ -1141,7 +1144,7 @@ describe("runSpecPipeline", () => {
         .mockImplementationOnce(() => new Promise(() => {}));
 
       const resultPromise = runSpecPipeline(
-        baseOpts({ issues: "1,2", retries: 1, specTimeout: 0.001, concurrency: 2 }),
+        baseOpts({ issues: "1,2", retries: 1, specWarnTimeout: 0.001, specKillTimeout: 0, concurrency: 2 }),
       );
 
       await vi.advanceTimersByTimeAsync(60);

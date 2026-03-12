@@ -32,6 +32,8 @@ vi.mock("../helpers/logger.js", () => ({
 vi.mock("../spec-generator.js", () => ({
   extractSpecContent: vi.fn((raw: string) => raw),
   validateSpecStructure: vi.fn(() => ({ valid: true, reason: undefined })),
+  DEFAULT_SPEC_WARN_MIN: 10,
+  DEFAULT_SPEC_KILL_MIN: 10,
 }));
 
 vi.mock("../datasources/md.js", () => ({
@@ -713,7 +715,7 @@ describe("timebox", () => {
   it("cancels both timers when prompt completes before warn fires", async () => {
     let resolvePrompt!: (value: string | null) => void;
     const promptPromise = new Promise<string | null>((res) => { resolvePrompt = res; });
-    const send = vi.fn<ProviderInstance["send"]>().mockResolvedValue(undefined);
+    const send = vi.fn<NonNullable<ProviderInstance["send"]>>().mockResolvedValue(undefined);
     const provider = createMockProvider({
       prompt: vi.fn<ProviderInstance["prompt"]>().mockReturnValue(promptPromise),
       send,
@@ -742,7 +744,7 @@ describe("timebox", () => {
   it("sends a wrap-up message when the warn timer fires", async () => {
     let resolvePrompt!: (value: string | null) => void;
     const promptPromise = new Promise<string | null>((res) => { resolvePrompt = res; });
-    const send = vi.fn<ProviderInstance["send"]>().mockResolvedValue(undefined);
+    const send = vi.fn<NonNullable<ProviderInstance["send"]>>().mockResolvedValue(undefined);
     const provider = createMockProvider({
       prompt: vi.fn<ProviderInstance["prompt"]>().mockReturnValue(promptPromise),
       send,
@@ -770,7 +772,7 @@ describe("timebox", () => {
 
   it("rejects with TimeoutError when the kill timer fires", async () => {
     const promptPromise = new Promise<string | null>(() => {});  // never resolves
-    const send = vi.fn<ProviderInstance["send"]>().mockResolvedValue(undefined);
+    const send = vi.fn<NonNullable<ProviderInstance["send"]>>().mockResolvedValue(undefined);
     const provider = createMockProvider({
       prompt: vi.fn<ProviderInstance["prompt"]>().mockReturnValue(promptPromise),
       send,
@@ -798,7 +800,7 @@ describe("timebox", () => {
   it("cancels the kill timer when prompt completes after warn but before kill", async () => {
     let resolvePrompt!: (value: string | null) => void;
     const promptPromise = new Promise<string | null>((res) => { resolvePrompt = res; });
-    const send = vi.fn<ProviderInstance["send"]>().mockResolvedValue(undefined);
+    const send = vi.fn<NonNullable<ProviderInstance["send"]>>().mockResolvedValue(undefined);
     const provider = createMockProvider({
       prompt: vi.fn<ProviderInstance["prompt"]>().mockReturnValue(promptPromise),
       send,
