@@ -30,6 +30,7 @@ import { elapsed, renderHeaderLines } from "../helpers/format.js";
 import { ensureAuthReady } from "../helpers/auth.js";
 import { DEFAULT_RETRY_COUNT, withRetry } from "../helpers/retry.js";
 import { withTimeout } from "../helpers/timeout.js";
+import { runWithConcurrency } from "../helpers/concurrency.js";
 import { slugify, MAX_SLUG_LENGTH } from "../helpers/slugify.js";
 import { parseIssueFilename } from "./datasource-helpers.js";
 
@@ -506,20 +507,13 @@ async function generateSpecsBatch(
     }
   }
 
-  // Sliding-window concurrency: start the next item as soon as any slot frees up
-  const inFlight = new Set<Promise<void>>();
-  let queueIndex = 0;
-
-  while (queueIndex < genQueue.length || inFlight.size > 0) {
-    while (queueIndex < genQueue.length && inFlight.size < concurrency) {
-      const item = genQueue[queueIndex++];
-      const p = processItem(item).then(() => { inFlight.delete(p); });
-      inFlight.add(p);
-    }
-    if (inFlight.size > 0) {
-      await Promise.race(inFlight);
-    }
-  }
+  // Sliding-window concurrency — delegate to the shared utility for
+  // consistency with dispatch-pipeline.ts.
+  await runWithConcurrency({
+    items: genQueue,
+    concurrency,
+    worker: async (item) => processItem(item),
+  });
 
   return { generatedFiles, issueNumbers, dispatchIdentifiers, failed, fileDurationsMs };
 }
@@ -592,8 +586,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
   const pipelineStart = Date.now();
   const specWarnMs = (opts.specWarnTimeout ?? DEFAULT_SPEC_WARN_MIN) * 60_000;
   const specKillMs = (opts.specKillTimeout ?? DEFAULT_SPEC_KILL_MIN) * 60_000;
-  const specTimeoutMs = specWarnMs + specKillMs;
-  log.debug(`Spec timebox: warn=${opts.specWarnTimeout ?? DEFAULT_SPEC_WARN_MIN}m, kill=${opts.specKillTimeout ?? DEFAULT_SPEC_KILL_MIN}m, total=${specTimeoutMs}ms`);
+  log.debug(`Spec timebox: warn=${opts.specWarnTimeout ?? DEFAULT_SPEC_WARN_MIN}m, kill=${opts.specKillTimeout ?? DEFAULT_SPEC_KILL_MIN}m, total=${specWarnMs + specKillMs}ms`);
 
   // ── Resolve datasource ─────────────────────────────────────
   const resolved = await resolveDatasource(issues, opts.issueSource, specCwd, org, project, workItemType, iteration, area);

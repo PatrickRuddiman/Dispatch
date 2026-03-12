@@ -195,6 +195,9 @@ export async function ensureAuthReady(
       if (remoteUrl) {
         const parsed = parseAzDevOpsRemoteUrl(remoteUrl);
         if (parsed) orgUrl = parsed.orgUrl;
+        else log.warn("Remote URL is not an Azure DevOps repository — skipping Azure pre-authentication");
+      } else {
+        log.warn("No git remote found — skipping Azure DevOps pre-authentication");
       }
     }
     if (orgUrl) await getAzureConnection(orgUrl);

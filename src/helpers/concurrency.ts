@@ -26,7 +26,8 @@ export interface ConcurrencyOptions<T, R> {
 /** Result of a single work item. */
 export type ConcurrencyResult<R> =
   | { status: "fulfilled"; value: R }
-  | { status: "rejected"; reason: unknown };
+  | { status: "rejected"; reason: unknown }
+  | { status: "skipped" };
 
 /**
  * Process `items` through `worker` with sliding-window concurrency.
@@ -81,6 +82,12 @@ export async function runWithConcurrency<T, R>(
       }
 
       if (active === 0) {
+        // Fill slots for items that were never launched (due to shouldStop)
+        for (let i = 0; i < results.length; i++) {
+          if (!(i in results)) {
+            results[i] = { status: "skipped" };
+          }
+        }
         resolve(results);
       }
     };

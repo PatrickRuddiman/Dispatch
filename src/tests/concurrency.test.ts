@@ -171,10 +171,10 @@ describe("runWithConcurrency", () => {
     expect(launched).toBe(2);
     expect(results[0]).toEqual({ status: "fulfilled", value: 1 });
     expect(results[1]).toEqual({ status: "fulfilled", value: 2 });
-    // Remaining items have no result (undefined in the array)
-    expect(results[2]).toBeUndefined();
-    expect(results[3]).toBeUndefined();
-    expect(results[4]).toBeUndefined();
+    // Remaining items are marked as skipped
+    expect(results[2]).toEqual({ status: "skipped" });
+    expect(results[3]).toEqual({ status: "skipped" });
+    expect(results[4]).toEqual({ status: "skipped" });
   });
 
   it("allows already-running workers to finish when shouldStop fires", async () => {
@@ -237,6 +237,76 @@ describe("runWithConcurrency", () => {
     });
 
     expect(indices.sort()).toEqual([0, 1, 2]);
+  });
+
+  it("clamps concurrency to at least 1 when given a negative value", async () => {
+    const results = await runWithConcurrency({
+      items: [1, 2],
+      concurrency: -5,
+      worker: async (n) => n * 2,
+    });
+
+    expect(results).toEqual([
+      { status: "fulfilled", value: 2 },
+      { status: "fulfilled", value: 4 },
+    ]);
+  });
+
+  it("launches no items when shouldStop is true from the start", async () => {
+    const workerFn = vi.fn().mockResolvedValue("nope");
+
+    const results = await runWithConcurrency({
+      items: [1, 2, 3],
+      concurrency: 2,
+      worker: workerFn,
+      shouldStop: () => true,
+    });
+
+    expect(workerFn).not.toHaveBeenCalled();
+    expect(results).toEqual([
+      { status: "skipped" },
+      { status: "skipped" },
+      { status: "skipped" },
+    ]);
+  });
+
+  it("captures non-Error thrown values as rejection reasons", async () => {
+    const results = await runWithConcurrency({
+      items: ["ok", "string-throw", "number-throw"],
+      concurrency: 3,
+      worker: async (item) => {
+        if (item === "string-throw") throw "a string reason";
+        if (item === "number-throw") throw 42;
+        return item;
+      },
+    });
+
+    expect(results[0]).toEqual({ status: "fulfilled", value: "ok" });
+    expect(results[1]).toEqual({ status: "rejected", reason: "a string reason" });
+    expect(results[2]).toEqual({ status: "rejected", reason: 42 });
+  });
+
+  it("marks unprocessed items as skipped when shouldStop fires mid-batch", async () => {
+    let stopSignal = false;
+
+    const results = await runWithConcurrency({
+      items: [1, 2, 3, 4, 5],
+      concurrency: 2,
+      worker: async (n) => {
+        if (n === 1) stopSignal = true;
+        await new Promise((r) => setTimeout(r, 10));
+        return n * 10;
+      },
+      shouldStop: () => stopSignal,
+    });
+
+    // Items 1 and 2 were launched (concurrency=2 before shouldStop checked)
+    expect(results[0]).toEqual({ status: "fulfilled", value: 10 });
+    expect(results[1]).toEqual({ status: "fulfilled", value: 20 });
+    // Remaining items are skipped
+    for (let i = 2; i < 5; i++) {
+      expect(results[i]).toEqual({ status: "skipped" });
+    }
   });
 
   it("handles a single item", async () => {

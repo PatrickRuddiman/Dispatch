@@ -183,8 +183,13 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
       }
 
       log.debug(`Sending follow-up to session ${sessionId} (${text.length} chars)...`);
-      await session.send({ prompt: text });
-      log.debug("Follow-up message sent");
+      try {
+        await session.send({ prompt: text });
+        log.debug("Follow-up message sent");
+      } catch (err) {
+        log.debug(`Follow-up send failed: ${log.formatErrorChain(err)}`);
+        throw err;
+      }
     },
 
     async cleanup(): Promise<void> {

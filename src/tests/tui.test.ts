@@ -630,6 +630,48 @@ describe("worktree indicator rendering", () => {
     expect(output).toContain("[▶ rerun]");
     expect(output).not.toContain("[wt:");
   });
+
+  it("handles worktree group with all-pending tasks without crashing", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    addTask("pending", "Pending task A", 0, { worktree: "100-new-feature" });
+    addTask("pending", "Pending task B", 1, { worktree: "100-new-feature" });
+    addTask("running", "Active task", 2, { worktree: "200-other-feature", elapsed: Date.now() });
+    tui.update();
+    const output = lastOutput();
+    expect(output).toContain("#100");
+    expect(output).toContain("#200");
+    expect(output).toContain("pending");
+  });
+});
+
+describe("module state isolation", () => {
+  it("resets cursor tracking between createTui calls", async () => {
+    const output = { columns: 80, write: vi.fn(() => true) };
+    const mod = await import("../tui.js");
+
+    // First TUI — render some content to set lastLineCount
+    const tui1 = mod.createTui({ output: output as any });
+    tui1.state.phase = "dispatching";
+    tui1.state.tasks.push({ task: makeTask("Task A", 0), status: "running", elapsed: Date.now() });
+    tui1.update();
+    tui1.stop();
+
+    // Second TUI — first draw should NOT cursor-up based on previous TUI's frame
+    output.write.mockClear();
+    const tui2 = mod.createTui({ output: output as any });
+    const firstWrite = String(output.write.mock.calls[0]?.[0] ?? "");
+    // The first write of a fresh TUI should not contain a large cursor-up sequence
+    const cursorUp = firstWrite.match(/\x1B\[(\d+)A/);
+    if (cursorUp) {
+      // Should be 0 or not present at all
+      expect(Number(cursorUp[1])).toBe(0);
+    }
+    tui2.stop();
+
+    // Reassign to module-level tui so afterEach cleanup works
+    tui = tui2;
+  });
 });
 
 describe("header and issue rendering", () => {
