@@ -243,6 +243,21 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
       }
     },
 
+    async send(sessionId: string, text: string): Promise<void> {
+      log.debug(`Sending follow-up message to session ${sessionId} (${text.length} chars)...`);
+      const { error } = await client.session.promptAsync({
+        path: { id: sessionId },
+        body: {
+          parts: [{ type: "text", text }],
+          ...(modelOverride ? { model: modelOverride } : {}),
+        },
+      });
+      if (error) {
+        throw new Error(`OpenCode send failed: ${JSON.stringify(error)}`);
+      }
+      log.debug("Follow-up message sent successfully");
+    },
+
     async cleanup(): Promise<void> {
       if (cleaned) return;
       cleaned = true;

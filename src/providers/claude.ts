@@ -104,6 +104,21 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
       }
     },
 
+    async send(sessionId: string, text: string): Promise<void> {
+      const session = sessions.get(sessionId);
+      if (!session) {
+        throw new Error(`Claude session ${sessionId} not found`);
+      }
+
+      log.debug(`Sending follow-up to session ${sessionId} (${text.length} chars)...`);
+      try {
+        await session.send(text);
+      } catch (err) {
+        log.debug(`Follow-up send failed: ${log.formatErrorChain(err)}`);
+        throw err;
+      }
+    },
+
     async cleanup(): Promise<void> {
       log.debug("Cleaning up Claude provider...");
       for (const session of sessions.values()) {

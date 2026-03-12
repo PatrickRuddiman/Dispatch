@@ -16,7 +16,8 @@ import type { Agent, AgentBootOptions } from "./interface.js";
 import type { AgentResult, SpecData } from "./types.js";
 import type { IssueDetails } from "../datasources/interface.js";
 import type { ProviderProgressSnapshot } from "../providers/interface.js";
-import { extractSpecContent, validateSpecStructure } from "../spec-generator.js";
+import { extractSpecContent, validateSpecStructure, DEFAULT_SPEC_WARN_MIN, DEFAULT_SPEC_KILL_MIN } from "../spec-generator.js";
+import { TimeoutError } from "../helpers/timeout.js";
 import { extractTitle } from "../datasources/md.js";
 import { log } from "../helpers/logger.js";
 import { fileLoggerStorage } from "../helpers/file-logger.js";
@@ -42,6 +43,10 @@ export interface SpecGenerateOptions {
   worktreeRoot?: string;
   /** Optional provider progress callback */
   onProgress?: (snapshot: ProviderProgressSnapshot) => void;
+  /** Warn-phase duration in ms — fires "wrap up" message after this period */
+  timeboxWarnMs?: number;
+  /** Kill-phase duration in ms — hard-kills the prompt after warn + this period */
+  timeboxKillMs?: number;
 }
 
 /**
@@ -122,7 +127,64 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
         // 4. Create a session via the provider and send the prompt
         const sessionId = await provider.createSession();
         log.debug(`Spec prompt built (${prompt.length} chars)`);
-        const response = await provider.prompt(sessionId, prompt, { onProgress });
+
+        // 5. Run prompt with two-phase timebox
+        const warnMs = genOpts.timeboxWarnMs ?? DEFAULT_SPEC_WARN_MIN * 60_000;
+        const killMs = genOpts.timeboxKillMs ?? DEFAULT_SPEC_KILL_MIN * 60_000;
+
+        const response = await new Promise<string | null>((resolve, reject) => {
+          let settled = false;
+          let warnTimer: ReturnType<typeof setTimeout> | undefined;
+          let killTimer: ReturnType<typeof setTimeout> | undefined;
+
+          const cleanup = () => {
+            if (warnTimer) clearTimeout(warnTimer);
+            if (killTimer) clearTimeout(killTimer);
+          };
+
+          // Start the warn timer
+          warnTimer = setTimeout(() => {
+            if (settled) return;
+            const remainingSec = Math.round(killMs / 1000);
+            const warnMessage =
+              `Your spec generation time is done. You have exceeded the ${Math.round(warnMs / 60_000)}-minute limit. ` +
+              `You MUST write the spec file to "${outputPath}" immediately. ` +
+              `If you do not comply within ${remainingSec} seconds, you will be terminated.`;
+            log.warn(`Timebox warn fired for session ${sessionId} — sending wrap-up message`);
+
+            if (provider.send) {
+              provider.send(sessionId, warnMessage).catch((err) => {
+                log.warn(`Failed to send timebox warning: ${log.extractMessage(err)}`);
+              });
+            } else {
+              log.warn(`Provider does not support send() — cannot deliver timebox warning`);
+            }
+
+            // Start the kill timer
+            killTimer = setTimeout(() => {
+              if (settled) return;
+              settled = true;
+              cleanup();
+              reject(new TimeoutError(warnMs + killMs, "spec timebox"));
+            }, killMs);
+          }, warnMs);
+
+          // Run the prompt
+          provider.prompt(sessionId, prompt, { onProgress }).then(
+            (value) => {
+              if (settled) return;
+              settled = true;
+              cleanup();
+              resolve(value);
+            },
+            (err) => {
+              if (settled) return;
+              settled = true;
+              cleanup();
+              reject(err);
+            },
+          );
+        });
 
         if (response === null) {
           return {
@@ -136,7 +198,7 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
         log.debug(`Spec agent response (${response.length} chars)`);
         fileLoggerStorage.getStore()?.response("spec", response);
 
-        // 5. Read the temp file
+        // 6. Read the temp file
         let rawContent: string;
         try {
           rawContent = await readFile(tmpPath, "utf-8");
@@ -149,21 +211,21 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
           };
         }
 
-        // 6. Apply extractSpecContent post-processing
+        // 7. Apply extractSpecContent post-processing
         const cleanedContent = extractSpecContent(rawContent);
         log.debug(`Post-processed spec (${rawContent.length} → ${cleanedContent.length} chars)`);
 
-        // 7. Run validateSpecStructure
+        // 8. Run validateSpecStructure
         const validation = validateSpecStructure(cleanedContent);
         if (!validation.valid) {
           log.warn(`Spec validation warning for ${outputPath}: ${validation.reason}`);
         }
 
-        // 8. Write the cleaned content to the final output path
+        // 9. Write the cleaned content to the final output path
         await writeFile(resolvedOutput, cleanedContent, "utf-8");
         log.debug(`Wrote cleaned spec to ${resolvedOutput}`);
 
-        // 9. Clean up the temp file
+        // 10. Clean up the temp file
         try {
           await unlink(tmpPath);
         } catch {
@@ -308,6 +370,8 @@ function buildCommonSpecInstructions(params: {
 
   return [
     `You are a **spec agent**. Your job is to explore the codebase, understand ${subject}, and write a high-level **markdown spec file** to disk that will drive an automated implementation pipeline.`,
+    ``,
+    `**Time limit:** You have ${DEFAULT_SPEC_WARN_MIN} minutes to complete this spec. Work efficiently and focus on delivering a complete, well-structured spec within this window.`,
     ``,
     `**Important:** This file will be consumed by a two-stage pipeline:`,
     `1. A **planner agent** reads each task together with the prose context in this file, then explores the codebase to produce a detailed, line-level implementation plan.`,

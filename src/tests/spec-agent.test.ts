@@ -32,6 +32,8 @@ vi.mock("../helpers/logger.js", () => ({
 vi.mock("../spec-generator.js", () => ({
   extractSpecContent: vi.fn((raw: string) => raw),
   validateSpecStructure: vi.fn(() => ({ valid: true, reason: undefined })),
+  DEFAULT_SPEC_WARN_MIN: 10,
+  DEFAULT_SPEC_KILL_MIN: 10,
 }));
 
 vi.mock("../datasources/md.js", () => ({
@@ -48,6 +50,7 @@ import {
   buildFileSpecPrompt,
   buildInlineTextSpecPrompt,
 } from "../agents/spec.js";
+import { TimeoutError } from "../helpers/timeout.js";
 
 function createMockProvider(overrides?: Partial<ProviderInstance>): ProviderInstance {
   return {
@@ -684,5 +687,145 @@ describe("buildInlineTextSpecPrompt", () => {
   it("includes shared scope isolation instructions", () => {
     const prompt = buildInlineTextSpecPrompt("text", "/tmp/project", "/tmp/output.md");
     expectSingleSourceScopeInstructions(prompt);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// timebox
+// ---------------------------------------------------------------------------
+describe("timebox", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.mocked(mkdir).mockResolvedValue(undefined);
+    vi.mocked(writeFile).mockResolvedValue(undefined);
+    vi.mocked(unlink).mockResolvedValue(undefined);
+    vi.mocked(randomUUID).mockReturnValue(
+      "test-uuid-1234" as `${string}-${string}-${string}-${string}-${string}`,
+    );
+    vi.mocked(readFile).mockResolvedValue(VALID_SPEC);
+    vi.mocked(extractSpecContent).mockImplementation((raw: string) => raw);
+    vi.mocked(validateSpecStructure).mockReturnValue({ valid: true, reason: undefined });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  it("cancels both timers when prompt completes before warn fires", async () => {
+    let resolvePrompt!: (value: string | null) => void;
+    const promptPromise = new Promise<string | null>((res) => { resolvePrompt = res; });
+    const send = vi.fn<NonNullable<ProviderInstance["send"]>>().mockResolvedValue(undefined);
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockReturnValue(promptPromise),
+      send,
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const resultPromise = agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+      timeboxWarnMs: 5_000,
+      timeboxKillMs: 3_000,
+    });
+
+    // Resolve the prompt before the warn timer (5s) fires
+    resolvePrompt("done");
+    const result = await resultPromise;
+
+    expect(result.success).toBe(true);
+    expect(send).not.toHaveBeenCalled();
+
+    // Advance past both timers to confirm they were cancelled (no unhandled rejections)
+    await vi.advanceTimersByTimeAsync(10_000);
+  });
+
+  it("sends a wrap-up message when the warn timer fires", async () => {
+    let resolvePrompt!: (value: string | null) => void;
+    const promptPromise = new Promise<string | null>((res) => { resolvePrompt = res; });
+    const send = vi.fn<NonNullable<ProviderInstance["send"]>>().mockResolvedValue(undefined);
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockReturnValue(promptPromise),
+      send,
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const resultPromise = agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+      timeboxWarnMs: 5_000,
+      timeboxKillMs: 3_000,
+    });
+
+    // Advance past the warn timer
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(send).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith("session-1", expect.stringContaining("MUST write the spec file"));
+
+    // Clean up: resolve prompt to avoid dangling promise
+    resolvePrompt("done");
+    await resultPromise;
+  });
+
+  it("rejects with TimeoutError when the kill timer fires", async () => {
+    const promptPromise = new Promise<string | null>(() => {});  // never resolves
+    const send = vi.fn<NonNullable<ProviderInstance["send"]>>().mockResolvedValue(undefined);
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockReturnValue(promptPromise),
+      send,
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const resultPromise = agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+      timeboxWarnMs: 5_000,
+      timeboxKillMs: 3_000,
+    });
+
+    // Advance past warn (5s) + kill (3s) = 8s total
+    await vi.advanceTimersByTimeAsync(8_000);
+
+    const result = await resultPromise;
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Timed out after 8000ms");
+    expect(result.error).toContain("spec timebox");
+  });
+
+  it("cancels the kill timer when prompt completes after warn but before kill", async () => {
+    let resolvePrompt!: (value: string | null) => void;
+    const promptPromise = new Promise<string | null>((res) => { resolvePrompt = res; });
+    const send = vi.fn<NonNullable<ProviderInstance["send"]>>().mockResolvedValue(undefined);
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockReturnValue(promptPromise),
+      send,
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const resultPromise = agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+      timeboxWarnMs: 5_000,
+      timeboxKillMs: 3_000,
+    });
+
+    // Advance past warn timer
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(send).toHaveBeenCalledOnce();
+
+    // Now resolve the prompt (between warn and kill)
+    resolvePrompt("done");
+    const result = await resultPromise;
+
+    expect(result.success).toBe(true);
+
+    // Advance past the kill timer to verify it was cancelled
+    await vi.advanceTimersByTimeAsync(5_000);
   });
 });
