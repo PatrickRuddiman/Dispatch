@@ -550,11 +550,17 @@ describe("runSpecPipeline", () => {
     });
 
     it("logs success message after deleting local spec in tracker mode", async () => {
-      await runSpecPipeline(baseOpts({ issues: "1", concurrency: 1 }));
+      // Enable verbose so the TUI quiet flag is disabled and log.success calls fire
+      (log as Record<string, unknown>).verbose = true;
+      try {
+        await runSpecPipeline(baseOpts({ issues: "1", concurrency: 1 }));
 
-      expect(vi.mocked(log.success)).toHaveBeenCalledWith(
-        expect.stringContaining("Deleted local spec"),
-      );
+        expect(vi.mocked(log.success)).toHaveBeenCalledWith(
+          expect.stringContaining("Deleted local spec"),
+        );
+      } finally {
+        (log as Record<string, unknown>).verbose = false;
+      }
     });
 
     it("warns when datasource sync fails in tracker mode", async () => {
@@ -1044,6 +1050,190 @@ describe("runSpecPipeline", () => {
       // Spec pipeline has no TUI, so it should never touch the auth prompt handler.
       // Auth prompts fall through to log.info() which is appropriate for CLI output.
       expect(setAuthPromptHandler).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("sliding-window spec queue concurrency", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("starts new items as soon as a slot opens, not waiting for a full batch", async () => {
+      const events: string[] = [];
+
+      mocks.mockFetch.mockImplementation(async (id: string) => ({
+        number: id,
+        title: `Issue ${id}`,
+        body: `Body for issue ${id}`,
+        labels: [],
+        state: "open",
+        url: `https://example.com/${id}`,
+        comments: [],
+        acceptanceCriteria: "",
+      }));
+
+      mocks.mockGenerate.mockImplementation(async (opts: { issue?: { number: string } }) => {
+        const id = opts.issue?.number ?? "unknown";
+        events.push(`start:${id}`);
+
+        // Item "1" takes much longer than others
+        const delay = id === "1" ? 200 : 50;
+        await new Promise((r) => setTimeout(r, delay));
+
+        events.push(`end:${id}`);
+        return {
+          success: true,
+          data: { content: "# Spec\n\n## Tasks\n\n- [ ] Do it", valid: true },
+        };
+      });
+
+      const promise = runSpecPipeline(baseOpts({ issues: "1,2,3,4", concurrency: 2 }));
+      await vi.runAllTimersAsync();
+      const result = await promise;
+
+      // Items 1 and 2 start immediately (concurrency = 2)
+      expect(events[0]).toBe("start:1");
+      expect(events[1]).toBe("start:2");
+
+      // Item 2 finishes first (shorter delay), then item 3 starts immediately
+      // Without sliding window, item 3 would wait for item 1 to finish too
+      expect(events[2]).toBe("end:2");
+      expect(events[3]).toBe("start:3");
+
+      // All 4 items should be generated
+      expect(result.generated).toBe(4);
+      expect(result.failed).toBe(0);
+    });
+
+    it("respects the concurrency limit", async () => {
+      let inFlight = 0;
+      let maxInFlight = 0;
+
+      const issues = "1,2,3,4,5,6";
+      mocks.mockFetch.mockImplementation(async (id: string) => ({
+        number: id,
+        title: `Issue ${id}`,
+        body: `Body for issue ${id}`,
+        labels: [],
+        state: "open",
+        url: `https://example.com/${id}`,
+        comments: [],
+        acceptanceCriteria: "",
+      }));
+
+      mocks.mockGenerate.mockImplementation(async () => {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((r) => setTimeout(r, 50));
+        inFlight--;
+        return {
+          success: true,
+          data: { content: "# Spec\n\n## Tasks\n\n- [ ] Do it", valid: true },
+        };
+      });
+
+      const promise = runSpecPipeline(baseOpts({ issues, concurrency: 3 }));
+      await vi.runAllTimersAsync();
+      await promise;
+
+      expect(maxInFlight).toBe(3);
+    });
+
+    it("accumulates results correctly from all items", async () => {
+      mocks.mockFetch.mockImplementation(async (id: string) => ({
+        number: id,
+        title: `Issue ${id}`,
+        body: `Body for issue ${id}`,
+        labels: [],
+        state: "open",
+        url: `https://example.com/${id}`,
+        comments: [],
+        acceptanceCriteria: "",
+      }));
+
+      const promise = runSpecPipeline(baseOpts({ issues: "10,20,30", concurrency: 2 }));
+      await vi.runAllTimersAsync();
+      const result = await promise;
+
+      expect(result.total).toBe(3);
+      expect(result.generated).toBe(3);
+      expect(result.failed).toBe(0);
+      expect(result.issueNumbers).toHaveLength(3);
+    });
+
+    it("handles mixed success and failure results", async () => {
+      let callIndex = 0;
+
+      mocks.mockFetch.mockImplementation(async (id: string) => ({
+        number: id,
+        title: `Issue ${id}`,
+        body: `Body for issue ${id}`,
+        labels: [],
+        state: "open",
+        url: `https://example.com/${id}`,
+        comments: [],
+        acceptanceCriteria: "",
+      }));
+
+      mocks.mockGenerate.mockImplementation(async () => {
+        callIndex++;
+        if (callIndex === 2) {
+          return { success: false, data: null, error: "Generation failed" };
+        }
+        return {
+          success: true,
+          data: { content: "# Spec\n\n## Tasks\n\n- [ ] Do it", valid: true },
+        };
+      });
+
+      const promise = runSpecPipeline(baseOpts({ issues: "1,2,3", concurrency: 2 }));
+      await vi.runAllTimersAsync();
+      const result = await promise;
+
+      expect(result.generated).toBe(2);
+      expect(result.failed).toBe(1);
+      expect(result.total).toBe(3);
+    });
+
+    it("processes all items sequentially with concurrency of 1", async () => {
+      const events: string[] = [];
+
+      mocks.mockFetch.mockImplementation(async (id: string) => ({
+        number: id,
+        title: `Issue ${id}`,
+        body: `Body for issue ${id}`,
+        labels: [],
+        state: "open",
+        url: `https://example.com/${id}`,
+        comments: [],
+        acceptanceCriteria: "",
+      }));
+
+      mocks.mockGenerate.mockImplementation(async (opts: { issue?: { number: string } }) => {
+        const id = opts.issue?.number ?? "unknown";
+        events.push(`start:${id}`);
+        await new Promise((r) => setTimeout(r, 10));
+        events.push(`end:${id}`);
+        return {
+          success: true,
+          data: { content: "# Spec\n\n## Tasks\n\n- [ ] Do it", valid: true },
+        };
+      });
+
+      const promise = runSpecPipeline(baseOpts({ issues: "1,2,3", concurrency: 1 }));
+      await vi.runAllTimersAsync();
+      await promise;
+
+      // With concurrency 1, items must be strictly sequential
+      expect(events).toEqual([
+        "start:1", "end:1",
+        "start:2", "end:2",
+        "start:3", "end:3",
+      ]);
     });
   });
 
