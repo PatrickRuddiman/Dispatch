@@ -39,6 +39,7 @@ import {
 } from "./datasource-helpers.js";
 import { DEFAULT_PLAN_TIMEOUT_MIN, withTimeout, TimeoutError } from "../helpers/timeout.js";
 import { DEFAULT_RETRY_COUNT, withRetry } from "../helpers/retry.js";
+import { runWithConcurrency } from "../helpers/concurrency.js";
 import { isGlobOrFilePath } from "../spec-generator.js";
 import { extractTitle } from "../datasources/md.js";
 import chalk from "chalk";
@@ -97,7 +98,7 @@ export async function runDispatchPipeline(
 ): Promise<DispatchSummary> {
   const {
     issueIds,
-    concurrency,
+    concurrency = 1,
     dryRun,
     serverUrl,
     noPlan,
@@ -387,7 +388,7 @@ export async function runDispatchPipeline(
 
     // Process a single issue file's tasks — handles both worktree and
     // serial branch modes, parameterised by useWorktrees.
-    const processIssueFile = async (file: string, fileTasks: typeof allTasks) => {
+    const processIssueFile = async (file: string, fileTasks: typeof allTasks): Promise<{ halted: boolean }> => {
       const details = issueDetailsByFile.get(file);
       const fileLogger = verbose && details ? new FileLogger(details.number, cwd) : null;
 
@@ -661,41 +662,47 @@ export async function runDispatchPipeline(
         let stopAfterIssue = false;
 
         for (const group of groups) {
-          const groupQueue = [...group];
-          while (groupQueue.length > 0) {
-            const batch = groupQueue.splice(0, concurrency);
-            const batchResults = await Promise.all(batch.map((task) => runTaskLifecycle(task)));
-            const pausedTasks: Array<{ task: Task; error: string }> = [];
+          const groupResults = await runWithConcurrency({
+            items: group,
+            concurrency,
+            worker: async (task) => runTaskLifecycle(task),
+            shouldStop: () => stopAfterIssue,
+          });
 
-            for (let index = 0; index < batch.length; index++) {
-              const task = batch[index];
-              const outcome = batchResults[index];
-              if (outcome.kind === "success") {
-                upsertResult(issueResults, outcome.result);
-                upsertResult(results, outcome.result);
-              } else {
-                pausedTasks.push({ task, error: outcome.error });
-              }
+          const pausedTasks: Array<{ task: Task; error: string }> = [];
+
+          for (let i = 0; i < group.length; i++) {
+            const result = groupResults[i];
+            if (result.status === "rejected") {
+              // Unexpected rejection — treat as a paused task
+              pausedTasks.push({ task: group[i], error: String(result.reason) });
+              continue;
             }
-
-            for (const pausedTask of pausedTasks) {
-              const resolution = await recoverPausedTask(pausedTask.task, pausedTask.error);
-              upsertResult(issueResults, resolution.result);
-              upsertResult(results, resolution.result);
-              if (resolution.halted) {
-                preserveContext = true;
-                stopAfterIssue = true;
-                halted = true;
-                break;
-              }
+            const outcome = result.value;
+            if (outcome.kind === "success") {
+              upsertResult(issueResults, outcome.result);
+              upsertResult(results, outcome.result);
+            } else {
+              pausedTasks.push({ task: group[i], error: outcome.error });
             }
-
-            if (!tui.state.model && localInstance.model) {
-              tui.state.model = localInstance.model;
-            }
-
-            if (stopAfterIssue) break;
           }
+
+          for (const pausedTask of pausedTasks) {
+            const resolution = await recoverPausedTask(pausedTask.task, pausedTask.error);
+            upsertResult(issueResults, resolution.result);
+            upsertResult(results, resolution.result);
+            if (resolution.halted) {
+              preserveContext = true;
+              stopAfterIssue = true;
+              halted = true;
+              break;
+            }
+          }
+
+          if (!tui.state.model && localInstance.model) {
+            tui.state.model = localInstance.model;
+          }
+
           if (stopAfterIssue) break;
         }
 
@@ -872,11 +879,28 @@ export async function runDispatchPipeline(
 
     // Execute issues: parallel via worktrees, or serial fallback
     // Feature mode forces serial execution to avoid merge conflicts
-    for (const [file, fileTasks] of tasksByFile) {
-      const issueResult = await processIssueFile(file, fileTasks);
-      if (issueResult?.halted) {
-        halted = true;
-        break;
+    if (useWorktrees && !feature) {
+      // Sliding-window concurrency: up to `concurrency` issues in parallel
+      const issueEntries = Array.from(tasksByFile.entries());
+      const concurrencyResults = await runWithConcurrency({
+        items: issueEntries,
+        concurrency,
+        worker: async ([file, fileTasks]) => processIssueFile(file, fileTasks),
+        shouldStop: () => halted,
+      });
+      for (const result of concurrencyResults) {
+        if (result?.status === "fulfilled" && result.value?.halted) {
+          halted = true;
+        }
+      }
+    } else {
+      // Sequential: non-worktree mode or feature mode
+      for (const [file, fileTasks] of tasksByFile) {
+        const issueResult = await processIssueFile(file, fileTasks);
+        if (issueResult?.halted) {
+          halted = true;
+          break;
+        }
       }
     }
 
