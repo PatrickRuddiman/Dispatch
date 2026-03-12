@@ -186,7 +186,10 @@ describe("runWithConcurrency", () => {
       concurrency: 2,
       worker: async (n) => {
         if (n === 1) {
-          // Item 1 finishes quickly and triggers stop
+          // Yield so both items 1 and 2 are launched before stop fires.
+          // Without this, the synchronous body would set stopSignal
+          // before the launch() loop starts item 2.
+          await Promise.resolve();
           stopSignal = true;
           completed.push(n);
           return n;

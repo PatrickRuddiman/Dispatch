@@ -98,7 +98,7 @@ export async function runDispatchPipeline(
 ): Promise<DispatchSummary> {
   const {
     issueIds,
-    concurrency,
+    concurrency = 1,
     dryRun,
     serverUrl,
     noPlan,
@@ -388,7 +388,7 @@ export async function runDispatchPipeline(
 
     // Process a single issue file's tasks — handles both worktree and
     // serial branch modes, parameterised by useWorktrees.
-    const processIssueFile = async (file: string, fileTasks: typeof allTasks) => {
+    const processIssueFile = async (file: string, fileTasks: typeof allTasks): Promise<{ halted: boolean }> => {
       const details = issueDetailsByFile.get(file);
       const fileLogger = verbose && details ? new FileLogger(details.number, cwd) : null;
 
