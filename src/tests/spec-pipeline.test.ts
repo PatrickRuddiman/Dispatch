@@ -550,11 +550,17 @@ describe("runSpecPipeline", () => {
     });
 
     it("logs success message after deleting local spec in tracker mode", async () => {
-      await runSpecPipeline(baseOpts({ issues: "1", concurrency: 1 }));
+      // Enable verbose so the TUI quiet flag is disabled and log.success calls fire
+      (log as Record<string, unknown>).verbose = true;
+      try {
+        await runSpecPipeline(baseOpts({ issues: "1", concurrency: 1 }));
 
-      expect(vi.mocked(log.success)).toHaveBeenCalledWith(
-        expect.stringContaining("Deleted local spec"),
-      );
+        expect(vi.mocked(log.success)).toHaveBeenCalledWith(
+          expect.stringContaining("Deleted local spec"),
+        );
+      } finally {
+        (log as Record<string, unknown>).verbose = false;
+      }
     });
 
     it("warns when datasource sync fails in tracker mode", async () => {
