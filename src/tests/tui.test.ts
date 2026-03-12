@@ -690,3 +690,143 @@ describe("visual row counting in draw", () => {
     expect(rowCount).toBeGreaterThan(0);
   });
 });
+
+describe("spec pipeline TUI integration", () => {
+  it("initializes spec mode with correct TUI state", async () => {
+    await setup();
+    tui.state.mode = "spec";
+    tui.state.provider = "opencode";
+    tui.state.model = "gpt-4";
+    tui.state.source = "github";
+    tui.state.phase = "dispatching";
+    addTask("pending", "Add auth module", 0);
+    addTask("pending", "Refactor DB layer", 1);
+    addTask("pending", "Update API docs", 2);
+    tui.update();
+    expect(lastOutput()).toContain("Generating specs");
+    expect(lastOutput()).toContain("opencode");
+    expect(lastOutput()).toContain("gpt-4");
+    expect(lastOutput()).toContain("github");
+  });
+
+  it("reflects task state transitions during spec generation lifecycle", async () => {
+    await setup();
+    tui.state.mode = "spec";
+    tui.state.phase = "dispatching";
+    addTask("pending", "Spec task A", 0);
+    addTask("pending", "Spec task B", 1);
+    addTask("pending", "Spec task C", 2);
+    tui.update();
+    expect(lastOutput()).toContain("pending");
+
+    tui.state.tasks[0].status = "generating";
+    tui.state.tasks[0].elapsed = Date.now();
+    tui.update();
+    expect(lastOutput()).toContain("generating");
+    expect(lastOutput()).toContain("Spec task A");
+
+    tui.state.tasks[0].status = "syncing";
+    tui.state.tasks[0].feedback = undefined;
+    tui.update();
+    expect(lastOutput()).toContain("syncing");
+
+    tui.state.tasks[0].status = "done";
+    tui.state.tasks[0].elapsed = 5000;
+    tui.update();
+    expect(lastOutput()).toContain("done");
+  });
+
+  it("displays onProgress feedback text during spec generation", async () => {
+    await setup();
+    tui.state.mode = "spec";
+    tui.state.phase = "dispatching";
+    addTask("generating", "Generate spec", 0, { elapsed: Date.now(), feedback: "Analyzing codebase structure" });
+    tui.update();
+    expect(lastOutput()).toContain("└─ Analyzing codebase structure");
+
+    tui.state.tasks[0].feedback = "Writing approach section";
+    tui.update();
+    expect(lastOutput()).toContain("└─ Writing approach section");
+    expect(lastOutput()).not.toContain("Analyzing codebase structure");
+  });
+
+  it("clears feedback text when task transitions from generating to syncing", async () => {
+    await setup();
+    tui.state.mode = "spec";
+    tui.state.phase = "dispatching";
+    addTask("generating", "Generate spec", 0, { elapsed: Date.now(), feedback: "Still drafting" });
+    tui.update();
+    expect(lastOutput()).toContain("└─ Still drafting");
+
+    tui.state.tasks[0].status = "syncing";
+    tui.state.tasks[0].feedback = undefined;
+    tui.update();
+    expect(lastOutput()).not.toContain("└─");
+    expect(lastOutput()).toContain("syncing");
+  });
+
+  it("updates progress bar as specs complete", async () => {
+    await setup();
+    tui.state.mode = "spec";
+    tui.state.phase = "dispatching";
+    addTask("pending", "Spec 1", 0);
+    addTask("pending", "Spec 2", 1);
+    addTask("pending", "Spec 3", 2);
+    addTask("pending", "Spec 4", 3);
+    tui.update();
+    expect(lastOutput()).toContain("0/4 tasks");
+
+    tui.state.tasks[0].status = "done";
+    tui.update();
+    expect(lastOutput()).toContain("1/4 tasks");
+
+    tui.state.tasks[1].status = "done";
+    tui.update();
+    expect(lastOutput()).toContain("2/4 tasks");
+
+    tui.state.tasks[2].status = "failed";
+    tui.update();
+    expect(lastOutput()).toContain("3/4 tasks");
+
+    tui.state.tasks[3].status = "done";
+    tui.update();
+    expect(lastOutput()).toContain("4/4 tasks");
+    expect(lastOutput()).toContain("100%");
+  });
+
+  it("shows passed and failed counts in spec mode summary", async () => {
+    await setup();
+    tui.state.mode = "spec";
+    tui.state.phase = "dispatching";
+    addTask("done", "Spec A", 0);
+    addTask("done", "Spec B", 1);
+    addTask("failed", "Spec C", 2, { error: "Provider timeout" });
+    tui.update();
+    expect(lastOutput()).toContain("2 passed");
+    expect(lastOutput()).toContain("1 failed");
+    expect(lastOutput()).toContain("Provider timeout");
+  });
+
+  it("renders spec mode phase label as 'Generating specs' not 'Dispatching tasks'", async () => {
+    await setup();
+    tui.state.mode = "spec";
+    tui.state.phase = "dispatching";
+    addTask("generating", "Generate spec", 0, { elapsed: Date.now() });
+    tui.update();
+    expect(lastOutput()).toContain("Generating specs");
+    expect(lastOutput()).not.toContain("Dispatching tasks");
+  });
+
+  it("handles concurrent generating tasks with individual feedback", async () => {
+    await setup();
+    tui.state.mode = "spec";
+    tui.state.phase = "dispatching";
+    addTask("generating", "Auth module spec", 0, { elapsed: Date.now(), feedback: "Exploring auth module" });
+    addTask("generating", "API routes spec", 1, { elapsed: Date.now(), feedback: "Reading API routes" });
+    addTask("pending", "DB layer spec", 2);
+    tui.update();
+    expect(lastOutput()).toContain("└─ Exploring auth module");
+    expect(lastOutput()).toContain("└─ Reading API routes");
+    expect(lastOutput()).toContain("0/3 tasks");
+  });
+});
