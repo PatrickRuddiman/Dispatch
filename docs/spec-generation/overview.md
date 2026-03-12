@@ -436,6 +436,10 @@ before `withRetry()` runs. The timeout surface is:
 | Setting | CLI flag | Config key | Default |
 |---------|----------|------------|---------|
 | Spec timeout | `--spec-timeout` | `specTimeout` | 10 minutes |
+| Spec warn-phase timeout | `--spec-warn-timeout` | `specWarnTimeout` | 10 minutes |
+| Spec kill-phase timeout | `--spec-kill-timeout` | `specKillTimeout` | 10 minutes |
+
+When both warn and kill timeouts are configured, spec generation uses a **two-phase timebox**: the warn-phase timer fires first and sends a time-warning nudge to the running agent via the provider's optional `send()` method; the kill-phase timer fires later and aborts the attempt with a `TimeoutError`. This gives the agent a chance to wrap up before being forcibly terminated.
 
 Implementation details in `src/orchestrator/spec-pipeline.ts`:
 

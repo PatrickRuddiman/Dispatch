@@ -270,6 +270,70 @@ describe("validateConfigValue", () => {
     expect(validateConfigValue("specTimeout", "NaN")).not.toBe(null);
   });
 
+  it("accepts valid specWarnTimeout (within bounds)", () => {
+    expect(validateConfigValue("specWarnTimeout", String(CONFIG_BOUNDS.specWarnTimeout.min))).toBe(null);
+    expect(validateConfigValue("specWarnTimeout", "10")).toBe(null);
+    expect(validateConfigValue("specWarnTimeout", "1.5")).toBe(null);
+    expect(validateConfigValue("specWarnTimeout", String(CONFIG_BOUNDS.specWarnTimeout.max))).toBe(null);
+  });
+
+  it("rejects specWarnTimeout below minimum", () => {
+    const zero = validateConfigValue("specWarnTimeout", "0");
+    expect(zero).not.toBe(null);
+    expect(zero).toContain("between");
+
+    const negative = validateConfigValue("specWarnTimeout", "-1");
+    expect(negative).not.toBe(null);
+  });
+
+  it("rejects specWarnTimeout above maximum", () => {
+    const result = validateConfigValue("specWarnTimeout", String(CONFIG_BOUNDS.specWarnTimeout.max + 1));
+    expect(result).not.toBe(null);
+    expect(result).toContain("between");
+  });
+
+  it("rejects non-numeric specWarnTimeout", () => {
+    expect(validateConfigValue("specWarnTimeout", "abc")).not.toBe(null);
+    expect(validateConfigValue("specWarnTimeout", "")).not.toBe(null);
+  });
+
+  it("rejects Infinity and NaN for specWarnTimeout", () => {
+    expect(validateConfigValue("specWarnTimeout", "Infinity")).not.toBe(null);
+    expect(validateConfigValue("specWarnTimeout", "NaN")).not.toBe(null);
+  });
+
+  it("accepts valid specKillTimeout (within bounds)", () => {
+    expect(validateConfigValue("specKillTimeout", String(CONFIG_BOUNDS.specKillTimeout.min))).toBe(null);
+    expect(validateConfigValue("specKillTimeout", "10")).toBe(null);
+    expect(validateConfigValue("specKillTimeout", "1.5")).toBe(null);
+    expect(validateConfigValue("specKillTimeout", String(CONFIG_BOUNDS.specKillTimeout.max))).toBe(null);
+  });
+
+  it("rejects specKillTimeout below minimum", () => {
+    const zero = validateConfigValue("specKillTimeout", "0");
+    expect(zero).not.toBe(null);
+    expect(zero).toContain("between");
+
+    const negative = validateConfigValue("specKillTimeout", "-1");
+    expect(negative).not.toBe(null);
+  });
+
+  it("rejects specKillTimeout above maximum", () => {
+    const result = validateConfigValue("specKillTimeout", String(CONFIG_BOUNDS.specKillTimeout.max + 1));
+    expect(result).not.toBe(null);
+    expect(result).toContain("between");
+  });
+
+  it("rejects non-numeric specKillTimeout", () => {
+    expect(validateConfigValue("specKillTimeout", "abc")).not.toBe(null);
+    expect(validateConfigValue("specKillTimeout", "")).not.toBe(null);
+  });
+
+  it("rejects Infinity and NaN for specKillTimeout", () => {
+    expect(validateConfigValue("specKillTimeout", "Infinity")).not.toBe(null);
+    expect(validateConfigValue("specKillTimeout", "NaN")).not.toBe(null);
+  });
+
   it("accepts valid concurrency (within bounds)", () => {
     expect(validateConfigValue("concurrency", String(CONFIG_BOUNDS.concurrency.min))).toBe(null);
     expect(validateConfigValue("concurrency", "4")).toBe(null);

@@ -451,6 +451,8 @@ spec generation:
 | Planning timeout | `--plan-timeout` | `planTimeout` | 15 minutes |
 | Planning retries | `--plan-retries` | `planRetries` | falls back to `--retries` (default 3) |
 | Spec-generation timeout | `--spec-timeout` | `specTimeout` | 10 minutes |
+| Spec warn-phase timeout | `--spec-warn-timeout` | `specWarnTimeout` | 10 minutes |
+| Spec kill-phase timeout | `--spec-kill-timeout` | `specKillTimeout` | 10 minutes |
 | Spec-generation retries | `--retries` | `retries` | 3 |
 
 Planning retries timed-out attempts up to `maxPlanAttempts`. Spec generation
@@ -462,6 +464,8 @@ Architecturally, that means spec deadlines are per item and per attempt.
 `TimeoutError` enters the normal retry flow, exhausted retries fail only that
 item, concurrent batches continue, and successful items still preserve partial
 progress in the final summary.
+
+The two-phase timebox model layers a **warn phase** (`--spec-warn-timeout`) and a **kill phase** (`--spec-kill-timeout`) around each spec-generation attempt. When the warn phase fires, a nudge message is sent to the agent via the optional `send()` method; when the kill phase fires, the attempt is aborted with a `TimeoutError`.
 
 Provider-local safeguards complement these deadlines rather than replacing them:
 Copilot adds its own idle wait timeout, while OpenCode surfaces `session.error`
