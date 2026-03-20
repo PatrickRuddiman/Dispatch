@@ -82,7 +82,7 @@ describe("createSession", () => {
     const instance = await boot();
     const sessionId = await instance.createSession();
     expect(sessionId).toBe("test-uuid-1234");
-    expect(mockCreateSession).toHaveBeenCalledWith({ model: "claude-sonnet-4", permissionMode: "acceptEdits" });
+    expect(mockCreateSession).toHaveBeenCalledWith({ model: "claude-sonnet-4", permissionMode: "bypassPermissions", allowDangerouslySkipPermissions: true });
   });
 
   it("passes cwd to unstable_v2_createSession when opts.cwd is set", async () => {
@@ -90,7 +90,8 @@ describe("createSession", () => {
     await instance.createSession();
     expect(mockCreateSession).toHaveBeenCalledWith({
       model: "claude-sonnet-4",
-      permissionMode: "acceptEdits",
+      permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
       cwd: "/tmp/worktree",
     });
   });
@@ -100,7 +101,8 @@ describe("createSession", () => {
     await instance.createSession();
     expect(mockCreateSession).toHaveBeenCalledWith({
       model: "claude-opus-4-6",
-      permissionMode: "acceptEdits",
+      permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
     });
   });
 
