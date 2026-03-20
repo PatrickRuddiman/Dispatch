@@ -78,7 +78,7 @@ timeout duration and retry behavior are configured at the orchestrator level:
 
 | Parameter | CLI flag | Config key | Default | Effect |
 |-----------|----------|------------|---------|--------|
-| Plan timeout | [`--plan-timeout`](../cli-orchestration/cli.md) | `planTimeout` | **15 minutes** | Converted to ms via `(planTimeout ?? 15) * 60_000` |
+| Plan timeout | [`--plan-timeout`](../cli-orchestration/cli.md) | `planTimeout` | **30 minutes** | Converted to ms via `(planTimeout ?? 30) * 60_000` |
 | Plan retries | [`--plan-retries`](../cli-orchestration/cli.md) | `planRetries` | **falls back to `--retries`, then shared default 3** (4 total attempts) | Loop runs `(planRetries ?? resolvedRetries) + 1` iterations |
 | Spec timeout | [`--spec-timeout`](../cli-orchestration/cli.md) | `specTimeout` | **10 minutes** | Converted to ms via `(specTimeout ?? DEFAULT_SPEC_TIMEOUT_MIN) * 60_000` |
 | Spec retries | [`--retries`](../cli-orchestration/cli.md) | `retries` | **3** (4 total attempts) | `withRetry()` wraps the timeout-bounded generation attempt |

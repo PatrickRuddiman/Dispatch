@@ -68,7 +68,7 @@ The config file is a plain JSON object with optional fields:
   "model": "claude-sonnet-4-5",
   "source": "github",
   "testTimeout": 10,
-  "planTimeout": 15,
+  "planTimeout": 30,
   "specTimeout": 10,
   "concurrency": 4
 }
