@@ -168,7 +168,7 @@ describe("getUsername", () => {
 
   it("falls back to email for single-word name", async () => {
     const mock = vi.mocked(execFile);
-    mock.mockImplementationOnce((_cmd: any, _args: any, _opts: any, cb: any) => {
+    (mock as any).mockImplementationOnce((_cmd: any, _args: any, _opts: any, cb: any) => {
       cb(null, { stdout: "John\n", stderr: "" });
     }).mockImplementationOnce((_cmd: any, _args: any, _opts: any, cb: any) => {
       cb(null, { stdout: "john.doe@example.com\n", stderr: "" });
@@ -179,7 +179,7 @@ describe("getUsername", () => {
 
   it('returns "local" when both git config calls fail', async () => {
     const mock = vi.mocked(execFile);
-    mock.mockImplementationOnce((_cmd: any, _args: any, _opts: any, cb: any) => {
+    (mock as any).mockImplementationOnce((_cmd: any, _args: any, _opts: any, cb: any) => {
       cb(new Error("git not found"));
     }).mockImplementationOnce((_cmd: any, _args: any, _opts: any, cb: any) => {
       cb(new Error("git not found"));
@@ -190,7 +190,7 @@ describe("getUsername", () => {
 
   it('returns "local" when git returns empty for both', async () => {
     const mock = vi.mocked(execFile);
-    mock.mockImplementationOnce((_cmd: any, _args: any, _opts: any, cb: any) => {
+    (mock as any).mockImplementationOnce((_cmd: any, _args: any, _opts: any, cb: any) => {
       cb(null, { stdout: "  \n", stderr: "" });
     }).mockImplementationOnce((_cmd: any, _args: any, _opts: any, cb: any) => {
       cb(null, { stdout: "\n", stderr: "" });
