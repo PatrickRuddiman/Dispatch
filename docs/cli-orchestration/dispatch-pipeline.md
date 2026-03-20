@@ -203,14 +203,14 @@ The pipeline wraps each `planner.plan()` call with a timeout and retry loop.
 
 | Parameter | Default | Source |
 |-----------|---------|--------|
-| `planTimeout` | 15 minutes | `DEFAULT_PLAN_TIMEOUT_MIN = 15` in `src/helpers/timeout.ts` |
+| `planTimeout` | 30 minutes | `DEFAULT_PLAN_TIMEOUT_MIN = 30` in `src/helpers/timeout.ts` |
 | `planRetries` | falls back to `retries` | `resolvedPlanRetries = planRetries ?? resolvedRetries` |
 | `retries` | 3 retries (4 total attempts) | `DEFAULT_RETRIES = 3` in `src/helpers/retry.ts` |
 
 The effective values are computed as:
 
 ```
-planTimeoutMs = (planTimeout ?? 15) * 60_000
+planTimeoutMs = (planTimeout ?? 30) * 60_000
 resolvedRetries = retries ?? 3
 maxPlanAttempts = (planRetries ?? resolvedRetries) + 1
 ```

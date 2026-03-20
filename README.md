@@ -206,7 +206,7 @@ Config is stored at `.dispatch/config.json` (relative to the working directory w
 | `model` | Model to use when spawning agents (provider-specific format) |
 | `source` | Issue tracker: `github`, `azdevops`, or `md` |
 | `testTimeout` | Test execution timeout in minutes (default: 5, range: 1–120) |
-| `planTimeout` | Planning timeout in minutes (default: 15, range: 1–120) |
+| `planTimeout` | Planning timeout in minutes (default: 30, range: 1–120) |
 | `concurrency` | Max parallel dispatches (range: 1–64) |
 | `org` | Azure DevOps organization URL |
 | `project` | Azure DevOps project name |
@@ -230,7 +230,7 @@ Config is stored at `.dispatch/config.json` (relative to the working directory w
 | `--feature [name]` | *(off)* | Group issues into a single feature branch and PR |
 | `--force` | `false` | Ignore prior run state and re-run all tasks |
 | `--concurrency <n>` | *(cpu/memory)* | Max parallel dispatches (max: 64) |
-| `--plan-timeout <min>` | `15` | Planning timeout in minutes |
+| `--plan-timeout <min>` | `30` | Planning timeout in minutes |
 | `--retries <n>` | `3` | Retry attempts for all agents |
 | `--plan-retries <n>` | *(from --retries)* | Retry attempts for the planner agent (overrides `--retries`) |
 | `--test-timeout <min>` | `5` | Test timeout in minutes |

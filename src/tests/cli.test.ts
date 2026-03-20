@@ -756,7 +756,7 @@ describe("help text completeness", () => {
   });
 
   it("advertises the updated planning timeout and retry defaults", () => {
-    expect(HELP).toContain("Planning timeout in minutes (default: 15)");
+    expect(HELP).toContain("Planning timeout in minutes (default: 30)");
     expect(HELP).toMatch(/--retries <n>\s+Retry attempts for all agents \(default: 3\)/);
   });
 
