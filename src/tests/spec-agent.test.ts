@@ -828,4 +828,94 @@ describe("timebox", () => {
     // Advance past the kill timer to verify it was cancelled
     await vi.advanceTimersByTimeAsync(5_000);
   });
+
+  it("still starts the kill timer when provider has no send() method", async () => {
+    const promptPromise = new Promise<string | null>(() => {}); // never resolves
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockReturnValue(promptPromise),
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const resultPromise = agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+      timeboxWarnMs: 5_000,
+      timeboxKillMs: 3_000,
+    });
+
+    // Advance past warn (5s)
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    // send should not have been called (it doesn't exist)
+    expect(provider.send).toBeUndefined();
+
+    // Advance past kill (3s)
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    const result = await resultPromise;
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Timed out after 8000ms");
+  });
+
+  it("catches and logs send() errors without preventing the kill timer", async () => {
+    const promptPromise = new Promise<string | null>(() => {}); // never resolves
+    const send = vi.fn<NonNullable<ProviderInstance["send"]>>().mockRejectedValue(new Error("send failed"));
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockReturnValue(promptPromise),
+      send,
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const resultPromise = agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+      timeboxWarnMs: 5_000,
+      timeboxKillMs: 3_000,
+    });
+
+    // Advance past warn timer — send() is called and rejects
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(send).toHaveBeenCalledOnce();
+
+    // Advance past kill timer — should still fire despite send() failure
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    const result = await resultPromise;
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Timed out after 8000ms");
+  });
+
+  it("cleans up timers when the prompt rejects before warn fires", async () => {
+    let rejectPrompt!: (err: Error) => void;
+    const promptPromise = new Promise<string | null>((_res, rej) => { rejectPrompt = rej; });
+    const send = vi.fn<NonNullable<ProviderInstance["send"]>>().mockResolvedValue(undefined);
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockReturnValue(promptPromise),
+      send,
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const resultPromise = agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+      timeboxWarnMs: 5_000,
+      timeboxKillMs: 3_000,
+    });
+
+    // Reject the prompt before timers fire
+    rejectPrompt(new Error("Provider crashed"));
+    const result = await resultPromise;
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Provider crashed");
+
+    // Advance past both timers to verify they were cleaned up (no unhandled errors)
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(send).not.toHaveBeenCalled();
+  });
 });

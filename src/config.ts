@@ -29,6 +29,8 @@ export interface DispatchConfig {
   testTimeout?: number;
   planTimeout?: number;
   specTimeout?: number;
+  specWarnTimeout?: number;
+  specKillTimeout?: number;
   concurrency?: number;
   org?: string;
   project?: string;
@@ -46,11 +48,13 @@ export const CONFIG_BOUNDS = {
   testTimeout: { min: 1, max: 120 },
   planTimeout: { min: 1, max: 120 },
   specTimeout: { min: 1, max: 120 },
+  specWarnTimeout: { min: 1, max: 120 },
+  specKillTimeout: { min: 1, max: 120 },
   concurrency: { min: 1, max: 64 },
 } as const;
 
 /** Valid configuration key names. */
-export const CONFIG_KEYS = ["provider", "model", "source", "testTimeout", "planTimeout", "specTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area", "username"] as const;
+export const CONFIG_KEYS = ["provider", "model", "source", "testTimeout", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area", "username"] as const;
 
 /** A valid configuration key name. */
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -137,6 +141,22 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
       const num = Number(value);
       if (!Number.isFinite(num) || num < CONFIG_BOUNDS.specTimeout.min || num > CONFIG_BOUNDS.specTimeout.max) {
         return `Invalid specTimeout "${value}". Must be a number between ${CONFIG_BOUNDS.specTimeout.min} and ${CONFIG_BOUNDS.specTimeout.max} (minutes)`;
+      }
+      return null;
+    }
+
+    case "specWarnTimeout": {
+      const num = Number(value);
+      if (!Number.isFinite(num) || num < CONFIG_BOUNDS.specWarnTimeout.min || num > CONFIG_BOUNDS.specWarnTimeout.max) {
+        return `Invalid specWarnTimeout "${value}". Must be a number between ${CONFIG_BOUNDS.specWarnTimeout.min} and ${CONFIG_BOUNDS.specWarnTimeout.max} (minutes)`;
+      }
+      return null;
+    }
+
+    case "specKillTimeout": {
+      const num = Number(value);
+      if (!Number.isFinite(num) || num < CONFIG_BOUNDS.specKillTimeout.min || num > CONFIG_BOUNDS.specKillTimeout.max) {
+        return `Invalid specKillTimeout "${value}". Must be a number between ${CONFIG_BOUNDS.specKillTimeout.min} and ${CONFIG_BOUNDS.specKillTimeout.max} (minutes)`;
       }
       return null;
     }

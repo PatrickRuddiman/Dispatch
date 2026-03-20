@@ -674,6 +674,7 @@ export async function runDispatchPipeline(
 
           for (let i = 0; i < group.length; i++) {
             const result = groupResults[i];
+            if (result.status === "skipped") continue;
             if (result.status === "rejected") {
               // Unexpected rejection — treat as a paused task
               pausedTasks.push({ task: group[i], error: String(result.reason) });
@@ -890,7 +891,7 @@ export async function runDispatchPipeline(
         shouldStop: () => halted,
       });
       for (const result of concurrencyResults) {
-        if (result?.status === "fulfilled" && result.value?.halted) {
+        if (result.status === "fulfilled" && result.value?.halted) {
           halted = true;
         }
       }

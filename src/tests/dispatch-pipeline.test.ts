@@ -431,11 +431,11 @@ describe("planning timeout and retry", () => {
       "/tmp/test",
     );
 
-    // Default is 15 minutes = 900_000ms; advance past four attempts (default retries=3)
-    await vi.advanceTimersByTimeAsync(900_000); // first attempt timeout
-    await vi.advanceTimersByTimeAsync(900_000); // second attempt timeout
-    await vi.advanceTimersByTimeAsync(900_000); // third attempt timeout
-    await vi.advanceTimersByTimeAsync(900_000); // fourth attempt timeout
+    // Default is 30 minutes = 1_800_000ms; advance past four attempts (default retries=3)
+    await vi.advanceTimersByTimeAsync(1_800_000); // first attempt timeout
+    await vi.advanceTimersByTimeAsync(1_800_000); // second attempt timeout
+    await vi.advanceTimersByTimeAsync(1_800_000); // third attempt timeout
+    await vi.advanceTimersByTimeAsync(1_800_000); // fourth attempt timeout
     await vi.runAllTimersAsync();
 
     const result = await resultPromise;

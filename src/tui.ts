@@ -285,16 +285,21 @@ function render(state: TuiState, cols: number): string {
       for (const [wt, tasks] of activeGroups) {
         const issueNum = wt.match(/^(\d+)/)?.[1] ?? wt.slice(0, 12);
         const activeTasks = tasks.filter((t) => isActiveStatus(t.status) || t.status === "paused");
-        const activeCount = activeTasks.length;
         const firstActive = activeTasks[0];
+        const displayStatus = firstActive?.status ?? "pending";
         const truncLen = Math.min(cols - 26, 60);
-        let text = firstActive?.task.text ?? "";
+        let text = firstActive?.task.text ?? tasks[0]?.task.text ?? "";
         if (text.length > truncLen) {
           text = text.slice(0, truncLen - 1) + "…";
         }
-        const earliest = Math.min(...activeTasks.map((t) => t.elapsed ?? now));
+        const earliest = activeTasks.length > 0
+          ? Math.min(...activeTasks.map((t) => t.elapsed ?? now))
+          : now;
         const elapsedStr = elapsed(now - earliest);
-        lines.push(`  ${statusIcon(firstActive?.status ?? "pending")} ${chalk.white(`#${issueNum}`)}  ${activeCount} active  ${text}  ${chalk.dim(elapsedStr)}`);
+        const countLabel = activeTasks.length > 0
+          ? `${activeTasks.length} active`
+          : `${tasks.length} pending`;
+        lines.push(`  ${statusIcon(displayStatus)} ${chalk.white(`#${issueNum}`)}  ${countLabel}  ${text}  ${chalk.dim(elapsedStr)}`);
       }
 
       // Ungrouped tasks (only running/planning, flat)
@@ -457,6 +462,8 @@ export function createTui(options?: {
     startTime: Date.now(),
     filesFound: 0,
   };
+  lastLineCount = 0;
+  spinnerIndex = 0;
   let activeRecoveryPromise: Promise<RecoveryAction> | null = null;
   let cleanupRecoveryPrompt: (() => void) | null = null;
 

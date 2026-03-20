@@ -75,6 +75,8 @@ export interface RawCliArgs {
   username?: string;
   planTimeout?: number;
   specTimeout?: number;
+  specWarnTimeout?: number;
+  specKillTimeout?: number;
   planRetries?: number;
   testTimeout?: number;
   retries?: number;
@@ -330,6 +332,8 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
           org: m.org, project: m.project, workItemType: m.workItemType, iteration: m.iteration, area: m.area, concurrency: m.concurrency,
           dryRun: m.dryRun, retries: m.retries,
           specTimeout: m.specTimeout ?? DEFAULT_SPEC_TIMEOUT_MIN,
+          specWarnTimeout: m.specWarnTimeout,
+          specKillTimeout: m.specKillTimeout,
         });
       }
 
@@ -369,6 +373,8 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
           org: m.org, project: m.project, workItemType: m.workItemType, iteration: m.iteration, area: m.area, concurrency: m.concurrency,
           dryRun: m.dryRun, retries: m.retries,
           specTimeout: m.specTimeout ?? DEFAULT_SPEC_TIMEOUT_MIN,
+          specWarnTimeout: m.specWarnTimeout,
+          specKillTimeout: m.specKillTimeout,
         });
       }
 

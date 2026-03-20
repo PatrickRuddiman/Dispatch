@@ -262,6 +262,17 @@ describe("getAzureConnection", () => {
 
     expect(mockDeviceCodeCredential).toHaveBeenCalledOnce();
   });
+
+  it("throws when Azure device-code flow returns no token", async () => {
+    mockFs.readFile.mockRejectedValue(new Error("ENOENT"));
+    mockGetToken.mockResolvedValue(null);
+
+    await expect(
+      getAzureConnection("https://dev.azure.com/myorg"),
+    ).rejects.toThrow(
+      "Azure device-code authentication did not return a token",
+    );
+  });
 });
 
 describe("auth cache file operations", () => {
@@ -306,6 +317,14 @@ describe("auth cache file operations", () => {
         configurable: true,
       });
     }
+  });
+
+  it.skipIf(realPlatform === "win32")("does not throw when chmod fails", async () => {
+    mockFs.readFile.mockRejectedValue(new Error("ENOENT"));
+    mockAuthFn.mockResolvedValue({ token: "tok" });
+    mockFs.chmod.mockRejectedValue(new Error("EPERM"));
+
+    await expect(getGithubOctokit()).resolves.toBeDefined();
   });
 });
 
@@ -445,6 +464,31 @@ describe("ensureAuthReady", () => {
     await ensureAuthReady("azdevops", "/fake/cwd");
 
     expect(mockWebApi).not.toHaveBeenCalled();
+  });
+
+  it("warns when azdevops source has no git remote", async () => {
+    mockGetGitRemoteUrl.mockResolvedValue(null);
+
+    await ensureAuthReady("azdevops", "/fake/cwd");
+
+    expect(mockWebApi).not.toHaveBeenCalled();
+    const { log } = await import("../helpers/logger.js");
+    expect(log.warn).toHaveBeenCalledWith(
+      "No git remote found — skipping Azure DevOps pre-authentication",
+    );
+  });
+
+  it("warns when azdevops remote URL does not match Azure DevOps", async () => {
+    mockGetGitRemoteUrl.mockResolvedValue("https://github.com/owner/repo");
+    mockParseAzDevOpsRemoteUrl.mockReturnValue(null);
+
+    await ensureAuthReady("azdevops", "/fake/cwd");
+
+    expect(mockWebApi).not.toHaveBeenCalled();
+    const { log } = await import("../helpers/logger.js");
+    expect(log.warn).toHaveBeenCalledWith(
+      "Remote URL is not an Azure DevOps repository — skipping Azure pre-authentication",
+    );
   });
 
   it("does nothing for md datasource", async () => {

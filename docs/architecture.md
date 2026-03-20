@@ -342,7 +342,7 @@ operations:
 |----------|----------|-------------|
 | Issue fetch fails | Logged, skipped; others continue | [Spec generation](spec-generation/overview.md#error-handling-and-exit-codes) |
 | Spec generation fails for one issue | Per-attempt timeout/retries are exhausted for that item; `failed` counter increments and others continue | [Spec generation](spec-generation/overview.md#error-handling-and-exit-codes) |
-| Planner times out | Retried up to `--plan-retries` (or shared `--retries`, default 3) with `--plan-timeout` (default 15 min); exhausted retries pause interactive dispatch runs for manual rerun, while verbose or non-TTY runs fail predictably without waiting | [Orchestrator](cli-orchestration/orchestrator.md) |
+| Planner times out | Retried up to `--plan-retries` (or shared `--retries`, default 3) with `--plan-timeout` (default 30 min); exhausted retries pause interactive dispatch runs for manual rerun, while verbose or non-TTY runs fail predictably without waiting | [Orchestrator](cli-orchestration/orchestrator.md) |
 | Executor returns null / exhausts retries | Interactive dispatch runs enter paused recovery for manual rerun or quit; verbose or non-TTY runs finalize the task as failed and stop predictably | [Dispatcher](planning-and-dispatch/dispatcher.md) |
 | Datasource sync fails post-execution | Warning logged; task still counted as done | [Orchestrator](cli-orchestration/orchestrator.md) |
 | Provider boot fails | Entire run aborts (misconfiguration — no retry) | [Provider error recovery](provider-system/overview.md#error-recovery-on-boot-failure) |
@@ -448,9 +448,11 @@ spec generation:
 
 | Setting | CLI flag | Config key | Default |
 |---------|----------|------------|---------|
-| Planning timeout | `--plan-timeout` | `planTimeout` | 15 minutes |
+| Planning timeout | `--plan-timeout` | `planTimeout` | 30 minutes |
 | Planning retries | `--plan-retries` | `planRetries` | falls back to `--retries` (default 3) |
 | Spec-generation timeout | `--spec-timeout` | `specTimeout` | 10 minutes |
+| Spec warn-phase timeout | `--spec-warn-timeout` | `specWarnTimeout` | 10 minutes |
+| Spec kill-phase timeout | `--spec-kill-timeout` | `specKillTimeout` | 10 minutes |
 | Spec-generation retries | `--retries` | `retries` | 3 |
 
 Planning retries timed-out attempts up to `maxPlanAttempts`. Spec generation
@@ -462,6 +464,8 @@ Architecturally, that means spec deadlines are per item and per attempt.
 `TimeoutError` enters the normal retry flow, exhausted retries fail only that
 item, concurrent batches continue, and successful items still preserve partial
 progress in the final summary.
+
+The two-phase timebox model layers a **warn phase** (`--spec-warn-timeout`) and a **kill phase** (`--spec-kill-timeout`) around each spec-generation attempt. When the warn phase fires, a nudge message is sent to the agent via the optional `send()` method; when the kill phase fires, the attempt is aborted with a `TimeoutError`.
 
 Provider-local safeguards complement these deadlines rather than replacing them:
 Copilot adds its own idle wait timeout, while OpenCode surfaces `session.error`

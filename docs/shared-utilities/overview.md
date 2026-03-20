@@ -9,6 +9,7 @@ guards, custom error types, and startup prerequisite validation.
 |------|---------|
 | [`src/helpers/slugify.ts`](../../src/helpers/slugify.ts) | Convert arbitrary text into URL/filesystem-safe identifiers |
 | [`src/helpers/timeout.ts`](../../src/helpers/timeout.ts) | Wrap any promise with a configurable deadline and labeled error |
+| [`src/helpers/concurrency.ts`](../../src/helpers/concurrency.ts) | Sliding-window concurrent execution with configurable parallelism and early-stop signal |
 | [`src/helpers/errors.ts`](../../src/helpers/errors.ts) | Custom `UnsupportedOperationError` for datasource operations that are structurally unsupported |
 | [`src/helpers/guards.ts`](../../src/helpers/guards.ts) | Runtime `hasProperty` type guard for safely narrowing `unknown` values |
 | [`src/helpers/prereqs.ts`](../../src/helpers/prereqs.ts) | Startup prerequisite checker validating git, Node.js, and datasource-specific CLIs |
@@ -30,6 +31,10 @@ need small, well-tested building blocks:
   other guarded async operation that exceeds its deadline is interrupted with a
   descriptive `TimeoutError`, enabling the [orchestrator](../cli-orchestration/orchestrator.md)
   to attempt recovery or record a per-item failure.
+- **runWithConcurrency** provides a sliding-window execution model that starts
+  new tasks as soon as active ones complete, up to a configurable concurrency
+  limit. An optional `shouldStop()` callback enables early termination. Used by
+  both the dispatch and spec pipelines for parallel task processing.
 - **UnsupportedOperationError** lets datasource implementations signal that
   an interface method is structurally unsupported (e.g., the markdown
   datasource cannot create git branches). See [Errors](./errors.md).
@@ -49,6 +54,7 @@ graph TD
         Timeout["timeout.ts"]
         Errors["errors.ts"]
         Guards["guards.ts"]
+        Concurrency["concurrency.ts"]
     end
 
     subgraph "Datasources"
@@ -73,6 +79,8 @@ graph TD
     SP -- "slugify(title, 60)" --> Slugify
     DH -- "slugify(title, 60)" --> Slugify
     DP -- "withTimeout(promise, ms, label)" --> Timeout
+    DP -- "runWithConcurrency(tasks, limit)" --> Concurrency
+    SP -- "runWithConcurrency(items, limit)" --> Concurrency
     MD -- "throws UnsupportedOperationError" --> Errors
     OC -- "hasProperty(value, key)" --> Guards
 ```
@@ -89,7 +97,7 @@ Consumers have settled on two truncation limits:
 
 ## The helpers barrel (`helpers/index.ts`)
 
-The barrel file at `src/helpers/index.ts` re-exports 14 sub-modules through
+The barrel file at `src/helpers/index.ts` re-exports 17 sub-modules through
 a single import surface. Every module listed below is public -- there is no
 internal vs. external distinction. Any module in the codebase can import from
 `"../helpers/index.js"` to access any of these exports.
@@ -110,6 +118,9 @@ internal vs. external distinction. Any module in the codebase can import from
 | `guards` | `hasProperty()` -- runtime type guard |
 | `branch-validation` | Branch name validation |
 | `file-logger` | `fileLoggerStorage` -- AsyncLocalStorage-based file logging |
+| `environment` | Environment detection utilities |
+| `auth` | OAuth device-flow authentication and token caching |
+| `concurrency` | `runWithConcurrency()` -- sliding-window parallel execution |
 
 ### Adding a new helper module
 

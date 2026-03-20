@@ -29,6 +29,8 @@ const CONFIG_TO_CLI: Record<ConfigKey, keyof RawCliArgs> = {
   testTimeout: "testTimeout",
   planTimeout: "planTimeout",
   specTimeout: "specTimeout",
+  specWarnTimeout: "specWarnTimeout",
+  specKillTimeout: "specKillTimeout",
   concurrency: "concurrency",
   org: "org",
   project: "project",
