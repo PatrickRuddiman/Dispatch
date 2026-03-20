@@ -660,7 +660,8 @@ describe("module state isolation", () => {
     // Second TUI — first draw should NOT cursor-up based on previous TUI's frame
     output.write.mockClear();
     const tui2 = mod.createTui({ output: output as any });
-    const firstWrite = String(output.write.mock.calls[0]?.[0] ?? "");
+    const calls = output.write.mock.calls as unknown[][];
+    const firstWrite = String(calls[0]?.[0] ?? "");
     // The first write of a fresh TUI should not contain a large cursor-up sequence
     const cursorUp = firstWrite.match(/\x1B\[(\d+)A/);
     if (cursorUp) {
