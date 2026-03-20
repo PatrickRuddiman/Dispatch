@@ -35,6 +35,8 @@ export interface DispatchConfig {
   workItemType?: string;
   iteration?: string;
   area?: string;
+  /** Short username prefix for branch names (e.g. "pr" instead of "patrick-ruddiman"). */
+  username?: string;
   /** Internal auto-increment counter for MD datasource issue IDs. Defaults to 1 when absent. */
   nextIssueId?: number;
 }
@@ -48,7 +50,7 @@ export const CONFIG_BOUNDS = {
 } as const;
 
 /** Valid configuration key names. */
-export const CONFIG_KEYS = ["provider", "model", "source", "testTimeout", "planTimeout", "specTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area"] as const;
+export const CONFIG_KEYS = ["provider", "model", "source", "testTimeout", "planTimeout", "specTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area", "username"] as const;
 
 /** A valid configuration key name. */
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -156,6 +158,19 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
         return `Invalid ${key}: value must not be empty`;
       }
       return null;
+
+    case "username": {
+      if (!value || value.trim() === "") {
+        return `Invalid username: value must not be empty`;
+      }
+      if (value.length > 20) {
+        return `Invalid username "${value}". Must be at most 20 characters`;
+      }
+      if (!/^[a-zA-Z0-9-]+$/.test(value)) {
+        return `Invalid username "${value}". Must contain only alphanumeric characters and hyphens`;
+      }
+      return null;
+    }
 
     default:
       return `Unknown config key "${key}"`;

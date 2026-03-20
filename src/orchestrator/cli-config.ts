@@ -35,6 +35,7 @@ const CONFIG_TO_CLI: Record<ConfigKey, keyof RawCliArgs> = {
   workItemType: "workItemType",
   iteration: "iteration",
   area: "area",
+  username: "username",
 };
 
 /** Type-safe indexed write into a RawCliArgs object. */

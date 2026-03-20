@@ -73,6 +73,8 @@ export interface IssueFetchOptions {
 export interface DispatchLifecycleOptions {
   /** Working directory (git repo root) */
   cwd: string;
+  /** Optional short username prefix from config, overrides git-derived username */
+  username?: string;
 }
 
 /** Valid datasource backend names. */
