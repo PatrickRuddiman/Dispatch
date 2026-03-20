@@ -300,11 +300,11 @@ describe("runWithConcurrency", () => {
       shouldStop: () => stopSignal,
     });
 
-    // Items 1 and 2 were launched (concurrency=2 before shouldStop checked)
+    // Item 1 launches and synchronously sets stopSignal before awaiting,
+    // so shouldStop() returns true before item 2 is launched.
     expect(results[0]).toEqual({ status: "fulfilled", value: 10 });
-    expect(results[1]).toEqual({ status: "fulfilled", value: 20 });
-    // Remaining items are skipped
-    for (let i = 2; i < 5; i++) {
+    // Remaining items are skipped because shouldStop fired before they launched
+    for (let i = 1; i < 5; i++) {
       expect(results[i]).toEqual({ status: "skipped" });
     }
   });
