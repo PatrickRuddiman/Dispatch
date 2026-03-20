@@ -46,7 +46,7 @@ export const HELP = `
     --provider <name>      Agent backend: ${PROVIDER_NAMES.join(", ")} (default: opencode)
     --source <name>        Issue source: ${DATASOURCE_NAMES.join(", ")} (optional; auto-detected from git remote)
     --server-url <url>     URL of a running provider server
-    --plan-timeout <min>   Planning timeout in minutes (default: 15)
+    --plan-timeout <min>   Planning timeout in minutes (default: 30)
     --retries <n>          Retry attempts for all agents (default: 3)
     --plan-retries <n>     Retry attempts after planning timeout (overrides --retries for planner)
     --test-timeout <min>   Test timeout in minutes (default: 5)

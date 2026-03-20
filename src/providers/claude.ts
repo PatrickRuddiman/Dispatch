@@ -52,7 +52,8 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
       try {
         const sessionOpts = {
           model,
-          permissionMode: "acceptEdits" as const,
+          permissionMode: "bypassPermissions" as const,
+          allowDangerouslySkipPermissions: true,
           ...(cwd ? { cwd } : {}),
         };
         const session = unstable_v2_createSession(sessionOpts);
