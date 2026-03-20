@@ -39,6 +39,8 @@ export interface OrchestrateRunOptions {
   workItemType?: string;
   iteration?: string;
   area?: string;
+  /** Configured username prefix for branch naming. */
+  username?: string;
   planTimeout?: number;
   planRetries?: number;
   retries?: number;
@@ -69,6 +71,8 @@ export interface RawCliArgs {
   workItemType?: string;
   iteration?: string;
   area?: string;
+  /** Configured username prefix for branch naming. */
+  username?: string;
   planTimeout?: number;
   specTimeout?: number;
   specWarnTimeout?: number;
@@ -154,6 +158,7 @@ interface MultiIssueFixTestsOptions {
   testTimeout?: number;
   org?: string;
   project?: string;
+  username?: string;
 }
 
 /**
@@ -176,7 +181,7 @@ async function runMultiIssueFixTests(opts: MultiIssueFixTestsOptions): Promise<F
 
   let username = "";
   try {
-    username = await datasource.getUsername({ cwd: opts.cwd });
+    username = await datasource.getUsername({ cwd: opts.cwd, username: opts.username });
   } catch (err) {
     log.warn(`Could not resolve git username for branch naming: ${log.formatErrorChain(err)}`);
   }
@@ -316,7 +321,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
           cwd: m.cwd, issueIds: m.issueIds, source,
           provider: m.provider, serverUrl: m.serverUrl,
           verbose: m.verbose, testTimeout: m.testTimeout,
-          org: m.org, project: m.project,
+          org: m.org, project: m.project, username: m.username,
         });
       }
 
@@ -378,7 +383,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
         dryRun: m.dryRun, noPlan: m.noPlan, noBranch: m.noBranch, noWorktree: m.noWorktree, provider: m.provider,
         model: m.model, serverUrl: m.serverUrl, source: m.issueSource, org: m.org, project: m.project,
         workItemType: m.workItemType, iteration: m.iteration, area: m.area, planTimeout: m.planTimeout, planRetries: m.planRetries, retries: m.retries,
-        force: m.force, feature: m.feature,
+        force: m.force, feature: m.feature, username: m.username,
       });
     },
   };

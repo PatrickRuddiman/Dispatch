@@ -53,9 +53,42 @@ async function getOwnerRepo(cwd: string): Promise<{ owner: string; repo: string 
  * @param title       - The issue title (will be slugified)
  * @param username    - The slugified git username to namespace the branch
  */
-function buildBranchName(issueNumber: string, title: string, username: string = "unknown"): string {
-  const slug = slugify(title, 50);
-  return `${username}/dispatch/${issueNumber}-${slug}`;
+function buildBranchName(issueNumber: string, _title: string, username: string = "unknown"): string {
+  return `${username}/dispatch/issue-${issueNumber}`;
+}
+
+/**
+ * Derive a short username from git config.
+ * - Multi-word name: first 2 chars of first name + first 6 of last name
+ * - Single word or no name: first 8 chars of email local part
+ * - Falls back to the provided `fallback` value
+ */
+async function deriveShortUsername(cwd: string, fallback: string): Promise<string> {
+  try {
+    const raw = (await git(["config", "user.name"], cwd)).trim();
+    if (raw) {
+      const parts = raw.toLowerCase().replace(/[^a-z\s]/g, "").trim().split(/\s+/);
+      if (parts.length >= 2) {
+        return (parts[0].slice(0, 2) + parts[parts.length - 1].slice(0, 6)) || fallback;
+      }
+    }
+  } catch {
+    // fall through to email
+  }
+
+  try {
+    const raw = (await git(["config", "user.email"], cwd)).trim();
+    if (raw) {
+      const localPart = raw.split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (localPart) {
+        return localPart.slice(0, 8);
+      }
+    }
+  } catch {
+    // fall through
+  }
+
+  return fallback;
 }
 
 /**
@@ -234,13 +267,8 @@ export const datasource: Datasource = {
   },
 
   async getUsername(opts: DispatchLifecycleOptions): Promise<string> {
-    try {
-      const name = await git(["config", "user.name"], opts.cwd);
-      const slug = slugify(name.trim());
-      return slug || "unknown";
-    } catch {
-      return "unknown";
-    }
+    if (opts.username) return opts.username;
+    return deriveShortUsername(opts.cwd, "unknown");
   },
 
   getDefaultBranch(opts) {

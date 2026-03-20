@@ -287,14 +287,14 @@ describe("github datasource — getDefaultBranch", () => {
 });
 
 describe("github datasource — buildBranchName", () => {
-  it("builds <username>/dispatch/<number>-<slug>", () => {
+  it("builds <username>/dispatch/issue-<number>", () => {
     const result = datasource.buildBranchName("42", "Add User Auth", "jdoe");
-    expect(result).toBe("jdoe/dispatch/42-add-user-auth");
+    expect(result).toBe("jdoe/dispatch/issue-42");
   });
 
   it("falls back to 'unknown' when username is omitted", () => {
     const result = datasource.buildBranchName("42", "Add User Auth");
-    expect(result).toBe("unknown/dispatch/42-add-user-auth");
+    expect(result).toBe("unknown/dispatch/issue-42");
   });
 });
 
@@ -524,6 +524,34 @@ describe("github datasource — createPullRequest", () => {
     expect(mockOctokit.rest.pulls.create).toHaveBeenCalledWith(
       expect.objectContaining({ body: multilineBody }),
     );
+  });
+});
+
+describe("github datasource — getUsername", () => {
+  it("returns opts.username when provided", async () => {
+    const result = await datasource.getUsername({ cwd: "/tmp", username: "pr" });
+    expect(result).toBe("pr");
+    expect(mockExecFile).not.toHaveBeenCalled();
+  });
+
+  it("derives short username from multi-word git user.name", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: "Patrick Ruddiman\n" });
+    const result = await datasource.getUsername({ cwd: "/tmp" });
+    expect(result).toBe("paruddim");
+  });
+
+  it("falls back to email for single-word name", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: "Patrick\n" });
+    mockExecFile.mockResolvedValueOnce({ stdout: "patrick@example.com\n" });
+    const result = await datasource.getUsername({ cwd: "/tmp" });
+    expect(result).toBe("patrick");
+  });
+
+  it("returns unknown when both git config calls fail", async () => {
+    mockExecFile.mockRejectedValueOnce(new Error("no config"));
+    mockExecFile.mockRejectedValueOnce(new Error("no config"));
+    const result = await datasource.getUsername({ cwd: "/tmp" });
+    expect(result).toBe("unknown");
   });
 });
 

@@ -116,6 +116,7 @@ export async function runDispatchPipeline(
     planTimeout,
     planRetries,
     retries,
+    username: usernameOverride,
   } = opts;
   let noBranch = noBranchOpt;
 
@@ -130,7 +131,7 @@ export async function runDispatchPipeline(
 
   // Dry-run mode uses simple log output
   if (dryRun) {
-    return dryRunMode(issueIds, cwd, source, org, project, workItemType, iteration, area);
+    return dryRunMode(issueIds, cwd, source, org, project, workItemType, iteration, area, usernameOverride);
   }
 
   // Pre-authenticate before TUI starts so device codes are visible in the terminal.
@@ -313,7 +314,7 @@ export async function runDispatchPipeline(
     const results: DispatchResult[] = [];
     let halted = false;
 
-    const lifecycleOpts: DispatchLifecycleOptions = { cwd };
+    const lifecycleOpts: DispatchLifecycleOptions = { cwd, username: usernameOverride };
 
     // ── Capture the branch the user is currently on ────────────────
     // This is used as the base for new branches, PR targets, and the
@@ -449,7 +450,7 @@ export async function runDispatchPipeline(
         }
 
         const worktreeRoot = useWorktrees ? worktreePath : undefined;
-        const issueLifecycleOpts: DispatchLifecycleOptions = { cwd: issueCwd };
+        const issueLifecycleOpts: DispatchLifecycleOptions = { cwd: issueCwd, username: usernameOverride };
 
         fileLogger?.phase("Provider/agent boot");
         let localInstance: ProviderInstance;
@@ -985,6 +986,7 @@ export async function dryRunMode(
   workItemType?: string,
   iteration?: string,
   area?: string,
+  username?: string,
 ): Promise<DispatchSummary> {
   if (!source) {
     log.error("No datasource configured. Use --source or run 'dispatch config' to set up defaults.");
@@ -994,10 +996,10 @@ export async function dryRunMode(
   const datasource = getDatasource(source);
   const fetchOpts: IssueFetchOptions = { cwd, org, project, workItemType, iteration, area };
 
-  const lifecycleOpts = { cwd };
-  let username = "";
+  const lifecycleOpts: DispatchLifecycleOptions = { cwd, username };
+  let resolvedUsername = "";
   try {
-    username = await datasource.getUsername(lifecycleOpts);
+    resolvedUsername = await datasource.getUsername(lifecycleOpts);
   } catch {
     // Fall back to empty prefix if username resolution fails
   }
@@ -1041,7 +1043,7 @@ export async function dryRunMode(
       ? items.find((item) => item.number === parsed.issueId)
       : issueDetailsByFile.get(task.file);
     const branchInfo = details
-      ? ` [branch: ${datasource.buildBranchName(details.number, details.title, username)}]`
+      ? ` [branch: ${datasource.buildBranchName(details.number, details.title, resolvedUsername)}]`
       : "";
     log.task(allTasks.indexOf(task), allTasks.length, `${task.file}:${task.line} — ${task.text}${branchInfo}`);
   }

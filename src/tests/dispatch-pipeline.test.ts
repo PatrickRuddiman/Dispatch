@@ -1234,8 +1234,8 @@ function setupMultiIssueScenario() {
   });
 
   const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
-  vi.mocked(ds.buildBranchName).mockImplementation((num: string, title: string, user?: string) => {
-    return `${user}/dispatch/${num}-${title.toLowerCase().replace(/\s+/g, "-")}`;
+  vi.mocked(ds.buildBranchName).mockImplementation((num: string, _title: string, user?: string) => {
+    return `${user}/dispatch/issue-${num}`;
   });
 }
 

@@ -873,28 +873,43 @@ describe("detectDoneState", () => {
 });
 
 describe("azdevops datasource — getUsername", () => {
-  it("returns slugified git config user.name when available", async () => {
-    mockExecFile.mockResolvedValueOnce({ stdout: "Alice Smith\n" });
-
-    const result = await datasource.getUsername({ cwd: "/tmp" });
-
-    expect(result).toBe("alice-smith");
-    expect(mockExecFile).toHaveBeenCalledTimes(1);
+  it("returns opts.username when provided", async () => {
+    const result = await datasource.getUsername({ cwd: "/tmp", username: "pr" });
+    expect(result).toBe("pr");
+    expect(mockExecFile).not.toHaveBeenCalled();
   });
 
-  it("returns unknown when git config fails", async () => {
-    mockExecFile.mockRejectedValueOnce(new Error("git config not set"));
-
+  it("derives short username from multi-word git user.name", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: "Alice Smith\n" });
     const result = await datasource.getUsername({ cwd: "/tmp" });
+    expect(result).toBe("alsmith");
+  });
 
+  it("falls back to email for single-word git user.name", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: "Alice\n" });
+    mockExecFile.mockResolvedValueOnce({ stdout: "alice.smith@example.com\n" });
+    const result = await datasource.getUsername({ cwd: "/tmp" });
+    expect(result).toBe("alicesmi");
+  });
+
+  it("falls back to email when git user.name is empty", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: "\n" });
+    mockExecFile.mockResolvedValueOnce({ stdout: "dev@example.com\n" });
+    const result = await datasource.getUsername({ cwd: "/tmp" });
+    expect(result).toBe("dev");
+  });
+
+  it("returns unknown when both git config calls fail", async () => {
+    mockExecFile.mockRejectedValueOnce(new Error("git config not set"));
+    mockExecFile.mockRejectedValueOnce(new Error("git config not set"));
+    const result = await datasource.getUsername({ cwd: "/tmp" });
     expect(result).toBe("unknown");
   });
 
-  it("returns unknown when git config returns empty", async () => {
+  it("returns unknown when git config returns empty for both", async () => {
     mockExecFile.mockResolvedValueOnce({ stdout: "\n" });
-
+    mockExecFile.mockResolvedValueOnce({ stdout: "\n" });
     const result = await datasource.getUsername({ cwd: "/tmp" });
-
     expect(result).toBe("unknown");
   });
 });
@@ -941,9 +956,9 @@ describe("azdevops datasource — getDefaultBranch", () => {
 });
 
 describe("azdevops datasource — buildBranchName", () => {
-  it("builds <username>/dispatch/<number>-<slug>", () => {
+  it("builds <username>/dispatch/issue-<number>", () => {
     const result = datasource.buildBranchName("42", "Add Auth Feature", "testuser");
-    expect(result).toBe("testuser/dispatch/42-add-auth-feature");
+    expect(result).toBe("testuser/dispatch/issue-42");
   });
 });
 
@@ -1232,25 +1247,25 @@ describe("azdevops datasource — getDefaultBranch validation", () => {
 describe("azdevops datasource — buildBranchName validation", () => {
   it("handles title with square brackets", () => {
     expect(datasource.buildBranchName("42", "[Bug] Fix login", "user")).toBe(
-      "user/dispatch/42-bug-fix-login"
+      "user/dispatch/issue-42"
     );
   });
 
   it("handles title with colons", () => {
     expect(datasource.buildBranchName("42", "feat: add endpoint", "user")).toBe(
-      "user/dispatch/42-feat-add-endpoint"
+      "user/dispatch/issue-42"
     );
   });
 
   it("handles title with mixed special characters", () => {
     expect(
       datasource.buildBranchName("42", "Fix @{upstream} issue", "user")
-    ).toBe("user/dispatch/42-fix-upstream-issue");
+    ).toBe("user/dispatch/issue-42");
   });
 
   it("handles title with dots by replacing them with hyphens", () => {
     expect(datasource.buildBranchName("42", "Update v1.2.3", "user")).toBe(
-      "user/dispatch/42-update-v1-2-3"
+      "user/dispatch/issue-42"
     );
   });
 });

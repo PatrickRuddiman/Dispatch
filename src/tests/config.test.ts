@@ -416,6 +416,32 @@ describe("validateConfigValue", () => {
     expect(validateConfigValue("area", "")).not.toBe(null);
     expect(validateConfigValue("area", "   ")).not.toBe(null);
   });
+
+  it("accepts valid username values", () => {
+    expect(validateConfigValue("username", "pr")).toBe(null);
+    expect(validateConfigValue("username", "john-doe")).toBe(null);
+    expect(validateConfigValue("username", "user123")).toBe(null);
+    expect(validateConfigValue("username", "a")).toBe(null);
+    expect(validateConfigValue("username", "abcdefghijklmnopqrst")).toBe(null); // 20 chars
+  });
+
+  it("rejects empty username", () => {
+    expect(validateConfigValue("username", "")).not.toBe(null);
+    expect(validateConfigValue("username", "   ")).not.toBe(null);
+  });
+
+  it("rejects username exceeding 20 characters", () => {
+    const result = validateConfigValue("username", "abcdefghijklmnopqrstu"); // 21 chars
+    expect(result).not.toBe(null);
+    expect(result).toContain("at most 20 characters");
+  });
+
+  it("rejects username with invalid characters", () => {
+    expect(validateConfigValue("username", "user name")).not.toBe(null);
+    expect(validateConfigValue("username", "user.name")).not.toBe(null);
+    expect(validateConfigValue("username", "user_name")).not.toBe(null);
+    expect(validateConfigValue("username", "user/name")).not.toBe(null);
+  });
 });
 
 // ─── Merge precedence (CLI > config > default) ─────────────────────
