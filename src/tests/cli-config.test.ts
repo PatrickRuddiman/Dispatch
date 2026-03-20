@@ -190,6 +190,64 @@ describe("resolveCliConfig()", () => {
       expect(result.specTimeout).toBe(15);
     });
 
+    it("merges specWarnTimeout from config when not explicit", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({
+        provider: "copilot",
+        specWarnTimeout: 8,
+      });
+
+      const args = createRawCliArgs({
+        explicitFlags: new Set(["provider", "issueSource"]),
+      });
+      const result = await resolveCliConfig(args);
+
+      expect(result.specWarnTimeout).toBe(8);
+    });
+
+    it("keeps explicit CLI specWarnTimeout over config value", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({
+        provider: "copilot",
+        specWarnTimeout: 8,
+      });
+
+      const args = createRawCliArgs({
+        explicitFlags: new Set(["provider", "issueSource", "specWarnTimeout"]),
+        specWarnTimeout: 15,
+      });
+      const result = await resolveCliConfig(args);
+
+      expect(result.specWarnTimeout).toBe(15);
+    });
+
+    it("merges specKillTimeout from config when not explicit", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({
+        provider: "copilot",
+        specKillTimeout: 5,
+      });
+
+      const args = createRawCliArgs({
+        explicitFlags: new Set(["provider", "issueSource"]),
+      });
+      const result = await resolveCliConfig(args);
+
+      expect(result.specKillTimeout).toBe(5);
+    });
+
+    it("keeps explicit CLI specKillTimeout over config value", async () => {
+      vi.mocked(loadConfig).mockResolvedValue({
+        provider: "copilot",
+        specKillTimeout: 5,
+      });
+
+      const args = createRawCliArgs({
+        explicitFlags: new Set(["provider", "issueSource", "specKillTimeout"]),
+        specKillTimeout: 12,
+      });
+      const result = await resolveCliConfig(args);
+
+      expect(result.specKillTimeout).toBe(12);
+    });
+
     it("merges azdevops config values (org, project, workItemType, iteration, area) when not in explicitFlags", async () => {
       vi.mocked(loadConfig).mockResolvedValue({
         provider: "copilot",

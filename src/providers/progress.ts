@@ -12,7 +12,7 @@ export function sanitizeProgressText(raw: string, maxLength = 120): string {
 
   if (!text) return "";
   if (text.length <= maxLength) return text;
-  if (maxLength <= 1) return "…";
+  if (maxLength <= 1) return maxLength <= 0 ? "" : "…";
   return `${text.slice(0, maxLength - 1).trimEnd()}…`;
 }
 

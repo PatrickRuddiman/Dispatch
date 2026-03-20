@@ -56,6 +56,8 @@ export const HELP = `
     --spec <value>         Comma-separated issue numbers, glob pattern for .md files, or inline text description
     --respec [value]       Regenerate specs: issue numbers, glob, or omit to regenerate all existing specs
     --spec-timeout <min>   Spec generation timeout in minutes (default: 10)
+    --spec-warn-timeout <min>  Spec warn-phase timeout in minutes (default: 10)
+    --spec-kill-timeout <min>  Spec kill-phase timeout in minutes (default: 10)
     --output-dir <dir>     Output directory for specs (default: .dispatch/specs)
 
   Azure DevOps options:
@@ -135,6 +137,8 @@ export const CLI_OPTIONS_MAP: Record<string, string> = {
   serverUrl: "serverUrl",
   planTimeout: "planTimeout",
   specTimeout: "specTimeout",
+  specWarnTimeout: "specWarnTimeout",
+  specKillTimeout: "specKillTimeout",
   retries: "retries",
   planRetries: "planRetries",
   testTimeout: "testTimeout",
@@ -205,6 +209,34 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
         }
         if (n > CONFIG_BOUNDS.specTimeout.max) {
           throw new CommanderError(1, "commander.invalidArgument", `--spec-timeout must not exceed ${CONFIG_BOUNDS.specTimeout.max}`);
+        }
+        return n;
+      },
+    )
+    .option(
+      "--spec-warn-timeout <min>",
+      "Spec warn-phase timeout in minutes",
+      (val: string): number => {
+        const n = parseFloat(val);
+        if (isNaN(n) || n < CONFIG_BOUNDS.specWarnTimeout.min) {
+          throw new CommanderError(1, "commander.invalidArgument", "--spec-warn-timeout must be a positive number (minutes)");
+        }
+        if (n > CONFIG_BOUNDS.specWarnTimeout.max) {
+          throw new CommanderError(1, "commander.invalidArgument", `--spec-warn-timeout must not exceed ${CONFIG_BOUNDS.specWarnTimeout.max}`);
+        }
+        return n;
+      },
+    )
+    .option(
+      "--spec-kill-timeout <min>",
+      "Spec kill-phase timeout in minutes",
+      (val: string): number => {
+        const n = parseFloat(val);
+        if (isNaN(n) || n < CONFIG_BOUNDS.specKillTimeout.min) {
+          throw new CommanderError(1, "commander.invalidArgument", "--spec-kill-timeout must be a positive number (minutes)");
+        }
+        if (n > CONFIG_BOUNDS.specKillTimeout.max) {
+          throw new CommanderError(1, "commander.invalidArgument", `--spec-kill-timeout must not exceed ${CONFIG_BOUNDS.specKillTimeout.max}`);
         }
         return n;
       },
@@ -287,6 +319,8 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
   if (opts.serverUrl !== undefined) args.serverUrl = opts.serverUrl;
   if (opts.planTimeout !== undefined) args.planTimeout = opts.planTimeout;
   if (opts.specTimeout !== undefined) args.specTimeout = opts.specTimeout;
+  if (opts.specWarnTimeout !== undefined) args.specWarnTimeout = opts.specWarnTimeout;
+  if (opts.specKillTimeout !== undefined) args.specKillTimeout = opts.specKillTimeout;
   if (opts.retries !== undefined) args.retries = opts.retries;
   if (opts.planRetries !== undefined) args.planRetries = opts.planRetries;
   if (opts.testTimeout !== undefined) args.testTimeout = opts.testTimeout;

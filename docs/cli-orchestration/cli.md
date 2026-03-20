@@ -180,6 +180,8 @@ required and the dispatch-specific flags (`--dry-run`, `--no-plan`,
 | `--server-url <url>` | string | *none* | Connect to a running provider server (shared with dispatch mode) |
 | `--retries <n>` | integer | `3` | Retry attempts for spec generation and other shared agent flows |
 | `--spec-timeout <min>` | float | `10` | Spec generation timeout in minutes. Must be a positive number. Parsed via `parseFloat`. |
+| `--spec-warn-timeout <min>` | float | `10` | Spec warn-phase timeout in minutes. The time-warning nudge is sent to the agent after this duration. Must be a positive number. |
+| `--spec-kill-timeout <min>` | float | `10` | Spec kill-phase timeout in minutes. The generation attempt is killed after this duration. Must be a positive number. |
 | `--plan-timeout <min>` | float | `30` | Planning timeout in minutes (shared with dispatch mode) |
 | `--plan-retries <n>` | integer | *(falls back to --retries)* | Retry attempts after planning timeout (shared with dispatch mode) |
 
