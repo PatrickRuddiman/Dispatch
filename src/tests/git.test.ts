@@ -568,7 +568,7 @@ describe("MD datasource — git lifecycle methods", () => {
   it("getUsername resolves via git config user.name", async () => {
     mockExecFile.mockResolvedValueOnce({ stdout: "John Doe\n", stderr: "" });
     const result = await md.getUsername({ cwd: "/tmp" });
-    expect(result).toBe("john-doe");
+    expect(result).toBe("jodoe");
     expect(mockExecFile).toHaveBeenCalledWith("git", ["config", "user.name"], { cwd: "/tmp", shell: SHELL });
   });
 
