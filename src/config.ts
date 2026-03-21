@@ -28,12 +28,17 @@ export interface DispatchConfig {
   source?: DatasourceName;
   testTimeout?: number;
   planTimeout?: number;
+  specTimeout?: number;
+  specWarnTimeout?: number;
+  specKillTimeout?: number;
   concurrency?: number;
   org?: string;
   project?: string;
   workItemType?: string;
   iteration?: string;
   area?: string;
+  /** Short username prefix for branch names (e.g. "pr" instead of "patrick-ruddiman"). */
+  username?: string;
   /** Internal auto-increment counter for MD datasource issue IDs. Defaults to 1 when absent. */
   nextIssueId?: number;
 }
@@ -42,11 +47,14 @@ export interface DispatchConfig {
 export const CONFIG_BOUNDS = {
   testTimeout: { min: 1, max: 120 },
   planTimeout: { min: 1, max: 120 },
+  specTimeout: { min: 1, max: 120 },
+  specWarnTimeout: { min: 1, max: 120 },
+  specKillTimeout: { min: 1, max: 120 },
   concurrency: { min: 1, max: 64 },
 } as const;
 
 /** Valid configuration key names. */
-export const CONFIG_KEYS = ["provider", "model", "source", "testTimeout", "planTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area"] as const;
+export const CONFIG_KEYS = ["provider", "model", "source", "testTimeout", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area", "username"] as const;
 
 /** A valid configuration key name. */
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -129,6 +137,30 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
       return null;
     }
 
+    case "specTimeout": {
+      const num = Number(value);
+      if (!Number.isFinite(num) || num < CONFIG_BOUNDS.specTimeout.min || num > CONFIG_BOUNDS.specTimeout.max) {
+        return `Invalid specTimeout "${value}". Must be a number between ${CONFIG_BOUNDS.specTimeout.min} and ${CONFIG_BOUNDS.specTimeout.max} (minutes)`;
+      }
+      return null;
+    }
+
+    case "specWarnTimeout": {
+      const num = Number(value);
+      if (!Number.isFinite(num) || num < CONFIG_BOUNDS.specWarnTimeout.min || num > CONFIG_BOUNDS.specWarnTimeout.max) {
+        return `Invalid specWarnTimeout "${value}". Must be a number between ${CONFIG_BOUNDS.specWarnTimeout.min} and ${CONFIG_BOUNDS.specWarnTimeout.max} (minutes)`;
+      }
+      return null;
+    }
+
+    case "specKillTimeout": {
+      const num = Number(value);
+      if (!Number.isFinite(num) || num < CONFIG_BOUNDS.specKillTimeout.min || num > CONFIG_BOUNDS.specKillTimeout.max) {
+        return `Invalid specKillTimeout "${value}". Must be a number between ${CONFIG_BOUNDS.specKillTimeout.min} and ${CONFIG_BOUNDS.specKillTimeout.max} (minutes)`;
+      }
+      return null;
+    }
+
     case "concurrency": {
       const num = Number(value);
       if (!Number.isInteger(num) || num < CONFIG_BOUNDS.concurrency.min || num > CONFIG_BOUNDS.concurrency.max) {
@@ -146,6 +178,19 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
         return `Invalid ${key}: value must not be empty`;
       }
       return null;
+
+    case "username": {
+      if (!value || value.trim() === "") {
+        return `Invalid username: value must not be empty`;
+      }
+      if (value.length > 20) {
+        return `Invalid username "${value}". Must be at most 20 characters`;
+      }
+      if (!/^[a-zA-Z0-9-]+$/.test(value)) {
+        return `Invalid username "${value}". Must contain only alphanumeric characters and hyphens`;
+      }
+      return null;
+    }
 
     default:
       return `Unknown config key "${key}"`;

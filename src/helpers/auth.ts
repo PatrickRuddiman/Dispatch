@@ -22,6 +22,12 @@ import {
   AZURE_TENANT_ID,
   AZURE_DEVOPS_SCOPE,
 } from "../constants.js";
+import {
+  getGitRemoteUrl,
+  parseGitHubRemoteUrl,
+  parseAzDevOpsRemoteUrl,
+} from "../datasources/index.js";
+import type { DatasourceName } from "../datasources/interface.js";
 
 interface AuthCache {
   github?: { token: string };
@@ -158,4 +164,42 @@ export async function getAzureConnection(
     orgUrl,
     azdev.getBearerHandler(accessToken.token),
   );
+}
+
+/**
+ * Ensure the user is authenticated for the given datasource before pipeline
+ * work begins. For cached/valid tokens this resolves instantly; for new or
+ * expired credentials it triggers the device-code flow while stdout is still
+ * free (before the TUI or batch output takes over).
+ *
+ * This is a shared entry point used by both the dispatch and spec pipelines.
+ */
+export async function ensureAuthReady(
+  source: DatasourceName | undefined,
+  cwd: string,
+  org?: string,
+): Promise<void> {
+  if (source === "github") {
+    const remoteUrl = await getGitRemoteUrl(cwd);
+    if (remoteUrl && parseGitHubRemoteUrl(remoteUrl)) {
+      await getGithubOctokit();
+    } else if (!remoteUrl) {
+      log.warn("No git remote found — skipping GitHub pre-authentication");
+    } else {
+      log.warn("Remote URL is not a GitHub repository — skipping GitHub pre-authentication");
+    }
+  } else if (source === "azdevops") {
+    let orgUrl = org;
+    if (!orgUrl) {
+      const remoteUrl = await getGitRemoteUrl(cwd);
+      if (remoteUrl) {
+        const parsed = parseAzDevOpsRemoteUrl(remoteUrl);
+        if (parsed) orgUrl = parsed.orgUrl;
+        else log.warn("Remote URL is not an Azure DevOps repository — skipping Azure pre-authentication");
+      } else {
+        log.warn("No git remote found — skipping Azure DevOps pre-authentication");
+      }
+    }
+    if (orgUrl) await getAzureConnection(orgUrl);
+  }
 }

@@ -29,6 +29,9 @@ vi.mock("../config.js", () => ({
   CONFIG_BOUNDS: {
     testTimeout: { min: 1, max: 120 },
     planTimeout: { min: 1, max: 120 },
+    specTimeout: { min: 1, max: 120 },
+    specWarnTimeout: { min: 1, max: 120 },
+    specKillTimeout: { min: 1, max: 120 },
     concurrency: { min: 1, max: 64 },
   },
 }));
@@ -450,6 +453,39 @@ describe("parseArgs value flags", () => {
     expect(args.planTimeout).toBe(1.5);
   });
 
+  it("parses --spec-timeout <n>", () => {
+    const [args, flags] = parseArgs(["--spec-timeout", "5"]);
+    expect(args.specTimeout).toBe(5);
+    expect(flags.has("specTimeout")).toBe(true);
+  });
+
+  it("parses --spec-timeout with decimal", () => {
+    const [args] = parseArgs(["--spec-timeout", "1.5"]);
+    expect(args.specTimeout).toBe(1.5);
+  });
+
+  it("parses --spec-warn-timeout <n>", () => {
+    const [args, flags] = parseArgs(["--spec-warn-timeout", "5"]);
+    expect(args.specWarnTimeout).toBe(5);
+    expect(flags.has("specWarnTimeout")).toBe(true);
+  });
+
+  it("parses --spec-warn-timeout with decimal", () => {
+    const [args] = parseArgs(["--spec-warn-timeout", "1.5"]);
+    expect(args.specWarnTimeout).toBe(1.5);
+  });
+
+  it("parses --spec-kill-timeout <n>", () => {
+    const [args, flags] = parseArgs(["--spec-kill-timeout", "5"]);
+    expect(args.specKillTimeout).toBe(5);
+    expect(flags.has("specKillTimeout")).toBe(true);
+  });
+
+  it("parses --spec-kill-timeout with decimal", () => {
+    const [args] = parseArgs(["--spec-kill-timeout", "1.5"]);
+    expect(args.specKillTimeout).toBe(1.5);
+  });
+
   it("parses --test-timeout <n>", () => {
     const [args, flags] = parseArgs(["--test-timeout", "5"]);
     expect(args.testTimeout).toBe(5);
@@ -548,6 +584,51 @@ describe("parseArgs error cases", () => {
 
   it("exits for --plan-timeout exceeding maximum", () => {
     expect(() => parseArgs(["--plan-timeout", "121"])).toThrow();
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
+
+  it("exits for non-positive --spec-timeout", () => {
+    expect(() => parseArgs(["--spec-timeout", "0"])).toThrow();
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
+
+  it("exits for non-numeric --spec-timeout", () => {
+    expect(() => parseArgs(["--spec-timeout", "abc"])).toThrow();
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
+
+  it("exits for --spec-timeout exceeding maximum", () => {
+    expect(() => parseArgs(["--spec-timeout", "121"])).toThrow();
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
+
+  it("exits for non-positive --spec-warn-timeout", () => {
+    expect(() => parseArgs(["--spec-warn-timeout", "0"])).toThrow();
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
+
+  it("exits for non-numeric --spec-warn-timeout", () => {
+    expect(() => parseArgs(["--spec-warn-timeout", "abc"])).toThrow();
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
+
+  it("exits for --spec-warn-timeout exceeding maximum", () => {
+    expect(() => parseArgs(["--spec-warn-timeout", "121"])).toThrow();
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
+
+  it("exits for non-positive --spec-kill-timeout", () => {
+    expect(() => parseArgs(["--spec-kill-timeout", "0"])).toThrow();
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
+
+  it("exits for non-numeric --spec-kill-timeout", () => {
+    expect(() => parseArgs(["--spec-kill-timeout", "abc"])).toThrow();
+    expect(mockExit).toHaveBeenCalledWith(1);
+  });
+
+  it("exits for --spec-kill-timeout exceeding maximum", () => {
+    expect(() => parseArgs(["--spec-kill-timeout", "121"])).toThrow();
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
@@ -726,5 +807,14 @@ describe("help text completeness", () => {
     expect(helpSection).toMatch(/-h,\s*--help/);
     // -v should be documented alongside --version
     expect(helpSection).toMatch(/-v,\s*--version/);
+  });
+
+  it("advertises the updated planning timeout and retry defaults", () => {
+    expect(HELP).toContain("Planning timeout in minutes (default: 30)");
+    expect(HELP).toMatch(/--retries <n>\s+Retry attempts for all agents \(default: 3\)/);
+  });
+
+  it("documents paused rerun recovery for interactive dispatch help", () => {
+    expect(HELP).toContain("Interactive dispatch runs pause exhausted failed tasks");
   });
 });

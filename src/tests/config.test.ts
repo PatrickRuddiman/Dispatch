@@ -238,6 +238,102 @@ describe("validateConfigValue", () => {
     expect(validateConfigValue("planTimeout", "NaN")).not.toBe(null);
   });
 
+  it("accepts valid specTimeout (within bounds)", () => {
+    expect(validateConfigValue("specTimeout", String(CONFIG_BOUNDS.specTimeout.min))).toBe(null);
+    expect(validateConfigValue("specTimeout", "10")).toBe(null);
+    expect(validateConfigValue("specTimeout", "1.5")).toBe(null);
+    expect(validateConfigValue("specTimeout", String(CONFIG_BOUNDS.specTimeout.max))).toBe(null);
+  });
+
+  it("rejects specTimeout below minimum", () => {
+    const zero = validateConfigValue("specTimeout", "0");
+    expect(zero).not.toBe(null);
+    expect(zero).toContain("between");
+
+    const negative = validateConfigValue("specTimeout", "-1");
+    expect(negative).not.toBe(null);
+  });
+
+  it("rejects specTimeout above maximum", () => {
+    const result = validateConfigValue("specTimeout", String(CONFIG_BOUNDS.specTimeout.max + 1));
+    expect(result).not.toBe(null);
+    expect(result).toContain("between");
+  });
+
+  it("rejects non-numeric specTimeout", () => {
+    expect(validateConfigValue("specTimeout", "abc")).not.toBe(null);
+    expect(validateConfigValue("specTimeout", "")).not.toBe(null);
+  });
+
+  it("rejects Infinity and NaN for specTimeout", () => {
+    expect(validateConfigValue("specTimeout", "Infinity")).not.toBe(null);
+    expect(validateConfigValue("specTimeout", "NaN")).not.toBe(null);
+  });
+
+  it("accepts valid specWarnTimeout (within bounds)", () => {
+    expect(validateConfigValue("specWarnTimeout", String(CONFIG_BOUNDS.specWarnTimeout.min))).toBe(null);
+    expect(validateConfigValue("specWarnTimeout", "10")).toBe(null);
+    expect(validateConfigValue("specWarnTimeout", "1.5")).toBe(null);
+    expect(validateConfigValue("specWarnTimeout", String(CONFIG_BOUNDS.specWarnTimeout.max))).toBe(null);
+  });
+
+  it("rejects specWarnTimeout below minimum", () => {
+    const zero = validateConfigValue("specWarnTimeout", "0");
+    expect(zero).not.toBe(null);
+    expect(zero).toContain("between");
+
+    const negative = validateConfigValue("specWarnTimeout", "-1");
+    expect(negative).not.toBe(null);
+  });
+
+  it("rejects specWarnTimeout above maximum", () => {
+    const result = validateConfigValue("specWarnTimeout", String(CONFIG_BOUNDS.specWarnTimeout.max + 1));
+    expect(result).not.toBe(null);
+    expect(result).toContain("between");
+  });
+
+  it("rejects non-numeric specWarnTimeout", () => {
+    expect(validateConfigValue("specWarnTimeout", "abc")).not.toBe(null);
+    expect(validateConfigValue("specWarnTimeout", "")).not.toBe(null);
+  });
+
+  it("rejects Infinity and NaN for specWarnTimeout", () => {
+    expect(validateConfigValue("specWarnTimeout", "Infinity")).not.toBe(null);
+    expect(validateConfigValue("specWarnTimeout", "NaN")).not.toBe(null);
+  });
+
+  it("accepts valid specKillTimeout (within bounds)", () => {
+    expect(validateConfigValue("specKillTimeout", String(CONFIG_BOUNDS.specKillTimeout.min))).toBe(null);
+    expect(validateConfigValue("specKillTimeout", "10")).toBe(null);
+    expect(validateConfigValue("specKillTimeout", "1.5")).toBe(null);
+    expect(validateConfigValue("specKillTimeout", String(CONFIG_BOUNDS.specKillTimeout.max))).toBe(null);
+  });
+
+  it("rejects specKillTimeout below minimum", () => {
+    const zero = validateConfigValue("specKillTimeout", "0");
+    expect(zero).not.toBe(null);
+    expect(zero).toContain("between");
+
+    const negative = validateConfigValue("specKillTimeout", "-1");
+    expect(negative).not.toBe(null);
+  });
+
+  it("rejects specKillTimeout above maximum", () => {
+    const result = validateConfigValue("specKillTimeout", String(CONFIG_BOUNDS.specKillTimeout.max + 1));
+    expect(result).not.toBe(null);
+    expect(result).toContain("between");
+  });
+
+  it("rejects non-numeric specKillTimeout", () => {
+    expect(validateConfigValue("specKillTimeout", "abc")).not.toBe(null);
+    expect(validateConfigValue("specKillTimeout", "")).not.toBe(null);
+  });
+
+  it("rejects Infinity and NaN for specKillTimeout", () => {
+    expect(validateConfigValue("specKillTimeout", "Infinity")).not.toBe(null);
+    expect(validateConfigValue("specKillTimeout", "NaN")).not.toBe(null);
+  });
+
   it("accepts valid concurrency (within bounds)", () => {
     expect(validateConfigValue("concurrency", String(CONFIG_BOUNDS.concurrency.min))).toBe(null);
     expect(validateConfigValue("concurrency", "4")).toBe(null);
@@ -320,6 +416,32 @@ describe("validateConfigValue", () => {
     expect(validateConfigValue("area", "")).not.toBe(null);
     expect(validateConfigValue("area", "   ")).not.toBe(null);
   });
+
+  it("accepts valid username values", () => {
+    expect(validateConfigValue("username", "pr")).toBe(null);
+    expect(validateConfigValue("username", "john-doe")).toBe(null);
+    expect(validateConfigValue("username", "user123")).toBe(null);
+    expect(validateConfigValue("username", "a")).toBe(null);
+    expect(validateConfigValue("username", "abcdefghijklmnopqrst")).toBe(null); // 20 chars
+  });
+
+  it("rejects empty username", () => {
+    expect(validateConfigValue("username", "")).not.toBe(null);
+    expect(validateConfigValue("username", "   ")).not.toBe(null);
+  });
+
+  it("rejects username exceeding 20 characters", () => {
+    const result = validateConfigValue("username", "abcdefghijklmnopqrstu"); // 21 chars
+    expect(result).not.toBe(null);
+    expect(result).toContain("at most 20 characters");
+  });
+
+  it("rejects username with invalid characters", () => {
+    expect(validateConfigValue("username", "user name")).not.toBe(null);
+    expect(validateConfigValue("username", "user.name")).not.toBe(null);
+    expect(validateConfigValue("username", "user_name")).not.toBe(null);
+    expect(validateConfigValue("username", "user/name")).not.toBe(null);
+  });
 });
 
 // ─── Merge precedence (CLI > config > default) ─────────────────────
@@ -333,6 +455,7 @@ describe("merge precedence", () => {
     provider: "provider",
     model: "model",
     source: "issueSource",
+    specTimeout: "specTimeout",
   };
 
   /** Applies the merge logic: config fills in where CLI flag is not explicit. */
@@ -378,15 +501,18 @@ describe("merge precedence", () => {
       provider: "opencode",
       model: "",
       issueSource: "github",
+      specTimeout: undefined,
     };
     const config: DispatchConfig = {
       model: "claude-sonnet-4-5",
       source: "azdevops",
+      specTimeout: 12,
     };
     const explicitFlags = new Set<string>();
     applyMerge(args, config, explicitFlags);
     expect(args.model).toBe("claude-sonnet-4-5");
     expect(args.issueSource).toBe("azdevops");
+    expect(args.specTimeout).toBe(12);
   });
 
   it("partially explicit flags still allow config for other fields", () => {

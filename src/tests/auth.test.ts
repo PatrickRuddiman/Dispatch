@@ -41,6 +41,10 @@ const mockGetBearerHandler = vi.hoisted(
 
 const mockOpen = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 
+const mockGetGitRemoteUrl = vi.hoisted(() => vi.fn());
+const mockParseGitHubRemoteUrl = vi.hoisted(() => vi.fn());
+const mockParseAzDevOpsRemoteUrl = vi.hoisted(() => vi.fn());
+
 vi.mock("node:fs/promises", () => ({
   readFile: mockFs.readFile,
   writeFile: mockFs.writeFile,
@@ -71,11 +75,17 @@ vi.mock("azure-devops-node-api", () => ({
 
 vi.mock("open", () => ({ default: mockOpen }));
 
+vi.mock("../datasources/index.js", () => ({
+  getGitRemoteUrl: mockGetGitRemoteUrl,
+  parseGitHubRemoteUrl: mockParseGitHubRemoteUrl,
+  parseAzDevOpsRemoteUrl: mockParseAzDevOpsRemoteUrl,
+}));
+
 vi.mock("../helpers/logger.js", () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-import { getGithubOctokit, getAzureConnection, setAuthPromptHandler } from "../helpers/auth.js";
+import { getGithubOctokit, getAzureConnection, setAuthPromptHandler, ensureAuthReady } from "../helpers/auth.js";
 
 const realPlatform = process.platform;
 
@@ -252,6 +262,17 @@ describe("getAzureConnection", () => {
 
     expect(mockDeviceCodeCredential).toHaveBeenCalledOnce();
   });
+
+  it("throws when Azure device-code flow returns no token", async () => {
+    mockFs.readFile.mockRejectedValue(new Error("ENOENT"));
+    mockGetToken.mockResolvedValue(null);
+
+    await expect(
+      getAzureConnection("https://dev.azure.com/myorg"),
+    ).rejects.toThrow(
+      "Azure device-code authentication did not return a token",
+    );
+  });
 });
 
 describe("auth cache file operations", () => {
@@ -296,6 +317,14 @@ describe("auth cache file operations", () => {
         configurable: true,
       });
     }
+  });
+
+  it.skipIf(realPlatform === "win32")("does not throw when chmod fails", async () => {
+    mockFs.readFile.mockRejectedValue(new Error("ENOENT"));
+    mockAuthFn.mockResolvedValue({ token: "tok" });
+    mockFs.chmod.mockRejectedValue(new Error("EPERM"));
+
+    await expect(getGithubOctokit()).resolves.toBeDefined();
   });
 });
 
@@ -365,5 +394,116 @@ describe("auth prompt handler", () => {
     expect(log.info).toHaveBeenCalledWith(
       "Enter code WXYZ-5678 at https://github.com/login/device",
     );
+  });
+});
+
+describe("ensureAuthReady", () => {
+  it("authenticates GitHub when source is github and remote is valid", async () => {
+    mockGetGitRemoteUrl.mockResolvedValue("https://github.com/owner/repo");
+    mockParseGitHubRemoteUrl.mockReturnValue({ owner: "owner", repo: "repo" });
+    mockFs.readFile.mockResolvedValue(JSON.stringify({ github: { token: "cached" } }));
+
+    await ensureAuthReady("github", "/fake/cwd");
+
+    expect(mockGetGitRemoteUrl).toHaveBeenCalledWith("/fake/cwd");
+    expect(mockParseGitHubRemoteUrl).toHaveBeenCalledWith("https://github.com/owner/repo");
+    expect(mockOctokitConstructor).toHaveBeenCalledWith({ auth: "cached" });
+  });
+
+  it("skips GitHub auth when no remote is found", async () => {
+    mockGetGitRemoteUrl.mockResolvedValue(null);
+
+    await ensureAuthReady("github", "/fake/cwd");
+
+    expect(mockOctokitConstructor).not.toHaveBeenCalled();
+    const { log } = await import("../helpers/logger.js");
+    expect(log.warn).toHaveBeenCalledWith("No git remote found — skipping GitHub pre-authentication");
+  });
+
+  it("skips GitHub auth when remote is not a GitHub URL", async () => {
+    mockGetGitRemoteUrl.mockResolvedValue("https://gitlab.com/owner/repo");
+    mockParseGitHubRemoteUrl.mockReturnValue(null);
+
+    await ensureAuthReady("github", "/fake/cwd");
+
+    expect(mockOctokitConstructor).not.toHaveBeenCalled();
+    const { log } = await import("../helpers/logger.js");
+    expect(log.warn).toHaveBeenCalledWith("Remote URL is not a GitHub repository — skipping GitHub pre-authentication");
+  });
+
+  it("authenticates Azure DevOps when source is azdevops with explicit org", async () => {
+    const futureExpiry = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    mockFs.readFile.mockResolvedValue(
+      JSON.stringify({ azure: { token: "az-cached", expiresAt: futureExpiry } }),
+    );
+
+    await ensureAuthReady("azdevops", "/fake/cwd", "https://dev.azure.com/myorg");
+
+    expect(mockGetGitRemoteUrl).not.toHaveBeenCalled();
+    expect(mockWebApi).toHaveBeenCalledWith("https://dev.azure.com/myorg", "bearer-handler");
+  });
+
+  it("resolves Azure org from remote when not explicitly provided", async () => {
+    mockGetGitRemoteUrl.mockResolvedValue("https://dev.azure.com/myorg/myproject/_git/myrepo");
+    mockParseAzDevOpsRemoteUrl.mockReturnValue({ orgUrl: "https://dev.azure.com/myorg", project: "myproject" });
+    const futureExpiry = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    mockFs.readFile.mockResolvedValue(
+      JSON.stringify({ azure: { token: "az-cached", expiresAt: futureExpiry } }),
+    );
+
+    await ensureAuthReady("azdevops", "/fake/cwd");
+
+    expect(mockGetGitRemoteUrl).toHaveBeenCalledWith("/fake/cwd");
+    expect(mockParseAzDevOpsRemoteUrl).toHaveBeenCalledWith("https://dev.azure.com/myorg/myproject/_git/myrepo");
+    expect(mockWebApi).toHaveBeenCalledWith("https://dev.azure.com/myorg", "bearer-handler");
+  });
+
+  it("skips Azure auth when org cannot be resolved", async () => {
+    mockGetGitRemoteUrl.mockResolvedValue(null);
+
+    await ensureAuthReady("azdevops", "/fake/cwd");
+
+    expect(mockWebApi).not.toHaveBeenCalled();
+  });
+
+  it("warns when azdevops source has no git remote", async () => {
+    mockGetGitRemoteUrl.mockResolvedValue(null);
+
+    await ensureAuthReady("azdevops", "/fake/cwd");
+
+    expect(mockWebApi).not.toHaveBeenCalled();
+    const { log } = await import("../helpers/logger.js");
+    expect(log.warn).toHaveBeenCalledWith(
+      "No git remote found — skipping Azure DevOps pre-authentication",
+    );
+  });
+
+  it("warns when azdevops remote URL does not match Azure DevOps", async () => {
+    mockGetGitRemoteUrl.mockResolvedValue("https://github.com/owner/repo");
+    mockParseAzDevOpsRemoteUrl.mockReturnValue(null);
+
+    await ensureAuthReady("azdevops", "/fake/cwd");
+
+    expect(mockWebApi).not.toHaveBeenCalled();
+    const { log } = await import("../helpers/logger.js");
+    expect(log.warn).toHaveBeenCalledWith(
+      "Remote URL is not an Azure DevOps repository — skipping Azure pre-authentication",
+    );
+  });
+
+  it("does nothing for md datasource", async () => {
+    await ensureAuthReady("md", "/fake/cwd");
+
+    expect(mockGetGitRemoteUrl).not.toHaveBeenCalled();
+    expect(mockOctokitConstructor).not.toHaveBeenCalled();
+    expect(mockWebApi).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when source is undefined", async () => {
+    await ensureAuthReady(undefined, "/fake/cwd");
+
+    expect(mockGetGitRemoteUrl).not.toHaveBeenCalled();
+    expect(mockOctokitConstructor).not.toHaveBeenCalled();
+    expect(mockWebApi).not.toHaveBeenCalled();
   });
 });

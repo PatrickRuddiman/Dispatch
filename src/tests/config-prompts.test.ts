@@ -4,6 +4,7 @@ import { runInteractiveConfigWizard } from "../config-prompts.js";
 import { loadConfig, saveConfig } from "../config.js";
 import { detectDatasource, getGitRemoteUrl, parseAzDevOpsRemoteUrl } from "../datasources/index.js";
 import { listProviderModels, checkProviderInstalled } from "../providers/index.js";
+import { ensureAuthReady } from "../helpers/auth.js";
 import chalk from "chalk";
 
 vi.mock("@inquirer/prompts", () => ({
@@ -40,6 +41,10 @@ vi.mock("../providers/index.js", async (importOriginal) => {
   };
 });
 
+vi.mock("../helpers/auth.js", () => ({
+  ensureAuthReady: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.spyOn(console, "log").mockImplementation(() => {});
 vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -56,6 +61,7 @@ beforeEach(() => {
   vi.mocked(parseAzDevOpsRemoteUrl).mockReturnValue(null);
   vi.mocked(input).mockResolvedValue("");
   vi.mocked(listProviderModels).mockResolvedValue([]);
+  vi.mocked(ensureAuthReady).mockResolvedValue(undefined);
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -360,5 +366,66 @@ describe("runInteractiveConfigWizard", () => {
         `${chalk.green("●")} ${choice.value}`,
       );
     }
+  });
+
+  it("triggers auth when github datasource is selected", async () => {
+    vi.mocked(loadConfig).mockResolvedValueOnce({});
+    vi.mocked(select)
+      .mockResolvedValueOnce("copilot")   // provider
+      .mockResolvedValueOnce("github");   // datasource
+    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    await runInteractiveConfigWizard();
+    expect(ensureAuthReady).toHaveBeenCalledWith("github", process.cwd(), undefined);
+  });
+
+  it("triggers auth when azdevops datasource is selected with org", async () => {
+    vi.mocked(loadConfig).mockResolvedValueOnce({});
+    vi.mocked(select)
+      .mockResolvedValueOnce("copilot")      // provider
+      .mockResolvedValueOnce("azdevops");     // datasource
+    vi.mocked(input)
+      .mockResolvedValueOnce("https://dev.azure.com/myorg")  // org
+      .mockResolvedValueOnce("MyProject")                     // project
+      .mockResolvedValueOnce("")                               // workItemType
+      .mockResolvedValueOnce("")                               // iteration
+      .mockResolvedValueOnce("");                              // area
+    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    await runInteractiveConfigWizard();
+    expect(ensureAuthReady).toHaveBeenCalledWith("azdevops", process.cwd(), "https://dev.azure.com/myorg");
+  });
+
+  it("does not trigger auth for md datasource", async () => {
+    vi.mocked(loadConfig).mockResolvedValueOnce({});
+    vi.mocked(select)
+      .mockResolvedValueOnce("copilot")
+      .mockResolvedValueOnce("md");
+    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    await runInteractiveConfigWizard();
+    expect(ensureAuthReady).toHaveBeenCalledWith("md", process.cwd(), undefined);
+  });
+
+  it("continues wizard when auth fails", async () => {
+    vi.mocked(ensureAuthReady).mockRejectedValueOnce(new Error("auth failed"));
+    vi.mocked(loadConfig).mockResolvedValueOnce({});
+    vi.mocked(select)
+      .mockResolvedValueOnce("copilot")
+      .mockResolvedValueOnce("github");
+    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    await runInteractiveConfigWizard();
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "copilot", source: "github" }),
+      undefined,
+    );
+  });
+
+  it("triggers auth for auto-detected github source when auto is selected", async () => {
+    vi.mocked(detectDatasource).mockResolvedValueOnce("github");
+    vi.mocked(loadConfig).mockResolvedValueOnce({});
+    vi.mocked(select)
+      .mockResolvedValueOnce("copilot")
+      .mockResolvedValueOnce("auto");    // auto selected, but detected as github
+    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    await runInteractiveConfigWizard();
+    expect(ensureAuthReady).toHaveBeenCalledWith("github", process.cwd(), undefined);
   });
 });

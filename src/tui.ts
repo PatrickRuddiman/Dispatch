@@ -4,23 +4,36 @@
  */
 
 import chalk from "chalk";
+import { emitKeypressEvents } from "node:readline";
 import { elapsed, renderHeaderLines } from "./helpers/format.js";
 import type { Task } from "./parser.js";
 
-export type TaskStatus = "pending" | "planning" | "running" | "done" | "failed";
+export type TaskStatus = "pending" | "planning" | "running" | "generating" | "syncing" | "paused" | "done" | "failed";
+type RecoveryAction = "rerun" | "quit";
 
 export interface TaskState {
   task: Task;
   status: TaskStatus;
   elapsed?: number;
   error?: string;
+  feedback?: string;
   /** Worktree directory name when running in a worktree (e.g. "123-fix-auth-bug") */
   worktree?: string;
 }
 
+export interface TuiRecoveryState {
+  taskIndex: number;
+  taskText: string;
+  error: string;
+  issue?: { number: string; title: string };
+  worktree?: string;
+  selectedAction: RecoveryAction;
+}
+
 export interface TuiState {
   tasks: TaskState[];
-  phase: "discovering" | "parsing" | "booting" | "dispatching" | "done";
+  phase: "discovering" | "parsing" | "booting" | "dispatching" | "paused" | "done";
+  mode?: "dispatch" | "spec";
   startTime: number;
   filesFound: number;
   serverUrl?: string;
@@ -34,6 +47,7 @@ export interface TuiState {
   currentIssue?: { number: string; title: string };
   /** Persistent notification banner (e.g. auth device-code prompt) */
   notification?: string;
+  recovery?: TuiRecoveryState;
 }
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -66,7 +80,11 @@ function statusIcon(status: TaskStatus): string {
     case "planning":
       return spinner();
     case "running":
+    case "generating":
+    case "syncing":
       return spinner();
+    case "paused":
+      return chalk.yellow("◐");
     case "done":
       return chalk.green("●");
     case "failed":
@@ -82,6 +100,12 @@ function statusLabel(status: TaskStatus): string {
       return chalk.magenta("planning");
     case "running":
       return chalk.cyan("executing");
+    case "generating":
+      return chalk.cyan("generating");
+    case "syncing":
+      return chalk.cyan("syncing");
+    case "paused":
+      return chalk.yellow("paused");
     case "done":
       return chalk.green("done");
     case "failed":
@@ -89,7 +113,7 @@ function statusLabel(status: TaskStatus): string {
   }
 }
 
-function phaseLabel(phase: TuiState["phase"], provider?: string): string {
+function phaseLabel(phase: TuiState["phase"], provider?: string, mode: TuiState["mode"] = "dispatch"): string {
   switch (phase) {
     case "discovering":
       return `${spinner()} Discovering task files...`;
@@ -100,10 +124,43 @@ function phaseLabel(phase: TuiState["phase"], provider?: string): string {
       return `${spinner()} Connecting to ${name}...`;
     }
     case "dispatching":
-      return `${spinner()} Dispatching tasks...`;
+      return mode === "spec" ? `${spinner()} Generating specs...` : `${spinner()} Dispatching tasks...`;
+    case "paused":
+      return chalk.yellow("◐") + " Waiting for rerun...";
     case "done":
       return chalk.green("✔") + " Complete";
   }
+}
+
+function isActiveStatus(status: TaskStatus): boolean {
+  return status === "planning" || status === "running" || status === "generating" || status === "syncing";
+}
+
+function sanitizeSubordinateText(text: string): string {
+  return text
+    .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/[\r\n]+/g, " ")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function truncateText(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text;
+  return text.slice(0, Math.max(0, maxLen - 1)) + "…";
+}
+
+function renderTaskError(error?: string): string | null {
+  if (!error) return null;
+  return chalk.red(`       └─ ${error}`);
+}
+
+function renderTaskFeedback(feedback: string | undefined, cols: number): string | null {
+  if (!feedback) return null;
+  const sanitized = sanitizeSubordinateText(feedback);
+  if (!sanitized) return null;
+  const maxLen = Math.max(16, cols - 10);
+  return chalk.dim(`       └─ ${truncateText(sanitized, maxLen)}`);
 }
 
 function countVisualRows(text: string, cols: number): number {
@@ -114,7 +171,19 @@ function countVisualRows(text: string, cols: number): number {
   }, 0);
 }
 
-function render(state: TuiState): string {
+function toggleRecoveryAction(action: RecoveryAction): RecoveryAction {
+  return action === "rerun" ? "quit" : "rerun";
+}
+
+function renderRecoveryAction(action: RecoveryAction, selectedAction: RecoveryAction): string {
+  const selected = action === selectedAction;
+  if (action === "rerun") {
+    return selected ? chalk.greenBright(`[▶ rerun]`) : chalk.dim("▶ rerun");
+  }
+  return selected ? chalk.redBright("[q quit]") : chalk.dim("q quit");
+}
+
+function render(state: TuiState, cols: number): string {
   const lines: string[] = [];
   const now = Date.now();
   const totalElapsed = elapsed(now - state.startTime);
@@ -150,9 +219,9 @@ function render(state: TuiState): string {
   }
 
   // ── Phase + Timer ───────────────────────────────────────────
-  lines.push(`  ${phaseLabel(state.phase, state.provider)}` + chalk.dim(`  ${totalElapsed}`));
+  lines.push(`  ${phaseLabel(state.phase, state.provider, state.mode)}` + chalk.dim(`  ${totalElapsed}`));
 
-  if (state.phase === "dispatching" || state.phase === "done") {
+  if (state.phase === "dispatching" || state.phase === "paused" || state.phase === "done") {
     // ── Progress bar ────────────────────────────────────────
     lines.push("");
     lines.push(`  ${progressBar(done + failed, total)}  ${chalk.dim(`${done + failed}/${total} tasks`)}`);
@@ -165,10 +234,10 @@ function render(state: TuiState): string {
     );
     const showWorktree = activeWorktrees.size > 1;
 
-    const cols = process.stdout.columns || 80;
     const maxTextLen = cols - 30;
 
-    const running = state.tasks.filter((t) => t.status === "running" || t.status === "planning");
+    const paused = state.tasks.filter((t) => t.status === "paused");
+    const running = state.tasks.filter((t) => isActiveStatus(t.status));
     const completed = state.tasks.filter(
       (t) => t.status === "done" || t.status === "failed"
     );
@@ -215,33 +284,40 @@ function render(state: TuiState): string {
       // Active groups (one row per group)
       for (const [wt, tasks] of activeGroups) {
         const issueNum = wt.match(/^(\d+)/)?.[1] ?? wt.slice(0, 12);
-        const activeTasks = tasks.filter((t) => t.status === "running" || t.status === "planning");
-        const activeCount = activeTasks.length;
+        const activeTasks = tasks.filter((t) => isActiveStatus(t.status) || t.status === "paused");
         const firstActive = activeTasks[0];
+        const displayStatus = firstActive?.status ?? "pending";
         const truncLen = Math.min(cols - 26, 60);
-        let text = firstActive?.task.text ?? "";
+        let text = firstActive?.task.text ?? tasks[0]?.task.text ?? "";
         if (text.length > truncLen) {
           text = text.slice(0, truncLen - 1) + "…";
         }
-        const earliest = Math.min(...activeTasks.map((t) => t.elapsed ?? now));
+        const earliest = activeTasks.length > 0
+          ? Math.min(...activeTasks.map((t) => t.elapsed ?? now))
+          : now;
         const elapsedStr = elapsed(now - earliest);
-        lines.push(`  ${spinner()} ${chalk.white(`#${issueNum}`)}  ${activeCount} active  ${text}  ${chalk.dim(elapsedStr)}`);
+        const countLabel = activeTasks.length > 0
+          ? `${activeTasks.length} active`
+          : `${tasks.length} pending`;
+        lines.push(`  ${statusIcon(displayStatus)} ${chalk.white(`#${issueNum}`)}  ${countLabel}  ${text}  ${chalk.dim(elapsedStr)}`);
       }
 
       // Ungrouped tasks (only running/planning, flat)
       for (const ts of ungrouped) {
-        if (ts.status !== "running" && ts.status !== "planning") continue;
+        if (!isActiveStatus(ts.status) && ts.status !== "paused") continue;
         const icon = statusIcon(ts.status);
         const idx = chalk.dim(`#${state.tasks.indexOf(ts) + 1}`);
-        let text = ts.task.text;
-        if (text.length > maxTextLen) {
-          text = text.slice(0, maxTextLen - 1) + "…";
-        }
+        const text = truncateText(ts.task.text, maxTextLen);
         const elapsedStr = chalk.dim(` ${elapsed(now - (ts.elapsed || now))}`);
         const label = statusLabel(ts.status);
         lines.push(`  ${icon} ${idx} ${text} ${label}${elapsedStr}`);
-        if (ts.error) {
-          lines.push(chalk.red(`       └─ ${ts.error}`));
+        const feedbackLine = ts.status === "generating" ? renderTaskFeedback(ts.feedback, cols) : null;
+        if (feedbackLine) {
+          lines.push(feedbackLine);
+        }
+        const errorLine = renderTaskError(ts.error);
+        if (errorLine) {
+          lines.push(errorLine);
         }
       }
     } else {
@@ -249,6 +325,7 @@ function render(state: TuiState): string {
       const visibleRunning = running.slice(0, 8);
       const visible: TaskState[] = [
         ...completed.slice(-3),
+        ...paused.slice(0, 3),
         ...visibleRunning,
         ...pending.slice(0, 3),
       ];
@@ -260,13 +337,10 @@ function render(state: TuiState): string {
       for (const ts of visible) {
         const icon = statusIcon(ts.status);
         const idx = chalk.dim(`#${state.tasks.indexOf(ts) + 1}`);
-        let text = ts.task.text;
-        if (text.length > maxTextLen) {
-          text = text.slice(0, maxTextLen - 1) + "…";
-        }
+        const text = truncateText(ts.task.text, maxTextLen);
 
         const elapsedStr =
-          ts.status === "running" || ts.status === "planning"
+          isActiveStatus(ts.status)
             ? chalk.dim(` ${elapsed(now - (ts.elapsed || now))}`)
             : ts.status === "done" && ts.elapsed
               ? chalk.dim(` ${elapsed(ts.elapsed)}`)
@@ -276,8 +350,14 @@ function render(state: TuiState): string {
 
         lines.push(`  ${icon} ${idx} ${text} ${label}${elapsedStr}`);
 
-        if (ts.error) {
-          lines.push(chalk.red(`       └─ ${ts.error}`));
+        const feedbackLine = ts.status === "generating" ? renderTaskFeedback(ts.feedback, cols) : null;
+        if (feedbackLine) {
+          lines.push(feedbackLine);
+        }
+
+        const errorLine = renderTaskError(ts.error);
+        if (errorLine) {
+          lines.push(errorLine);
         }
       }
 
@@ -288,6 +368,21 @@ function render(state: TuiState): string {
       if (pending.length > 3) {
         lines.push(chalk.dim(`  ··· ${pending.length - 3} more task(s) pending`));
       }
+    }
+
+    if (state.phase === "paused" && state.recovery) {
+      const selectedAction = state.recovery.selectedAction ?? "rerun";
+      lines.push("");
+      lines.push(`  ${chalk.yellow("Recovery")}: ${chalk.white(`#${state.recovery.taskIndex + 1}`)} ${state.recovery.taskText}`);
+      lines.push(`  ${chalk.red(state.recovery.error)}`);
+      if (state.recovery.issue) {
+        lines.push(`  ${chalk.dim(`Issue #${state.recovery.issue.number} - ${state.recovery.issue.title}`)}`);
+      }
+      if (state.recovery.worktree) {
+        lines.push(`  ${chalk.dim(`Worktree: ${state.recovery.worktree}`)}`);
+      }
+      lines.push(`  ${chalk.red("✖")} ${renderRecoveryAction("rerun", selectedAction)}  ${renderRecoveryAction("quit", selectedAction)}`);
+      lines.push(`  ${chalk.dim("Tab/←/→ switch · Enter/Space runs selection · r reruns · q quits")}`);
     }
 
     // ── Summary line ────────────────────────────────────────
@@ -311,9 +406,16 @@ function render(state: TuiState): string {
  * Uses a single-write, per-line overwrite strategy to eliminate flicker.
  */
 function draw(state: TuiState): void {
-  const output = render(state);
-  const cols = process.stdout.columns || 80;
-  const newLineCount = countVisualRows(output, cols);
+  drawToOutput(state, process.stdout);
+}
+
+function drawToOutput(
+  state: TuiState,
+  output: Pick<NodeJS.WriteStream, "write"> & { columns?: number },
+): void {
+  const cols = output.columns || 80;
+  const rendered = render(state, cols);
+  const newLineCount = countVisualRows(rendered, cols);
 
   let buffer = "";
 
@@ -323,7 +425,7 @@ function draw(state: TuiState): void {
   }
 
   // Append each line with \x1B[K (Erase to End of Line)
-  const lines = output.split("\n");
+  const lines = rendered.split("\n");
   buffer += lines.map((line) => line + "\x1B[K").join("\n");
 
   // Clean up leftover rows if new frame is shorter than previous
@@ -335,42 +437,130 @@ function draw(state: TuiState): void {
     buffer += `\x1B[${leftover}A`;
   }
 
-  process.stdout.write(buffer);
+  output.write(buffer);
   lastLineCount = newLineCount;
 }
 
 /**
  * Create and start the TUI — returns a controller to update state.
  */
-export function createTui(): {
+export function createTui(options?: {
+  input?: NodeJS.ReadStream;
+  output?: Pick<NodeJS.WriteStream, "write"> & { columns?: number };
+}): {
   state: TuiState;
   update: () => void;
   stop: () => void;
+  waitForRecoveryAction: () => Promise<RecoveryAction>;
 } {
+  const input = options?.input ?? process.stdin;
+  const output = options?.output ?? process.stdout;
   const state: TuiState = {
     tasks: [],
     phase: "discovering",
+    mode: "dispatch",
     startTime: Date.now(),
     filesFound: 0,
   };
+  lastLineCount = 0;
+  spinnerIndex = 0;
+  let activeRecoveryPromise: Promise<RecoveryAction> | null = null;
+  let cleanupRecoveryPrompt: (() => void) | null = null;
 
   // Animate spinner at ~80ms
   interval = setInterval(() => {
     spinnerIndex++;
-    draw(state);
+    drawToOutput(state, output);
   }, 80);
 
-  const update = () => draw(state);
+  const update = () => drawToOutput(state, output);
+
+  const waitForRecoveryAction = () => {
+    if (activeRecoveryPromise) {
+      return activeRecoveryPromise;
+    }
+
+    activeRecoveryPromise = new Promise<RecoveryAction>((resolve) => {
+      const ttyInput = input as NodeJS.ReadStream & {
+        isRaw?: boolean;
+        isTTY?: boolean;
+        setRawMode?: (mode: boolean) => void;
+      };
+      const wasRaw = ttyInput.isRaw ?? false;
+      const canToggleRawMode = ttyInput.isTTY === true && typeof ttyInput.setRawMode === "function";
+      if (state.recovery) {
+        state.recovery.selectedAction = state.recovery.selectedAction ?? "rerun";
+        drawToOutput(state, output);
+      }
+
+      emitKeypressEvents(input);
+      if (canToggleRawMode) {
+        ttyInput.setRawMode!(true);
+      }
+
+      const finish = (action: RecoveryAction) => {
+        cleanupRecoveryPrompt?.();
+        resolve(action);
+      };
+
+      const updateSelection = (nextAction: RecoveryAction) => {
+        if (!state.recovery || state.recovery.selectedAction === nextAction) {
+          return;
+        }
+        state.recovery.selectedAction = nextAction;
+        drawToOutput(state, output);
+      };
+
+      const onKeypress = (str: string | undefined, key: { name?: string; ctrl?: boolean } | undefined) => {
+        const name = key?.name ?? str;
+        if (key?.ctrl && name === "c") {
+          finish("quit");
+          return;
+        }
+        if (name === "r" || name === "R") {
+          finish("rerun");
+          return;
+        }
+        if (name === "q" || name === "Q") {
+          finish("quit");
+          return;
+        }
+        if (name === "tab" || name === "left" || name === "right") {
+          updateSelection(toggleRecoveryAction(state.recovery?.selectedAction ?? "rerun"));
+          return;
+        }
+        if (name === "return" || name === "enter" || name === "space" || str === " ") {
+          finish(state.recovery?.selectedAction ?? "rerun");
+        }
+      };
+
+      cleanupRecoveryPrompt = () => {
+        input.off("keypress", onKeypress);
+        if (canToggleRawMode) {
+          ttyInput.setRawMode!(wasRaw);
+        }
+        cleanupRecoveryPrompt = null;
+        activeRecoveryPromise = null;
+      };
+
+      input.on("keypress", onKeypress);
+    });
+
+    return activeRecoveryPromise;
+  };
 
   const stop = () => {
     if (interval) {
       clearInterval(interval);
       interval = null;
     }
-    draw(state);
+    if (activeRecoveryPromise) {
+      cleanupRecoveryPrompt?.();
+    }
+    drawToOutput(state, output);
   };
 
-  draw(state);
+  drawToOutput(state, output);
 
-  return { state, update, stop };
+  return { state, update, stop, waitForRecoveryAction };
 }

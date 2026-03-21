@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { join, resolve } from "node:path";
-import type { ProviderInstance } from "../providers/interface.js";
+import type { ProviderInstance, ProviderProgressSnapshot } from "../providers/interface.js";
 import type { IssueDetails } from "../datasources/interface.js";
 
 vi.mock("node:fs/promises", () => ({
@@ -32,6 +32,8 @@ vi.mock("../helpers/logger.js", () => ({
 vi.mock("../spec-generator.js", () => ({
   extractSpecContent: vi.fn((raw: string) => raw),
   validateSpecStructure: vi.fn(() => ({ valid: true, reason: undefined })),
+  DEFAULT_SPEC_WARN_MIN: 10,
+  DEFAULT_SPEC_KILL_MIN: 10,
 }));
 
 vi.mock("../datasources/md.js", () => ({
@@ -48,6 +50,7 @@ import {
   buildFileSpecPrompt,
   buildInlineTextSpecPrompt,
 } from "../agents/spec.js";
+import { TimeoutError } from "../helpers/timeout.js";
 
 function createMockProvider(overrides?: Partial<ProviderInstance>): ProviderInstance {
   return {
@@ -85,6 +88,13 @@ const ISSUE_FIXTURE: IssueDetails = {
   comments: [],
   acceptanceCriteria: "",
 };
+
+function expectSingleSourceScopeInstructions(prompt: string): void {
+  expect(prompt).toContain("Each invocation is scoped to exactly one source item.");
+  expect(prompt).toContain("The source item for this invocation is the single passed issue, file, or inline request shown below.");
+  expect(prompt).toContain("Treat other repository materials — including existing spec files, sibling issues, and future work — as context only unless the passed source explicitly references them as required context.");
+  expect(prompt).toContain("Do not merge unrelated specs, issues, files, or requests into the generated output.");
+}
 
 // ---------------------------------------------------------------------------
 // boot
@@ -204,6 +214,64 @@ describe("generate", () => {
 
     expect(result.success).toBe(true);
     expect(provider.prompt).toHaveBeenCalledOnce();
+  });
+
+  it("forwards provider progress snapshots upward", async () => {
+    const onProgress = vi.fn<(snapshot: ProviderProgressSnapshot) => void>();
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockImplementation(async (_sessionId, _prompt, options) => {
+        options?.onProgress?.({ text: "Generating outline" });
+        return "AI response";
+      }),
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+      onProgress,
+    });
+
+    expect(result.success).toBe(true);
+    expect(onProgress).toHaveBeenCalledWith({ text: "Generating outline" });
+    expect(provider.prompt).toHaveBeenCalledWith(
+      "session-1",
+      expect.any(String),
+      expect.objectContaining({ onProgress }),
+    );
+  });
+
+  it("forwards multiple provider progress snapshots in order", async () => {
+    const snapshots: ProviderProgressSnapshot[] = [
+      { text: "Generating outline" },
+      { text: "Drafting tasks" },
+    ];
+    const onProgress = vi.fn<(snapshot: ProviderProgressSnapshot) => void>();
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockImplementation(async (_sessionId, _prompt, options) => {
+        for (const snapshot of snapshots) {
+          options?.onProgress?.(snapshot);
+        }
+        return "AI response";
+      }),
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+      onProgress,
+    });
+
+    expect(result.success).toBe(true);
+    expect(onProgress.mock.calls.map(([snapshot]) => snapshot)).toEqual(snapshots);
+    expect(provider.prompt).toHaveBeenCalledWith(
+      "session-1",
+      expect.any(String),
+      expect.objectContaining({ onProgress }),
+    );
   });
 
   it("returns failure when neither issue, inlineText, nor filePath+fileContent is provided", async () => {
@@ -493,6 +561,11 @@ describe("buildSpecPrompt", () => {
     expect(prompt).toContain("Operating System");
     expect(prompt).toContain("run commands directly");
   });
+
+  it("includes shared scope isolation instructions", () => {
+    const prompt = buildSpecPrompt(ISSUE_FIXTURE, "/tmp/project", "/tmp/output.md");
+    expectSingleSourceScopeInstructions(prompt);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -551,6 +624,11 @@ describe("buildFileSpecPrompt", () => {
     expect(prompt).toContain("Operating System");
     expect(prompt).toContain("run commands directly");
   });
+
+  it("includes shared scope isolation instructions", () => {
+    const prompt = buildFileSpecPrompt("/tmp/project/feature.md", "content", "/tmp/project");
+    expectSingleSourceScopeInstructions(prompt);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -604,5 +682,240 @@ describe("buildInlineTextSpecPrompt", () => {
     expect(prompt).toContain("## Environment");
     expect(prompt).toContain("Operating System");
     expect(prompt).toContain("run commands directly");
+  });
+
+  it("includes shared scope isolation instructions", () => {
+    const prompt = buildInlineTextSpecPrompt("text", "/tmp/project", "/tmp/output.md");
+    expectSingleSourceScopeInstructions(prompt);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// timebox
+// ---------------------------------------------------------------------------
+describe("timebox", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.mocked(mkdir).mockResolvedValue(undefined);
+    vi.mocked(writeFile).mockResolvedValue(undefined);
+    vi.mocked(unlink).mockResolvedValue(undefined);
+    vi.mocked(randomUUID).mockReturnValue(
+      "test-uuid-1234" as `${string}-${string}-${string}-${string}-${string}`,
+    );
+    vi.mocked(readFile).mockResolvedValue(VALID_SPEC);
+    vi.mocked(extractSpecContent).mockImplementation((raw: string) => raw);
+    vi.mocked(validateSpecStructure).mockReturnValue({ valid: true, reason: undefined });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  it("cancels both timers when prompt completes before warn fires", async () => {
+    let resolvePrompt!: (value: string | null) => void;
+    const promptPromise = new Promise<string | null>((res) => { resolvePrompt = res; });
+    const send = vi.fn<NonNullable<ProviderInstance["send"]>>().mockResolvedValue(undefined);
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockReturnValue(promptPromise),
+      send,
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const resultPromise = agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+      timeboxWarnMs: 5_000,
+      timeboxKillMs: 3_000,
+    });
+
+    // Resolve the prompt before the warn timer (5s) fires
+    resolvePrompt("done");
+    const result = await resultPromise;
+
+    expect(result.success).toBe(true);
+    expect(send).not.toHaveBeenCalled();
+
+    // Advance past both timers to confirm they were cancelled (no unhandled rejections)
+    await vi.advanceTimersByTimeAsync(10_000);
+  });
+
+  it("sends a wrap-up message when the warn timer fires", async () => {
+    let resolvePrompt!: (value: string | null) => void;
+    const promptPromise = new Promise<string | null>((res) => { resolvePrompt = res; });
+    const send = vi.fn<NonNullable<ProviderInstance["send"]>>().mockResolvedValue(undefined);
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockReturnValue(promptPromise),
+      send,
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const resultPromise = agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+      timeboxWarnMs: 5_000,
+      timeboxKillMs: 3_000,
+    });
+
+    // Advance past the warn timer
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(send).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith("session-1", expect.stringContaining("MUST write the spec file"));
+
+    // Clean up: resolve prompt to avoid dangling promise
+    resolvePrompt("done");
+    await resultPromise;
+  });
+
+  it("rejects with TimeoutError when the kill timer fires", async () => {
+    const promptPromise = new Promise<string | null>(() => {});  // never resolves
+    const send = vi.fn<NonNullable<ProviderInstance["send"]>>().mockResolvedValue(undefined);
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockReturnValue(promptPromise),
+      send,
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const resultPromise = agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+      timeboxWarnMs: 5_000,
+      timeboxKillMs: 3_000,
+    });
+
+    // Advance past warn (5s) + kill (3s) = 8s total
+    await vi.advanceTimersByTimeAsync(8_000);
+
+    const result = await resultPromise;
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Timed out after 8000ms");
+    expect(result.error).toContain("spec timebox");
+  });
+
+  it("cancels the kill timer when prompt completes after warn but before kill", async () => {
+    let resolvePrompt!: (value: string | null) => void;
+    const promptPromise = new Promise<string | null>((res) => { resolvePrompt = res; });
+    const send = vi.fn<NonNullable<ProviderInstance["send"]>>().mockResolvedValue(undefined);
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockReturnValue(promptPromise),
+      send,
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const resultPromise = agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+      timeboxWarnMs: 5_000,
+      timeboxKillMs: 3_000,
+    });
+
+    // Advance past warn timer
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(send).toHaveBeenCalledOnce();
+
+    // Now resolve the prompt (between warn and kill)
+    resolvePrompt("done");
+    const result = await resultPromise;
+
+    expect(result.success).toBe(true);
+
+    // Advance past the kill timer to verify it was cancelled
+    await vi.advanceTimersByTimeAsync(5_000);
+  });
+
+  it("still starts the kill timer when provider has no send() method", async () => {
+    const promptPromise = new Promise<string | null>(() => {}); // never resolves
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockReturnValue(promptPromise),
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const resultPromise = agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+      timeboxWarnMs: 5_000,
+      timeboxKillMs: 3_000,
+    });
+
+    // Advance past warn (5s)
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    // send should not have been called (it doesn't exist)
+    expect(provider.send).toBeUndefined();
+
+    // Advance past kill (3s)
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    const result = await resultPromise;
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Timed out after 8000ms");
+  });
+
+  it("catches and logs send() errors without preventing the kill timer", async () => {
+    const promptPromise = new Promise<string | null>(() => {}); // never resolves
+    const send = vi.fn<NonNullable<ProviderInstance["send"]>>().mockRejectedValue(new Error("send failed"));
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockReturnValue(promptPromise),
+      send,
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const resultPromise = agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+      timeboxWarnMs: 5_000,
+      timeboxKillMs: 3_000,
+    });
+
+    // Advance past warn timer — send() is called and rejects
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(send).toHaveBeenCalledOnce();
+
+    // Advance past kill timer — should still fire despite send() failure
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    const result = await resultPromise;
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Timed out after 8000ms");
+  });
+
+  it("cleans up timers when the prompt rejects before warn fires", async () => {
+    let rejectPrompt!: (err: Error) => void;
+    const promptPromise = new Promise<string | null>((_res, rej) => { rejectPrompt = rej; });
+    const send = vi.fn<NonNullable<ProviderInstance["send"]>>().mockResolvedValue(undefined);
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockReturnValue(promptPromise),
+      send,
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const resultPromise = agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+      timeboxWarnMs: 5_000,
+      timeboxKillMs: 3_000,
+    });
+
+    // Reject the prompt before timers fire
+    rejectPrompt(new Error("Provider crashed"));
+    const result = await resultPromise;
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Provider crashed");
+
+    // Advance past both timers to verify they were cleaned up (no unhandled errors)
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(send).not.toHaveBeenCalled();
   });
 });

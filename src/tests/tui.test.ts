@@ -1,8 +1,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Task } from "../parser.js";
+import { PassThrough } from "node:stream";
 
 let writeSpy: ReturnType<typeof vi.spyOn>;
-let tui: { state: import("../tui.js").TuiState; update: () => void; stop: () => void };
+let tui: { state: import("../tui.js").TuiState; update: () => void; stop: () => void; waitForRecoveryAction: () => Promise<"rerun" | "quit"> };
+
+function createMockInput() {
+  const input = new PassThrough() as PassThrough & {
+    isTTY: boolean;
+    isRaw?: boolean;
+    setRawMode: ReturnType<typeof vi.fn>;
+  };
+  input.isTTY = true;
+  input.isRaw = false;
+  input.setRawMode = vi.fn((value: boolean) => {
+    input.isRaw = value;
+  });
+  return input;
+}
 
 function lastOutput(): string {
   const calls = writeSpy.mock.calls;
@@ -37,9 +52,9 @@ afterEach(() => {
 });
 
 // Dynamic import so mocks are in place
-async function setup() {
+async function setup(options?: Parameters<(typeof import("../tui.js"))["createTui"]>[0]) {
   const mod = await import("../tui.js");
-  tui = mod.createTui();
+  tui = mod.createTui(options);
   return tui;
 }
 
@@ -146,6 +161,13 @@ describe("phase rendering", () => {
     expect(lastOutput()).toContain("Complete");
   });
 
+  it("shows paused phase label", async () => {
+    await setup();
+    tui.state.phase = "paused";
+    tui.update();
+    expect(lastOutput()).toContain("Waiting for rerun");
+  });
+
   it("shows found files count when not dispatching", async () => {
     await setup();
     tui.state.filesFound = 5;
@@ -179,6 +201,17 @@ describe("task status rendering", () => {
     expect(lastOutput()).toContain("executing");
   });
 
+  it("renders generating and syncing labels", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    tui.state.mode = "spec";
+    addTask("generating", "Generating task", 0, { elapsed: Date.now(), feedback: "Drafting" });
+    addTask("syncing", "Syncing task", 1, { elapsed: Date.now() });
+    tui.update();
+    expect(lastOutput()).toContain("generating");
+    expect(lastOutput()).toContain("syncing");
+  });
+
   it("renders done task with 'done' label", async () => {
     await setup();
     tui.state.phase = "dispatching";
@@ -193,6 +226,14 @@ describe("task status rendering", () => {
     addTask("failed", "A failed task", 0);
     tui.update();
     expect(lastOutput()).toContain("failed");
+  });
+
+  it("renders paused task with 'paused' label", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    addTask("paused", "A paused task", 0);
+    tui.update();
+    expect(lastOutput()).toContain("paused");
   });
 
   it("renders task index as 1-based #N", async () => {
@@ -217,6 +258,71 @@ describe("task status rendering", () => {
     addTask("failed", "Broken task", 0, { error: "something broke" });
     tui.update();
     expect(lastOutput()).toContain("something broke");
+  });
+
+  it("renders one subordinate feedback line for generating rows", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    tui.state.mode = "spec";
+    addTask("generating", "Generate spec", 0, { elapsed: Date.now(), feedback: "Drafting outline" });
+    tui.update();
+    expect(lastOutput()).toContain("└─ Drafting outline");
+  });
+
+  it("sanitizes and truncates feedback lines", async () => {
+    await setup();
+    Object.defineProperty(process.stdout, "columns", { value: 40, configurable: true });
+    tui.state.phase = "dispatching";
+    tui.state.mode = "spec";
+    addTask("generating", "Generate spec", 0, {
+      elapsed: Date.now(),
+      feedback: "\u001b[31mLine one\nline two with extra text that keeps going\u0007\u001b[0m",
+    });
+    tui.update();
+    const output = lastOutput();
+    expect(output).toContain("└─ Line one line two");
+    expect(output).not.toContain("\u001b[31m");
+  });
+
+  it("does not render a subordinate line for sanitized-empty feedback", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    tui.state.mode = "spec";
+    addTask("generating", "Generate spec", 0, {
+      elapsed: Date.now(),
+      feedback: "\u001b[31m \n \u0007\u001b[0m",
+    });
+    tui.update();
+
+    expect(lastOutput()).not.toContain("└─");
+  });
+
+  it("renders compact feedback as a single sanitized subordinate line", async () => {
+    await setup();
+    Object.defineProperty(process.stdout, "columns", { value: 44, configurable: true });
+    tui.state.phase = "dispatching";
+    tui.state.mode = "spec";
+    addTask("generating", "Generate spec", 0, {
+      elapsed: Date.now(),
+      feedback: "\u001b[31mLine one\n  line   two\u0007\nline three\u001b[0m",
+    });
+    tui.update();
+
+    const output = lastOutput();
+    const feedbackLines = output.split("\n").filter((line) => line.includes("└─"));
+
+    expect(feedbackLines).toHaveLength(1);
+    expect(feedbackLines[0]).toMatch(/└─ Line one line two/);
+    expect(feedbackLines[0]).not.toContain("\u001b[31m");
+    expect(feedbackLines[0]).not.toContain("\u0007");
+  });
+
+  it("does not render feedback for non-generating rows", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    addTask("syncing", "Sync row", 0, { elapsed: Date.now(), feedback: "Should stay hidden" });
+    tui.update();
+    expect(lastOutput()).not.toContain("Should stay hidden");
   });
 });
 
@@ -265,6 +371,144 @@ describe("progress bar and summary", () => {
     addTask("pending", "Task B", 1);
     tui.update();
     expect(lastOutput()).toContain("remaining");
+  });
+});
+
+describe("recovery rendering and input", () => {
+  it("shows a play-style rerun affordance and selected action in paused mode", async () => {
+    await setup();
+    tui.state.phase = "paused";
+    addTask("paused", "Broken task", 0, { error: "boom" });
+    tui.state.recovery = {
+      taskIndex: 0,
+      taskText: "Broken task",
+      error: "boom",
+      issue: { number: "42", title: "Fix it" },
+      worktree: "42-fix-it",
+      selectedAction: "rerun",
+    };
+    tui.update();
+
+    const output = lastOutput();
+    expect(output).toContain("[▶ rerun]");
+    expect(output).toContain("q quit");
+    expect(output).toContain("Enter/Space runs selection");
+    expect(output).toContain("Broken task");
+    expect(output).toContain("boom");
+  });
+
+  it("resolves rerun on enter with the default selection", async () => {
+    const input = createMockInput();
+    const output = { columns: 80, write: vi.fn(() => true) };
+
+    await setup({ input: input as any, output: output as any });
+    tui.state.phase = "paused";
+    tui.state.recovery = {
+      taskIndex: 0,
+      taskText: "Broken task",
+      error: "boom",
+      selectedAction: "rerun",
+    };
+    const promise = tui.waitForRecoveryAction();
+    input.emit("keypress", "\r", { name: "return" });
+
+    await expect(promise).resolves.toBe("rerun");
+    expect(input.setRawMode).toHaveBeenNthCalledWith(1, true);
+    expect(input.setRawMode).toHaveBeenLastCalledWith(false);
+    expect(input.listenerCount("keypress")).toBe(0);
+  });
+
+  it("switches selection with tab and resolves quit on enter", async () => {
+    const input = createMockInput();
+    const output = { columns: 80, write: vi.fn(() => true) };
+
+    await setup({ input: input as any, output: output as any });
+    tui.state.phase = "paused";
+    tui.state.recovery = {
+      taskIndex: 0,
+      taskText: "Broken task",
+      error: "boom",
+      selectedAction: "rerun",
+    };
+    const promise = tui.waitForRecoveryAction();
+    input.emit("keypress", "\t", { name: "tab" });
+    expect(tui.state.recovery?.selectedAction).toBe("quit");
+    input.emit("keypress", "\r", { name: "return" });
+
+    await expect(promise).resolves.toBe("quit");
+  });
+
+  it("switches selection with arrows", async () => {
+    const input = createMockInput();
+
+    await setup({ input: input as any, output: { columns: 80, write: vi.fn(() => true) } as any });
+    tui.state.phase = "paused";
+    tui.state.recovery = {
+      taskIndex: 0,
+      taskText: "Broken task",
+      error: "boom",
+      selectedAction: "rerun",
+    };
+    const promise = tui.waitForRecoveryAction();
+    input.emit("keypress", undefined, { name: "left" });
+    expect(tui.state.recovery?.selectedAction).toBe("quit");
+    input.emit("keypress", undefined, { name: "right" });
+    expect(tui.state.recovery?.selectedAction).toBe("rerun");
+    input.emit("keypress", "q", { name: "q" });
+
+    await expect(promise).resolves.toBe("quit");
+  });
+
+  it("resolves rerun on r", async () => {
+    const input = createMockInput();
+
+    await setup({ input: input as any, output: { columns: 80, write: vi.fn(() => true) } as any });
+    tui.state.phase = "paused";
+    tui.state.recovery = {
+      taskIndex: 0,
+      taskText: "Broken task",
+      error: "boom",
+      selectedAction: "quit",
+    };
+    const promise = tui.waitForRecoveryAction();
+    input.emit("keypress", "r", { name: "r" });
+
+    await expect(promise).resolves.toBe("rerun");
+  });
+
+  it("resolves quit on q", async () => {
+    const input = createMockInput();
+
+    await setup({ input: input as any, output: { columns: 80, write: vi.fn(() => true) } as any });
+    tui.state.phase = "paused";
+    tui.state.recovery = {
+      taskIndex: 0,
+      taskText: "Broken task",
+      error: "boom",
+      selectedAction: "rerun",
+    };
+    const promise = tui.waitForRecoveryAction();
+    input.emit("keypress", "q", { name: "q" });
+
+    await expect(promise).resolves.toBe("quit");
+  });
+
+  it("maps ctrl+c to quit", async () => {
+    const input = createMockInput();
+
+    await setup({ input: input as any, output: { columns: 80, write: vi.fn(() => true) } as any });
+    tui.state.phase = "paused";
+    tui.state.recovery = {
+      taskIndex: 0,
+      taskText: "Broken task",
+      error: "boom",
+      selectedAction: "rerun",
+    };
+    const promise = tui.waitForRecoveryAction();
+    input.emit("keypress", "\u0003", { name: "c", ctrl: true });
+
+    await expect(promise).resolves.toBe("quit");
+    expect(input.listenerCount("keypress")).toBe(0);
   });
 });
 
@@ -356,6 +600,79 @@ describe("worktree indicator rendering", () => {
     // Old-style [wt:...] tags must not appear
     expect(output).not.toContain("[wt:");
   });
+
+  it("renders paused recovery details in grouped worktree mode", async () => {
+    await setup();
+    tui.state.phase = "paused";
+    addTask("paused", "Retry auth flow", 0, {
+      worktree: "123-fix-auth",
+      error: "auth still failing",
+    });
+    addTask("running", "Add feature flag", 1, {
+      worktree: "456-add-feature",
+      elapsed: Date.now(),
+    });
+    tui.state.recovery = {
+      taskIndex: 0,
+      taskText: "Retry auth flow",
+      error: "auth still failing",
+      issue: { number: "123", title: "Fix auth" },
+      worktree: "123-fix-auth",
+      selectedAction: "rerun",
+    };
+    tui.update();
+
+    const output = lastOutput();
+    expect(output).toContain("#123");
+    expect(output).toContain("#456");
+    expect(output).toContain("Retry auth flow");
+    expect(output).toContain("Worktree: 123-fix-auth");
+    expect(output).toContain("[▶ rerun]");
+    expect(output).not.toContain("[wt:");
+  });
+
+  it("handles worktree group with all-pending tasks without crashing", async () => {
+    await setup();
+    tui.state.phase = "dispatching";
+    addTask("pending", "Pending task A", 0, { worktree: "100-new-feature" });
+    addTask("pending", "Pending task B", 1, { worktree: "100-new-feature" });
+    addTask("running", "Active task", 2, { worktree: "200-other-feature", elapsed: Date.now() });
+    tui.update();
+    const output = lastOutput();
+    expect(output).toContain("#100");
+    expect(output).toContain("#200");
+    expect(output).toContain("pending");
+  });
+});
+
+describe("module state isolation", () => {
+  it("resets cursor tracking between createTui calls", async () => {
+    const output = { columns: 80, write: vi.fn(() => true) };
+    const mod = await import("../tui.js");
+
+    // First TUI — render some content to set lastLineCount
+    const tui1 = mod.createTui({ output: output as any });
+    tui1.state.phase = "dispatching";
+    tui1.state.tasks.push({ task: makeTask("Task A", 0), status: "running", elapsed: Date.now() });
+    tui1.update();
+    tui1.stop();
+
+    // Second TUI — first draw should NOT cursor-up based on previous TUI's frame
+    output.write.mockClear();
+    const tui2 = mod.createTui({ output: output as any });
+    const calls = output.write.mock.calls as unknown[][];
+    const firstWrite = String(calls[0]?.[0] ?? "");
+    // The first write of a fresh TUI should not contain a large cursor-up sequence
+    const cursorUp = firstWrite.match(/\x1B\[(\d+)A/);
+    if (cursorUp) {
+      // Should be 0 or not present at all
+      expect(Number(cursorUp[1])).toBe(0);
+    }
+    tui2.stop();
+
+    // Reassign to module-level tui so afterEach cleanup works
+    tui = tui2;
+  });
 });
 
 describe("header and issue rendering", () => {
@@ -414,5 +731,145 @@ describe("visual row counting in draw", () => {
     // the task will wrap to multiple visual rows. The cursor-up count must be
     // greater than a simple newline count would produce.
     expect(rowCount).toBeGreaterThan(0);
+  });
+});
+
+describe("spec pipeline TUI integration", () => {
+  it("initializes spec mode with correct TUI state", async () => {
+    await setup();
+    tui.state.mode = "spec";
+    tui.state.provider = "opencode";
+    tui.state.model = "gpt-4";
+    tui.state.source = "github";
+    tui.state.phase = "dispatching";
+    addTask("pending", "Add auth module", 0);
+    addTask("pending", "Refactor DB layer", 1);
+    addTask("pending", "Update API docs", 2);
+    tui.update();
+    expect(lastOutput()).toContain("Generating specs");
+    expect(lastOutput()).toContain("opencode");
+    expect(lastOutput()).toContain("gpt-4");
+    expect(lastOutput()).toContain("github");
+  });
+
+  it("reflects task state transitions during spec generation lifecycle", async () => {
+    await setup();
+    tui.state.mode = "spec";
+    tui.state.phase = "dispatching";
+    addTask("pending", "Spec task A", 0);
+    addTask("pending", "Spec task B", 1);
+    addTask("pending", "Spec task C", 2);
+    tui.update();
+    expect(lastOutput()).toContain("pending");
+
+    tui.state.tasks[0].status = "generating";
+    tui.state.tasks[0].elapsed = Date.now();
+    tui.update();
+    expect(lastOutput()).toContain("generating");
+    expect(lastOutput()).toContain("Spec task A");
+
+    tui.state.tasks[0].status = "syncing";
+    tui.state.tasks[0].feedback = undefined;
+    tui.update();
+    expect(lastOutput()).toContain("syncing");
+
+    tui.state.tasks[0].status = "done";
+    tui.state.tasks[0].elapsed = 5000;
+    tui.update();
+    expect(lastOutput()).toContain("done");
+  });
+
+  it("displays onProgress feedback text during spec generation", async () => {
+    await setup();
+    tui.state.mode = "spec";
+    tui.state.phase = "dispatching";
+    addTask("generating", "Generate spec", 0, { elapsed: Date.now(), feedback: "Analyzing codebase structure" });
+    tui.update();
+    expect(lastOutput()).toContain("└─ Analyzing codebase structure");
+
+    tui.state.tasks[0].feedback = "Writing approach section";
+    tui.update();
+    expect(lastOutput()).toContain("└─ Writing approach section");
+    expect(lastOutput()).not.toContain("Analyzing codebase structure");
+  });
+
+  it("clears feedback text when task transitions from generating to syncing", async () => {
+    await setup();
+    tui.state.mode = "spec";
+    tui.state.phase = "dispatching";
+    addTask("generating", "Generate spec", 0, { elapsed: Date.now(), feedback: "Still drafting" });
+    tui.update();
+    expect(lastOutput()).toContain("└─ Still drafting");
+
+    tui.state.tasks[0].status = "syncing";
+    tui.state.tasks[0].feedback = undefined;
+    tui.update();
+    expect(lastOutput()).not.toContain("└─");
+    expect(lastOutput()).toContain("syncing");
+  });
+
+  it("updates progress bar as specs complete", async () => {
+    await setup();
+    tui.state.mode = "spec";
+    tui.state.phase = "dispatching";
+    addTask("pending", "Spec 1", 0);
+    addTask("pending", "Spec 2", 1);
+    addTask("pending", "Spec 3", 2);
+    addTask("pending", "Spec 4", 3);
+    tui.update();
+    expect(lastOutput()).toContain("0/4 tasks");
+
+    tui.state.tasks[0].status = "done";
+    tui.update();
+    expect(lastOutput()).toContain("1/4 tasks");
+
+    tui.state.tasks[1].status = "done";
+    tui.update();
+    expect(lastOutput()).toContain("2/4 tasks");
+
+    tui.state.tasks[2].status = "failed";
+    tui.update();
+    expect(lastOutput()).toContain("3/4 tasks");
+
+    tui.state.tasks[3].status = "done";
+    tui.update();
+    expect(lastOutput()).toContain("4/4 tasks");
+    expect(lastOutput()).toContain("100%");
+  });
+
+  it("shows passed and failed counts in spec mode summary", async () => {
+    await setup();
+    tui.state.mode = "spec";
+    tui.state.phase = "dispatching";
+    addTask("done", "Spec A", 0);
+    addTask("done", "Spec B", 1);
+    addTask("failed", "Spec C", 2, { error: "Provider timeout" });
+    tui.update();
+    expect(lastOutput()).toContain("2 passed");
+    expect(lastOutput()).toContain("1 failed");
+    expect(lastOutput()).toContain("Provider timeout");
+  });
+
+  it("renders spec mode phase label as 'Generating specs' not 'Dispatching tasks'", async () => {
+    await setup();
+    tui.state.mode = "spec";
+    tui.state.phase = "dispatching";
+    addTask("generating", "Generate spec", 0, { elapsed: Date.now() });
+    tui.update();
+    expect(lastOutput()).toContain("Generating specs");
+    expect(lastOutput()).not.toContain("Dispatching tasks");
+  });
+
+  it("handles concurrent generating tasks with individual feedback", async () => {
+    await setup();
+    tui.state.mode = "spec";
+    tui.state.phase = "dispatching";
+    addTask("generating", "Auth module spec", 0, { elapsed: Date.now(), feedback: "Exploring auth module" });
+    addTask("generating", "API routes spec", 1, { elapsed: Date.now(), feedback: "Reading API routes" });
+    addTask("pending", "DB layer spec", 2);
+    tui.update();
+    expect(lastOutput()).toContain("└─ Exploring auth module");
+    expect(lastOutput()).toContain("└─ Reading API routes");
+    expect(lastOutput()).toContain("0/3 tasks");
   });
 });

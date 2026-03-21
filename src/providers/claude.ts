@@ -9,8 +9,13 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { unstable_v2_createSession, type SDKSession, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { ProviderInstance, ProviderBootOptions } from "./interface.js";
+import { unstable_v2_createSession, type SDKSession } from "@anthropic-ai/claude-agent-sdk";
+import type {
+  ProviderInstance,
+  ProviderBootOptions,
+  ProviderPromptOptions,
+} from "./interface.js";
+import { createProgressReporter } from "./progress.js";
 import { log } from "../helpers/logger.js";
 
 /**
@@ -45,7 +50,12 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
     async createSession(): Promise<string> {
       log.debug("Creating Claude session...");
       try {
-        const sessionOpts = { model, permissionMode: 'acceptEdits' as const, ...(cwd ? { cwd } : {}) };
+        const sessionOpts = {
+          model,
+          permissionMode: "bypassPermissions" as const,
+          allowDangerouslySkipPermissions: true,
+          ...(cwd ? { cwd } : {}),
+        };
         const session = unstable_v2_createSession(sessionOpts);
         const sessionId = randomUUID();
         sessions.set(sessionId, session);
@@ -57,13 +67,18 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
       }
     },
 
-    async prompt(sessionId: string, text: string): Promise<string | null> {
+    async prompt(
+      sessionId: string,
+      text: string,
+      options?: ProviderPromptOptions,
+    ): Promise<string | null> {
       const session = sessions.get(sessionId);
       if (!session) {
         throw new Error(`Claude session ${sessionId} not found`);
       }
 
       log.debug(`Sending prompt to session ${sessionId} (${text.length} chars)...`);
+      const reporter = createProgressReporter(options?.onProgress);
       try {
         await session.send(text);
 
@@ -74,7 +89,10 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
               .filter((block: { type: string }) => block.type === "text")
               .map((block: { type: string; text: string }) => block.text)
               .join("");
-            if (msgText) parts.push(msgText);
+            if (msgText) {
+              reporter.emit(msgText);
+              parts.push(msgText);
+            }
           }
         }
 
@@ -87,10 +105,27 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
       }
     },
 
+    async send(sessionId: string, text: string): Promise<void> {
+      const session = sessions.get(sessionId);
+      if (!session) {
+        throw new Error(`Claude session ${sessionId} not found`);
+      }
+
+      log.debug(`Sending follow-up to session ${sessionId} (${text.length} chars)...`);
+      try {
+        await session.send(text);
+      } catch (err) {
+        log.debug(`Follow-up send failed: ${log.formatErrorChain(err)}`);
+        throw err;
+      }
+    },
+
     async cleanup(): Promise<void> {
       log.debug("Cleaning up Claude provider...");
       for (const session of sessions.values()) {
-        try { session.close(); } catch {}
+        try {
+          session.close();
+        } catch {}
       }
       sessions.clear();
     },

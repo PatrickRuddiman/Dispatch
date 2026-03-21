@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { mkdir, readFile, rename, unlink } from "node:fs/promises";
 import { glob } from "glob";
 import type { SpecOptions, SpecSummary } from "../spec-generator.js";
-import { isIssueNumbers, isGlobOrFilePath, resolveSource, defaultConcurrency } from "../spec-generator.js";
+import { isIssueNumbers, isGlobOrFilePath, resolveSource, defaultConcurrency, DEFAULT_SPEC_WARN_MIN, DEFAULT_SPEC_KILL_MIN } from "../spec-generator.js";
 import type { IssueDetails, IssueFetchOptions, Datasource, DatasourceName } from "../datasources/interface.js";
 import { getDatasource } from "../datasources/index.js";
 import { extractTitle } from "../datasources/md.js";
@@ -24,9 +24,13 @@ import { log } from "../helpers/logger.js";
 import { FileLogger, fileLoggerStorage } from "../helpers/file-logger.js";
 import { confirmLargeBatch } from "../helpers/confirm-large-batch.js";
 import chalk from "chalk";
+import { createTui, type TuiState } from "../tui.js";
+import type { Task } from "../parser.js";
 import { elapsed, renderHeaderLines } from "../helpers/format.js";
-import { withRetry } from "../helpers/retry.js";
+import { ensureAuthReady } from "../helpers/auth.js";
+import { DEFAULT_RETRY_COUNT, withRetry } from "../helpers/retry.js";
 import { withTimeout } from "../helpers/timeout.js";
+import { runWithConcurrency } from "../helpers/concurrency.js";
 import { slugify, MAX_SLUG_LENGTH } from "../helpers/slugify.js";
 import { parseIssueFilename } from "./datasource-helpers.js";
 
@@ -304,8 +308,13 @@ async function generateSpecsBatch(
   specCwd: string,
   concurrency: number,
   retries: number,
+  specWarnMs: number,
+  specKillMs: number,
+  tuiState?: TuiState,
+  tuiUpdate?: () => void,
 ): Promise<GenerationResults> {
   await mkdir(outputDir, { recursive: true });
+  const quiet = !!tuiState && !log.verbose;
 
   const generatedFiles: string[] = [];
   const issueNumbers: string[] = [];
@@ -316,157 +325,195 @@ async function generateSpecsBatch(
   const genQueue = [...validItems];
   let modelLoggedInBanner = !!instance.model;
 
-  while (genQueue.length > 0) {
-    const batch = genQueue.splice(0, concurrency);
-    log.info(`Generating specs for batch of ${batch.length} (${generatedFiles.length + failed}/${items.length} done)...`);
+  async function processItem({ id, details }: ValidItem): Promise<void> {
+    const specStart = Date.now();
+    const tuiTask = tuiState?.tasks.find(t => t.task.file === id);
+    if (tuiTask) {
+      tuiTask.status = "generating";
+      tuiTask.elapsed = specStart;
+      tuiUpdate?.();
+    }
 
-    const batchResults = await Promise.all(
-      batch.map(async ({ id, details }) => {
-        const specStart = Date.now();
+    if (!details) {
+      log.error(`Skipping item ${id}: missing issue details`);
+      failed++;
+      return;
+    }
 
-        if (!details) {
-          log.error(`Skipping item ${id}: missing issue details`);
-          return null;
-        }
-
-        const itemBody = async (): Promise<{ filepath: string; identifier: string } | null> => {
-          let filepath: string;
-          if (isTrackerMode) {
-            const slug = slugify(details.title, MAX_SLUG_LENGTH);
-            const filename = `${id}-${slug}.md`;
-            filepath = join(outputDir, filename);
-          } else if (isInlineText) {
-            filepath = id;
-          } else {
-            filepath = id;
-          }
-
-          fileLoggerStorage.getStore()?.info(`Output path: ${filepath}`);
-
-          try {
-            fileLoggerStorage.getStore()?.info(`Starting spec generation for ${isTrackerMode ? `#${id}` : filepath}`);
-            log.info(`Generating spec for ${isTrackerMode ? `#${id}` : filepath}: ${details.title}...`);
-
-            const result = await withRetry(
-              () => specAgent.generate({
-                issue: isTrackerMode ? details : undefined,
-                filePath: isTrackerMode ? undefined : id,
-                fileContent: isTrackerMode ? undefined : details.body,
-                cwd: specCwd,
-                outputPath: filepath,
-              }),
-              retries,
-              { label: `specAgent.generate(${isTrackerMode ? `#${id}` : filepath})` },
-            );
-
-            if (!result.success) {
-              throw new Error(result.error ?? "Spec generation failed");
-            }
-
-            fileLoggerStorage.getStore()?.info(`Spec generated successfully`);
-
-            if (isTrackerMode || isInlineText) {
-              const h1Title = extractTitle(result.data.content, filepath);
-              const h1Slug = slugify(h1Title, MAX_SLUG_LENGTH);
-              const finalFilename = isTrackerMode ? `${id}-${h1Slug}.md` : `${h1Slug}.md`;
-              const finalFilepath = join(outputDir, finalFilename);
-              if (finalFilepath !== filepath) {
-                await rename(filepath, finalFilepath);
-                filepath = finalFilepath;
-              }
-            }
-
-            const specDuration = Date.now() - specStart;
-            fileDurationsMs[filepath] = specDuration;
-            log.success(`Spec written: ${filepath} (${elapsed(specDuration)})`);
-
-            let identifier = filepath;
-
-            fileLoggerStorage.getStore()?.phase("Datasource sync");
-            try {
-              if (isTrackerMode) {
-                await datasource.update(id, details.title, result.data.content, fetchOpts);
-                log.success(`Updated issue #${id} with spec content`);
-                await unlink(filepath);
-                log.success(`Deleted local spec ${filepath} (now tracked as issue #${id})`);
-                identifier = id;
-                issueNumbers.push(id);
-              } else if (datasource.name === "md") {
-                const parsed = parseIssueFilename(filepath);
-                if (parsed) {
-                  await datasource.update(parsed.issueId, details.title, result.data.content, fetchOpts);
-                  log.success(`Updated spec #${parsed.issueId} in-place`);
-                  identifier = parsed.issueId;
-                  issueNumbers.push(parsed.issueId);
-                } else {
-                  const created = await datasource.create(details.title, result.data.content, fetchOpts);
-                  log.success(`Created spec #${created.number} from ${filepath}`);
-                  identifier = created.number;
-                  issueNumbers.push(created.number);
-                  try {
-                    await unlink(filepath);
-                    log.success(`Deleted local spec ${filepath} (now tracked as spec #${created.number})`);
-                  } catch (unlinkErr) {
-                    log.warn(`Could not delete local spec ${filepath}: ${log.formatErrorChain(unlinkErr)}`);
-                  }
-                  // Update filepath to the newly created spec so
-                  // generatedFiles / fileDurationsMs reference the
-                  // correct (existing) file, not the deleted original.
-                  const oldDuration = fileDurationsMs[filepath];
-                  delete fileDurationsMs[filepath];
-                  filepath = created.url;
-                  fileDurationsMs[filepath] = oldDuration;
-                }
-              } else {
-                const created = await datasource.create(details.title, result.data.content, fetchOpts);
-                log.success(`Created issue #${created.number} from ${filepath}`);
-                await unlink(filepath);
-                log.success(`Deleted local spec ${filepath} (now tracked as issue #${created.number})`);
-                identifier = created.number;
-                issueNumbers.push(created.number);
-              }
-            } catch (err) {
-              const label = isTrackerMode ? `issue #${id}` : filepath;
-              log.warn(`Could not sync ${label} to datasource: ${log.formatErrorChain(err)}`);
-            }
-
-            return { filepath, identifier };
-          } catch (err) {
-            fileLoggerStorage.getStore()?.error(`Spec generation failed for ${id}: ${log.extractMessage(err)}${err instanceof Error && err.stack ? `\n${err.stack}` : ""}`);
-            log.error(`Failed to generate spec for ${isTrackerMode ? `#${id}` : filepath}: ${log.formatErrorChain(err)}`);
-            log.debug(log.formatErrorChain(err));
-            return null;
-          }
-        };
-
-        const fileLogger = log.verbose ? new FileLogger(id, specCwd) : null;
-        if (fileLogger) {
-          return fileLoggerStorage.run(fileLogger, async () => {
-            try {
-              fileLogger.phase(`Spec generation: ${id}`);
-              return await itemBody();
-            } finally {
-              fileLogger.close();
-            }
-          });
-        }
-        return itemBody();
-      }));
-
-    for (const result of batchResults) {
-      if (result !== null) {
-        generatedFiles.push(result.filepath);
-        dispatchIdentifiers.push(result.identifier);
+    const itemBody = async (): Promise<{ filepath: string; identifier: string } | null> => {
+      let filepath: string;
+      if (isTrackerMode) {
+        const slug = slugify(details.title, MAX_SLUG_LENGTH);
+        const filename = `${id}-${slug}.md`;
+        filepath = join(outputDir, filename);
+      } else if (isInlineText) {
+        filepath = id;
       } else {
-        failed++;
+        filepath = id;
       }
+
+      fileLoggerStorage.getStore()?.info(`Output path: ${filepath}`);
+
+      try {
+        fileLoggerStorage.getStore()?.info(`Starting spec generation for ${isTrackerMode ? `#${id}` : filepath}`);
+        if (!quiet) log.info(`Generating spec for ${isTrackerMode ? `#${id}` : filepath}: ${details.title}...`);
+        const generateLabel = `specAgent.generate(${isTrackerMode ? `#${id}` : filepath})`;
+
+        const result = await withRetry(
+          () => withTimeout(
+            specAgent.generate({
+              issue: isTrackerMode ? details : undefined,
+              filePath: isTrackerMode ? undefined : id,
+              fileContent: isTrackerMode ? undefined : details.body,
+              cwd: specCwd,
+              outputPath: filepath,
+              timeboxWarnMs: specWarnMs,
+              timeboxKillMs: specKillMs,
+              onProgress: tuiTask ? (snapshot) => {
+                tuiTask.feedback = snapshot.text;
+                tuiUpdate?.();
+              } : undefined,
+            }),
+            specWarnMs + specKillMs,
+            generateLabel,
+          ),
+          retries,
+          { label: generateLabel },
+        );
+
+        if (!result.success) {
+          throw new Error(result.error ?? "Spec generation failed");
+        }
+
+        fileLoggerStorage.getStore()?.info(`Spec generated successfully`);
+
+        if (isTrackerMode || isInlineText) {
+          const h1Title = extractTitle(result.data.content, filepath);
+          const h1Slug = slugify(h1Title, MAX_SLUG_LENGTH);
+          const finalFilename = isTrackerMode ? `${id}-${h1Slug}.md` : `${h1Slug}.md`;
+          const finalFilepath = join(outputDir, finalFilename);
+          if (finalFilepath !== filepath) {
+            await rename(filepath, finalFilepath);
+            filepath = finalFilepath;
+          }
+        }
+
+        const specDuration = Date.now() - specStart;
+        fileDurationsMs[filepath] = specDuration;
+        if (!quiet) log.success(`Spec written: ${filepath} (${elapsed(specDuration)})`);
+        if (tuiTask) {
+          tuiTask.status = "done";
+          tuiTask.elapsed = specDuration;
+          tuiTask.feedback = undefined;
+          tuiUpdate?.();
+        }
+
+        let identifier = filepath;
+
+        fileLoggerStorage.getStore()?.phase("Datasource sync");
+        if (tuiTask) {
+          tuiTask.status = "syncing";
+          tuiTask.feedback = undefined;
+          tuiUpdate?.();
+        }
+        try {
+          if (isTrackerMode) {
+            await datasource.update(id, details.title, result.data.content, fetchOpts);
+            if (!quiet) log.success(`Updated issue #${id} with spec content`);
+            await unlink(filepath);
+            if (!quiet) log.success(`Deleted local spec ${filepath} (now tracked as issue #${id})`);
+            identifier = id;
+            issueNumbers.push(id);
+          } else if (datasource.name === "md") {
+            const parsed = parseIssueFilename(filepath);
+            if (parsed) {
+              await datasource.update(parsed.issueId, details.title, result.data.content, fetchOpts);
+              if (!quiet) log.success(`Updated spec #${parsed.issueId} in-place`);
+              identifier = parsed.issueId;
+              issueNumbers.push(parsed.issueId);
+            } else {
+              const created = await datasource.create(details.title, result.data.content, fetchOpts);
+              if (!quiet) log.success(`Created spec #${created.number} from ${filepath}`);
+              identifier = created.number;
+              issueNumbers.push(created.number);
+              try {
+                await unlink(filepath);
+                if (!quiet) log.success(`Deleted local spec ${filepath} (now tracked as spec #${created.number})`);
+              } catch (unlinkErr) {
+                log.warn(`Could not delete local spec ${filepath}: ${log.formatErrorChain(unlinkErr)}`);
+              }
+              // Update filepath to the newly created spec so
+              // generatedFiles / fileDurationsMs reference the
+              // correct (existing) file, not the deleted original.
+              const oldDuration = fileDurationsMs[filepath];
+              delete fileDurationsMs[filepath];
+              filepath = created.url;
+              fileDurationsMs[filepath] = oldDuration;
+            }
+          } else {
+            const created = await datasource.create(details.title, result.data.content, fetchOpts);
+            if (!quiet) log.success(`Created issue #${created.number} from ${filepath}`);
+            await unlink(filepath);
+            if (!quiet) log.success(`Deleted local spec ${filepath} (now tracked as issue #${created.number})`);
+            identifier = created.number;
+            issueNumbers.push(created.number);
+          }
+        } catch (err) {
+          const label = isTrackerMode ? `issue #${id}` : filepath;
+          log.warn(`Could not sync ${label} to datasource: ${log.formatErrorChain(err)}`);
+        }
+
+        return { filepath, identifier };
+      } catch (err) {
+        fileLoggerStorage.getStore()?.error(`Spec generation failed for ${id}: ${log.extractMessage(err)}${err instanceof Error && err.stack ? `\n${err.stack}` : ""}`);
+        log.error(`Failed to generate spec for ${isTrackerMode ? `#${id}` : filepath}: ${log.formatErrorChain(err)}`);
+        log.debug(log.formatErrorChain(err));
+        if (tuiTask) {
+          tuiTask.status = "failed";
+          tuiTask.elapsed = Date.now() - specStart;
+          tuiTask.error = log.extractMessage(err);
+          tuiTask.feedback = undefined;
+          tuiUpdate?.();
+        }
+        return null;
+      }
+    };
+
+    let itemResult: { filepath: string; identifier: string } | null;
+    const fileLogger = log.verbose ? new FileLogger(id, specCwd) : null;
+    if (fileLogger) {
+      itemResult = await fileLoggerStorage.run(fileLogger, async () => {
+        try {
+          fileLogger.phase(`Spec generation: ${id}`);
+          return await itemBody();
+        } finally {
+          fileLogger.close();
+        }
+      });
+    } else {
+      itemResult = await itemBody();
+    }
+
+    if (itemResult !== null) {
+      generatedFiles.push(itemResult.filepath);
+      dispatchIdentifiers.push(itemResult.identifier);
+    } else {
+      failed++;
     }
 
     if (!modelLoggedInBanner && instance.model) {
-      log.info(`Detected model: ${instance.model}`);
+      if (!quiet) log.info(`Detected model: ${instance.model}`);
       modelLoggedInBanner = true;
     }
   }
+
+  // Sliding-window concurrency — delegate to the shared utility for
+  // consistency with dispatch-pipeline.ts.
+  await runWithConcurrency({
+    items: genQueue,
+    concurrency,
+    worker: async (item) => processItem(item),
+  });
 
   return { generatedFiles, issueNumbers, dispatchIdentifiers, failed, fileDurationsMs };
 }
@@ -533,10 +580,13 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     area,
     concurrency = defaultConcurrency(),
     dryRun,
-    retries = 2,
+    retries = DEFAULT_RETRY_COUNT,
   } = opts;
 
   const pipelineStart = Date.now();
+  const specWarnMs = (opts.specWarnTimeout ?? DEFAULT_SPEC_WARN_MIN) * 60_000;
+  const specKillMs = (opts.specKillTimeout ?? DEFAULT_SPEC_KILL_MIN) * 60_000;
+  log.debug(`Spec timebox: warn=${opts.specWarnTimeout ?? DEFAULT_SPEC_WARN_MIN}m, kill=${opts.specKillTimeout ?? DEFAULT_SPEC_KILL_MIN}m, total=${specWarnMs + specKillMs}ms`);
 
   // ── Resolve datasource ─────────────────────────────────────
   const resolved = await resolveDatasource(issues, opts.issueSource, specCwd, org, project, workItemType, iteration, area);
@@ -544,6 +594,9 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     return { total: 0, generated: 0, failed: 0, files: [], issueNumbers: [], durationMs: Date.now() - pipelineStart, fileDurationsMs: {} };
   }
   const { source, datasource, fetchOpts } = resolved;
+
+  // Pre-authenticate so device-code prompts appear before batch processing.
+  await ensureAuthReady(source, specCwd, org);
 
   // ── Determine items to process ─────────────────────────────
   const isTrackerMode = isIssueNumbers(issues);
@@ -585,29 +638,84 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
   // ── Boot provider and spec agent ───────────────────────────
   const { specAgent, instance } = await bootPipeline(provider, serverUrl, specCwd, model, source);
 
+  // ── Start TUI ──────────────────────────────────────────────
+  const verbose = log.verbose;
+  let tui: ReturnType<typeof createTui>;
+
+  if (verbose) {
+    // Silent state container — no animated rendering (header already printed by bootPipeline)
+    const state: TuiState = {
+      tasks: [],
+      phase: "booting",
+      mode: "spec",
+      startTime: Date.now(),
+      filesFound: 0,
+      provider,
+      model: instance.model,
+      source,
+    };
+    tui = {
+      state,
+      update: () => {},
+      stop: () => {},
+      waitForRecoveryAction: async () => "quit" as const,
+    };
+  } else {
+    tui = createTui();
+    tui.state.mode = "spec";
+    tui.state.provider = provider;
+    tui.state.model = instance.model;
+    tui.state.source = source;
+  }
+
+  tui.state.tasks = validItems.map((item, index) => ({
+    task: {
+      index,
+      text: item.details?.title ?? `Item ${item.id}`,
+      line: 0,
+      raw: item.details?.title ?? item.id,
+      file: item.id,
+    } satisfies Task,
+    status: "pending" as const,
+  }));
+
+  tui.state.phase = "dispatching";
+  tui.update();
+
   // ── Generate specs in batches ──────────────────────────────
-  const results = await generateSpecsBatch(
-    validItems, items, specAgent, instance,
-    isTrackerMode, isInlineText,
-    datasource, fetchOpts, outputDir, specCwd,
-    concurrency, retries,
-  );
+  try {
+    const results = await generateSpecsBatch(
+      validItems, items, specAgent, instance,
+      isTrackerMode, isInlineText,
+      datasource, fetchOpts, outputDir, specCwd,
+      concurrency, retries, specWarnMs, specKillMs,
+      tui.state, tui.update,
+    );
 
-  // ── Cleanup ────────────────────────────────────────────────
-  await cleanupPipeline(specAgent, instance);
+    // ── Cleanup ────────────────────────────────────────────────
+    await cleanupPipeline(specAgent, instance);
 
-  // ── Summary ────────────────────────────────────────────────
-  const totalDuration = Date.now() - pipelineStart;
-  logSummary(results.generatedFiles, results.dispatchIdentifiers, results.failed, totalDuration);
+    // ── Stop TUI ───────────────────────────────────────────────
+    tui.state.phase = "done";
+    tui.stop();
 
-  return {
-    total: items.length,
-    generated: results.generatedFiles.length,
-    failed: results.failed,
-    files: results.generatedFiles,
-    issueNumbers: results.issueNumbers,
-    identifiers: results.dispatchIdentifiers,
-    durationMs: totalDuration,
-    fileDurationsMs: results.fileDurationsMs,
-  };
+    // ── Summary ────────────────────────────────────────────────
+    const totalDuration = Date.now() - pipelineStart;
+    logSummary(results.generatedFiles, results.dispatchIdentifiers, results.failed, totalDuration);
+
+    return {
+      total: items.length,
+      generated: results.generatedFiles.length,
+      failed: results.failed,
+      files: results.generatedFiles,
+      issueNumbers: results.issueNumbers,
+      identifiers: results.dispatchIdentifiers,
+      durationMs: totalDuration,
+      fileDurationsMs: results.fileDurationsMs,
+    };
+  } catch (err) {
+    tui.state.phase = "done";
+    tui.stop();
+    throw err;
+  }
 }

@@ -125,6 +125,40 @@ function toIssueDetails(filename: string, content: string, dir: string): IssueDe
   };
 }
 
+/**
+ * Derive a short username from git config.
+ * - Multi-word name: first 2 chars of first name + first 6 of last name
+ * - Single word or no name: first 8 chars of email local part
+ * - Falls back to the provided `fallback` value
+ */
+async function deriveShortUsername(cwd: string, fallback: string): Promise<string> {
+  try {
+    const raw = (await git(["config", "user.name"], cwd)).trim();
+    if (raw) {
+      const parts = raw.toLowerCase().replace(/[^a-z\s]/g, "").trim().split(/\s+/);
+      if (parts.length >= 2) {
+        return (parts[0].slice(0, 2) + parts[parts.length - 1].slice(0, 6)) || fallback;
+      }
+    }
+  } catch {
+    // fall through to email
+  }
+
+  try {
+    const raw = (await git(["config", "user.email"], cwd)).trim();
+    if (raw) {
+      const localPart = raw.split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (localPart) {
+        return localPart.slice(0, 8);
+      }
+    }
+  } catch {
+    // fall through
+  }
+
+  return fallback;
+}
+
 export const datasource: Datasource = {
   name: "md",
 
@@ -258,19 +292,11 @@ export const datasource: Datasource = {
   },
 
   async getUsername(opts: DispatchLifecycleOptions): Promise<string> {
-    try {
-      const { stdout } = await exec("git", ["config", "user.name"], { cwd: opts.cwd, shell: process.platform === "win32" });
-      const name = stdout.trim();
-      if (!name) return "local";
-      return slugify(name);
-    } catch {
-      return "local";
-    }
+    if (opts.username) return opts.username;
+    return deriveShortUsername(opts.cwd, "local");
   },
 
-  buildBranchName(issueNumber: string, title: string, username: string): string {
-    const slug = slugify(title, 50);
-
+  buildBranchName(issueNumber: string, _title: string, username: string): string {
     // When issueNumber is a file path, extract a clean identifier from the filename
     if (issueNumber.includes("/") || issueNumber.includes("\\")) {
       // Normalize backslashes so basename() works correctly on POSIX
@@ -278,15 +304,15 @@ export const datasource: Datasource = {
       const filename = basename(normalized);
       const idMatch = /^(\d+)-(.+)\.md$/.exec(filename);
       if (idMatch) {
-        return `${username}/dispatch/file-${idMatch[1]}-${slug}`;
+        return `${username}/dispatch/issue-${idMatch[1]}`;
       }
       // Fallback: use slugified basename without extension
       const nameWithoutExt = parsePath(filename).name;
       const slugifiedName = slugify(nameWithoutExt, 50);
-      return `${username}/dispatch/file-${slugifiedName}-${slug}`;
+      return `${username}/dispatch/file-${slugifiedName}`;
     }
 
-    return `${username}/dispatch/${issueNumber}-${slug}`;
+    return `${username}/dispatch/issue-${issueNumber}`;
   },
 
   async createAndSwitchBranch(branchName: string, opts: DispatchLifecycleOptions): Promise<void> {

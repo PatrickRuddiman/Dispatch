@@ -108,6 +108,10 @@ in the `elapsedMs` field of `ExecuteResult`. This includes both the dispatch
 time (AI provider round-trip) and the `markTaskComplete()` file I/O time.
 The orchestrator uses this for TUI display.
 
+The orchestrator wraps executor calls in `withRetry()`. By default, `--retries`
+is `3`, so executor tasks get up to 4 total attempts unless the user overrides
+that flag.
+
 ## Interfaces
 
 ### `ExecuteInput`

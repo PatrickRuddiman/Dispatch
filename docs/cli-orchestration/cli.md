@@ -99,7 +99,7 @@ argument parsing (`src/cli.ts:13`). Commander provides:
   options use Commander's variadic syntax to collect multiple arguments
   into arrays.
 - **Custom option processing**: Numeric options (`--concurrency`, `--plan-timeout`,
-  `--retries`, `--plan-retries`, `--test-timeout`) use Commander's custom
+  `--spec-timeout`, `--retries`, `--plan-retries`, `--test-timeout`) use Commander's custom
   processing callbacks to parse, validate, and coerce values in a single step.
 - **Negatable booleans**: `--no-plan`, `--no-branch`, and `--no-worktree` use
   Commander's built-in negatable boolean support (Commander automatically handles
@@ -146,14 +146,16 @@ them as their positive counterparts (`plan`, `branch`, `worktree`).
 | `--concurrency <n>` | integer | `min(cpus, freeMB/500)` | Maximum parallel dispatches per batch. Must be between 1 and 64 (`MAX_CONCURRENCY`). See [concurrency model](orchestrator.md#concurrency-model) and [default computation](configuration.md#default-concurrency-computation). |
 | `--provider <name>` | string | `"opencode"` | AI agent backend: `opencode`, `copilot`, `claude`, or `codex`. Validated via Commander's `choices()` against `PROVIDER_NAMES`. See [Provider Abstraction](../provider-system/overview.md). |
 | `--server-url <url>` | string | *none* | Connect to a running provider server instead of starting one |
-| `--plan-timeout <min>` | float | `10` | Planning timeout in minutes. Must be a positive number. Parsed via `parseFloat`. |
-| `--retries <n>` | integer | `2` | Retry attempts for all agents. Must be a non-negative integer. Parsed via `parseInt`. |
+| `--plan-timeout <min>` | float | `30` | Planning timeout in minutes. Must be a positive number. Parsed via `parseFloat`. |
+| `--retries <n>` | integer | `3` | Retry attempts for all agents. Must be a non-negative integer. Parsed via `parseInt`. |
 | `--plan-retries <n>` | integer | *(falls back to --retries)* | Retry attempts after planning timeout. Overrides `--retries` for the planner agent specifically. Must be a non-negative integer. |
 | `--test-timeout <min>` | float | `5` | Test timeout in minutes. Must be a positive number. Parsed via `parseFloat`. Configurable via `dispatch config`. |
 | `--cwd <dir>` | string | `process.cwd()` | Working directory for file discovery and agent execution |
 | `--verbose` | boolean | `false` | Show detailed debug output for troubleshooting |
 | `-h`, `--help` | boolean | `false` | Show usage information |
 | `-v`, `--version` | boolean | `false` | Show version string |
+
+> **Note**: `--plan-timeout` defaults to 30 minutes, and `--retries` defaults to 3 shared retries (4 total attempts). If those automatic retries are exhausted during dispatch, interactive TUI runs pause the task for rerun-or-quit recovery instead of silently continuing. Verbose or non-TTY runs will not wait for recovery input. See [Planning & Dispatch overview](../planning-and-dispatch/overview.md) and [Terminal UI](tui.md).
 
 > **Note**: The `model` setting (AI model override) is a **config-only** field.
 > It is not available as a CLI flag and must be set via `dispatch config` or
@@ -176,7 +178,11 @@ required and the dispatch-specific flags (`--dry-run`, `--no-plan`,
 | `--output-dir <dir>` | string | `.dispatch/specs` | Output directory for generated spec files. Resolved to an absolute path. Validated for existence and writability via `fs.access()` with `W_OK` before pipeline execution. |
 | `--provider <name>` | string | `"opencode"` | AI agent backend (shared with dispatch mode) |
 | `--server-url <url>` | string | *none* | Connect to a running provider server (shared with dispatch mode) |
-| `--plan-timeout <min>` | float | `10` | Planning timeout in minutes (shared with dispatch mode) |
+| `--retries <n>` | integer | `3` | Retry attempts for spec generation and other shared agent flows |
+| `--spec-timeout <min>` | float | `10` | Spec generation timeout in minutes. Must be a positive number. Parsed via `parseFloat`. |
+| `--spec-warn-timeout <min>` | float | `10` | Spec warn-phase timeout in minutes. The time-warning nudge is sent to the agent after this duration. Must be a positive number. |
+| `--spec-kill-timeout <min>` | float | `10` | Spec kill-phase timeout in minutes. The generation attempt is killed after this duration. Must be a positive number. |
+| `--plan-timeout <min>` | float | `30` | Planning timeout in minutes (shared with dispatch mode) |
 | `--plan-retries <n>` | integer | *(falls back to --retries)* | Retry attempts after planning timeout (shared with dispatch mode) |
 
 ### Fix-tests mode options
@@ -553,6 +559,7 @@ boundary validation in Commander's custom processing callbacks:
 |-------|-----|-----|
 | `testTimeout` | 1 | 120 |
 | `planTimeout` | 1 | 120 |
+| `specTimeout` | 1 | 120 |
 | `concurrency` | 1 | 64 |
 
 The CLI exports `MAX_CONCURRENCY = CONFIG_BOUNDS.concurrency.max` (64) for

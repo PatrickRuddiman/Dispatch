@@ -8,6 +8,9 @@
 
 import { log } from "./logger.js";
 
+/** Default retry count used across shared agent retry flows. */
+export const DEFAULT_RETRY_COUNT = 3;
+
 /** Options for `withRetry`. */
 export interface RetryOptions {
   /** Label for log messages identifying the operation being retried. */

@@ -25,6 +25,9 @@ export class TimeoutError extends Error {
   }
 }
 
+/** Default planning timeout in minutes when not specified by the user. */
+export const DEFAULT_PLAN_TIMEOUT_MIN = 30;
+
 /**
  * Race a promise against a timeout.
  *

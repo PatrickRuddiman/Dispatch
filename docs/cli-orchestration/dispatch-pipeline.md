@@ -203,18 +203,21 @@ The pipeline wraps each `planner.plan()` call with a timeout and retry loop.
 
 | Parameter | Default | Source |
 |-----------|---------|--------|
-| `planTimeout` | 10 minutes | `DEFAULT_PLAN_TIMEOUT_MIN = 10` at `dispatch-pipeline.ts:46` |
-| `planRetries` | 1 retry (2 total attempts) | `DEFAULT_PLAN_RETRIES = 1` at `dispatch-pipeline.ts:49` |
+| `planTimeout` | 30 minutes | `DEFAULT_PLAN_TIMEOUT_MIN = 30` in `src/helpers/timeout.ts` |
+| `planRetries` | falls back to `retries` | `resolvedPlanRetries = planRetries ?? resolvedRetries` |
+| `retries` | 3 retries (4 total attempts) | `DEFAULT_RETRIES = 3` in `src/helpers/retry.ts` |
 
 The effective values are computed as:
 
 ```
-planTimeoutMs = (planTimeout ?? 10) * 60_000
-maxPlanAttempts = (planRetries ?? retries ?? 1) + 1
+planTimeoutMs = (planTimeout ?? 30) * 60_000
+resolvedRetries = retries ?? 3
+maxPlanAttempts = (planRetries ?? resolvedRetries) + 1
 ```
 
-The `planRetries` option takes priority. If not set, the general `retries`
-option is used. If neither is set, the default of 1 retry applies.
+The `planRetries` option takes priority. If it is not set, the planner falls
+back to the general `retries` budget. If neither flag is set, both planner and
+executor use the shared default of 3 retries.
 
 ### Retry behavior
 
@@ -227,6 +230,9 @@ The retry loop distinguishes between timeout errors and other errors:
 | All attempts exhausted | — | Task marked failed with `"Planning timed out after N attempts"` |
 | Planning succeeds | — | Result returned immediately, no further attempts |
 
+Planner retries apply only to `TimeoutError`. Non-timeout planner failures are
+not retried, and the planner is intentionally not wrapped in `withRetry()`.
+
 When `--no-plan` is set, the planning phase is skipped entirely — the executor
 receives a `null` plan.
 
@@ -236,15 +242,15 @@ The executor has its own independent retry mechanism:
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
-| `execRetries` | 2 (hardcoded) | This means **3 total attempts** via `withRetry(fn, 2)` |
+| `execRetries` | `retries` or shared default `3` | This means **4 total attempts** by default via `withRetry(fn, 3)` |
 
 The retry uses the `withRetry` helper from `src/helpers/retry.ts`. On each
 non-success result from the executor, the handler throws to trigger a retry.
-If all 3 attempts fail, the final error is caught and wrapped as a failed
+If all 4 default attempts fail, the final error is caught and wrapped as a failed
 `AgentResult`.
 
-Unlike planning retries, the executor retry count is not configurable — it is
-hardcoded at `dispatch-pipeline.ts:446`.
+Unlike before, the executor retry count now follows `--retries`, so the CLI
+contract of "Retry attempts for all agents" matches runtime behavior.
 
 ## Task execution modes
 

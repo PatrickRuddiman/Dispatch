@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { join, resolve } from "node:path";
 import { isIssueNumbers, isGlobOrFilePath, validateSpecStructure, extractSpecContent, resolveSource } from "../spec-generator.js";
-import { buildFileSpecPrompt, boot } from "../agents/spec.js";
+import { buildSpecPrompt, buildFileSpecPrompt, buildInlineTextSpecPrompt, boot } from "../agents/spec.js";
 import * as datasourcesIndex from "../datasources/index.js";
-import type { ProviderInstance } from "../providers/interface.js";
+import type { ProviderInstance, ProviderProgressSnapshot } from "../providers/interface.js";
 import type { Datasource, IssueDetails } from "../datasources/interface.js";
 import { createMockDatasource } from "./fixtures.js";
 
@@ -68,6 +68,24 @@ function createMockProvider(overrides?: Partial<ProviderInstance>): ProviderInst
     cleanup: vi.fn<ProviderInstance["cleanup"]>().mockResolvedValue(undefined),
     ...overrides,
   };
+}
+
+const ISSUE_FIXTURE: IssueDetails = {
+  number: "42",
+  title: "My Feature",
+  body: "Implement the feature",
+  labels: ["enhancement"],
+  state: "open",
+  url: "https://github.com/org/repo/issues/42",
+  comments: [],
+  acceptanceCriteria: "",
+};
+
+function expectSingleSourceScopeInstructions(prompt: string): void {
+  expect(prompt).toContain("Each invocation is scoped to exactly one source item.");
+  expect(prompt).toContain("The source item for this invocation is the single passed issue, file, or inline request shown below.");
+  expect(prompt).toContain("Treat other repository materials — including existing spec files, sibling issues, and future work — as context only unless the passed source explicitly references them as required context.");
+  expect(prompt).toContain("Do not merge unrelated specs, issues, files, or requests into the generated output.");
 }
 
 describe("resolveSource", () => {
@@ -472,10 +490,15 @@ describe("isGlobOrFilePath", () => {
   });
 });
 
-describe("buildFileSpecPrompt", () => {
+describe("spec prompt builders", () => {
   const FILE_PATH = "/home/user/drafts/my-feature.md";
   const CONTENT = "This is the feature description.\n\nIt has multiple paragraphs.";
   const CWD = "/home/user/project";
+
+  it("includes shared scope isolation instructions for issue prompts", () => {
+    const prompt = buildSpecPrompt(ISSUE_FIXTURE, CWD, "/tmp/output.md");
+    expectSingleSourceScopeInstructions(prompt);
+  });
 
   it("returns a string", () => {
     const result = buildFileSpecPrompt(FILE_PATH, CONTENT, CWD);
@@ -608,6 +631,20 @@ describe("buildFileSpecPrompt", () => {
     expect(result).toContain("**Keep tasks atomic and ordered.**");
     expect(result).toContain("**Tag every task with `(P)`, `(S)`, or `(I)`.**");
     expect(result).toContain("**Keep the markdown clean**");
+  });
+
+  it("includes shared scope isolation instructions", () => {
+    const result = buildFileSpecPrompt(FILE_PATH, CONTENT, CWD);
+    expectSingleSourceScopeInstructions(result);
+  });
+
+  it("includes shared scope isolation instructions for inline prompts", () => {
+    const prompt = buildInlineTextSpecPrompt(
+      "add dark mode toggle to settings page",
+      CWD,
+      "/tmp/output.md",
+    );
+    expectSingleSourceScopeInstructions(prompt);
   });
 });
 
@@ -1090,17 +1127,6 @@ describe("SpecAgent generate", () => {
     "- [ ] (S) Second task",
   ].join("\n");
 
-  const ISSUE_FIXTURE: IssueDetails = {
-    number: "42",
-    title: "My Feature",
-    body: "Implement the feature",
-    labels: ["enhancement"],
-    state: "open",
-    url: "https://github.com/org/repo/issues/42",
-    comments: [],
-    acceptanceCriteria: "",
-  };
-
   it("generates a spec successfully with the temp file workflow", async () => {
     const provider = createMockProvider({
       prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("AI response text"),
@@ -1167,6 +1193,35 @@ describe("SpecAgent generate", () => {
 
     expect(result.success).toBe(true);
     expect(result.data!.valid).toBe(true);
+  });
+
+  it("forwards provider progress snapshots upward", async () => {
+    const onProgress = vi.fn<(snapshot: ProviderProgressSnapshot) => void>();
+    const snapshot = { text: "Generating outline" };
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockImplementation(async (_sessionId, _prompt, options) => {
+        options?.onProgress?.(snapshot);
+        return "AI response";
+      }),
+    });
+
+    vi.mocked(readFile).mockResolvedValue(VALID_SPEC);
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+      onProgress,
+    });
+
+    expect(result.success).toBe(true);
+    expect(onProgress).toHaveBeenCalledWith(snapshot);
+    expect(provider.prompt).toHaveBeenCalledWith(
+      "session-1",
+      expect.any(String),
+      expect.objectContaining({ onProgress }),
+    );
   });
 
   it("returns failure when AI returns null response", async () => {

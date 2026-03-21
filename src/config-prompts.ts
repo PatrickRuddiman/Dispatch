@@ -22,6 +22,7 @@ import {
   parseAzDevOpsRemoteUrl,
 } from "./datasources/index.js";
 import type { DatasourceName } from "./datasources/interface.js";
+import { ensureAuthReady } from "./helpers/auth.js";
 
 /**
  * Run the interactive configuration wizard.
@@ -179,6 +180,14 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
       default: existing.area ?? undefined,
     });
     if (areaInput.trim()) area = areaInput.trim();
+  }
+
+  // ── Authenticate tracker-backed datasource ────────────────
+  try {
+    await ensureAuthReady(effectiveSource ?? undefined, process.cwd(), org);
+  } catch (err) {
+    log.warn(`Authentication failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.warn("You can re-run 'dispatch config' or authenticate later at runtime.");
   }
 
   // ── Build new config ───────────────────────────────────────

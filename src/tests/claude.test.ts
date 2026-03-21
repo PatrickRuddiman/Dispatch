@@ -82,7 +82,7 @@ describe("createSession", () => {
     const instance = await boot();
     const sessionId = await instance.createSession();
     expect(sessionId).toBe("test-uuid-1234");
-    expect(mockCreateSession).toHaveBeenCalledWith({ model: "claude-sonnet-4", permissionMode: "acceptEdits" });
+    expect(mockCreateSession).toHaveBeenCalledWith({ model: "claude-sonnet-4", permissionMode: "bypassPermissions", allowDangerouslySkipPermissions: true });
   });
 
   it("passes cwd to unstable_v2_createSession when opts.cwd is set", async () => {
@@ -90,7 +90,8 @@ describe("createSession", () => {
     await instance.createSession();
     expect(mockCreateSession).toHaveBeenCalledWith({
       model: "claude-sonnet-4",
-      permissionMode: "acceptEdits",
+      permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
       cwd: "/tmp/worktree",
     });
   });
@@ -100,7 +101,8 @@ describe("createSession", () => {
     await instance.createSession();
     expect(mockCreateSession).toHaveBeenCalledWith({
       model: "claude-opus-4-6",
-      permissionMode: "acceptEdits",
+      permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
     });
   });
 
@@ -138,6 +140,63 @@ describe("prompt", () => {
     const result = await instance.prompt(sessionId, "hello");
     expect(mockSession.send).toHaveBeenCalledWith("hello");
     expect(result).toBe("response text");
+  });
+
+  it("emits sanitized assistant stream progress", async () => {
+    const progress: string[] = [];
+
+    mockSession.stream.mockReturnValue(
+      (async function* () {
+        yield {
+          type: "assistant",
+          message: {
+            content: [{ type: "text", text: "\n\n" }],
+          },
+        };
+        yield {
+          type: "assistant",
+          message: {
+            content: [{ type: "text", text: "draft\nplan" }],
+          },
+        };
+        yield {
+          type: "assistant",
+          message: {
+            content: [{ type: "text", text: "draft plan" }],
+          },
+        };
+      })(),
+    );
+
+    const instance = await boot();
+    const sessionId = await instance.createSession();
+    const result = await instance.prompt(sessionId, "hello", {
+      onProgress: (update) => progress.push(update.text),
+    });
+
+    expect(result).toBe("\n\ndraft\nplandraft plan");
+    expect(progress).toEqual(["draft plan"]);
+  });
+
+  it("emits progress snapshots from assistant stream output", async () => {
+    const onProgress = vi.fn();
+
+    mockSession.stream.mockReturnValue(
+      (async function* () {
+        yield {
+          type: "assistant",
+          message: {
+            content: [{ type: "text", text: "streamed response text" }],
+          },
+        };
+      })(),
+    );
+
+    const instance = await boot();
+    const sessionId = await instance.createSession();
+    await instance.prompt(sessionId, "hello", { onProgress });
+
+    expect(onProgress).toHaveBeenCalledWith({ text: "streamed response text" });
   });
 
   it("returns null when no assistant message found", async () => {

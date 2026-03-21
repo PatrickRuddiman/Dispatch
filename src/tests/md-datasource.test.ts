@@ -153,25 +153,47 @@ describe("list", () => {
 });
 
 describe("getUsername", () => {
-  it("returns slugified git user name", async () => {
+  it("returns opts.username when provided", async () => {
+    const result = await datasource.getUsername({ cwd: "/tmp", username: "pr" });
+    expect(result).toBe("pr");
+  });
+
+  it("derives short username from multi-word git user.name", async () => {
     mockExecFile(vi.mocked(execFile), (_cmd, _args, _opts, cb) => {
       cb(null, { stdout: "John Doe\n", stderr: "" });
     });
     const result = await datasource.getUsername({ cwd: "/tmp" });
-    expect(result).toBe("john-doe");
+    expect(result).toBe("jodoe");
   });
 
-  it('returns "local" when git returns empty string', async () => {
-    mockExecFile(vi.mocked(execFile), (_cmd, _args, _opts, cb) => {
-      cb(null, { stdout: "  \n", stderr: "" });
+  it("falls back to email for single-word name", async () => {
+    const mock = vi.mocked(execFile);
+    (mock as any).mockImplementationOnce((_cmd: any, _args: any, _opts: any, cb: any) => {
+      cb(null, { stdout: "John\n", stderr: "" });
+    }).mockImplementationOnce((_cmd: any, _args: any, _opts: any, cb: any) => {
+      cb(null, { stdout: "john.doe@example.com\n", stderr: "" });
+    });
+    const result = await datasource.getUsername({ cwd: "/tmp" });
+    expect(result).toBe("johndoe");
+  });
+
+  it('returns "local" when both git config calls fail', async () => {
+    const mock = vi.mocked(execFile);
+    (mock as any).mockImplementationOnce((_cmd: any, _args: any, _opts: any, cb: any) => {
+      cb(new Error("git not found"));
+    }).mockImplementationOnce((_cmd: any, _args: any, _opts: any, cb: any) => {
+      cb(new Error("git not found"));
     });
     const result = await datasource.getUsername({ cwd: "/tmp" });
     expect(result).toBe("local");
   });
 
-  it('returns "local" when git command fails', async () => {
-    mockExecFile(vi.mocked(execFile), (_cmd, _args, _opts, cb) => {
-      cb(new Error("git not found"));
+  it('returns "local" when git returns empty for both', async () => {
+    const mock = vi.mocked(execFile);
+    (mock as any).mockImplementationOnce((_cmd: any, _args: any, _opts: any, cb: any) => {
+      cb(null, { stdout: "  \n", stderr: "" });
+    }).mockImplementationOnce((_cmd: any, _args: any, _opts: any, cb: any) => {
+      cb(null, { stdout: "\n", stderr: "" });
     });
     const result = await datasource.getUsername({ cwd: "/tmp" });
     expect(result).toBe("local");
@@ -179,23 +201,23 @@ describe("getUsername", () => {
 });
 
 describe("buildBranchName", () => {
-  it("builds branch name with username/dispatch/issueNumber-slug pattern", () => {
+  it("builds branch name with username/dispatch/issue-{id} pattern", () => {
     const result = datasource.buildBranchName("42", "My Feature", "john-doe");
-    expect(result).toBe("john-doe/dispatch/42-my-feature");
+    expect(result).toBe("john-doe/dispatch/issue-42");
   });
 
   it("builds branch name with provided username", () => {
     const result = datasource.buildBranchName("99", "Some Task", "local");
-    expect(result).toBe("local/dispatch/99-some-task");
+    expect(result).toBe("local/dispatch/issue-99");
   });
 
-  it("extracts file-{id} from an absolute Unix file path with {id}-{slug}.md pattern", () => {
+  it("extracts issue-{id} from an absolute Unix file path with {id}-{slug}.md pattern", () => {
     const result = datasource.buildBranchName(
       "/home/user/project/.dispatch/specs/42-batch-updates.md",
       "Batch Updates",
       "john-doe",
     );
-    expect(result).toBe("john-doe/dispatch/file-42-batch-updates");
+    expect(result).toBe("john-doe/dispatch/issue-42");
   });
 
   it("falls back to file-{slugified-basename} for paths without numeric prefix", () => {
@@ -204,16 +226,16 @@ describe("buildBranchName", () => {
       "My Design Doc",
       "john-doe",
     );
-    expect(result).toBe("john-doe/dispatch/file-my-design-doc-my-design-doc");
+    expect(result).toBe("john-doe/dispatch/file-my-design-doc");
   });
 
-  it("extracts file-{id} from a relative path with {id}-{slug}.md pattern", () => {
+  it("extracts issue-{id} from a relative path with {id}-{slug}.md pattern", () => {
     const result = datasource.buildBranchName(
       "specs/7-add-logging.md",
       "Add Logging",
       "alice",
     );
-    expect(result).toBe("alice/dispatch/file-7-add-logging");
+    expect(result).toBe("alice/dispatch/issue-7");
   });
 
   it("handles Windows-style backslash path separators", () => {
@@ -222,12 +244,12 @@ describe("buildBranchName", () => {
       "Fix Bug",
       "bob",
     );
-    expect(result).toBe("bob/dispatch/file-10-fix-bug");
+    expect(result).toBe("bob/dispatch/issue-10");
   });
 
   it("preserves plain numeric ID without path separators unchanged", () => {
     const result = datasource.buildBranchName("7", "Feature Request", "local");
-    expect(result).toBe("local/dispatch/7-feature-request");
+    expect(result).toBe("local/dispatch/issue-7");
   });
 
   it("falls back to slugified basename for non-.md file path without numeric prefix", () => {
@@ -236,12 +258,12 @@ describe("buildBranchName", () => {
       "Design Doc",
       "dev",
     );
-    expect(result).toBe("dev/dispatch/file-design-doc-design-doc");
+    expect(result).toBe("dev/dispatch/file-design-doc");
   });
 
   it("preserves existing behavior for plain non-numeric identifiers", () => {
     const result = datasource.buildBranchName("my-issue.md", "Some Task", "user");
-    expect(result).toBe("user/dispatch/my-issue.md-some-task");
+    expect(result).toBe("user/dispatch/issue-my-issue.md");
   });
 });
 
