@@ -33,7 +33,7 @@ jobs:
         id: compare
         run: |
           LOCAL_VERSION=$(node -p "require('./package.json').version")
-          NPM_VERSION=$(npm view @pruddiman/dispatch version 2>/dev/null || echo "0.0.0")
+          NPM_VERSION=$(npm view @pruddiman/dispatch dist-tags.latest 2>/dev/null || echo "0.0.0")
           echo "local=$LOCAL_VERSION npm=$NPM_VERSION"
 
           SHOULD_PUBLISH=$(node -e "
