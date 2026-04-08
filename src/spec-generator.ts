@@ -227,12 +227,9 @@ export function extractSpecContent(raw: string): string {
   return content;
 }
 
-export interface ValidationResult {
-  /** Whether the spec content has valid structure */
-  valid: boolean;
-  /** Human-readable reason when validation fails */
-  reason?: string;
-}
+export type ValidationResult =
+  | { valid: true }
+  | { valid: false; reason: string };
 
 /**
  * Validate that spec content has the expected structural markers.

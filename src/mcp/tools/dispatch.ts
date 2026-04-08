@@ -7,9 +7,8 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { boot as bootOrchestrator } from "../../orchestrator/runner.js";
 import { createRun, finishRun, updateRunCounters, createTask, updateTaskStatus, emitLog } from "../state/manager.js";
 import { buildTaskId } from "../../helpers/run-state.js";
-
-const PROVIDER_NAMES = ["opencode", "copilot", "claude", "codex"] as const;
-const DATASOURCE_NAMES = ["github", "azdevops", "md"] as const;
+import { PROVIDER_NAMES } from "../../providers/interface.js";
+import { DATASOURCE_NAMES } from "../../datasources/interface.js";
 
 export function registerDispatchTools(server: McpServer, cwd: string): void {
   // ── dispatch_run ──────────────────────────────────────────────

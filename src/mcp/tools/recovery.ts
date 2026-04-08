@@ -11,10 +11,9 @@ import { getRun, getTasksForRun, createRun, finishRun, updateRunCounters, update
 import { boot as bootOrchestrator } from "../../orchestrator/runner.js";
 import { loadConfig } from "../../config.js";
 import { join } from "node:path";
+import { PROVIDER_NAMES } from "../../providers/interface.js";
 
 const issueIdsSchema = z.array(z.string());
-
-const PROVIDER_NAMES = ["opencode", "copilot", "claude", "codex"] as const;
 
 export function registerRecoveryTools(server: McpServer, cwd: string): void {
   // ── run_retry ─────────────────────────────────────────────────

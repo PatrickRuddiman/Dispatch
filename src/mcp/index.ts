@@ -40,8 +40,10 @@ export async function startMcpServer(opts: McpServerOptions): Promise<void> {
     process.exit(0);
   }
 
-  process.on("SIGINT", () => shutdown("SIGINT"));
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  // Fire-and-forget: signal handlers are intentionally not awaited — the
+  // shutdown() function calls process.exit(0) itself when done.
+  process.on("SIGINT", () => void shutdown("SIGINT"));
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
   // Keep the process alive — the HTTP server holds the event loop open.
 }

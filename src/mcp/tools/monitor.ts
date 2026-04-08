@@ -9,8 +9,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getRun, listRuns, getTasksForRun, listRunsByStatus } from "../state/manager.js";
 import { getDatasource } from "../../datasources/index.js";
 import { loadConfig } from "../../config.js";
-
-const DATASOURCE_NAMES = ["github", "azdevops", "md"] as const;
+import { DATASOURCE_NAMES } from "../../datasources/interface.js";
 
 export function registerMonitorTools(server: McpServer, cwd: string): void {
   // ── status_get ────────────────────────────────────────────────

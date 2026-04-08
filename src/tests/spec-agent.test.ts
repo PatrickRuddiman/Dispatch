@@ -31,7 +31,7 @@ vi.mock("../helpers/logger.js", () => ({
 
 vi.mock("../spec-generator.js", () => ({
   extractSpecContent: vi.fn((raw: string) => raw),
-  validateSpecStructure: vi.fn(() => ({ valid: true, reason: undefined })),
+  validateSpecStructure: vi.fn(() => ({ valid: true as const })),
   DEFAULT_SPEC_WARN_MIN: 10,
   DEFAULT_SPEC_KILL_MIN: 10,
 }));
@@ -139,7 +139,7 @@ describe("generate", () => {
     );
     vi.mocked(readFile).mockResolvedValue(VALID_SPEC);
     vi.mocked(extractSpecContent).mockImplementation((raw: string) => raw);
-    vi.mocked(validateSpecStructure).mockReturnValue({ valid: true, reason: undefined });
+    vi.mocked(validateSpecStructure).mockReturnValue({ valid: true });
   });
 
   afterEach(() => {
@@ -444,7 +444,12 @@ describe("generate", () => {
 
     expect(result.success).toBe(true);
     expect(result.data!.valid).toBe(false);
-    expect(result.data!.validationReason).toBeDefined();
+    // Narrow to the invalid branch of the SpecData discriminated union before accessing validationReason.
+    if (result.data && !result.data.valid) {
+      expect(result.data.validationReason).toBeDefined();
+    } else {
+      throw new Error("Expected SpecData to be invalid but it was valid");
+    }
   });
 
   it("uses unique temp file paths per generation via randomUUID", async () => {
@@ -704,7 +709,7 @@ describe("timebox", () => {
     );
     vi.mocked(readFile).mockResolvedValue(VALID_SPEC);
     vi.mocked(extractSpecContent).mockImplementation((raw: string) => raw);
-    vi.mocked(validateSpecStructure).mockReturnValue({ valid: true, reason: undefined });
+    vi.mocked(validateSpecStructure).mockReturnValue({ valid: true });
   });
 
   afterEach(() => {

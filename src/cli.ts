@@ -176,7 +176,7 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
     )
     .addOption(
       new Option("--source <name>", "Issue source").choices(
-        DATASOURCE_NAMES as string[],
+        [...DATASOURCE_NAMES],
       ),
     )
     .option(

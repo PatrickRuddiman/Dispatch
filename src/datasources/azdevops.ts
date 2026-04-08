@@ -121,7 +121,7 @@ export async function detectWorkItemType(
     if (!Array.isArray(types) || types.length === 0) return null;
 
     const names = types.map((t) => t.name).filter((n): n is string => !!n);
-    const preferred = ["User Story", "Product Backlog Item", "Requirement", "Issue"];
+    const preferred = ["User Story", "Product Backlog Item", "Requirement", "Issue"] as const;
     for (const p of preferred) {
       if (names.includes(p)) return p;
     }
@@ -154,7 +154,7 @@ export async function detectDoneState(
 
       // Fallback: check for known terminal states in priority order
       const names = states.map((s) => s.name).filter((n): n is string => !!n);
-      const fallbacks = ["Done", "Closed", "Resolved", "Completed"];
+      const fallbacks = ["Done", "Closed", "Resolved", "Completed"] as const;
       for (const f of fallbacks) {
         if (names.includes(f)) {
           doneStateCache.set(cacheKey, f);
@@ -266,6 +266,8 @@ export const datasource: Datasource = {
 
     const wiql = `SELECT [System.Id] FROM workitems WHERE ${conditions.join(" AND ")} ORDER BY [System.CreatedDate] DESC`;
 
+    // The SDK's queryByWiql accepts a partial TeamContext with only `project` set.
+    // Cast is safe: we only use the project field for routing, matching SDK usage patterns.
     const queryResult = await witApi.queryByWiql({ query: wiql }, { project } as TeamContext);
     const workItemRefs = queryResult.workItems ?? [];
     if (workItemRefs.length === 0) return [];
@@ -286,6 +288,8 @@ export const datasource: Datasource = {
       for (let i = 0; i < itemsArray.length; i += CONCURRENCY) {
         const batch = itemsArray.slice(i, i + CONCURRENCY);
         const batchResults = await Promise.all(
+          // item.id is guaranteed non-null here: the ids array was built by filtering
+          // out null ids from workItemRefs, and itemsArray came from getWorkItems(ids).
           batch.map((item) => fetchComments(item.id!, project, connection))
         );
         commentsArray.push(...batchResults);
@@ -330,7 +334,8 @@ export const datasource: Datasource = {
       { op: "add", path: "/fields/System.Title", value: title },
       { op: "add", path: "/fields/System.Description", value: body },
     ];
-    // customHeaders is the first arg (pass null), document second, id third
+    // The azure-devops-node-api SDK's updateWorkItem signature requires a `customHeaders`
+    // first argument; passing null is the documented way to omit it (no typed alternative).
     await witApi.updateWorkItem(null as any, document as JsonPatchDocument, Number(issueId));
   },
 
@@ -354,6 +359,7 @@ export const datasource: Datasource = {
     const document = [
       { op: "add", path: "/fields/System.State", value: state },
     ];
+    // null as any: SDK customHeaders param — passing null is the documented way to omit it.
     await witApi.updateWorkItem(null as any, document as JsonPatchDocument, Number(issueId));
   },
 
@@ -380,6 +386,7 @@ export const datasource: Datasource = {
     ];
 
     const item = await witApi.createWorkItem(
+      // null as any: SDK customHeaders param — passing null is the documented way to omit it.
       null as any,
       document as JsonPatchDocument,
       project,

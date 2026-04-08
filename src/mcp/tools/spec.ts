@@ -9,9 +9,8 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { runSpecPipeline } from "../../orchestrator/spec-pipeline.js";
 import { createSpecRun, finishSpecRun, listSpecRuns, getSpecRun, emitLog } from "../state/manager.js";
 import type { SpecStatus } from "../state/database.js";
-
-const PROVIDER_NAMES = ["opencode", "copilot", "claude", "codex"] as const;
-const DATASOURCE_NAMES = ["github", "azdevops", "md"] as const;
+import { PROVIDER_NAMES } from "../../providers/interface.js";
+import { DATASOURCE_NAMES } from "../../datasources/interface.js";
 
 export function registerSpecTools(server: McpServer, cwd: string): void {
   // ── spec_generate ─────────────────────────────────────────────

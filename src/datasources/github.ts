@@ -14,6 +14,7 @@ import { log } from "../helpers/logger.js";
 import { InvalidBranchNameError, isValidBranchName } from "../helpers/branch-validation.js";
 import { getGithubOctokit } from "../helpers/auth.js";
 import { getGitRemoteUrl, parseGitHubRemoteUrl } from "./index.js";
+import { RequestError } from "@octokit/request-error";
 
 export { InvalidBranchNameError } from "../helpers/branch-validation.js";
 
@@ -352,11 +353,7 @@ export const datasource: Datasource = {
       // If a PR already exists for this branch, retrieve its URL.
       // Octokit throws a RequestError with status 422 for validation
       // failures, including "A pull request already exists".
-      const isValidationError =
-        typeof err === "object" &&
-        err !== null &&
-        "status" in err &&
-        (err as { status: number }).status === 422;
+      const isValidationError = err instanceof RequestError && err.status === 422;
 
       if (isValidationError) {
         const { data: prs } = await octokit.rest.pulls.list({

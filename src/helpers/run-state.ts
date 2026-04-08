@@ -22,23 +22,14 @@ import type { Task } from "../parser.js";
 
 // ── Public types (unchanged) ──────────────────────────────────
 
-export interface RunStateTask {
-  id: string;
-  status: "pending" | "running" | "success" | "failed";
-  branch?: string;
-}
-
-export interface RunState {
-  runId: string;
-  preRunSha: string;
-  tasks: RunStateTask[];
-}
-
 // ── Zod schema for RunState (used at JSON parse boundaries) ───
+
+/** Reused by both the schema and the SQLite row parser below. */
+const RunStateTaskStatusSchema = z.enum(["pending", "running", "success", "failed"]);
 
 const RunStateTaskSchema = z.object({
   id: z.string(),
-  status: z.enum(["pending", "running", "success", "failed"]),
+  status: RunStateTaskStatusSchema,
   branch: z.string().optional(),
 });
 
@@ -47,6 +38,12 @@ const RunStateSchema = z.object({
   preRunSha: z.string(),
   tasks: z.array(RunStateTaskSchema),
 });
+
+/** Derives from Zod schema — single source of truth for the shape. */
+export type RunStateTask = z.infer<typeof RunStateTaskSchema>;
+
+/** Derives from Zod schema — single source of truth for the shape. */
+export type RunState = z.infer<typeof RunStateSchema>;
 
 // ── SQLite helpers (lazy-loaded to avoid circular deps at module init) ──
 
@@ -108,13 +105,14 @@ export async function loadRunState(cwd: string): Promise<RunState | null> {
   await migrateFromJson(cwd);
 
   const db = await getDb(cwd);
-  // Load the most-recently updated run
+  // SQLite returns plain objects; shape matches the table schema defined above
   const row = db.prepare(
     "SELECT run_id, pre_run_sha FROM run_state ORDER BY updated_at DESC LIMIT 1"
   ).get() as { run_id: string; pre_run_sha: string } | undefined;
 
   if (!row) return null;
 
+  // SQLite returns plain objects; shape matches the run_state_tasks schema above
   const taskRows = db.prepare(
     "SELECT task_id, status, branch FROM run_state_tasks WHERE run_id = ?"
   ).all(row.run_id) as { task_id: string; status: string; branch: string | null }[];
@@ -123,7 +121,8 @@ export async function loadRunState(cwd: string): Promise<RunState | null> {
     runId: row.run_id,
     preRunSha: row.pre_run_sha,
     tasks: taskRows.map((t) => {
-      const statusResult = z.enum(["pending", "running", "success", "failed"]).safeParse(t.status);
+      // Validate the status column value against the known enum at runtime
+      const statusResult = RunStateTaskStatusSchema.safeParse(t.status);
       return {
         id: t.task_id,
         status: statusResult.success ? statusResult.data : "pending" as const,

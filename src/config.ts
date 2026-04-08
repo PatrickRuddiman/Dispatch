@@ -192,9 +192,10 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
       return null;
     }
 
-    default:
-      return `Unknown config key "${key}"`;
-  }
+    default: {
+      const _exhaustive: never = key;
+      return `Unknown config key "${_exhaustive}"`;
+    }  }
 }
 
 /**

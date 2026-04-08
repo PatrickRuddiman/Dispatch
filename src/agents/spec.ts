@@ -234,11 +234,9 @@ export async function boot(opts: AgentBootOptions): Promise<SpecAgent> {
 
         fileLoggerStorage.getStore()?.agentEvent("spec", "completed", `${Date.now() - startTime}ms`);
         return {
-          data: {
-            content: cleanedContent,
-            valid: validation.valid,
-            validationReason: validation.reason,
-          },
+          data: validation.valid
+            ? { content: cleanedContent, valid: true }
+            : { content: cleanedContent, valid: false, validationReason: validation.reason },
           success: true,
           durationMs: Date.now() - startTime,
         };
