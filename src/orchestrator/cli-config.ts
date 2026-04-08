@@ -27,6 +27,7 @@ const CONFIG_TO_CLI: Record<ConfigKey, keyof RawCliArgs> = {
   model: "model",
   fastProvider: "fastProvider",
   fastModel: "fastModel",
+  agents: "agents",
   source: "issueSource",
   testTimeout: "testTimeout",
   planTimeout: "planTimeout",

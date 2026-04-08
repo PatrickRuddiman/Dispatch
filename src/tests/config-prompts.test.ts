@@ -75,7 +75,7 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("github");
     vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(false) // per-agent overrides — decline
       .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(saveConfig).toHaveBeenCalledWith(
@@ -96,7 +96,7 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("model-a")   // model
       .mockResolvedValueOnce("github");   // datasource
     vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(false) // per-agent overrides — decline
       .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(saveConfig).toHaveBeenCalledWith(
@@ -117,7 +117,7 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("")          // model — "default (provider decides)"
       .mockResolvedValueOnce("github");   // datasource
     vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(false) // per-agent overrides — decline
       .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     const savedConfig = vi.mocked(saveConfig).mock.calls[0][0];
@@ -143,7 +143,7 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("github");
     vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(false) // per-agent overrides — decline
       .mockResolvedValueOnce(false); // save — declined
     await runInteractiveConfigWizard();
     expect(saveConfig).not.toHaveBeenCalled();
@@ -156,7 +156,7 @@ describe("runInteractiveConfigWizard", () => {
     });
     vi.mocked(confirm)
       .mockResolvedValueOnce(true)  // reconfigure
-      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(false) // per-agent overrides — decline
       .mockResolvedValueOnce(true); // save
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
@@ -175,7 +175,7 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("github");
     vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(false) // per-agent overrides — decline
       .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(select).toHaveBeenCalledWith(
@@ -191,7 +191,7 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(loadConfig).mockResolvedValueOnce({ source: "azdevops" });
     vi.mocked(confirm)
       .mockResolvedValueOnce(true)  // reconfigure
-      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(false) // per-agent overrides — decline
       .mockResolvedValueOnce(true); // save
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
@@ -212,7 +212,7 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("md");
     vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(false) // per-agent overrides — decline
       .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(select).toHaveBeenCalledWith(
@@ -229,7 +229,7 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("auto");
     vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(false) // per-agent overrides — decline
       .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     const savedConfig = vi.mocked(saveConfig).mock.calls[0][0];
@@ -243,7 +243,7 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("github");
     vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(false) // per-agent overrides — decline
       .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     const datasourceCall = vi.mocked(select).mock.calls[1][0];
@@ -257,7 +257,7 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("github");
     vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(false) // per-agent overrides — decline
       .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     const providerCall = vi.mocked(select).mock.calls[0][0];
@@ -280,7 +280,7 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("@CurrentIteration")             // iteration
       .mockResolvedValueOnce("MyProject\\Team A");            // area
     vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(false) // per-agent overrides — decline
       .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(saveConfig).toHaveBeenCalledWith(
@@ -309,7 +309,7 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("")   // iteration — skip
       .mockResolvedValueOnce("");  // area — skip
     vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(false) // per-agent overrides — decline
       .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     const savedConfig = vi.mocked(saveConfig).mock.calls[0][0];
@@ -337,7 +337,7 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("")                               // iteration — skip
       .mockResolvedValueOnce("");                              // area — skip
     vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(false) // per-agent overrides — decline
       .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     // Verify input was called with defaults from git remote
@@ -361,7 +361,7 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("github");
     vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(false) // per-agent overrides — decline
       .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(input).not.toHaveBeenCalled();
@@ -379,7 +379,7 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("github");
     vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(false) // per-agent overrides — decline
       .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     const providerCall = vi.mocked(select).mock.calls[0][0];
@@ -404,7 +404,7 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("copilot")   // provider
       .mockResolvedValueOnce("github");   // datasource
     vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(false) // per-agent overrides — decline
       .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(ensureAuthReady).toHaveBeenCalledWith("github", process.cwd(), undefined);
@@ -422,7 +422,7 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("")                               // iteration
       .mockResolvedValueOnce("");                              // area
     vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(false) // per-agent overrides — decline
       .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(ensureAuthReady).toHaveBeenCalledWith("azdevops", process.cwd(), "https://dev.azure.com/myorg");
@@ -434,7 +434,7 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("md");
     vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(false) // per-agent overrides — decline
       .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(ensureAuthReady).toHaveBeenCalledWith("md", process.cwd(), undefined);
@@ -447,7 +447,7 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("github");
     vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(false) // per-agent overrides — decline
       .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(saveConfig).toHaveBeenCalledWith(
@@ -463,7 +463,7 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("auto");    // auto selected, but detected as github
     vi.mocked(confirm)
-      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(false) // per-agent overrides — decline
       .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(ensureAuthReady).toHaveBeenCalledWith("github", process.cwd(), undefined);
