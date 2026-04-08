@@ -2,17 +2,23 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ─── Hoisted mock references ────────────────────────────────────────
 
-const { mockCreateSession, mockSession } = vi.hoisted(() => {
+const { mockQuery, mockQueryFn, mockCreateSession, mockSession } = vi.hoisted(() => {
+  const mockQuery = {
+    supportedModels: vi.fn().mockResolvedValue([]),
+    close: vi.fn(),
+  };
+
+  const mockQueryFn = vi.fn().mockReturnValue(mockQuery);
+
   const mockSession = {
     send: vi.fn().mockResolvedValue(undefined),
     stream: vi.fn().mockReturnValue((async function* () {})()),
     close: vi.fn(),
-    supportedModels: vi.fn().mockResolvedValue([]),
   };
 
   const mockCreateSession = vi.fn().mockReturnValue(mockSession);
 
-  return { mockCreateSession, mockSession };
+  return { mockQuery, mockQueryFn, mockCreateSession, mockSession };
 });
 
 const { mockRandomUUID } = vi.hoisted(() => {
@@ -27,6 +33,7 @@ vi.mock("node:crypto", () => ({
 }));
 
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
+  query: mockQueryFn,
   unstable_v2_createSession: mockCreateSession,
 }));
 
@@ -49,18 +56,20 @@ import { randomUUID } from "node:crypto";
 beforeEach(() => {
   vi.clearAllMocks();
   mockRandomUUID.mockReturnValue("test-uuid-1234");
+  mockQueryFn.mockReturnValue(mockQuery);
+  mockQuery.supportedModels.mockResolvedValue([]);
+  mockQuery.close.mockReturnValue(undefined);
   mockCreateSession.mockReturnValue(mockSession);
   mockSession.send.mockResolvedValue(undefined);
   mockSession.stream.mockReturnValue((async function* () {})());
   mockSession.close.mockReturnValue(undefined);
-  mockSession.supportedModels.mockResolvedValue([]);
 });
 
 // ─── Tests ──────────────────────────────────────────────────────────
 
 describe("listModels", () => {
   it("returns sorted model values from supportedModels()", async () => {
-    mockSession.supportedModels.mockResolvedValue([
+    mockQuery.supportedModels.mockResolvedValue([
       { value: "claude-sonnet-4", displayName: "Sonnet 4", description: "" },
       { value: "claude-haiku-3-5", displayName: "Haiku 3.5", description: "" },
       { value: "claude-opus-4-6", displayName: "Opus 4.6", description: "" },
@@ -68,14 +77,14 @@ describe("listModels", () => {
 
     const models = await listModels();
     expect(models).toEqual(["claude-haiku-3-5", "claude-opus-4-6", "claude-sonnet-4"]);
-    expect(mockSession.close).toHaveBeenCalled();
+    expect(mockQuery.close).toHaveBeenCalled();
   });
 
-  it("closes the session even when supportedModels() throws", async () => {
-    mockSession.supportedModels.mockRejectedValue(new Error("fetch fail"));
+  it("closes the query even when supportedModels() throws", async () => {
+    mockQuery.supportedModels.mockRejectedValue(new Error("fetch fail"));
 
     const models = await listModels();
-    expect(mockSession.close).toHaveBeenCalled();
+    expect(mockQuery.close).toHaveBeenCalled();
     // Falls back to hardcoded list
     expect(models).toEqual([
       "claude-haiku-3-5",
@@ -85,9 +94,9 @@ describe("listModels", () => {
     ]);
   });
 
-  it("falls back to hardcoded list when session creation fails", async () => {
-    mockCreateSession.mockImplementation(() => {
-      throw new Error("session fail");
+  it("falls back to hardcoded list when query() throws", async () => {
+    mockQueryFn.mockImplementation(() => {
+      throw new Error("query fail");
     });
 
     const models = await listModels();
