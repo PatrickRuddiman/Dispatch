@@ -29,13 +29,13 @@ export async function startMcpServer(opts: McpServerOptions): Promise<void> {
     console.log(`\nReceived ${signal}, shutting down MCP server...`);
     try {
       await handle.close();
-    } catch {
-      // ignore errors during shutdown
+    } catch (err) {
+      console.error("[dispatch-mcp] Error during server close:", err);
     }
     try {
       closeDatabase();
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error("[dispatch-mcp] Error closing database:", err);
     }
     process.exit(0);
   }

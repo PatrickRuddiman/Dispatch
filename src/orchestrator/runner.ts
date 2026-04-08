@@ -21,15 +21,12 @@ import { runSpecPipeline } from "./spec-pipeline.js";
 import { runDispatchPipeline } from "./dispatch-pipeline.js";
 
 /** Progress event emitted by the dispatch pipeline for MCP monitoring. */
-export interface DispatchProgressEvent {
-  runId?: string;
-  type: "task_start" | "task_done" | "task_failed" | "phase_change" | "log";
-  taskId?: string;
-  taskText?: string;
-  phase?: string;
-  message?: string;
-  error?: string;
-}
+export type DispatchProgressEvent =
+  | { type: "task_start"; runId?: string; taskId: string; taskText: string; phase?: string }
+  | { type: "task_done";  runId?: string; taskId: string; taskText: string }
+  | { type: "task_failed"; runId?: string; taskId: string; taskText: string; error: string }
+  | { type: "phase_change"; runId?: string; phase: string; message?: string }
+  | { type: "log"; runId?: string; message: string };
 
 /** Runtime options passed to `orchestrate()`. */
 export interface OrchestrateRunOptions {

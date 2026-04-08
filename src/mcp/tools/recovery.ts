@@ -12,6 +12,10 @@ import { boot as bootOrchestrator } from "../../orchestrator/runner.js";
 import { loadConfig } from "../../config.js";
 import { join } from "node:path";
 
+const issueIdsSchema = z.array(z.string());
+
+const PROVIDER_NAMES = ["opencode", "copilot", "claude", "codex"] as const;
+
 export function registerRecoveryTools(server: McpServer, cwd: string): void {
   // ── run_retry ─────────────────────────────────────────────────
   server.tool(
@@ -19,7 +23,7 @@ export function registerRecoveryTools(server: McpServer, cwd: string): void {
     "Re-run all failed tasks from a previous dispatch run. Returns a new runId.",
     {
       runId: z.string().describe("The original runId to retry failed tasks from"),
-      provider: z.string().optional().describe("Agent provider (default: from config)"),
+      provider: z.enum(PROVIDER_NAMES).optional().describe("Agent provider (default: from config)"),
       concurrency: z.number().int().min(1).max(32).optional(),
     },
     async (args) => {
@@ -41,10 +45,10 @@ export function registerRecoveryTools(server: McpServer, cwd: string): void {
       }
 
       const config = await loadConfig(join(cwd, ".dispatch"));
-      const issueIds = JSON.parse(originalRun.issueIds) as string[];
+      const issueIds = issueIdsSchema.parse(JSON.parse(originalRun.issueIds));
       const newRunId = createRun({ cwd, issueIds });
 
-      setImmediate(async () => {
+      setImmediate(() => { void (async () => {
         try {
           const orchestrator = await bootOrchestrator({ cwd });
           emitLog(newRunId, `Retrying ${failedTasks.length} failed task(s) from run ${args.runId}`);
@@ -52,20 +56,34 @@ export function registerRecoveryTools(server: McpServer, cwd: string): void {
           const result = await orchestrator.orchestrate({
             issueIds,
             dryRun: false,
-            provider: (args.provider as any) ?? config.provider ?? "opencode",
-            source: config.source as any,
+            provider: args.provider ?? config.provider ?? "opencode",
+            source: config.source,
             concurrency: args.concurrency ?? config.concurrency ?? 1,
             force: true, // re-run even previously completed tasks? No — force just skips run-state check
             progressCallback: (event) => {
-              if (event.type === "task_start") {
-                emitLog(newRunId, `Task started: ${event.taskText}`);
-                if (event.taskId) updateTaskStatus(newRunId, event.taskId, "running");
-              } else if (event.type === "task_done") {
-                emitLog(newRunId, `Task done: ${event.taskText}`);
-                if (event.taskId) updateTaskStatus(newRunId, event.taskId, "success");
-              } else if (event.type === "task_failed") {
-                emitLog(newRunId, `Task failed: ${event.taskText} — ${event.error}`, "error");
-                if (event.taskId) updateTaskStatus(newRunId, event.taskId, "failed", { error: event.error });
+              switch (event.type) {
+                case "task_start":
+                  emitLog(newRunId, `Task started: ${event.taskText}`);
+                  updateTaskStatus(newRunId, event.taskId, "running");
+                  break;
+                case "task_done":
+                  emitLog(newRunId, `Task done: ${event.taskText}`);
+                  updateTaskStatus(newRunId, event.taskId, "success");
+                  break;
+                case "task_failed":
+                  emitLog(newRunId, `Task failed: ${event.taskText} — ${event.error}`, "error");
+                  updateTaskStatus(newRunId, event.taskId, "failed", { error: event.error });
+                  break;
+                case "phase_change":
+                  emitLog(newRunId, event.message ?? `Phase: ${event.phase}`);
+                  break;
+                case "log":
+                  emitLog(newRunId, event.message);
+                  break;
+                default: {
+                  const _exhaustive: never = event;
+                  void _exhaustive;
+                }
               }
             },
           });
@@ -78,7 +96,7 @@ export function registerRecoveryTools(server: McpServer, cwd: string): void {
           finishRun(newRunId, "failed", msg);
           emitLog(newRunId, `Retry error: ${msg}`, "error");
         }
-      });
+      })(); });
 
       return {
         content: [{ type: "text", text: JSON.stringify({ runId: newRunId, status: "running", originalRunId: args.runId }) }],
@@ -93,7 +111,7 @@ export function registerRecoveryTools(server: McpServer, cwd: string): void {
     {
       runId: z.string().describe("The original runId"),
       taskId: z.string().describe("The taskId to retry (from status_get)"),
-      provider: z.string().optional(),
+      provider: z.enum(PROVIDER_NAMES).optional(),
     },
     async (args) => {
       const originalRun = getRun(args.runId);
@@ -114,10 +132,10 @@ export function registerRecoveryTools(server: McpServer, cwd: string): void {
       }
 
       const config = await loadConfig(join(cwd, ".dispatch"));
-      const issueIds = JSON.parse(originalRun.issueIds) as string[];
+      const issueIds = issueIdsSchema.parse(JSON.parse(originalRun.issueIds));
       const newRunId = createRun({ cwd, issueIds });
 
-      setImmediate(async () => {
+      setImmediate(() => { void (async () => {
         try {
           const orchestrator = await bootOrchestrator({ cwd });
           emitLog(newRunId, `Retrying task: ${task.taskText}`);
@@ -125,17 +143,31 @@ export function registerRecoveryTools(server: McpServer, cwd: string): void {
           const result = await orchestrator.orchestrate({
             issueIds,
             dryRun: false,
-            provider: (args.provider as any) ?? config.provider ?? "opencode",
-            source: config.source as any,
+            provider: args.provider ?? config.provider ?? "opencode",
+            source: config.source,
             concurrency: 1,
             force: true,
             progressCallback: (event) => {
-              if (event.type === "task_start") {
-                emitLog(newRunId, `Task started: ${event.taskText}`);
-              } else if (event.type === "task_done") {
-                emitLog(newRunId, `Task done: ${event.taskText}`);
-              } else if (event.type === "task_failed") {
-                emitLog(newRunId, `Task failed: ${event.taskText} — ${event.error}`, "error");
+              switch (event.type) {
+                case "task_start":
+                  emitLog(newRunId, `Task started: ${event.taskText}`);
+                  break;
+                case "task_done":
+                  emitLog(newRunId, `Task done: ${event.taskText}`);
+                  break;
+                case "task_failed":
+                  emitLog(newRunId, `Task failed: ${event.taskText} — ${event.error}`, "error");
+                  break;
+                case "phase_change":
+                  emitLog(newRunId, event.message ?? `Phase: ${event.phase}`);
+                  break;
+                case "log":
+                  emitLog(newRunId, event.message);
+                  break;
+                default: {
+                  const _exhaustive: never = event;
+                  void _exhaustive;
+                }
               }
             },
           });
@@ -148,7 +180,7 @@ export function registerRecoveryTools(server: McpServer, cwd: string): void {
           finishRun(newRunId, "failed", msg);
           emitLog(newRunId, `Task retry error: ${msg}`, "error");
         }
-      });
+      })(); });
 
       return {
         content: [{ type: "text", text: JSON.stringify({ runId: newRunId, status: "running", taskId: args.taskId }) }],

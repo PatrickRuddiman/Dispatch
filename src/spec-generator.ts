@@ -48,14 +48,11 @@ export const RECOGNIZED_H2 = new Set([
 ]);
 
 /** Progress event emitted by the spec pipeline for MCP monitoring. */
-export interface SpecProgressEvent {
-  runId?: string;
-  type: "item_start" | "item_done" | "item_failed" | "log";
-  itemId?: string;
-  itemTitle?: string;
-  message?: string;
-  error?: string;
-}
+export type SpecProgressEvent =
+  | { type: "item_start";  runId?: string; itemId: string; itemTitle?: string }
+  | { type: "item_done";   runId?: string; itemId: string; itemTitle?: string }
+  | { type: "item_failed"; runId?: string; itemId: string; itemTitle?: string; error: string }
+  | { type: "log";         runId?: string; message: string };
 
 export interface SpecOptions {
   /** Comma-separated issue numbers, glob pattern(s), or "list" to use datasource.list() */

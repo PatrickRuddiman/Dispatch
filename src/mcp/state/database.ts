@@ -16,9 +16,13 @@ import { mkdirSync } from "node:fs";
 
 // ── Record types ──────────────────────────────────────────────
 
-export type RunStatus = "running" | "completed" | "failed" | "cancelled";
-export type TaskStatus = "pending" | "running" | "success" | "failed" | "skipped";
-export type SpecStatus = "running" | "completed" | "failed";
+export const RUN_STATUSES = ["running", "completed", "failed", "cancelled"] as const;
+export const TASK_STATUSES = ["pending", "running", "success", "failed", "skipped"] as const;
+export const SPEC_STATUSES = ["running", "completed", "failed"] as const;
+
+export type RunStatus = typeof RUN_STATUSES[number];
+export type TaskStatus = typeof TASK_STATUSES[number];
+export type SpecStatus = typeof SPEC_STATUSES[number];
 
 export interface RunRecord {
   runId: string;

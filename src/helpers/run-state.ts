@@ -17,6 +17,7 @@
 
 import { readFile, mkdir } from "node:fs/promises";
 import { join, basename } from "node:path";
+import { z } from "zod";
 import type { Task } from "../parser.js";
 
 // ── Public types (unchanged) ──────────────────────────────────
@@ -32,6 +33,20 @@ export interface RunState {
   preRunSha: string;
   tasks: RunStateTask[];
 }
+
+// ── Zod schema for RunState (used at JSON parse boundaries) ───
+
+const RunStateTaskSchema = z.object({
+  id: z.string(),
+  status: z.enum(["pending", "running", "success", "failed"]),
+  branch: z.string().optional(),
+});
+
+const RunStateSchema = z.object({
+  runId: z.string(),
+  preRunSha: z.string(),
+  tasks: z.array(RunStateTaskSchema),
+});
 
 // ── SQLite helpers (lazy-loaded to avoid circular deps at module init) ──
 
@@ -72,7 +87,9 @@ async function migrateFromJson(cwd: string): Promise<void> {
   const jsonPath = join(cwd, ".dispatch", "run-state.json");
   try {
     const raw = await readFile(jsonPath, "utf-8");
-    const state = JSON.parse(raw) as RunState;
+    const parsed = RunStateSchema.safeParse(JSON.parse(raw));
+    if (!parsed.success) return; // malformed JSON file — skip migration
+    const state = parsed.data;
     // Only import if there's no existing record in the DB
     const db = await getDb(cwd);
     const existing = db.prepare("SELECT run_id FROM run_state WHERE run_id = ?").get(state.runId);
@@ -105,11 +122,14 @@ export async function loadRunState(cwd: string): Promise<RunState | null> {
   return {
     runId: row.run_id,
     preRunSha: row.pre_run_sha,
-    tasks: taskRows.map((t) => ({
-      id: t.task_id,
-      status: t.status as RunStateTask["status"],
-      branch: t.branch ?? undefined,
-    })),
+    tasks: taskRows.map((t) => {
+      const statusResult = z.enum(["pending", "running", "success", "failed"]).safeParse(t.status);
+      return {
+        id: t.task_id,
+        status: statusResult.success ? statusResult.data : "pending" as const,
+        branch: t.branch ?? undefined,
+      };
+    }),
   };
 }
 

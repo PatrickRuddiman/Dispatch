@@ -50,7 +50,6 @@ interface ResolvedItem {
 interface ValidItem {
   id: string;
   details: IssueDetails;
-  error?: string;
 }
 
 /** Result of the datasource resolution stage. */

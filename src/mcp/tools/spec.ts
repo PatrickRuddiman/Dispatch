@@ -3,12 +3,15 @@
  */
 
 import { z } from "zod";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { readdir, readFile } from "node:fs/promises";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { runSpecPipeline } from "../../orchestrator/spec-pipeline.js";
 import { createSpecRun, finishSpecRun, listSpecRuns, getSpecRun, emitLog } from "../state/manager.js";
 import type { SpecStatus } from "../state/database.js";
+
+const PROVIDER_NAMES = ["opencode", "copilot", "claude", "codex"] as const;
+const DATASOURCE_NAMES = ["github", "azdevops", "md"] as const;
 
 export function registerSpecTools(server: McpServer, cwd: string): void {
   // ── spec_generate ─────────────────────────────────────────────
@@ -19,8 +22,8 @@ export function registerSpecTools(server: McpServer, cwd: string): void {
       issues: z.string().describe(
         "Comma-separated issue IDs (e.g. '42,43'), a glob pattern (e.g. 'drafts/*.md'), or an inline description."
       ),
-      provider: z.string().optional().describe("Agent provider name (default: opencode)"),
-      source: z.string().optional().describe("Issue datasource: github, azdevops, md"),
+      provider: z.enum(PROVIDER_NAMES).optional().describe("Agent provider name (default: opencode)"),
+      source: z.enum(DATASOURCE_NAMES).optional().describe("Issue datasource: github, azdevops, md"),
       concurrency: z.number().int().min(1).max(32).optional().describe("Max parallel spec generations"),
       dryRun: z.boolean().optional().describe("Preview without generating"),
     },
@@ -28,23 +31,34 @@ export function registerSpecTools(server: McpServer, cwd: string): void {
       const runId = createSpecRun({ cwd, issues: args.issues });
 
       // Fire-and-forget — tools return runId immediately
-      setImmediate(async () => {
+      setImmediate(() => { void (async () => {
         try {
           emitLog(runId, `Starting spec generation for: ${args.issues}`);
           const result = await runSpecPipeline({
             issues: args.issues,
-            provider: (args.provider as any) ?? "opencode",
-            issueSource: args.source as any,
+            provider: args.provider ?? "opencode",
+            issueSource: args.source,
             concurrency: args.concurrency,
             dryRun: args.dryRun,
             cwd,
             progressCallback: (event) => {
-              if (event.type === "item_start") {
-                emitLog(runId, `Generating spec for: ${event.itemTitle ?? event.itemId}`);
-              } else if (event.type === "item_done") {
-                emitLog(runId, `Spec done: ${event.itemTitle ?? event.itemId}`);
-              } else if (event.type === "item_failed") {
-                emitLog(runId, `Spec failed: ${event.itemTitle ?? event.itemId} — ${event.error}`, "error");
+              switch (event.type) {
+                case "item_start":
+                  emitLog(runId, `Generating spec for: ${event.itemTitle ?? event.itemId}`);
+                  break;
+                case "item_done":
+                  emitLog(runId, `Spec done: ${event.itemTitle ?? event.itemId}`);
+                  break;
+                case "item_failed":
+                  emitLog(runId, `Spec failed: ${event.itemTitle ?? event.itemId} — ${event.error}`, "error");
+                  break;
+                case "log":
+                  emitLog(runId, event.message);
+                  break;
+                default: {
+                  const _exhaustive: never = event;
+                  void _exhaustive;
+                }
               }
             },
           });
@@ -59,7 +73,7 @@ export function registerSpecTools(server: McpServer, cwd: string): void {
           finishSpecRun(runId, "failed", { total: 0, generated: 0, failed: 0 }, msg);
           emitLog(runId, `Spec generation error: ${msg}`, "error");
         }
-      });
+      })(); });
 
       return {
         content: [{ type: "text", text: JSON.stringify({ runId, status: "running" }) }],
@@ -95,17 +109,34 @@ export function registerSpecTools(server: McpServer, cwd: string): void {
       file: z.string().describe("Filename or full path of the spec file (e.g. '42-add-auth.md')"),
     },
     async (args) => {
-      const filePath = args.file.includes("/")
-        ? args.file
-        : join(cwd, ".dispatch", "specs", args.file);
+      const specsDir = resolve(cwd, ".dispatch", "specs");
+      // Resolve the candidate path — if the arg contains no path separators
+      // treat it as a bare filename inside specsDir, otherwise resolve it
+      // relative to specsDir (never as an absolute path from user input).
+      const candidatePath = args.file.includes("/") || args.file.includes("\\")
+        ? resolve(specsDir, args.file)
+        : join(specsDir, args.file);
+
+      // Bounds check: reject anything that escapes the specs directory
+      if (!candidatePath.startsWith(specsDir + "/") && candidatePath !== specsDir) {
+        return {
+          content: [{ type: "text", text: `Access denied: path must be inside the specs directory` }],
+          isError: true,
+        };
+      }
+
       try {
-        const content = await readFile(filePath, "utf-8");
+        const content = await readFile(candidatePath, "utf-8");
         return {
           content: [{ type: "text", text: content }],
         };
       } catch (err) {
+        const isNotFound = err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT";
+        const message = isNotFound
+          ? `File not found: ${candidatePath}`
+          : `Error reading ${candidatePath}: ${err instanceof Error ? err.message : String(err)}`;
         return {
-          content: [{ type: "text", text: `Error reading ${filePath}: ${err instanceof Error ? err.message : String(err)}` }],
+          content: [{ type: "text", text: message }],
           isError: true,
         };
       }

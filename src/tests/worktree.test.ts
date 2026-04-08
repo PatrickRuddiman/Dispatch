@@ -247,6 +247,43 @@ describe("createWorktree", () => {
       expect.stringContaining("existing branch"),
     );
   });
+
+  it("passes startPoint to git worktree add when provided", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: "" });
+
+    await createWorktree("/repo", "42-my-feature.md", "dispatch/42-my-feature", "origin/main");
+
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "git",
+      ["worktree", "add", join("/repo", ".dispatch", "worktrees", "issue-42"), "-b", "dispatch/42-my-feature", "origin/main"],
+      { cwd: "/repo", shell: SHELL },
+    );
+  });
+
+  it("prunes and retries when retry also hits 'already used by worktree'", async () => {
+    const worktreePath = join("/repo", ".dispatch", "worktrees", "issue-42");
+
+    mockExecFile
+      .mockRejectedValueOnce(new Error("fatal: a branch named 'x' already exists"))
+      .mockRejectedValueOnce(new Error("is already used by worktree"))
+      .mockResolvedValueOnce({ stdout: "" })  // prune
+      .mockResolvedValueOnce({ stdout: "" }); // final add
+
+    const result = await createWorktree("/repo", "42-my-feature.md", "dispatch/42-my-feature");
+
+    expect(result).toBe(worktreePath);
+    expect(mockExecFile).toHaveBeenCalledTimes(4);
+  });
+
+  it("throws when retry fails with non-worktree-conflict error", async () => {
+    mockExecFile
+      .mockRejectedValueOnce(new Error("fatal: a branch named 'x' already exists"))
+      .mockRejectedValueOnce(new Error("some unexpected error"));
+
+    await expect(
+      createWorktree("/repo", "42-my-feature.md", "dispatch/42-my-feature"),
+    ).rejects.toThrow("some unexpected error");
+  });
 });
 
 // ─── removeWorktree ────────────────────────────────────────────────────

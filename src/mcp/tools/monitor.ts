@@ -10,6 +10,8 @@ import { getRun, listRuns, getTasksForRun, listRunsByStatus } from "../state/man
 import { getDatasource } from "../../datasources/index.js";
 import { loadConfig } from "../../config.js";
 
+const DATASOURCE_NAMES = ["github", "azdevops", "md"] as const;
+
 export function registerMonitorTools(server: McpServer, cwd: string): void {
   // ── status_get ────────────────────────────────────────────────
   server.tool(
@@ -57,7 +59,7 @@ export function registerMonitorTools(server: McpServer, cwd: string): void {
     "issues_list",
     "List open issues from the configured datasource.",
     {
-      source: z.string().optional().describe("Issue datasource: github, azdevops, md (auto-detected if omitted)"),
+      source: z.enum(DATASOURCE_NAMES).optional().describe("Issue datasource: github, azdevops, md (auto-detected if omitted)"),
       org: z.string().optional().describe("Azure DevOps organization URL"),
       project: z.string().optional().describe("Azure DevOps project name"),
       workItemType: z.string().optional(),
@@ -67,7 +69,7 @@ export function registerMonitorTools(server: McpServer, cwd: string): void {
     async (args) => {
       try {
         const config = await loadConfig(join(cwd, ".dispatch"));
-        const sourceName = (args.source ?? config.source) as any;
+        const sourceName = args.source ?? config.source;
         if (!sourceName) {
           return {
             content: [{ type: "text", text: "No datasource configured. Pass source or run dispatch config." }],
@@ -107,14 +109,14 @@ export function registerMonitorTools(server: McpServer, cwd: string): void {
     "Fetch full details for one or more issues from the datasource.",
     {
       issueIds: z.array(z.string()).min(1).describe("Issue IDs to fetch"),
-      source: z.string().optional().describe("Issue datasource: github, azdevops, md"),
+      source: z.enum(DATASOURCE_NAMES).optional().describe("Issue datasource: github, azdevops, md"),
       org: z.string().optional(),
       project: z.string().optional(),
     },
     async (args) => {
       try {
         const config = await loadConfig(join(cwd, ".dispatch"));
-        const sourceName = (args.source ?? config.source) as any;
+        const sourceName = args.source ?? config.source;
         if (!sourceName) {
           return {
             content: [{ type: "text", text: "No datasource configured. Pass source or run dispatch config." }],

@@ -62,7 +62,8 @@ export async function createMcpServer(opts: {
     }
 
     if (req.url?.startsWith("/mcp")) {
-      const sessionId = req.headers["mcp-session-id"] as string | undefined;
+      const rawSessionId = req.headers["mcp-session-id"];
+      const sessionId = typeof rawSessionId === "string" ? rawSessionId : undefined;
 
       if (req.method === "POST") {
         // Initialisation request (no session yet) or existing session
@@ -168,10 +169,14 @@ export async function createMcpServer(opts: {
     close: async () => {
       // Close all active transports
       for (const transport of transports.values()) {
-        await transport.close().catch(() => {});
+        await transport.close().catch((err: unknown) => {
+          console.error("[dispatch-mcp] transport.close error:", err);
+        });
       }
       transports.clear();
-      await mcpServer.close().catch(() => {});
+      await mcpServer.close().catch((err: unknown) => {
+        console.error("[dispatch-mcp] mcpServer.close error:", err);
+      });
       await new Promise<void>((resolve) => httpServer.close(() => resolve()));
     },
   };
@@ -192,6 +197,8 @@ export function wireRunLogs(runId: string, server: McpServer): void {
       level: level === "error" ? "error" : level === "warn" ? "warning" : "info",
       logger: `dispatch.run.${runId}`,
       data: message,
-    }).catch(() => {});
+    }).catch((err: unknown) => {
+      console.error("[dispatch-mcp] sendLoggingMessage error:", err);
+    });
   });
 }

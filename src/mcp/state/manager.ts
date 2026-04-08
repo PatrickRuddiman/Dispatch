@@ -12,7 +12,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { getDb } from "./database.js";
+import { getDb, RUN_STATUSES, TASK_STATUSES, SPEC_STATUSES } from "./database.js";
 import type {
   RunRecord,
   TaskRecord,
@@ -59,11 +59,29 @@ export function emitLog(runId: string, message: string, level: "info" | "warn" |
     for (const cb of run.callbacks) {
       try {
         cb(message, level);
-      } catch {
-        // swallow — don't let notification errors crash the pipeline
+      } catch (err) {
+        // Don't let notification errors crash the pipeline; log at debug level
+        if (process.env["DEBUG"]) console.error("[dispatch-mcp] log callback error:", err);
       }
     }
   }
+}
+
+// ── Status field runtime validators ──────────────────────────
+
+function assertRunStatus(value: string): RunStatus {
+  if ((RUN_STATUSES as readonly string[]).includes(value)) return value as RunStatus;
+  throw new Error(`Invalid RunStatus from database: "${value}"`);
+}
+
+function assertTaskStatus(value: string): TaskStatus {
+  if ((TASK_STATUSES as readonly string[]).includes(value)) return value as TaskStatus;
+  throw new Error(`Invalid TaskStatus from database: "${value}"`);
+}
+
+function assertSpecStatus(value: string): SpecStatus {
+  if ((SPEC_STATUSES as readonly string[]).includes(value)) return value as SpecStatus;
+  throw new Error(`Invalid SpecStatus from database: "${value}"`);
 }
 
 // ── Row ↔ record mappers ──────────────────────────────────────
@@ -113,7 +131,7 @@ function rowToRun(row: RunRow): RunRecord {
     runId: row.run_id,
     cwd: row.cwd,
     issueIds: row.issue_ids,
-    status: row.status as RunStatus,
+    status: assertRunStatus(row.status),
     startedAt: row.started_at,
     finishedAt: row.finished_at,
     total: row.total,
@@ -131,7 +149,7 @@ function rowToTask(row: TaskRow): TaskRecord {
     taskText: row.task_text,
     file: row.file,
     line: row.line,
-    status: row.status as TaskStatus,
+    status: assertTaskStatus(row.status),
     branch: row.branch,
     error: row.error,
     startedAt: row.started_at,
@@ -144,7 +162,7 @@ function rowToSpecRun(row: SpecRunRow): SpecRunRecord {
     runId: row.run_id,
     cwd: row.cwd,
     issues: row.issues,
-    status: row.status as SpecStatus,
+    status: assertSpecStatus(row.status),
     startedAt: row.started_at,
     finishedAt: row.finished_at,
     total: row.total,

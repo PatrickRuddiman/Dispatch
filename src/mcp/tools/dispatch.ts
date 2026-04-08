@@ -8,6 +8,9 @@ import { boot as bootOrchestrator } from "../../orchestrator/runner.js";
 import { createRun, finishRun, updateRunCounters, createTask, updateTaskStatus, emitLog } from "../state/manager.js";
 import { buildTaskId } from "../../helpers/run-state.js";
 
+const PROVIDER_NAMES = ["opencode", "copilot", "claude", "codex"] as const;
+const DATASOURCE_NAMES = ["github", "azdevops", "md"] as const;
+
 export function registerDispatchTools(server: McpServer, cwd: string): void {
   // ── dispatch_run ──────────────────────────────────────────────
   server.tool(
@@ -15,8 +18,8 @@ export function registerDispatchTools(server: McpServer, cwd: string): void {
     "Execute dispatch pipeline for one or more issue IDs. Returns a runId immediately; progress is pushed via logging notifications.",
     {
       issueIds: z.array(z.string()).min(1).describe("Issue IDs to dispatch (e.g. ['42', '43'])"),
-      provider: z.string().optional().describe("Agent provider (default: opencode)"),
-      source: z.string().optional().describe("Issue datasource: github, azdevops, md"),
+      provider: z.enum(PROVIDER_NAMES).optional().describe("Agent provider (default: opencode)"),
+      source: z.enum(DATASOURCE_NAMES).optional().describe("Issue datasource: github, azdevops, md"),
       concurrency: z.number().int().min(1).max(32).optional().describe("Max parallel tasks"),
       noPlan: z.boolean().optional().describe("Skip the planner agent"),
       noBranch: z.boolean().optional().describe("Skip branch creation and PR lifecycle"),
@@ -26,7 +29,7 @@ export function registerDispatchTools(server: McpServer, cwd: string): void {
     async (args) => {
       const runId = createRun({ cwd, issueIds: args.issueIds });
 
-      setImmediate(async () => {
+      setImmediate(() => { void (async () => {
         try {
           const orchestrator = await bootOrchestrator({ cwd });
           emitLog(runId, `Starting dispatch for issues: ${args.issueIds.join(", ")}`);
@@ -34,33 +37,37 @@ export function registerDispatchTools(server: McpServer, cwd: string): void {
           const result = await orchestrator.orchestrate({
             issueIds: args.issueIds,
             dryRun: false,
-            provider: (args.provider as any) ?? "opencode",
-            source: args.source as any,
+            provider: args.provider ?? "opencode",
+            source: args.source,
             concurrency: args.concurrency ?? 1,
             noPlan: args.noPlan,
             noBranch: args.noBranch,
             noWorktree: args.noWorktree,
             retries: args.retries,
             progressCallback: (event) => {
-              if (event.type === "task_start") {
-                emitLog(runId, `Task started: ${event.taskText}`);
-                if (event.taskId) {
+              switch (event.type) {
+                case "task_start":
+                  emitLog(runId, `Task started: ${event.taskText}`);
                   updateTaskStatus(runId, event.taskId, "running");
-                }
-              } else if (event.type === "task_done") {
-                emitLog(runId, `Task done: ${event.taskText}`);
-                if (event.taskId) {
+                  break;
+                case "task_done":
+                  emitLog(runId, `Task done: ${event.taskText}`);
                   updateTaskStatus(runId, event.taskId, "success");
-                }
-              } else if (event.type === "task_failed") {
-                emitLog(runId, `Task failed: ${event.taskText} — ${event.error}`, "error");
-                if (event.taskId) {
+                  break;
+                case "task_failed":
+                  emitLog(runId, `Task failed: ${event.taskText} — ${event.error}`, "error");
                   updateTaskStatus(runId, event.taskId, "failed", { error: event.error });
+                  break;
+                case "phase_change":
+                  emitLog(runId, event.message ?? `Phase: ${event.phase}`);
+                  break;
+                case "log":
+                  emitLog(runId, event.message);
+                  break;
+                default: {
+                  const _exhaustive: never = event;
+                  void _exhaustive;
                 }
-              } else if (event.type === "phase_change") {
-                emitLog(runId, event.message ?? `Phase: ${event.phase}`);
-              } else if (event.type === "log") {
-                emitLog(runId, event.message ?? "");
               }
               updateRunCounters(
                 runId,
@@ -79,7 +86,7 @@ export function registerDispatchTools(server: McpServer, cwd: string): void {
           finishRun(runId, "failed", msg);
           emitLog(runId, `Dispatch error: ${msg}`, "error");
         }
-      });
+      })(); });
 
       return {
         content: [{ type: "text", text: JSON.stringify({ runId, status: "running" }) }],
@@ -93,7 +100,7 @@ export function registerDispatchTools(server: McpServer, cwd: string): void {
     "Preview tasks that would be dispatched for the given issue IDs without executing anything.",
     {
       issueIds: z.array(z.string()).min(1).describe("Issue IDs to preview"),
-      source: z.string().optional().describe("Issue datasource: github, azdevops, md"),
+      source: z.enum(DATASOURCE_NAMES).optional().describe("Issue datasource: github, azdevops, md"),
     },
     async (args) => {
       try {
@@ -101,7 +108,7 @@ export function registerDispatchTools(server: McpServer, cwd: string): void {
         const result = await orchestrator.orchestrate({
           issueIds: args.issueIds,
           dryRun: true,
-          source: args.source as any,
+          source: args.source,
         });
         return {
           content: [{ type: "text", text: JSON.stringify(result) }],
