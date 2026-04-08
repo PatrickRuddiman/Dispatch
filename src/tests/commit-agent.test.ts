@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { join } from "node:path";
 import type { ProviderInstance } from "../providers/interface.js";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
@@ -138,7 +139,7 @@ describe("generate — success", () => {
     });
     const agent = await boot({ cwd: "/tmp", provider });
     const result = await agent.generate({ branchDiff: "diff", issue: makeIssue(), taskResults: [], cwd: "/tmp" });
-    expect(mockMkdir).toHaveBeenCalledWith(expect.stringContaining(".dispatch/tmp"), { recursive: true });
+    expect(mockMkdir).toHaveBeenCalledWith(expect.stringContaining(join(".dispatch", "tmp")), { recursive: true });
     expect(mockWriteFile).toHaveBeenCalledOnce();
     expect(result.outputPath).toContain("aabbccdd");
   });

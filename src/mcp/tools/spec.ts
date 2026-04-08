@@ -3,7 +3,7 @@
  */
 
 import { z } from "zod";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { readdir, readFile } from "node:fs/promises";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { runSpecPipeline } from "../../orchestrator/spec-pipeline.js";
@@ -117,7 +117,7 @@ export function registerSpecTools(server: McpServer, cwd: string): void {
         : join(specsDir, args.file);
 
       // Bounds check: reject anything that escapes the specs directory
-      if (!candidatePath.startsWith(specsDir + "/") && candidatePath !== specsDir) {
+      if (!candidatePath.startsWith(specsDir + sep) && candidatePath !== specsDir) {
         return {
           content: [{ type: "text", text: `Access denied: path must be inside the specs directory` }],
           isError: true,
