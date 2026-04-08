@@ -296,3 +296,26 @@ describe("cleanup", () => {
     expect(mockSession.close).not.toHaveBeenCalled();
   });
 });
+
+describe("send", () => {
+  it("throws when session not found", async () => {
+    const instance = await boot();
+    await expect(instance.send!("unknown-id", "hello")).rejects.toThrow(
+      "Claude session unknown-id not found",
+    );
+  });
+
+  it("sends follow-up text to the session", async () => {
+    const instance = await boot();
+    const sessionId = await instance.createSession();
+    await instance.send!(sessionId, "follow-up text");
+    expect(mockSession.send).toHaveBeenCalledWith("follow-up text");
+  });
+
+  it("throws when session.send fails during send", async () => {
+    mockSession.send.mockRejectedValueOnce(new Error("send follow-up boom"));
+    const instance = await boot();
+    const sessionId = await instance.createSession();
+    await expect(instance.send!(sessionId, "text")).rejects.toThrow("send follow-up boom");
+  });
+});

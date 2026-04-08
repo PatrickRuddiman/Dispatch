@@ -21,7 +21,7 @@ import { formatEnvironmentPrompt } from "../helpers/environment.js";
 
 export interface FixTestsPipelineOptions {
   cwd: string;
-  provider: string;
+  provider: ProviderName;
   serverUrl?: string;
   verbose: boolean;
   dryRun?: boolean;
@@ -39,13 +39,18 @@ export interface TestRunResult {
 /*  Test runner utilities                                               */
 /* ------------------------------------------------------------------ */
 
+/** Minimal shape of package.json that we inspect. */
+interface PackageJson {
+  scripts?: Record<string, unknown>;
+}
+
 /** Detect the test command from package.json in the given directory. */
 export async function detectTestCommand(cwd: string): Promise<string | null> {
   try {
     const raw = await readFile(join(cwd, "package.json"), "utf-8");
-    let pkg: any;
+    let pkg: PackageJson;
     try {
-      pkg = JSON.parse(raw);
+      pkg = JSON.parse(raw) as PackageJson;
     } catch {
       log.debug(
         `Failed to parse package.json: ${raw.slice(0, 200)}`,
@@ -76,10 +81,11 @@ export function runTestCommand(
       cmd,
       args,
       { cwd, maxBuffer: 10 * 1024 * 1024, shell: process.platform === "win32" },
-      (error, stdout, stderr) => {
+        (error, stdout, stderr) => {
         const exitCode =
           error && "code" in error
-            ? ((error as { code?: number }).code ?? 1)
+            ? // execFile errors carry a numeric `code` property for non-zero exits
+              ((error as { code?: number }).code ?? 1)
             : error
               ? 1
               : 0;
@@ -175,7 +181,7 @@ export async function runFixTestsPipeline(
       );
 
       // Boot the provider
-      const provider = (opts.provider ?? "opencode") as ProviderName;
+      const provider = opts.provider ?? "opencode";
       const instance = await bootProvider(provider, { url: opts.serverUrl, cwd });
       registerCleanup(() => instance.cleanup());
 

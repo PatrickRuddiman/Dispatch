@@ -22,6 +22,14 @@ import { resolveCliConfig } from "./cli-config.js";
 import { runSpecPipeline } from "./spec-pipeline.js";
 import { runDispatchPipeline } from "./dispatch-pipeline.js";
 
+/** Progress event emitted by the dispatch pipeline for MCP monitoring. */
+export type DispatchProgressEvent =
+  | { type: "task_start"; runId?: string; taskId: string; taskText: string; phase?: string }
+  | { type: "task_done";  runId?: string; taskId: string; taskText: string }
+  | { type: "task_failed"; runId?: string; taskId: string; taskText: string; error: string }
+  | { type: "phase_change"; runId?: string; phase: string; message?: string }
+  | { type: "log"; runId?: string; message: string };
+
 /** Runtime options passed to `orchestrate()`. */
 export interface OrchestrateRunOptions {
   issueIds: string[];
@@ -53,6 +61,8 @@ export interface OrchestrateRunOptions {
   planRetries?: number;
   retries?: number;
   feature?: string | boolean;
+  /** Optional callback for MCP progress notifications. */
+  progressCallback?: (event: DispatchProgressEvent) => void;
 }
 
 /** Raw CLI arguments before config resolution. */
@@ -252,34 +262,42 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
     generateSpecs: (specOpts) => runSpecPipeline(specOpts),
 
     async run(opts: UnifiedRunOptions): Promise<RunResult> {
-      if (opts.mode === "spec") {
-        const { mode: _, ...rest } = opts;
-        return runner.generateSpecs({ ...rest, cwd });
-      }
-      if (opts.mode === "fix-tests") {
-        const { runFixTestsPipeline } = await import("./fix-tests-pipeline.js");
-
-        // No issue IDs — run in current cwd (existing behavior)
-        if (!opts.issueIds || opts.issueIds.length === 0) {
-          return runFixTestsPipeline({ cwd, provider: opts.provider ?? "opencode", serverUrl: opts.serverUrl, verbose: opts.verbose ?? false, testTimeout: opts.testTimeout });
+      switch (opts.mode) {
+        case "spec": {
+          const { mode: _, ...rest } = opts;
+          return runner.generateSpecs({ ...rest, cwd });
         }
+        case "fix-tests": {
+          const { runFixTestsPipeline } = await import("./fix-tests-pipeline.js");
 
-        // Multi-issue fix-tests via worktrees
-        const source = opts.source;
-        if (!source) {
-          log.error("No datasource configured for multi-issue fix-tests.");
-          return { mode: "fix-tests" as const, success: false, error: "No datasource configured" };
+          // No issue IDs — run in current cwd (existing behavior)
+          if (!opts.issueIds || opts.issueIds.length === 0) {
+            return runFixTestsPipeline({ cwd, provider: opts.provider ?? "opencode", serverUrl: opts.serverUrl, verbose: opts.verbose ?? false, testTimeout: opts.testTimeout });
+          }
+
+          // Multi-issue fix-tests via worktrees
+          const source = opts.source;
+          if (!source) {
+            log.error("No datasource configured for multi-issue fix-tests.");
+            return { mode: "fix-tests" as const, success: false, error: "No datasource configured" };
+          }
+
+          return runMultiIssueFixTests({
+            cwd, issueIds: opts.issueIds, source,
+            provider: opts.provider ?? "opencode", serverUrl: opts.serverUrl,
+            verbose: opts.verbose ?? false, testTimeout: opts.testTimeout,
+            org: opts.org, project: opts.project,
+          });
         }
-
-        return runMultiIssueFixTests({
-          cwd, issueIds: opts.issueIds, source,
-          provider: opts.provider ?? "opencode", serverUrl: opts.serverUrl,
-          verbose: opts.verbose ?? false, testTimeout: opts.testTimeout,
-          org: opts.org, project: opts.project,
-        });
+        case "dispatch": {
+          const { mode: _, ...rest } = opts;
+          return runner.orchestrate(rest);
+        }
+        default: {
+          const _exhaustive: never = opts;
+          throw new Error(`Unhandled run mode: ${JSON.stringify(_exhaustive)}`);
+        }
       }
-      const { mode: _, ...rest } = opts;
-      return runner.orchestrate(rest);
     },
 
     async runFromCli(args: RawCliArgs): Promise<RunResult> {
@@ -303,7 +321,7 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
         m.respec !== undefined && "--respec",
         m.fixTests && "--fix-tests",
         m.feature && "--feature",
-      ].filter(Boolean) as string[];
+      ].filter((f): f is string => typeof f === "string");
 
       if (modeFlags.length > 1) {
         log.error(`${modeFlags.join(" and ")} are mutually exclusive`);

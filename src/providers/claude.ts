@@ -140,8 +140,12 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
       log.debug("Cleaning up Claude provider...");
       for (const session of sessions.values()) {
         try {
-          session.close();
-        } catch {}
+          // session.close() may return a promise — await it so cleanup errors
+          // are surfaced in debug logs rather than becoming unhandled rejections.
+          await Promise.resolve(session.close());
+        } catch (err) {
+          log.debug(`Failed to close Claude session: ${log.formatErrorChain(err)}`);
+        }
       }
       sessions.clear();
     },

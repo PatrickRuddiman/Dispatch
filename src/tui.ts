@@ -89,6 +89,10 @@ function statusIcon(status: TaskStatus): string {
       return chalk.green("●");
     case "failed":
       return chalk.red("✖");
+    default: {
+      const _exhaustive: never = status;
+      return chalk.dim(_exhaustive);
+    }
   }
 }
 
@@ -110,6 +114,10 @@ function statusLabel(status: TaskStatus): string {
       return chalk.green("done");
     case "failed":
       return chalk.red("failed");
+    default: {
+      const _exhaustive: never = status;
+      return chalk.dim(_exhaustive);
+    }
   }
 }
 
@@ -129,6 +137,10 @@ function phaseLabel(phase: TuiState["phase"], provider?: string, mode: TuiState[
       return chalk.yellow("◐") + " Waiting for rerun...";
     case "done":
       return chalk.green("✔") + " Complete";
+    default: {
+      const _exhaustive: never = phase;
+      return chalk.dim(_exhaustive);
+    }
   }
 }
 
@@ -495,7 +507,8 @@ export function createTui(options?: {
 
       emitKeypressEvents(input);
       if (canToggleRawMode) {
-        ttyInput.setRawMode!(true);
+        // canToggleRawMode guards that setRawMode is a function — cast is safe
+        (ttyInput.setRawMode as (mode: boolean) => void)(true);
       }
 
       const finish = (action: RecoveryAction) => {
@@ -537,7 +550,8 @@ export function createTui(options?: {
       cleanupRecoveryPrompt = () => {
         input.off("keypress", onKeypress);
         if (canToggleRawMode) {
-          ttyInput.setRawMode!(wasRaw);
+          // canToggleRawMode guards that setRawMode is a function — cast is safe
+          (ttyInput.setRawMode as (mode: boolean) => void)(wasRaw);
         }
         cleanupRecoveryPrompt = null;
         activeRecoveryPromise = null;

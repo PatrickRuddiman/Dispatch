@@ -192,7 +192,7 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
     .option("--fast-model <model>", "Fast tier model (planner/commit)")
     .addOption(
       new Option("--source <name>", "Issue source").choices(
-        DATASOURCE_NAMES as string[],
+        [...DATASOURCE_NAMES],
       ),
     )
     .option(
@@ -385,6 +385,40 @@ async function main() {
     const configDir = join(configProgram.opts().cwd ?? process.cwd(), ".dispatch");
     await handleConfigCommand(rawArgv.slice(1), configDir);
     process.exit(0);
+  }
+
+  // ── MCP subcommand ─────────────────────────────────────────
+  if (rawArgv[0] === "mcp") {
+    const mcpProgram = new Command("dispatch-mcp")
+      .exitOverride()
+      .configureOutput({ writeOut: () => {}, writeErr: () => {} })
+      .helpOption(false)
+      .allowUnknownOption(true)
+      .allowExcessArguments(true)
+      .option("--port <number>", "Port to listen on", (v: string) => parseInt(v, 10), 9110)
+      .option("--host <host>", "Host to bind to", "127.0.0.1")
+      .option("--cwd <dir>", "Working directory", (v: string) => resolve(v));
+
+    try {
+      mcpProgram.parse(rawArgv.slice(1), { from: "user" });
+    } catch (err) {
+      if (err instanceof CommanderError) {
+        log.error(err.message);
+        process.exit(1);
+      }
+      throw err;
+    }
+
+    const mcpOpts = mcpProgram.opts<{ port: number; host: string; cwd?: string }>();
+    const { startMcpServer } = await import("./mcp/index.js");
+    await startMcpServer({
+      port: mcpOpts.port,
+      host: mcpOpts.host,
+      cwd: mcpOpts.cwd ?? process.cwd(),
+    });
+    // startMcpServer installs signal handlers and the http server keeps the
+    // event loop alive; we only reach here if something calls process.exit().
+    return;
   }
 
   const [args, explicitFlags] = parseArgs(rawArgv);

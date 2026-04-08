@@ -12,6 +12,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Datasource, DatasourceName } from "./interface.js";
+import { DATASOURCE_NAMES } from "./interface.js";
 import { datasource as githubDatasource } from "./github.js";
 import { datasource as azdevopsDatasource } from "./azdevops.js";
 import { datasource as mdDatasource } from "./md.js";
@@ -26,9 +27,9 @@ const DATASOURCES: Partial<Record<DatasourceName, Datasource>> = {
 };
 
 /**
- * All registered datasource names — useful for CLI help text and validation.
+ * All registered datasource names — re-exported from the canonical definition in interface.ts.
  */
-export const DATASOURCE_NAMES = Object.keys(DATASOURCES) as DatasourceName[];
+export { DATASOURCE_NAMES } from "./interface.js";
 
 /**
  * Get a datasource by name.

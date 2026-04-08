@@ -26,7 +26,7 @@ import { resolveAgentProviderConfig } from "../config.js";
 import { getDatasource } from "../datasources/index.js";
 import type { DatasourceName, DispatchLifecycleOptions, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
 import { ensureAuthReady, setAuthPromptHandler } from "../helpers/auth.js";
-import type { OrchestrateRunOptions, DispatchSummary } from "./runner.js";
+import type { OrchestrateRunOptions, DispatchSummary, DispatchProgressEvent } from "./runner.js";
 import {
   fetchItemsById,
   writeItemsToTempDir,
@@ -46,6 +46,7 @@ import { extractTitle } from "../datasources/md.js";
 import chalk from "chalk";
 import { elapsed, renderHeaderLines } from "../helpers/format.js";
 import { FileLogger, fileLoggerStorage } from "../helpers/file-logger.js";
+import { buildTaskId } from "../helpers/run-state.js";
 
 const exec = promisify(execFile);
 
@@ -121,6 +122,7 @@ export async function runDispatchPipeline(
     planRetries,
     retries,
     username: usernameOverride,
+    progressCallback,
   } = opts;
   let noBranch = noBranchOpt;
 
@@ -360,6 +362,7 @@ export async function runDispatchPipeline(
     // ── 5. Dispatch tasks ───────────────────────────────────────
     tui.state.phase = "dispatching";
     if (verbose) log.info(`Dispatching ${allTasks.length} task(s)...`);
+    progressCallback?.({ type: "phase_change", phase: "dispatching", message: `Dispatching ${allTasks.length} task(s)` });
     const results: DispatchResult[] = [];
     let halted = false;
 
@@ -568,6 +571,19 @@ export async function runDispatchPipeline(
           tuiTask.elapsed = startTime;
           tuiTask.error = undefined;
 
+          const emitProgress = (type: "task_start" | "task_done" | "task_failed", extra?: { phase?: string; error?: string }) => {
+            if (!progressCallback) return;
+            const taskId = buildTaskId(task);
+            const taskText = task.text;
+            if (type === "task_start") {
+              progressCallback({ type, taskId, taskText, phase: extra?.phase });
+            } else if (type === "task_done") {
+              progressCallback({ type, taskId, taskText });
+            } else {
+              progressCallback({ type, taskId, taskText, error: extra?.error ?? "unknown error" });
+            }
+          };
+
           if (localPlanner) {
             tuiTask.status = "planning";
             fileLogger?.phase(`Planning task: ${task.text}`);
@@ -630,6 +646,7 @@ export async function runDispatchPipeline(
           tuiTask.status = "running";
           fileLogger?.phase(`Executing task: ${task.text}`);
           if (verbose) log.info(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: executing — "${task.text}"`);
+           emitProgress("task_start", { phase: "executing" });
           const execResult = await withRetry(
             async () => {
               const result = await localExecutor.execute({
@@ -657,6 +674,7 @@ export async function runDispatchPipeline(
             fileLogger?.error(`Execution failed: ${error}`);
             tuiTask.elapsed = Date.now() - startTime;
             pauseTask(task, error);
+            emitProgress("task_failed", { error });
             if (verbose) log.error(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: paused — "${task.text}" (${elapsed(tuiTask.elapsed)})${error ? `: ${error}` : ""}`);
             return { kind: "paused", error };
           }
@@ -684,6 +702,7 @@ export async function runDispatchPipeline(
           tuiTask.status = "done";
           tuiTask.error = undefined;
           tuiTask.elapsed = Date.now() - startTime;
+          emitProgress("task_done");
           if (verbose) log.success(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: done — "${task.text}" (${elapsed(tuiTask.elapsed)})`);
           return { kind: "success", result: execResult.data.dispatchResult };
         };
