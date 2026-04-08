@@ -47,6 +47,16 @@ export const RECOGNIZED_H2 = new Set([
   "## Key Guidelines",
 ]);
 
+/** Progress event emitted by the spec pipeline for MCP monitoring. */
+export interface SpecProgressEvent {
+  runId?: string;
+  type: "item_start" | "item_done" | "item_failed" | "log";
+  itemId?: string;
+  itemTitle?: string;
+  message?: string;
+  error?: string;
+}
+
 export interface SpecOptions {
   /** Comma-separated issue numbers, glob pattern(s), or "list" to use datasource.list() */
   issues: string | string[];
@@ -84,6 +94,8 @@ export interface SpecOptions {
   specWarnTimeout?: number;
   /** Kill-phase timeout in minutes — hard termination after the warn phase expires (default: 10) */
   specKillTimeout?: number;
+  /** Optional callback for MCP progress notifications. */
+  progressCallback?: (event: SpecProgressEvent) => void;
 }
 
 /**

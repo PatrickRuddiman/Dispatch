@@ -10,7 +10,7 @@
 import { join } from "node:path";
 import { mkdir, readFile, rename, unlink } from "node:fs/promises";
 import { glob } from "glob";
-import type { SpecOptions, SpecSummary } from "../spec-generator.js";
+import type { SpecOptions, SpecSummary, SpecProgressEvent } from "../spec-generator.js";
 import { isIssueNumbers, isGlobOrFilePath, resolveSource, defaultConcurrency, DEFAULT_SPEC_WARN_MIN, DEFAULT_SPEC_KILL_MIN } from "../spec-generator.js";
 import type { IssueDetails, IssueFetchOptions, Datasource, DatasourceName } from "../datasources/interface.js";
 import { getDatasource } from "../datasources/index.js";
@@ -312,6 +312,7 @@ async function generateSpecsBatch(
   specKillMs: number,
   tuiState?: TuiState,
   tuiUpdate?: () => void,
+  progressCallback?: (event: SpecProgressEvent) => void,
 ): Promise<GenerationResults> {
   await mkdir(outputDir, { recursive: true });
   const quiet = !!tuiState && !log.verbose;
@@ -333,6 +334,7 @@ async function generateSpecsBatch(
       tuiTask.elapsed = specStart;
       tuiUpdate?.();
     }
+    progressCallback?.({ type: "item_start", itemId: id, itemTitle: details?.title });
 
     if (!details) {
       log.error(`Skipping item ${id}: missing issue details`);
@@ -407,6 +409,7 @@ async function generateSpecsBatch(
           tuiTask.feedback = undefined;
           tuiUpdate?.();
         }
+        progressCallback?.({ type: "item_done", itemId: id, itemTitle: details?.title });
 
         let identifier = filepath;
 
@@ -475,6 +478,7 @@ async function generateSpecsBatch(
           tuiTask.feedback = undefined;
           tuiUpdate?.();
         }
+        progressCallback?.({ type: "item_failed", itemId: id, itemTitle: details?.title, error: log.extractMessage(err) });
         return null;
       }
     };
@@ -581,6 +585,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     concurrency = defaultConcurrency(),
     dryRun,
     retries = DEFAULT_RETRY_COUNT,
+    progressCallback,
   } = opts;
 
   const pipelineStart = Date.now();
@@ -690,6 +695,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
       datasource, fetchOpts, outputDir, specCwd,
       concurrency, retries, specWarnMs, specKillMs,
       tui.state, tui.update,
+      progressCallback,
     );
 
     // ── Cleanup ────────────────────────────────────────────────

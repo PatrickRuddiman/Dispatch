@@ -20,6 +20,17 @@ import { resolveCliConfig } from "./cli-config.js";
 import { runSpecPipeline } from "./spec-pipeline.js";
 import { runDispatchPipeline } from "./dispatch-pipeline.js";
 
+/** Progress event emitted by the dispatch pipeline for MCP monitoring. */
+export interface DispatchProgressEvent {
+  runId?: string;
+  type: "task_start" | "task_done" | "task_failed" | "phase_change" | "log";
+  taskId?: string;
+  taskText?: string;
+  phase?: string;
+  message?: string;
+  error?: string;
+}
+
 /** Runtime options passed to `orchestrate()`. */
 export interface OrchestrateRunOptions {
   issueIds: string[];
@@ -45,6 +56,8 @@ export interface OrchestrateRunOptions {
   planRetries?: number;
   retries?: number;
   feature?: string | boolean;
+  /** Optional callback for MCP progress notifications. */
+  progressCallback?: (event: DispatchProgressEvent) => void;
 }
 
 /** Raw CLI arguments before config resolution. */
