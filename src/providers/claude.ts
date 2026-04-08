@@ -9,7 +9,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { unstable_v2_createSession, type SDKSession } from "@anthropic-ai/claude-agent-sdk";
+import { query, unstable_v2_createSession, type Options, type ModelInfo, type SDKSession } from "@anthropic-ai/claude-agent-sdk";
 import type {
   ProviderInstance,
   ProviderBootOptions,
@@ -21,21 +21,22 @@ import { log } from "../helpers/logger.js";
 /**
  * List available Claude models.
  *
- * Creates a temporary session to query the SDK for supported models.
+ * Uses the V1 query() API to ask the SDK for supported models at runtime.
  * Falls back to a hardcoded list if the dynamic query fails.
  */
 export async function listModels(opts?: ProviderBootOptions): Promise<string[]> {
   try {
-    const session = unstable_v2_createSession({
+    const queryOpts: Options = {
       model: opts?.model ?? "claude-sonnet-4",
-      permissionMode: "bypassPermissions" as const,
+      permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
-    });
+    };
+    const q = query({ prompt: "", options: queryOpts });
     try {
-      const models = await session.supportedModels();
-      return models.map((m) => m.value).sort();
+      const models = await q.supportedModels();
+      return models.map((m: ModelInfo) => m.value).sort();
     } finally {
-      session.close();
+      q.close();
     }
   } catch (err) {
     log.debug(`Failed to list models dynamically: ${log.formatErrorChain(err)}`);
