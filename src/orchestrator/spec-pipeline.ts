@@ -413,6 +413,7 @@ async function generateSpecsBatch(
         fileLoggerStorage.getStore()?.phase("Datasource sync");
         if (tuiTask) {
           tuiTask.status = "syncing";
+          tuiTask.elapsed = Date.now();
           tuiTask.feedback = undefined;
           tuiUpdate?.();
         }

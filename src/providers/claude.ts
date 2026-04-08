@@ -21,16 +21,31 @@ import { log } from "../helpers/logger.js";
 /**
  * List available Claude models.
  *
- * The Claude Agent SDK does not expose a model listing API, so this returns
- * a hardcoded list of known Claude model identifiers.
+ * Creates a temporary session to query the SDK for supported models.
+ * Falls back to a hardcoded list if the dynamic query fails.
  */
-export async function listModels(_opts?: ProviderBootOptions): Promise<string[]> {
-  return [
-    "claude-haiku-3-5",
-    "claude-opus-4-6",
-    "claude-sonnet-4",
-    "claude-sonnet-4-5",
-  ];
+export async function listModels(opts?: ProviderBootOptions): Promise<string[]> {
+  try {
+    const session = unstable_v2_createSession({
+      model: opts?.model ?? "claude-sonnet-4",
+      permissionMode: "bypassPermissions" as const,
+      allowDangerouslySkipPermissions: true,
+    });
+    try {
+      const models = await session.supportedModels();
+      return models.map((m) => m.value).sort();
+    } finally {
+      session.close();
+    }
+  } catch (err) {
+    log.debug(`Failed to list models dynamically: ${log.formatErrorChain(err)}`);
+    return [
+      "claude-haiku-3-5",
+      "claude-opus-4-6",
+      "claude-sonnet-4",
+      "claude-sonnet-4-5",
+    ];
+  }
 }
 
 /**

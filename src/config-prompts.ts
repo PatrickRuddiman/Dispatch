@@ -98,6 +98,54 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
     selectedModel = existing.model;
   }
 
+  // ── Fast tier selection (cost-saving) ──────────────────────
+  let selectedFastProvider: ProviderName | undefined = existing.fastProvider;
+  let selectedFastModel: string | undefined = existing.fastModel;
+
+  const useFastTier = await confirm({
+    message: "Use a separate fast tier for planner/commit agents? (saves cost)",
+    default: existing.fastProvider !== undefined || existing.fastModel !== undefined,
+  });
+
+  if (useFastTier) {
+    // Fast provider selection
+    const fastProvider = await select<ProviderName>({
+      message: "Select a fast tier provider:",
+      choices: PROVIDER_NAMES.map((name, i) => ({
+        name: `${installStatuses[i] ? chalk.green("●") : chalk.red("●")} ${name}`,
+        value: name,
+      })),
+      default: existing.fastProvider ?? provider,
+    });
+    selectedFastProvider = fastProvider;
+
+    // Fast model selection
+    try {
+      log.dim("Fetching available models for fast tier...");
+      const fastModels = await listProviderModels(fastProvider);
+      if (fastModels.length > 0) {
+        const fastModelChoice = await select<string>({
+          message: "Select a fast tier model:",
+          choices: [
+            { name: "default (provider decides)", value: "" },
+            ...fastModels.map((m) => ({ name: m, value: m })),
+          ],
+          default: existing.fastModel ?? "",
+        });
+        selectedFastModel = fastModelChoice || undefined;
+      } else {
+        log.dim("No models returned by fast tier provider — skipping model selection.");
+        selectedFastModel = existing.fastModel;
+      }
+    } catch {
+      log.dim("Could not list models for fast tier provider — skipping model selection.");
+      selectedFastModel = existing.fastModel;
+    }
+  } else {
+    selectedFastProvider = undefined;
+    selectedFastModel = undefined;
+  }
+
   // ── Auto-detect datasource from git remote ─────────────────
   const detectedSource = await detectDatasource(process.cwd());
   const datasourceDefault: DatasourceName | "auto" = existing.source ?? "auto";
@@ -198,6 +246,12 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
 
   if (selectedModel !== undefined) {
     newConfig.model = selectedModel;
+  }
+  if (selectedFastProvider !== undefined) {
+    newConfig.fastProvider = selectedFastProvider;
+  }
+  if (selectedFastModel !== undefined) {
+    newConfig.fastModel = selectedFastModel;
   }
   if (org !== undefined) newConfig.org = org;
   if (project !== undefined) newConfig.project = project;

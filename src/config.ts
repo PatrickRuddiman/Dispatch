@@ -23,8 +23,20 @@ export interface DispatchConfig {
    *   - Copilot: bare model ID (e.g. "claude-sonnet-4-5")
    *   - OpenCode: "provider/model" (e.g. "anthropic/claude-sonnet-4")
    * When omitted the provider uses its auto-detected default.
+   * This is the "strong" tier model used by executor and spec agents.
    */
   model?: string;
+  /**
+   * Provider for the "fast" (cost-saving) tier used by planner and commit agents.
+   * Defaults to `provider` when omitted.
+   */
+  fastProvider?: ProviderName;
+  /**
+   * Model for the "fast" (cost-saving) tier, in provider-specific format.
+   * Used by planner and commit agents to reduce costs.
+   * Defaults to `model` when omitted.
+   */
+  fastModel?: string;
   source?: DatasourceName;
   testTimeout?: number;
   planTimeout?: number;
@@ -54,7 +66,7 @@ export const CONFIG_BOUNDS = {
 } as const;
 
 /** Valid configuration key names. */
-export const CONFIG_KEYS = ["provider", "model", "source", "testTimeout", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area", "username"] as const;
+export const CONFIG_KEYS = ["provider", "model", "fastProvider", "fastModel", "source", "testTimeout", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area", "username"] as const;
 
 /** A valid configuration key name. */
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -110,8 +122,15 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
       return null;
 
     case "model":
+    case "fastModel":
       if (!value || value.trim() === "") {
-        return `Invalid model: value must not be empty`;
+        return `Invalid ${key}: value must not be empty`;
+      }
+      return null;
+
+    case "fastProvider":
+      if (!PROVIDER_NAMES.includes(value as ProviderName)) {
+        return `Invalid fastProvider "${value}". Available: ${PROVIDER_NAMES.join(", ")}`;
       }
       return null;
 

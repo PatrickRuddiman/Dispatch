@@ -7,6 +7,7 @@ const { mockCreateSession, mockSession } = vi.hoisted(() => {
     send: vi.fn().mockResolvedValue(undefined),
     stream: vi.fn().mockReturnValue((async function* () {})()),
     close: vi.fn(),
+    supportedModels: vi.fn().mockResolvedValue([]),
   };
 
   const mockCreateSession = vi.fn().mockReturnValue(mockSession);
@@ -40,7 +41,7 @@ vi.mock("../helpers/logger.js", () => ({
   },
 }));
 
-import { boot } from "../providers/claude.js";
+import { boot, listModels } from "../providers/claude.js";
 import { randomUUID } from "node:crypto";
 
 // ─── Reset mocks between tests ─────────────────────────────────────
@@ -52,9 +53,52 @@ beforeEach(() => {
   mockSession.send.mockResolvedValue(undefined);
   mockSession.stream.mockReturnValue((async function* () {})());
   mockSession.close.mockReturnValue(undefined);
+  mockSession.supportedModels.mockResolvedValue([]);
 });
 
 // ─── Tests ──────────────────────────────────────────────────────────
+
+describe("listModels", () => {
+  it("returns sorted model values from supportedModels()", async () => {
+    mockSession.supportedModels.mockResolvedValue([
+      { value: "claude-sonnet-4", displayName: "Sonnet 4", description: "" },
+      { value: "claude-haiku-3-5", displayName: "Haiku 3.5", description: "" },
+      { value: "claude-opus-4-6", displayName: "Opus 4.6", description: "" },
+    ]);
+
+    const models = await listModels();
+    expect(models).toEqual(["claude-haiku-3-5", "claude-opus-4-6", "claude-sonnet-4"]);
+    expect(mockSession.close).toHaveBeenCalled();
+  });
+
+  it("closes the session even when supportedModels() throws", async () => {
+    mockSession.supportedModels.mockRejectedValue(new Error("fetch fail"));
+
+    const models = await listModels();
+    expect(mockSession.close).toHaveBeenCalled();
+    // Falls back to hardcoded list
+    expect(models).toEqual([
+      "claude-haiku-3-5",
+      "claude-opus-4-6",
+      "claude-sonnet-4",
+      "claude-sonnet-4-5",
+    ]);
+  });
+
+  it("falls back to hardcoded list when session creation fails", async () => {
+    mockCreateSession.mockImplementation(() => {
+      throw new Error("session fail");
+    });
+
+    const models = await listModels();
+    expect(models).toEqual([
+      "claude-haiku-3-5",
+      "claude-opus-4-6",
+      "claude-sonnet-4",
+      "claude-sonnet-4-5",
+    ]);
+  });
+});
 
 describe("boot", () => {
   it("uses default model when no opts provided", async () => {

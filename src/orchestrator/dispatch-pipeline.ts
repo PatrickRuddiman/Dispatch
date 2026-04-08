@@ -107,6 +107,8 @@ export async function runDispatchPipeline(
     feature,
     provider = "opencode",
     model,
+    fastProvider,
+    fastModel,
     source,
     org,
     project,
@@ -119,6 +121,11 @@ export async function runDispatchPipeline(
     username: usernameOverride,
   } = opts;
   let noBranch = noBranchOpt;
+
+  // Resolve fast tier — defaults to strong tier when not configured
+  const resolvedFastProvider = fastProvider ?? provider;
+  const resolvedFastModel = fastModel ?? model;
+  const needsFastInstance = resolvedFastProvider !== provider || resolvedFastModel !== model;
 
   // Planning timeout/retry defaults
   const resolvedRetries = retries ?? DEFAULT_RETRY_COUNT;
@@ -290,22 +297,33 @@ export async function runDispatchPipeline(
     // When using worktrees, providers are booted per-worktree inside
     // processIssueFile. Otherwise, boot a single shared provider.
     let instance: ProviderInstance | undefined;
+    let fastInstance: ProviderInstance | undefined;
     let planner: PlannerAgent | null = null;
     let executor: ExecutorAgent | undefined;
     let commitAgent: CommitAgent | undefined;
 
     if (!useWorktrees) {
+      // Strong tier (executor, spec)
       instance = await bootProvider(provider, { url: serverUrl, cwd, model });
       registerCleanup(() => instance!.cleanup());
       if (instance.model) {
         tui.state.model = instance.model;
       }
-      if (verbose && instance.model) log.debug(`Model: ${instance.model}`);
+      if (verbose && instance.model) log.debug(`Model (strong): ${instance.model}`);
+
+      // Fast tier (planner, commit) — only boot if different from strong
+      if (needsFastInstance) {
+        fastInstance = await bootProvider(resolvedFastProvider, { url: serverUrl, cwd, model: resolvedFastModel });
+        registerCleanup(() => fastInstance!.cleanup());
+        if (verbose && fastInstance.model) log.debug(`Model (fast): ${fastInstance.model}`);
+      } else {
+        fastInstance = instance;
+      }
 
       // ── 4. Boot planner agent (unless --no-plan) ────────────────
-      planner = noPlan ? null : await bootPlanner({ provider: instance, cwd });
+      planner = noPlan ? null : await bootPlanner({ provider: fastInstance, cwd });
       executor = await bootExecutor({ provider: instance, cwd });
-      commitAgent = await bootCommit({ provider: instance, cwd });
+      commitAgent = await bootCommit({ provider: fastInstance, cwd });
     }
 
     // ── 5. Dispatch tasks ───────────────────────────────────────
@@ -459,16 +477,28 @@ export async function runDispatchPipeline(
         let localCommitAgent: CommitAgent;
 
         if (useWorktrees) {
+          // Strong tier
           localInstance = await bootProvider(provider, { url: serverUrl, cwd: issueCwd, model });
           registerCleanup(() => localInstance.cleanup());
           if (localInstance.model && !tui.state.model) {
             tui.state.model = localInstance.model;
           }
-          if (verbose && localInstance.model) log.debug(`Model: ${localInstance.model}`);
-          localPlanner = noPlan ? null : await bootPlanner({ provider: localInstance, cwd: issueCwd });
+          if (verbose && localInstance.model) log.debug(`Model (strong): ${localInstance.model}`);
+
+          // Fast tier — only boot if different from strong
+          let localFastInstance: ProviderInstance;
+          if (needsFastInstance) {
+            localFastInstance = await bootProvider(resolvedFastProvider, { url: serverUrl, cwd: issueCwd, model: resolvedFastModel });
+            registerCleanup(() => localFastInstance.cleanup());
+            if (verbose && localFastInstance.model) log.debug(`Model (fast): ${localFastInstance.model}`);
+          } else {
+            localFastInstance = localInstance;
+          }
+
+          localPlanner = noPlan ? null : await bootPlanner({ provider: localFastInstance, cwd: issueCwd });
           localExecutor = await bootExecutor({ provider: localInstance, cwd: issueCwd });
-          localCommitAgent = await bootCommit({ provider: localInstance, cwd: issueCwd });
-          fileLogger?.info(`Provider booted: ${localInstance.model ?? provider}`);
+          localCommitAgent = await bootCommit({ provider: localFastInstance, cwd: issueCwd });
+          fileLogger?.info(`Provider booted: ${localInstance.model ?? provider}${needsFastInstance ? ` (fast: ${localFastInstance.model ?? resolvedFastProvider})` : ""}`);
         } else {
           localInstance = instance!;
           localPlanner = planner;

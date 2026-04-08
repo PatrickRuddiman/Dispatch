@@ -25,6 +25,8 @@ import { detectDatasource, DATASOURCE_NAMES } from "../datasources/index.js";
 const CONFIG_TO_CLI: Record<ConfigKey, keyof RawCliArgs> = {
   provider: "provider",
   model: "model",
+  fastProvider: "fastProvider",
+  fastModel: "fastModel",
   source: "issueSource",
   testTimeout: "testTimeout",
   planTimeout: "planTimeout",

@@ -74,7 +74,9 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("github");
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({ provider: "copilot", source: "github" }),
@@ -93,7 +95,9 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("copilot")   // provider
       .mockResolvedValueOnce("model-a")   // model
       .mockResolvedValueOnce("github");   // datasource
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -112,7 +116,9 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("copilot")   // provider
       .mockResolvedValueOnce("")          // model — "default (provider decides)"
       .mockResolvedValueOnce("github");   // datasource
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     const savedConfig = vi.mocked(saveConfig).mock.calls[0][0];
     expect(savedConfig.provider).toBe("copilot");
@@ -136,7 +142,9 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("github");
-    vi.mocked(confirm).mockResolvedValueOnce(false); // save — declined
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(false); // save — declined
     await runInteractiveConfigWizard();
     expect(saveConfig).not.toHaveBeenCalled();
   });
@@ -147,7 +155,8 @@ describe("runInteractiveConfigWizard", () => {
       source: "github",
     });
     vi.mocked(confirm)
-      .mockResolvedValueOnce(true) // reconfigure
+      .mockResolvedValueOnce(true)  // reconfigure
+      .mockResolvedValueOnce(false) // fast tier — decline
       .mockResolvedValueOnce(true); // save
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
@@ -165,7 +174,9 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("github");
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(select).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -179,7 +190,8 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(detectDatasource).mockResolvedValueOnce("github");
     vi.mocked(loadConfig).mockResolvedValueOnce({ source: "azdevops" });
     vi.mocked(confirm)
-      .mockResolvedValueOnce(true) // reconfigure
+      .mockResolvedValueOnce(true)  // reconfigure
+      .mockResolvedValueOnce(false) // fast tier — decline
       .mockResolvedValueOnce(true); // save
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
@@ -199,7 +211,9 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("md");
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(select).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -214,7 +228,9 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("auto");
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     const savedConfig = vi.mocked(saveConfig).mock.calls[0][0];
     expect(savedConfig.source).toBeUndefined();
@@ -226,7 +242,9 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("github");
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     const datasourceCall = vi.mocked(select).mock.calls[1][0];
     expect(datasourceCall.choices[0]).toMatchObject({ name: "auto", value: "auto" });
@@ -238,7 +256,9 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("github");
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     const providerCall = vi.mocked(select).mock.calls[0][0];
     for (const choice of providerCall.choices as Array<{ name: string; value: string }>) {
@@ -259,7 +279,9 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("User Story")                    // workItemType
       .mockResolvedValueOnce("@CurrentIteration")             // iteration
       .mockResolvedValueOnce("MyProject\\Team A");            // area
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -286,7 +308,9 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("")   // workItemType — skip
       .mockResolvedValueOnce("")   // iteration — skip
       .mockResolvedValueOnce("");  // area — skip
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     const savedConfig = vi.mocked(saveConfig).mock.calls[0][0];
     expect(savedConfig.org).toBeUndefined();
@@ -312,7 +336,9 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("")                               // workItemType — skip
       .mockResolvedValueOnce("")                               // iteration — skip
       .mockResolvedValueOnce("");                              // area — skip
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     // Verify input was called with defaults from git remote
     expect(input).toHaveBeenCalledWith(
@@ -334,7 +360,9 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("github");
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(input).not.toHaveBeenCalled();
     const savedConfig = vi.mocked(saveConfig).mock.calls[0][0];
@@ -350,7 +378,9 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("github");
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     const providerCall = vi.mocked(select).mock.calls[0][0];
     const choices = providerCall.choices as Array<{ name: string; value: string }>;
@@ -373,7 +403,9 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")   // provider
       .mockResolvedValueOnce("github");   // datasource
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(ensureAuthReady).toHaveBeenCalledWith("github", process.cwd(), undefined);
   });
@@ -389,7 +421,9 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("")                               // workItemType
       .mockResolvedValueOnce("")                               // iteration
       .mockResolvedValueOnce("");                              // area
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(ensureAuthReady).toHaveBeenCalledWith("azdevops", process.cwd(), "https://dev.azure.com/myorg");
   });
@@ -399,7 +433,9 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("md");
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(ensureAuthReady).toHaveBeenCalledWith("md", process.cwd(), undefined);
   });
@@ -410,7 +446,9 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("github");
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({ provider: "copilot", source: "github" }),
@@ -424,7 +462,9 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(select)
       .mockResolvedValueOnce("copilot")
       .mockResolvedValueOnce("auto");    // auto selected, but detected as github
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false) // fast tier — decline
+      .mockResolvedValueOnce(true); // save
     await runInteractiveConfigWizard();
     expect(ensureAuthReady).toHaveBeenCalledWith("github", process.cwd(), undefined);
   });
