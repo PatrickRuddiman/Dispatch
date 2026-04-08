@@ -27,7 +27,8 @@
     "orchestration",
     "dispatch",
     "tasks",
-    "markdown"
+    "markdown",
+    "beta"
   ],
   "license": "MIT",
   "repository": {
