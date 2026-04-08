@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - "release/*"
     paths:
       - package.json
   workflow_dispatch:
@@ -17,11 +18,12 @@ permissions:
   id-token: write      # OIDC token for npm trusted publishing + provenance
 
 jobs:
-  check-version:
+  prepare:
     runs-on: ubuntu-latest
     outputs:
-      should_publish: ${{ steps.compare.outputs.should_publish }}
-      local_version: ${{ steps.compare.outputs.local_version }}
+      should_publish: ${{ steps.resolve.outputs.should_publish }}
+      version: ${{ steps.resolve.outputs.version }}
+      channel: ${{ steps.resolve.outputs.channel }}
     steps:
       - uses: actions/checkout@v4
 
@@ -29,26 +31,37 @@ jobs:
         with:
           node-version: 22
 
-      - name: Compare local version with npm registry
-        id: compare
+      - name: Resolve publish parameters
+        id: resolve
         run: |
-          LOCAL_VERSION=$(node -p "require('./package.json').version")
-          NPM_VERSION=$(npm view @pruddiman/dispatch dist-tags.latest 2>/dev/null || echo "0.0.0")
-          echo "local=$LOCAL_VERSION npm=$NPM_VERSION"
+          BASE_VERSION=$(node -p "require('./package.json').version")
 
-          SHOULD_PUBLISH=$(node -e "
-            const [lM, lm, lp] = '${LOCAL_VERSION}'.split('.').map(Number);
-            const [nM, nm, np] = '${NPM_VERSION}'.split('.').map(Number);
-            const gt = lM > nM || (lM === nM && lm > nm) || (lM === nM && lm === nm && lp > np);
-            console.log(gt ? 'true' : 'false');
-          ")
+          if [[ "${{ github.ref_name }}" == "main" ]]; then
+            NPM_VERSION=$(npm view @pruddiman/dispatch dist-tags.latest 2>/dev/null || echo "0.0.0")
+            echo "local=$BASE_VERSION npm=$NPM_VERSION"
 
-          echo "should_publish=$SHOULD_PUBLISH" >> "$GITHUB_OUTPUT"
-          echo "local_version=$LOCAL_VERSION" >> "$GITHUB_OUTPUT"
+            SHOULD_PUBLISH=$(node -e "
+              const [lM, lm, lp] = '${BASE_VERSION}'.split('.').map(Number);
+              const [nM, nm, np] = '${NPM_VERSION}'.split('.').map(Number);
+              const gt = lM > nM || (lM === nM && lm > nm) || (lM === nM && lm === nm && lp > np);
+              console.log(gt ? 'true' : 'false');
+            ")
+
+            echo "channel=latest" >> "$GITHUB_OUTPUT"
+            echo "version=${BASE_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "should_publish=${SHOULD_PUBLISH}" >> "$GITHUB_OUTPUT"
+          else
+            SHORT_SHA=$(git rev-parse --short HEAD)
+            BETA_VERSION="${BASE_VERSION}-beta.${SHORT_SHA}"
+
+            echo "channel=beta" >> "$GITHUB_OUTPUT"
+            echo "version=${BETA_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+          fi
 
   publish:
-    needs: check-version
-    if: needs.check-version.outputs.should_publish == 'true'
+    needs: prepare
+    if: needs.prepare.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -58,6 +71,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+          registry-url: "https://registry.npmjs.org"
 
       - run: npm ci
 
@@ -65,18 +79,24 @@ jobs:
 
       - run: npm test
 
+      - name: Set beta version
+        if: needs.prepare.outputs.channel == 'beta'
+        run: npm version "${{ needs.prepare.outputs.version }}" --no-git-tag-version
+
       - run: npm run build
 
       - name: Publish to npm
-        run: npm publish --provenance
+        run: npm publish --provenance --tag ${{ needs.prepare.outputs.channel }}
 
       - name: Create git tag
+        if: needs.prepare.outputs.channel == 'latest'
         run: |
-          VERSION="v${{ needs.check-version.outputs.local_version }}"
+          VERSION="v${{ needs.prepare.outputs.version }}"
           git tag "$VERSION"
           git push origin "$VERSION"
 
       - name: Create GitHub Release
-        run: gh release create "v${{ needs.check-version.outputs.local_version }}" --generate-notes
+        if: needs.prepare.outputs.channel == 'latest'
+        run: gh release create "v${{ needs.prepare.outputs.version }}" --generate-notes
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
