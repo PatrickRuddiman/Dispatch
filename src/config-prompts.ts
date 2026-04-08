@@ -11,8 +11,11 @@ import { log } from "./helpers/logger.js";
 import {
   loadConfig,
   saveConfig,
+  AGENT_NAMES,
   type DispatchConfig,
+  type AgentConfig,
 } from "./config.js";
+import type { AgentName } from "./agents/interface.js";
 import { PROVIDER_NAMES, listProviderModels, checkProviderInstalled } from "./providers/index.js";
 import type { ProviderName } from "./providers/interface.js";
 import {
@@ -96,6 +99,73 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
   } catch {
     log.dim("Could not list models (provider may not be running) — skipping model selection.");
     selectedModel = existing.model;
+  }
+
+  // ── Per-agent provider/model overrides ──────────────────────
+  const agentOverrides: Partial<Record<AgentName, AgentConfig>> = {};
+  const hasExistingAgents = existing.agents && Object.keys(existing.agents).length > 0;
+
+  const useAgentOverrides = await confirm({
+    message: "Configure per-agent provider/model overrides? (advanced, saves cost)",
+    default: hasExistingAgents ?? false,
+  });
+
+  if (useAgentOverrides) {
+    console.log();
+    log.dim(`Each agent inherits from the top-level provider (${provider}) unless overridden.`);
+    console.log();
+
+    for (const role of AGENT_NAMES) {
+      const existingAgent = existing.agents?.[role];
+      const wantOverride = await confirm({
+        message: `Override ${role} agent?`,
+        default: existingAgent !== undefined,
+      });
+
+      if (!wantOverride) continue;
+
+      // Provider selection for this agent
+      const agentProvider = await select<ProviderName | "">({
+        message: `  ${role} — provider:`,
+        choices: [
+          { name: `inherit (${provider})`, value: "" },
+          ...PROVIDER_NAMES.map((name, i) => ({
+            name: `${installStatuses[i] ? chalk.green("●") : chalk.red("●")} ${name}`,
+            value: name,
+          })),
+        ],
+        default: existingAgent?.provider ?? "",
+      });
+
+      // Model selection for this agent
+      const effectiveProvider = (agentProvider || provider) as ProviderName;
+      let agentModel: string | undefined;
+      try {
+        const agentModels = await listProviderModels(effectiveProvider);
+        if (agentModels.length > 0) {
+          const modelChoice = await select<string>({
+            message: `  ${role} — model:`,
+            choices: [
+              { name: "inherit (top-level model)", value: "" },
+              ...agentModels.map((m) => ({ name: m, value: m })),
+            ],
+            default: existingAgent?.model ?? "",
+          });
+          agentModel = modelChoice || undefined;
+        }
+      } catch {
+        log.dim(`  Could not list models for ${effectiveProvider} — skipping model selection.`);
+        agentModel = existingAgent?.model;
+      }
+
+      // Only store if something differs from top-level
+      if (agentProvider || agentModel) {
+        const cfg: AgentConfig = {};
+        if (agentProvider) cfg.provider = agentProvider as ProviderName;
+        if (agentModel) cfg.model = agentModel;
+        agentOverrides[role] = cfg;
+      }
+    }
   }
 
   // ── Auto-detect datasource from git remote ─────────────────
@@ -199,6 +269,9 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
   if (selectedModel !== undefined) {
     newConfig.model = selectedModel;
   }
+  if (Object.keys(agentOverrides).length > 0) {
+    newConfig.agents = agentOverrides;
+  }
   if (org !== undefined) newConfig.org = org;
   if (project !== undefined) newConfig.project = project;
   if (workItemType !== undefined) newConfig.workItemType = workItemType;
@@ -210,7 +283,17 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
   log.info(chalk.bold("Configuration summary:"));
   for (const [key, value] of Object.entries(newConfig)) {
     if (value !== undefined) {
-      console.log(`  ${chalk.cyan(key)} = ${value}`);
+      if (key === "agents" && typeof value === "object") {
+        console.log(`  ${chalk.cyan("agents")}:`);
+        for (const [role, cfg] of Object.entries(value as Record<string, AgentConfig>)) {
+          const parts: string[] = [];
+          if (cfg.provider) parts.push(`provider=${cfg.provider}`);
+          if (cfg.model) parts.push(`model=${cfg.model}`);
+          console.log(`    ${chalk.cyan(role)} = ${parts.join(", ")}`);
+        }
+      } else {
+        console.log(`  ${chalk.cyan(key)} = ${value}`);
+      }
     }
   }
   if (selectedSource === "auto") {

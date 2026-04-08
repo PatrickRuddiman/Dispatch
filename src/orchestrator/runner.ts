@@ -5,6 +5,8 @@
 import type { DispatchResult } from "../dispatcher.js";
 import type { AgentBootOptions } from "../agents/interface.js";
 import type { ProviderName } from "../providers/interface.js";
+import type { AgentConfig } from "../config.js";
+import type { AgentName } from "../agents/interface.js";
 import type { DatasourceName } from "../datasources/interface.js";
 import type { SpecOptions, SpecSummary } from "../spec-generator.js";
 import { defaultConcurrency, DEFAULT_SPEC_TIMEOUT_MIN, resolveSource } from "../spec-generator.js";
@@ -32,6 +34,12 @@ export interface OrchestrateRunOptions {
   provider?: ProviderName;
   /** Model override to pass to the provider (provider-specific format). */
   model?: string;
+  /** Provider for the fast (cost-saving) tier — used by planner and commit agents. */
+  fastProvider?: ProviderName;
+  /** Model for the fast (cost-saving) tier (provider-specific format). */
+  fastModel?: string;
+  /** Per-agent provider/model overrides. Supersedes fastProvider/fastModel when set. */
+  agents?: Partial<Record<AgentName, AgentConfig>>;
   serverUrl?: string;
   source?: DatasourceName;
   org?: string;
@@ -59,6 +67,12 @@ export interface RawCliArgs {
   provider: ProviderName;
   /** Model override from config or CLI (provider-specific format). */
   model?: string;
+  /** Provider for the fast (cost-saving) tier — used by planner and commit agents. */
+  fastProvider?: ProviderName;
+  /** Model for the fast (cost-saving) tier (provider-specific format). */
+  fastModel?: string;
+  /** Per-agent provider/model overrides. Supersedes fastProvider/fastModel when set. */
+  agents?: Partial<Record<AgentName, AgentConfig>>;
   serverUrl?: string;
   cwd: string;
   verbose: boolean;
@@ -381,7 +395,8 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
       return this.orchestrate({
         issueIds: m.issueIds, concurrency: m.concurrency ?? defaultConcurrency(),
         dryRun: m.dryRun, noPlan: m.noPlan, noBranch: m.noBranch, noWorktree: m.noWorktree, provider: m.provider,
-        model: m.model, serverUrl: m.serverUrl, source: m.issueSource, org: m.org, project: m.project,
+        model: m.model, fastProvider: m.fastProvider, fastModel: m.fastModel, agents: m.agents,
+        serverUrl: m.serverUrl, source: m.issueSource, org: m.org, project: m.project,
         workItemType: m.workItemType, iteration: m.iteration, area: m.area, planTimeout: m.planTimeout, planRetries: m.planRetries, retries: m.retries,
         force: m.force, feature: m.feature, username: m.username,
       });

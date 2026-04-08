@@ -44,6 +44,9 @@ export const HELP = `
     --force                Ignore prior run state and re-run all tasks
     --concurrency <n>      Max parallel dispatches (default: min(cpus, freeMB/500), max: ${MAX_CONCURRENCY})
     --provider <name>      Agent backend: ${PROVIDER_NAMES.join(", ")} (default: opencode)
+    --model <model>        Model override (provider-specific format)
+    --fast-provider <name> Provider for fast tier (planner/commit agents, saves cost)
+    --fast-model <model>   Model for fast tier (planner/commit agents, saves cost)
     --source <name>        Issue source: ${DATASOURCE_NAMES.join(", ")} (optional; auto-detected from git remote)
     --server-url <url>     URL of a running provider server
     --plan-timeout <min>   Planning timeout in minutes (default: 30)
@@ -74,6 +77,10 @@ export const HELP = `
 
   Config:
     dispatch config                     Launch interactive configuration wizard
+    dispatch config --cwd <dir>         Configure a specific project directory
+
+    Additional settings available via config file (.dispatch/config.json):
+      workItemType, iteration, area (Azure DevOps filters), username (branch prefix)
 
   Examples:
     dispatch 14
@@ -95,6 +102,7 @@ export const HELP = `
     dispatch --spec "feature A should do x" --provider copilot
     dispatch --feature
     dispatch --feature my-feature
+    dispatch 14 15 16 --feature my-feature
     dispatch --fix-tests
     dispatch --fix-tests 14
     dispatch --fix-tests 14 15 16
@@ -133,6 +141,9 @@ export const CLI_OPTIONS_MAP: Record<string, string> = {
   feature: "feature",
   source: "issueSource",
   provider: "provider",
+  model: "model",
+  fastProvider: "fastProvider",
+  fastModel: "fastModel",
   concurrency: "concurrency",
   serverUrl: "serverUrl",
   planTimeout: "planTimeout",
@@ -174,6 +185,11 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
     .addOption(
       new Option("--provider <name>", "Agent backend").choices(PROVIDER_NAMES),
     )
+    .option("--model <model>", "Model override (provider-specific format)")
+    .addOption(
+      new Option("--fast-provider <name>", "Fast tier provider (planner/commit)").choices(PROVIDER_NAMES),
+    )
+    .option("--fast-model <model>", "Fast tier model (planner/commit)")
     .addOption(
       new Option("--source <name>", "Issue source").choices(
         DATASOURCE_NAMES as string[],
@@ -314,6 +330,9 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
   }
   if (opts.fixTests) args.fixTests = true;
   if (opts.feature) args.feature = opts.feature;
+  if (opts.model !== undefined) args.model = opts.model;
+  if (opts.fastProvider !== undefined) args.fastProvider = opts.fastProvider;
+  if (opts.fastModel !== undefined) args.fastModel = opts.fastModel;
   if (opts.source !== undefined) args.issueSource = opts.source;
   if (opts.concurrency !== undefined) args.concurrency = opts.concurrency;
   if (opts.serverUrl !== undefined) args.serverUrl = opts.serverUrl;

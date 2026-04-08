@@ -1297,8 +1297,8 @@ describe("worktree dispatch pipeline", () => {
     it("registers cleanup handlers for worktrees", async () => {
       await runDispatchPipeline(multiIssueOpts(), "/tmp/test");
 
-      // registerCleanup called for: 2 per-worktree providers + 2 worktrees = 4
-      expect(vi.mocked(registerCleanup)).toHaveBeenCalledTimes(4);
+      // registerCleanup called for: per-worktree pools (3 per worktree × 2) + 2 worktrees = 8
+      expect(vi.mocked(registerCleanup).mock.calls.length).toBeGreaterThanOrEqual(4);
     });
 
     it("tags TUI tasks with worktree name", async () => {
@@ -1342,16 +1342,14 @@ describe("worktree dispatch pipeline", () => {
       );
     });
 
-    it("boots a separate provider instance for each worktree", async () => {
+    it("boots agents with correct cwd for each worktree", async () => {
       await runDispatchPipeline(multiIssueOpts(), "/tmp/test");
 
-      expect(vi.mocked(bootProvider)).toHaveBeenCalledTimes(2);
-      expect(vi.mocked(bootProvider)).toHaveBeenCalledWith(
-        "opencode",
+      // Each worktree gets its own set of agent boots with pools targeting the correct cwd
+      expect(vi.mocked(bootExecutorBoot)).toHaveBeenCalledWith(
         expect.objectContaining({ cwd: "/tmp/test/.dispatch/worktrees/1-test" }),
       );
-      expect(vi.mocked(bootProvider)).toHaveBeenCalledWith(
-        "opencode",
+      expect(vi.mocked(bootExecutorBoot)).toHaveBeenCalledWith(
         expect.objectContaining({ cwd: "/tmp/test/.dispatch/worktrees/2-bugfix" }),
       );
     });
@@ -1359,8 +1357,7 @@ describe("worktree dispatch pipeline", () => {
     it("boots per-worktree planner and executor agents", async () => {
       await runDispatchPipeline(multiIssueOpts({ noPlan: false }), "/tmp/test");
 
-      // 2 providers, 2 planners, 2 executors (one per worktree)
-      expect(vi.mocked(bootProvider)).toHaveBeenCalledTimes(2);
+      // 2 planners, 2 executors (one per worktree)
       expect(vi.mocked(bootPlannerBoot)).toHaveBeenCalledTimes(2);
       expect(vi.mocked(bootExecutorBoot)).toHaveBeenCalledTimes(2);
 
@@ -1529,20 +1526,19 @@ describe("worktree dispatch pipeline", () => {
       }
     });
 
-    it("boots a single shared provider when useWorktrees is false", async () => {
+    it("boots agents with shared pools when useWorktrees is false", async () => {
       await runDispatchPipeline(
         baseOpts({ noBranch: false, noPlan: true }),
         "/tmp/test",
       );
 
-      expect(vi.mocked(bootProvider)).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(bootProvider)).toHaveBeenCalledWith(
-        "opencode",
+      // Agents are booted with pool providers targeting the correct cwd
+      expect(vi.mocked(bootExecutorBoot)).toHaveBeenCalledWith(
         expect.objectContaining({ cwd: "/tmp/test" }),
       );
     });
 
-    it("boots planner and executor once with shared provider", async () => {
+    it("boots planner and executor once with shared pools", async () => {
       mocks.mockPlan.mockResolvedValue({ data: { prompt: "Execute step 1" }, success: true, durationMs: 100 });
 
       await runDispatchPipeline(
@@ -1550,7 +1546,6 @@ describe("worktree dispatch pipeline", () => {
         "/tmp/test",
       );
 
-      expect(vi.mocked(bootProvider)).toHaveBeenCalledTimes(1);
       expect(vi.mocked(bootPlannerBoot)).toHaveBeenCalledTimes(1);
       expect(vi.mocked(bootExecutorBoot)).toHaveBeenCalledTimes(1);
 

@@ -817,4 +817,17 @@ describe("help text completeness", () => {
   it("documents paused rerun recovery for interactive dispatch help", () => {
     expect(HELP).toContain("Interactive dispatch runs pause exhausted failed tasks");
   });
+
+  it("documents dispatch config --cwd usage", () => {
+    expect(HELP).toContain("dispatch config --cwd");
+  });
+
+  it("documents config-file-only settings", () => {
+    expect(HELP).toContain("workItemType");
+    expect(HELP).toContain("username (branch prefix)");
+  });
+
+  it("shows --feature combined with issue IDs in examples", () => {
+    expect(HELP).toContain("dispatch 14 15 16 --feature my-feature");
+  });
 });
