@@ -5,6 +5,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@openai/codex": path.resolve(__dirname, "src/__mocks__/@openai/codex.ts"),
+      "@github/copilot-sdk": path.resolve(__dirname, "src/__mocks__/@github/copilot-sdk.ts"),
     },
   },
   test: {
