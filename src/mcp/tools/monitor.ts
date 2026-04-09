@@ -20,17 +20,24 @@ export function registerMonitorTools(server: McpServer, cwd: string): void {
       runId: z.string().describe("The runId returned by dispatch_run or spec_generate"),
     },
     async (args) => {
-      const run = getRun(args.runId);
-      if (!run) {
+      try {
+        const run = getRun(args.runId);
+        if (!run) {
+          return {
+            content: [{ type: "text", text: `Run ${args.runId} not found` }],
+            isError: true,
+          };
+        }
+        const tasks = getTasksForRun(args.runId);
         return {
-          content: [{ type: "text", text: `Run ${args.runId} not found` }],
+          content: [{ type: "text", text: JSON.stringify({ run, tasks }) }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
           isError: true,
         };
       }
-      const tasks = getTasksForRun(args.runId);
-      return {
-        content: [{ type: "text", text: JSON.stringify({ run, tasks }) }],
-      };
     }
   );
 
@@ -44,12 +51,19 @@ export function registerMonitorTools(server: McpServer, cwd: string): void {
       limit: z.number().int().min(1).max(100).optional().describe("Max results (default 20)"),
     },
     async (args) => {
-      const runs = args.status
-        ? listRunsByStatus(args.status, args.limit ?? 20)
-        : listRuns(args.limit ?? 20);
-      return {
-        content: [{ type: "text", text: JSON.stringify(runs) }],
-      };
+      try {
+        const runs = args.status
+          ? listRunsByStatus(args.status, args.limit ?? 20)
+          : listRuns(args.limit ?? 20);
+        return {
+          content: [{ type: "text", text: JSON.stringify(runs) }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
+          isError: true,
+        };
+      }
     }
   );
 

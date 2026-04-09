@@ -88,14 +88,23 @@ export function registerSpecTools(server: McpServer, cwd: string): void {
     async () => {
       const specsDir = join(cwd, ".dispatch", "specs");
       let files: string[] = [];
+      let dirError: string | undefined;
       try {
         const entries = await readdir(specsDir);
         files = entries.filter((f) => f.endsWith(".md")).sort();
-      } catch {
-        // Directory doesn't exist yet
+      } catch (err) {
+        const isNotFound = err instanceof Error && "code" in err &&
+          (err as NodeJS.ErrnoException).code === "ENOENT";
+        if (!isNotFound) {
+          dirError = `Error reading specs directory: ${err instanceof Error ? err.message : String(err)}`;
+        }
       }
+      let recentRuns: unknown[] = [];
+      try {
+        recentRuns = listSpecRuns(5);
+      } catch { /* DB may not be initialized */ }
       return {
-        content: [{ type: "text", text: JSON.stringify({ files, specsDir }) }],
+        content: [{ type: "text", text: JSON.stringify({ files, specsDir, recentRuns, ...(dirError ? { error: dirError } : {}) }) }],
       };
     }
   );
@@ -150,10 +159,17 @@ export function registerSpecTools(server: McpServer, cwd: string): void {
       limit: z.number().int().min(1).max(100).optional().describe("Max results (default 20)"),
     },
     async (args) => {
-      const runs = listSpecRuns(args.limit ?? 20);
-      return {
-        content: [{ type: "text", text: JSON.stringify(runs) }],
-      };
+      try {
+        const runs = listSpecRuns(args.limit ?? 20);
+        return {
+          content: [{ type: "text", text: JSON.stringify(runs) }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
+          isError: true,
+        };
+      }
     }
   );
 
@@ -165,16 +181,23 @@ export function registerSpecTools(server: McpServer, cwd: string): void {
       runId: z.string().describe("The runId returned by spec_generate"),
     },
     async (args) => {
-      const run = getSpecRun(args.runId);
-      if (!run) {
+      try {
+        const run = getSpecRun(args.runId);
+        if (!run) {
+          return {
+            content: [{ type: "text", text: `Run ${args.runId} not found` }],
+            isError: true,
+          };
+        }
         return {
-          content: [{ type: "text", text: `Run ${args.runId} not found` }],
+          content: [{ type: "text", text: JSON.stringify(run) }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
           isError: true,
         };
       }
-      return {
-        content: [{ type: "text", text: JSON.stringify(run) }],
-      };
     }
   );
 }
