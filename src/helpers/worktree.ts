@@ -123,6 +123,8 @@ export async function createWorktree(
             } catch (pruneRetryErr) {
               lastError = pruneRetryErr;
             }
+          } else {
+            throw retryErr;
           }
         }
       } else if (message.includes("already used by worktree")) {
