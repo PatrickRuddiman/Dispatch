@@ -8,10 +8,9 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getRun, getTasksForRun, createRun } from "../state/manager.js";
-import { loadConfig } from "../../config.js";
-import { join } from "node:path";
 import { PROVIDER_NAMES } from "../../providers/interface.js";
 import { forkDispatchRun } from "./_fork-run.js";
+import { loadMcpConfig } from "./_resolve-config.js";
 
 const issueIdsSchema = z.array(z.string());
 
@@ -46,7 +45,16 @@ export function registerRecoveryTools(server: McpServer, cwd: string): void {
         };
       }
 
-      const config = await loadConfig(join(cwd, ".dispatch"));
+      let config;
+      try {
+        config = await loadMcpConfig(cwd, { provider: args.provider });
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
+          isError: true,
+        };
+      }
+
       const issueIds = issueIdsSchema.parse(JSON.parse(originalRun.issueIds));
       const newRunId = createRun({ cwd, issueIds });
 
@@ -56,8 +64,19 @@ export function registerRecoveryTools(server: McpServer, cwd: string): void {
         opts: {
           issueIds,
           dryRun: false,
-          provider: args.provider ?? config.provider ?? "opencode",
+          provider: config.provider,
+          model: config.model,
+          fastProvider: config.fastProvider,
+          fastModel: config.fastModel,
+          agents: config.agents,
           source: config.source,
+          org: config.org,
+          project: config.project,
+          workItemType: config.workItemType,
+          iteration: config.iteration,
+          area: config.area,
+          username: config.username,
+          planTimeout: config.planTimeout,
           concurrency: args.concurrency ?? config.concurrency ?? 1,
           force: true,
         },
@@ -96,7 +115,16 @@ export function registerRecoveryTools(server: McpServer, cwd: string): void {
         };
       }
 
-      const config = await loadConfig(join(cwd, ".dispatch"));
+      let config;
+      try {
+        config = await loadMcpConfig(cwd, { provider: args.provider });
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
+          isError: true,
+        };
+      }
+
       const issueIds = issueIdsSchema.parse(JSON.parse(originalRun.issueIds));
       const newRunId = createRun({ cwd, issueIds });
 
@@ -106,8 +134,19 @@ export function registerRecoveryTools(server: McpServer, cwd: string): void {
         opts: {
           issueIds,
           dryRun: false,
-          provider: args.provider ?? config.provider ?? "opencode",
+          provider: config.provider,
+          model: config.model,
+          fastProvider: config.fastProvider,
+          fastModel: config.fastModel,
+          agents: config.agents,
           source: config.source,
+          org: config.org,
+          project: config.project,
+          workItemType: config.workItemType,
+          iteration: config.iteration,
+          area: config.area,
+          username: config.username,
+          planTimeout: config.planTimeout,
           concurrency: 1,
           force: true,
         },

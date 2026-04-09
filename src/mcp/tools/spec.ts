@@ -6,10 +6,11 @@ import { z } from "zod";
 import { join, resolve, sep } from "node:path";
 import { readdir, readFile } from "node:fs/promises";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { createSpecRun, finishSpecRun, listSpecRuns, getSpecRun } from "../state/manager.js";
+import { createSpecRun, finishSpecRun, listSpecRuns, getSpecRun, waitForRunCompletion } from "../state/manager.js";
 import { PROVIDER_NAMES } from "../../providers/interface.js";
 import { DATASOURCE_NAMES } from "../../datasources/interface.js";
 import { forkDispatchRun } from "./_fork-run.js";
+import { loadMcpConfig } from "./_resolve-config.js";
 
 export function registerSpecTools(server: McpServer, cwd: string): void {
   // ── spec_generate ─────────────────────────────────────────────
@@ -20,12 +21,22 @@ export function registerSpecTools(server: McpServer, cwd: string): void {
       issues: z.string().describe(
         "Comma-separated issue IDs (e.g. '42,43'), a glob pattern (e.g. 'drafts/*.md'), or an inline description."
       ),
-      provider: z.enum(PROVIDER_NAMES).optional().describe("Agent provider name (default: opencode)"),
-      source: z.enum(DATASOURCE_NAMES).optional().describe("Issue datasource: github, azdevops, md"),
+      provider: z.enum(PROVIDER_NAMES).optional().describe("Agent provider name (default: from config)"),
+      source: z.enum(DATASOURCE_NAMES).optional().describe("Issue datasource: github, azdevops, md (default: from config)"),
       concurrency: z.number().int().min(1).max(32).optional().describe("Max parallel spec generations"),
       dryRun: z.boolean().optional().describe("Preview without generating"),
     },
     async (args) => {
+      let config;
+      try {
+        config = await loadMcpConfig(cwd, { provider: args.provider, source: args.source });
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
+          isError: true,
+        };
+      }
+
       const runId = createSpecRun({ cwd, issues: args.issues });
 
       forkDispatchRun(runId, server, {
@@ -33,9 +44,18 @@ export function registerSpecTools(server: McpServer, cwd: string): void {
         cwd,
         opts: {
           issues: args.issues,
-          provider: args.provider ?? "opencode",
-          issueSource: args.source,
-          concurrency: args.concurrency,
+          provider: config.provider,
+          model: config.model,
+          issueSource: config.source,
+          org: config.org,
+          project: config.project,
+          workItemType: config.workItemType,
+          iteration: config.iteration,
+          area: config.area,
+          concurrency: args.concurrency ?? config.concurrency,
+          specTimeout: config.specTimeout,
+          specWarnTimeout: config.specWarnTimeout,
+          specKillTimeout: config.specKillTimeout,
           dryRun: args.dryRun,
           cwd,
         },
@@ -153,21 +173,40 @@ export function registerSpecTools(server: McpServer, cwd: string): void {
   // ── spec_run_status ───────────────────────────────────────────
   server.tool(
     "spec_run_status",
-    "Get the status of a specific spec generation run.",
+    "Get the status of a specific spec generation run. Use waitMs to hold the response until the run completes or the timeout elapses.",
     {
       runId: z.string().describe("The runId returned by spec_generate"),
+      waitMs: z.number().int().min(0).max(120000).optional().default(0)
+        .describe("Hold response until run completes or timeout (ms). 0 = return immediately."),
     },
     async (args) => {
       try {
-        const run = getSpecRun(args.runId);
+        let run = getSpecRun(args.runId);
         if (!run) {
           return {
             content: [{ type: "text", text: `Run ${args.runId} not found` }],
             isError: true,
           };
         }
+
+        // Long-poll if requested and still running
+        if (run.status === "running" && args.waitMs > 0) {
+          const completed = await waitForRunCompletion(
+            args.runId,
+            args.waitMs,
+            () => getSpecRun(args.runId)?.status ?? null,
+          );
+          if (completed) {
+            run = getSpecRun(args.runId)!;
+          }
+        }
+
+        const response: Record<string, unknown> = { ...run };
+        if (run.status === "running") {
+          response.retryAfterMs = 5000;
+        }
         return {
-          content: [{ type: "text", text: JSON.stringify(run) }],
+          content: [{ type: "text", text: JSON.stringify(response) }],
         };
       } catch (err) {
         return {
