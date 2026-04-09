@@ -25,6 +25,9 @@ export function registerDispatchTools(server: McpServer, cwd: string): void {
       noBranch: z.boolean().optional().describe("Skip branch creation and PR lifecycle"),
       noWorktree: z.boolean().optional().describe("Skip git worktree isolation"),
       retries: z.number().int().min(0).max(10).optional().describe("Retry attempts per task"),
+      feature: z.string().optional().describe("Group issues into a single feature branch with this name"),
+      planRetries: z.number().int().min(0).max(10).optional().describe("Number of planner retry attempts"),
+      force: z.boolean().optional().describe("Bypass safety checks (e.g. large batch confirmation)"),
     },
     async (args) => {
       let config;
@@ -63,6 +66,9 @@ export function registerDispatchTools(server: McpServer, cwd: string): void {
           noBranch: args.noBranch,
           noWorktree: args.noWorktree,
           retries: args.retries,
+          feature: args.feature,
+          planRetries: args.planRetries,
+          force: args.force,
         },
       });
 

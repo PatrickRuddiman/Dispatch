@@ -44,12 +44,14 @@ const { mockRunSpecPipeline } = vi.hoisted(() => ({
   mockRunSpecPipeline: vi.fn().mockResolvedValue({ total: 1, generated: 1, failed: 0 }),
 }));
 
-const { mockLoadConfig } = vi.hoisted(() => ({
+const { mockLoadConfig, mockSaveConfig, mockValidateConfigValue } = vi.hoisted(() => ({
   mockLoadConfig: vi.fn().mockResolvedValue({
     source: "github",
     provider: "opencode",
     concurrency: 1,
   }),
+  mockSaveConfig: vi.fn().mockResolvedValue(undefined),
+  mockValidateConfigValue: vi.fn().mockReturnValue(null),
 }));
 
 const { mockGetDatasource } = vi.hoisted(() => ({
@@ -100,6 +102,9 @@ vi.mock("../orchestrator/spec-pipeline.js", () => ({
 
 vi.mock("../config.js", () => ({
   loadConfig: mockLoadConfig,
+  saveConfig: mockSaveConfig,
+  validateConfigValue: mockValidateConfigValue,
+  CONFIG_KEYS: ["provider", "model", "fastProvider", "fastModel", "agents", "source", "testTimeout", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area", "username"] as const,
 }));
 
 vi.mock("../datasources/index.js", () => ({
@@ -113,6 +118,14 @@ vi.mock("node:fs/promises", () => ({
 
 vi.mock("../mcp/tools/_fork-run.js", () => ({
   forkDispatchRun: mockForkDispatchRun,
+}));
+
+vi.mock("../orchestrator/datasource-helpers.js", () => ({
+  parseIssueFilename: vi.fn((filePath: string) => {
+    const match = /^(?:.*\/)?(\d+)-(.+)\.md$/.exec(filePath);
+    if (!match) return null;
+    return { issueId: match[1], slug: match[2] };
+  }),
 }));
 
 // ─── Imports (after mocks) ───────────────────────────────────

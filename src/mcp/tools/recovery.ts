@@ -11,6 +11,7 @@ import { getRun, getTasksForRun, createRun } from "../state/manager.js";
 import { PROVIDER_NAMES } from "../../providers/interface.js";
 import { forkDispatchRun } from "./_fork-run.js";
 import { loadMcpConfig } from "./_resolve-config.js";
+import { parseIssueFilename } from "../../orchestrator/datasource-helpers.js";
 
 const issueIdsSchema = z.array(z.string());
 
@@ -55,7 +56,22 @@ export function registerRecoveryTools(server: McpServer, cwd: string): void {
         };
       }
 
-      const issueIds = issueIdsSchema.parse(JSON.parse(originalRun.issueIds));
+      const allIssueIds = issueIdsSchema.parse(JSON.parse(originalRun.issueIds));
+
+      // Only re-dispatch issues that actually failed, not the entire original set.
+      // Fall back to all IDs when the run failed before any tasks were created.
+      let issueIds: string[];
+      if (failedTasks.length === 0) {
+        issueIds = allIssueIds;
+      } else {
+        const failedIssueIds = new Set<string>();
+        for (const t of failedTasks) {
+          const parsed = parseIssueFilename(t.file || t.taskId.split(":")[0]);
+          if (parsed) failedIssueIds.add(parsed.issueId);
+        }
+        issueIds = failedIssueIds.size > 0 ? [...failedIssueIds] : allIssueIds;
+      }
+
       const newRunId = createRun({ cwd, issueIds });
 
       forkDispatchRun(newRunId, server, {
@@ -125,7 +141,12 @@ export function registerRecoveryTools(server: McpServer, cwd: string): void {
         };
       }
 
-      const issueIds = issueIdsSchema.parse(JSON.parse(originalRun.issueIds));
+      // Extract the single issue ID from the task's file field.
+      // Fall back to all original issue IDs if parsing fails.
+      const allIssueIds = issueIdsSchema.parse(JSON.parse(originalRun.issueIds));
+      const parsed = parseIssueFilename(task.file || task.taskId.split(":")[0]);
+      const issueIds = parsed ? [parsed.issueId] : allIssueIds;
+
       const newRunId = createRun({ cwd, issueIds });
 
       forkDispatchRun(newRunId, server, {

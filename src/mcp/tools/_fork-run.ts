@@ -103,6 +103,11 @@ export function forkDispatchRun(
         const result = msg["result"] as Record<string, unknown>;
         if (options?.onDone) {
           options.onDone(result);
+        } else if ("mode" in result && result["mode"] === "fix-tests") {
+          // Fix-tests result
+          const success = result["success"] as boolean;
+          finishRun(runId, success ? "completed" : "failed", success ? undefined : (result["error"] as string));
+          emitLog(runId, `Fix-tests ${success ? "completed successfully" : "failed"}`);
         } else if ("completed" in result) {
           // Dispatch result
           updateRunCounters(runId, result["total"] as number, result["completed"] as number, result["failed"] as number);
