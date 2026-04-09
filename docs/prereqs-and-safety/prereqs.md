@@ -29,8 +29,8 @@ checks run.
 
 ## Why these specific checks
 
--   **Git** is universally required because every pipeline mode (dispatch,
-    spec, fix-tests) performs git operations -- branching, committing,
+-   **Git** is universally required because every pipeline mode (dispatch and
+    spec) performs git operations -- branching, committing,
     pushing, or reading the working tree.
 
 -   **Node.js >= 20.12.0** is required because the `engines.node` field in
@@ -132,7 +132,7 @@ does not throw; it uses the runner's own `process.exit(1)` call.
 1.  `resolveCliConfig(args)` -- merge CLI flags, config file, defaults
 2.  **`checkPrereqs({ datasource })`** -- validate environment
 3.  `ensureGitignoreEntry()` -- add `.dispatch/worktrees/` to `.gitignore`
-4.  Mode routing -- spec, respec, fix-tests, or dispatch
+4.  Mode routing -- spec, respec, or dispatch
 
 ## Design decisions
 
@@ -227,7 +227,7 @@ Node.js versions. Each test resets the mock and restores the real version in
     helpers barrel that re-exports `checkPrereqs`.
 -   [Shared Utilities Testing](../shared-utilities/testing.md) -- Test
     patterns for the shared utility modules including prereqs.
--   [Provider Detection](./provider-detection.md) -- Provider binary
+-   [Provider Detection](../provider-system/binary-detection.md) -- Provider binary
     detection that complements prerequisite checks with datasource-specific
     tool validation.
 -   [Confirm Large Batch](./confirm-large-batch.md) -- Safety prompt

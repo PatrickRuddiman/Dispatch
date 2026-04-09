@@ -150,7 +150,7 @@ metadata (`durationMs`, `errorCode`).
 
 ### `SpecData`
 
-Domain payload for the [spec agent](../spec-generation/spec-agent.md):
+Domain payload for the [spec agent](../agent-system/spec-agent.md):
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -263,7 +263,7 @@ registry architecture, boot lifecycle, and provider session management.
 - [Executor Agent](./executor.md) — Returns `AgentResult<ExecutorData>`
 - [Dispatcher](./dispatcher.md) — The `DispatchResult` wrapped by
   `ExecutorData`
-- [Spec Agent](../spec-generation/spec-agent.md) — Returns
+- [Spec Agent](../agent-system/spec-agent.md) — Returns
   `AgentResult<SpecData>`
 - [Provider Interface](../shared-types/provider.md) — The
   `ProviderInstance` passed via `AgentBootOptions`

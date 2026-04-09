@@ -1,610 +1,297 @@
-# Datasource Abstraction & Implementations
-
-The datasource system is a strategy-pattern abstraction that normalizes access
-to work items and specs across three backends: GitHub Issues, Azure DevOps Work
-Items, and local markdown files. It provides a unified CRUD contract so that the
-orchestrator, spec generation, and CLI layers operate on the same `IssueDetails`
-data structure regardless of where the underlying data lives.
+# Datasource System Overview
 
 ## What it does
 
-The datasource system:
+The datasource system is the data-access layer of Dispatch. It provides a
+unified `Datasource` interface (15 methods) that abstracts communication with
+three backends -- GitHub Issues, Azure DevOps Work Items, and local Markdown
+files -- so that the plan generator and orchestrator never depend on a specific
+tracker.
 
-1. **Defines a common interface** (`Datasource`) with fourteen operations: five
-   CRUD methods (`list`, `fetch`, `update`, `close`, `create`), one identity
-   method (`getUsername`), one capability query (`supportsGit`), and seven git
-   lifecycle methods (`getDefaultBranch`, `buildBranchName`,
-   `createAndSwitchBranch`, `switchBranch`, `pushBranch`, `commitAllChanges`,
-   `createPullRequest`).
-2. **Provides three implementations**: GitHub (via the `gh` CLI), Azure DevOps
-   (via the `az` CLI), and local markdown files (via Node.js `fs`).
-3. **Auto-detects the correct backend** by inspecting the git `origin` remote
-   URL, or accepts an explicit `--source` flag.
-4. **Normalizes all data** into `IssueDetails` objects that the rest of the
-   pipeline consumes without knowing which tracker produced them.
-5. **Manages git lifecycle operations** (branching, committing, pushing, and
-   pull request creation) so that the dispatch pipeline can work with any
-   backend without knowing the platform-specific PR conventions.
+All three implementations live under `src/datasources/` and share a common
+registration and auto-detection mechanism defined in `src/datasources/index.ts`.
+Authentication is handled by the shared helpers in `src/helpers/auth.ts` using
+OAuth device-code flows with tokens cached at `~/.dispatch/auth.json`.
+
+**Source files:**
+
+| File | Purpose |
+|------|---------|
+| `src/datasources/interface.ts` | `Datasource` interface, `IssueDetails`, option types |
+| `src/datasources/index.ts` | Registry, auto-detection, URL parsers, `deriveShortUsername()` |
+| `src/datasources/github.ts` | GitHub implementation (Octokit SDK) |
+| `src/datasources/azdevops.ts` | Azure DevOps implementation (`azure-devops-node-api` SDK) |
+| `src/datasources/md.ts` | Markdown file implementation (fs/promises + glob) |
+| `src/helpers/auth.ts` | Device-code authentication, token caching |
+| `src/helpers/branch-validation.ts` | Branch name validation |
+| `src/constants.ts` | OAuth client IDs, Azure tenant/scope |
+| `src/orchestrator/datasource-helpers.ts` | Orchestration bridge functions |
+
+**Related docs:**
+
+- [GitHub datasource](./github-datasource.md)
+- [Azure DevOps datasource](./azdevops-datasource.md)
+- [Markdown datasource](./markdown-datasource.md)
+- [External integrations](./integrations.md)
+- [Datasource helpers](./datasource-helpers.md)
+- [Testing](./testing.md)
 
 ## Why it exists
 
-dispatch supports teams using different issue trackers and local-first
-workflows. Rather than coupling the [spec generator](../spec-generation/overview.md) and [orchestrator](../cli-orchestration/orchestrator.md) to a single
-tracker's API, the datasource layer provides a uniform interface so the rest of
-the pipeline is agnostic to the data source.
+Different teams use different issue trackers. The datasource abstraction lets
+Dispatch work with any of them through a single contract, keeping the core
+pipeline logic tracker-agnostic. Adding a new backend requires only:
 
-The system uses CLI tools (`gh`, `az`) instead of native REST clients or SDKs
-for three reasons (see also
-[Prerequisites — External Integrations](../prereqs-and-safety/integrations.md)
-for how these tools are detected at startup):
+1. Creating a new file under `src/datasources/` that satisfies `Datasource`.
+2. Registering it in the `DATASOURCES` map in `src/datasources/index.ts`.
+3. Adding the name to the `DatasourceName` union in `src/datasources/interface.ts`.
 
-1. **Authentication reuse.** Users authenticate once via `gh auth login` or
-   `az login`. The CLI tools manage token storage, refresh, and multi-account
-   switching. Using HTTP APIs would require dispatch to implement its own
-   credential management.
-2. **Zero additional dependencies.** No GitHub REST/GraphQL client library
-   (`@octokit/rest`) or Azure DevOps SDK (`azure-devops-node-api`) is added to
-   the dependency tree. The only runtime requirement is that the CLI tool is
-   installed on the host.
-3. **Simplicity.** A single `execFile` call with JSON output replaces dozens of
-   lines of API client setup, pagination handling, and error mapping. The
-   trade-off is a runtime dependency on external binaries being installed and
-   on PATH.
+## How it works
 
-The markdown datasource enables fully offline operation where markdown files in
-`.dispatch/specs/` serve as the source of truth, with no network calls or
-external tool requirements.
+### Datasource interface
 
-## Relationship to the deprecated issue-fetcher system
+The `Datasource` interface (`src/datasources/interface.ts`) defines 15 methods
+organized into three groups:
 
-The datasource system supersedes the older `IssueFetcher` interface defined in
-`src/issue-fetcher.ts`. The previous system supported only `fetch`, `update`,
-and `close` operations and only covered the `github` and `azdevops` backends
-(no local markdown support).
+**CRUD operations (5 methods):**
 
-The deprecated compatibility layer in `src/issue-fetchers/index.ts` provides
-backwards-compatible shims that delegate to the new datasource implementations.
-All exports from the old `issue-fetchers/` directory are marked `@deprecated`
-and are slated for removal. No code outside the deprecated layer currently
-imports from the old paths.
-
-For details on the deprecated layer, see the
-[deprecated compatibility documentation](../issue-fetching/overview.md).
-
-## Key source files
-
-| File | Role |
-|------|------|
-| `src/datasources/interface.ts` | Defines `Datasource`, `IssueDetails`, `IssueFetchOptions`, `DispatchLifecycleOptions`, and `DatasourceName` |
-| `src/datasources/index.ts` | Registry, `DATASOURCE_NAMES`, `getDatasource()`, `detectDatasource()`, `getGitRemoteUrl()`, and `parseAzDevOpsRemoteUrl()` |
-| `src/datasources/github.ts` | GitHub implementation via `gh` CLI |
-| `src/datasources/azdevops.ts` | Azure DevOps implementation via `az` CLI |
-| `src/datasources/md.ts` | Local markdown file implementation via `fs/promises` |
-| `src/orchestrator/datasource-helpers.ts` | Orchestration bridge: temp file writing, issue ID extraction, auto-close logic (see [Datasource Helpers](./datasource-helpers.md)) |
-| `src/tests/datasource.test.ts` | Test suite covering the md datasource and registry (see [Testing](./testing.md)) |
-
-## Architecture
-
-The datasource system sits between the external data sources and the pipeline
-consumers (orchestrator, spec generator, CLI). All communication flows through
-the `Datasource` interface, which normalizes tracker-specific data into
-`IssueDetails` objects.
-
-```mermaid
-C4Context
-    title Datasource Abstraction Layer
-
-    Person(user, "Developer", "Runs dispatch CLI")
-
-    System_Boundary(dispatch, "dispatch") {
-        Container(cli, "CLI", "src/cli.ts", "Parses --source, --spec flags")
-        Container(orch, "Orchestrator", "src/orchestrator/", "Drives dispatch and spec pipelines")
-        Container(helpers, "Datasource Helpers", "src/orchestrator/datasource-helpers.ts", "Temp file writing, issue-ID extraction, auto-close")
-        Container(specgen, "Spec Generator", "src/spec-generator.ts", "Builds AI prompts from issues")
-        Container(registry, "Datasource Registry", "src/datasources/index.ts", "Maps names to implementations, auto-detects backend")
-        Container(iface, "Datasource Interface", "src/datasources/interface.ts", "Datasource, IssueDetails, DispatchLifecycleOptions")
-
-        Container(gh_ds, "GitHub Datasource", "src/datasources/github.ts", "Shells out to gh CLI and git")
-        Container(az_ds, "Azure DevOps Datasource", "src/datasources/azdevops.ts", "Shells out to az CLI and git")
-        Container(md_ds, "Markdown Datasource", "src/datasources/md.ts", "Reads/writes .dispatch/specs/")
-
-        Container(compat, "Deprecated Compat", "src/issue-fetchers/", "IssueFetcher shims")
-    }
-
-    System_Ext(github, "GitHub Issues & PRs", "Cloud issue tracker and PR service")
-    System_Ext(azdo, "Azure DevOps", "Cloud work item tracker and PR service")
-    System_Ext(fs, "Local Filesystem", ".dispatch/specs/ directory")
-    System_Ext(git, "Git CLI", "Branch, commit, push operations; remote URL inspection")
-
-    Rel(user, cli, "invokes")
-    Rel(cli, orch, "delegates to")
-    Rel(orch, registry, "getDatasource()")
-    Rel(orch, helpers, "writeItemsToTempDir(), closeCompletedSpecIssues()")
-    Rel(orch, specgen, "generates specs")
-    Rel(specgen, registry, "getDatasource()")
-    Rel(helpers, registry, "getDatasource(), detectDatasource()")
-    Rel(registry, gh_ds, "github")
-    Rel(registry, az_ds, "azdevops")
-    Rel(registry, md_ds, "md")
-    Rel(registry, git, "detectDatasource()")
-    Rel(gh_ds, github, "gh issue/pr commands")
-    Rel(gh_ds, git, "checkout, commit, push")
-    Rel(az_ds, azdo, "az boards/repos commands")
-    Rel(az_ds, git, "checkout, commit, push")
-    Rel(md_ds, fs, "readFile/writeFile/readdir/rename")
-    Rel(compat, registry, "delegates to getDatasource()")
-    Rel(gh_ds, iface, "implements")
-    Rel(az_ds, iface, "implements")
-    Rel(md_ds, iface, "implements")
-```
-
-## Data flow
-
-The following diagram shows how data flows from external sources through the
-datasource layer into the pipeline consumers:
-
-```mermaid
-flowchart LR
-    subgraph "External Sources"
-        GH["GitHub Issues<br/>via gh CLI"]
-        AZ["Azure DevOps<br/>via az CLI"]
-        FS["Local Filesystem<br/>.dispatch/specs/*.md"]
-    end
-
-    subgraph "Datasource Layer"
-        REG["Registry<br/>getDatasource()"]
-        DET["Auto-Detection<br/>detectDatasource()"]
-        GHDS["GitHub<br/>Datasource"]
-        AZDS["AzDevOps<br/>Datasource"]
-        MDDS["Markdown<br/>Datasource"]
-    end
-
-    subgraph "Normalized Output"
-        ID["IssueDetails<br/>{number, title, body,<br/>labels, state, url,<br/>comments, acceptanceCriteria}"]
-    end
-
-    subgraph "Pipeline Consumers"
-        ORCH["Dispatch Pipeline<br/>orchestrator/dispatch-pipeline.ts"]
-        SPEC["Spec Pipeline<br/>orchestrator/spec-pipeline.ts"]
-        HELP["Datasource Helpers<br/>orchestrator/datasource-helpers.ts"]
-        SG["Spec Generator<br/>spec-generator.ts"]
-    end
-
-    GH --> GHDS
-    AZ --> AZDS
-    FS --> MDDS
-
-    DET -->|"git remote get-url origin"| REG
-    REG --> GHDS
-    REG --> AZDS
-    REG --> MDDS
-
-    GHDS --> ID
-    AZDS --> ID
-    MDDS --> ID
-
-    ID --> ORCH
-    ID --> SPEC
-    ID --> HELP
-    ID --> SG
-```
-
-## Issue-to-completion lifecycle
-
-The following sequence diagram shows the full lifecycle of an issue from
-fetch through task completion, including the git lifecycle operations managed
-by the datasource:
-
-```mermaid
-sequenceDiagram
-    participant CLI as CLI / Orchestrator
-    participant Helpers as Datasource Helpers
-    participant DS as Datasource
-    participant Git as Git CLI
-    participant Tracker as Issue Tracker
-
-    CLI->>DS: fetch(issueId)
-    DS->>Tracker: gh issue view / az boards work-item show
-    Tracker-->>DS: Issue data
-    DS-->>CLI: IssueDetails
-
-    CLI->>Helpers: writeItemsToTempDir(items)
-    Helpers-->>CLI: {files, issueDetailsByFile}
-
-    CLI->>DS: getDefaultBranch(opts)
-    DS->>Git: git symbolic-ref refs/remotes/origin/HEAD
-    Git-->>DS: refs/remotes/origin/main
-    DS-->>CLI: "main"
-
-    CLI->>DS: getUsername(opts)
-    DS->>Git: git config user.name
-    Git-->>DS: "John Doe"
-    DS-->>CLI: "john-doe"
-
-    CLI->>DS: buildBranchName(issueNumber, title, username)
-    DS-->>CLI: "john-doe/dispatch/42-add-auth"
-
-    CLI->>DS: createAndSwitchBranch("john-doe/dispatch/42-add-auth", opts)
-    DS->>Git: git checkout -b john-doe/dispatch/42-add-auth
-    Git-->>DS: OK
-
-    Note over CLI: Tasks execute and produce changes
-
-    CLI->>DS: commitAllChanges("dispatch: complete tasks for #42", opts)
-    DS->>Git: git add -A
-    DS->>Git: git diff --cached --stat
-    DS->>Git: git commit -m "..."
-    Git-->>DS: OK
-
-    CLI->>DS: pushBranch("john-doe/dispatch/42-add-auth", opts)
-    DS->>Git: git push --set-upstream origin john-doe/dispatch/42-add-auth
-    Git-->>DS: OK
-
-    CLI->>DS: createPullRequest("john-doe/dispatch/42-add-auth", "42", "Add auth", "", opts)
-    DS->>Tracker: gh pr create / az repos pr create
-    Tracker-->>DS: PR URL
-    DS-->>CLI: "https://..."
-
-    CLI->>Helpers: closeCompletedSpecIssues(taskFiles, results, cwd)
-    Helpers->>DS: close(issueId)
-    DS->>Tracker: gh issue close / az boards work-item update --state Closed
-    Tracker-->>DS: OK
-```
-
-## The `Datasource` interface
-
-Every datasource implementation must satisfy a fourteen-method contract defined
-in `src/datasources/interface.ts`. The interface is split into four groups:
-five CRUD operations for issue/spec management, one identity method
-(`getUsername`), one capability query (`supportsGit`), and seven git lifecycle
-operations for branching, committing, pushing, and pull request creation.
-
-### CRUD operations
-
-| Method | Signature | Purpose |
-|--------|-----------|---------|
-| `list` | `(opts?) => Promise<IssueDetails[]>` | List available issues or specs |
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `list` | `(opts?) => Promise<IssueDetails[]>` | List open issues/specs |
 | `fetch` | `(issueId, opts?) => Promise<IssueDetails>` | Fetch a single issue by ID |
-| `update` | `(issueId, title, body, opts?) => Promise<void>` | Update title and/or body |
-| `close` | `(issueId, opts?) => Promise<void>` | Close or resolve an issue |
 | `create` | `(title, body, opts?) => Promise<IssueDetails>` | Create a new issue |
+| `update` | `(issueId, title, body, opts?) => Promise<void>` | Update title and body |
+| `close` | `(issueId, opts?) => Promise<void>` | Close or resolve an issue |
 
-All CRUD methods accept an optional `IssueFetchOptions` parameter with `cwd`,
-`org`, `project`, `workItemType`, `iteration`, and `area` fields. The `org` and
-`project` fields are only meaningful for the Azure DevOps datasource. The
-`workItemType` field overrides the automatic work item type detection in the
-Azure DevOps datasource's `create()` method (see
-[Azure DevOps Datasource -- `create()`](./azdevops-datasource.md#create)). The
-`iteration` and `area` fields filter Azure DevOps work items by iteration path
-(e.g., `"MyProject\\Sprint 1"` or `"@CurrentIteration"`) and area path
-(e.g., `"MyProject\\Team A"`) respectively.
+**Git lifecycle operations (8 methods):**
 
-### Capability query
-
-| Method | Signature | Purpose |
-|--------|-----------|---------|
-| `supportsGit` | `() => boolean` | Whether this datasource supports git operations (branching, pushing, PRs) |
-
-The `supportsGit()` method controls whether the dispatch pipeline invokes git
-lifecycle methods on this datasource. When it returns `false`, the pipeline
-skips all branching, committing, pushing, and PR creation operations for that
-datasource. Currently only the markdown datasource returns `false` (it operates
-on local files without git integration). The GitHub and Azure DevOps datasources
-return `true`.
-
-The dispatch pipeline checks `supportsGit()` before each of these operations:
-
-- **Branch creation**: `createAndSwitchBranch()` is skipped
-- **Safety-net commit**: `commitAllChanges()` after task dispatch is skipped
-- **Commit agent**: squash and rewrite operations are skipped
-- **Push**: `pushBranch()` is skipped
-- **PR creation**: `createPullRequest()` is skipped
-- **Branch switch-back**: `switchBranch()` to the default branch is skipped
-
-### Identity method
-
-| Method | Signature | Purpose |
-|--------|-----------|---------|
-| `getUsername` | `(opts) => Promise<string>` | Resolve the current git username for branch namespacing |
-
-The `getUsername` method reads `git config user.name`, slugifies the result,
-and returns a branch-safe username string. This username is prepended to the
-branch name to namespace dispatch branches per developer (see
-[branch naming convention](#branch-naming-convention) below).
-
-The fallback value differs per datasource:
-
-| Datasource | Fallback |
-|------------|----------|
-| **GitHub** | `"unknown"` |
-| **Azure DevOps** | `"unknown"` |
-| **Markdown** | `"local"` |
-
-### Git lifecycle operations
-
-These methods manage the branching, committing, pushing, and pull request
-workflow that the dispatch pipeline uses after completing tasks for an issue.
-
-| Method | Signature | Purpose |
-|--------|-----------|---------|
-| `getDefaultBranch` | `(opts) => Promise<string>` | Detect the repository's default branch (`main` or `master`) |
-| `buildBranchName` | `(issueNumber, title, username?) => string` | Build a sanitized branch name from an issue number, title, and username |
-| `createAndSwitchBranch` | `(branchName, opts) => Promise<void>` | Create a new branch and switch to it; if it already exists, switch to it |
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `getDefaultBranch` | `(opts) => Promise<string>` | Resolve default branch (symbolic-ref or fallback) |
+| `getCurrentBranch` | `(opts) => Promise<string>` | Current branch, falls back to default on detached HEAD |
+| `getUsername` | `(opts) => Promise<string>` | Slugified username for branch namespacing |
+| `buildBranchName` | `(issueNumber, title, username?) => string` | Build branch name from issue data |
+| `createAndSwitchBranch` | `(branchName, opts) => Promise<void>` | Create and checkout branch (with worktree recovery) |
 | `switchBranch` | `(branchName, opts) => Promise<void>` | Switch to an existing branch |
-| `pushBranch` | `(branchName, opts) => Promise<void>` | Push a branch to the remote with `--set-upstream` |
-| `commitAllChanges` | `(message, opts) => Promise<void>` | Stage all changes (`git add -A`) and commit; no-ops if nothing staged |
-| `createPullRequest` | `(branchName, issueNumber, title, body, opts) => Promise<string>` | Create a PR linking the branch to the issue; returns the PR URL |
+| `pushBranch` | `(branchName, opts) => Promise<void>` | Push branch to origin |
+| `commitAllChanges` | `(message, opts) => Promise<void>` | Stage all and commit (skips if nothing staged) |
 
-All git lifecycle methods accept a required `DispatchLifecycleOptions`
-parameter (see [below](#the-dispatchlifecycleoptions-interface)). The
-`buildBranchName` method is synchronous -- all others are async.
+**Pull request creation (1 method):**
 
-### Branch naming convention
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `createPullRequest` | `(branchName, issueNumber, title, body, opts, baseBranch?) => Promise<string>` | Create PR; returns URL of created or existing PR |
 
-All three datasource implementations use the same branch naming convention:
+**Capability query (1 method):**
 
-```
-<username>/dispatch/<issueNumber>-<slugified-title>
-```
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `supportsGit` | `() => boolean` | Whether git operations are functional (returns `true` for all 3 datasources) |
 
-The `username` is resolved by `getUsername()`, which reads `git config user.name`
-and slugifies it. The title is slugified identically to the markdown datasource's
-`create()` filename slug (via [`slugify()`](../shared-utilities/slugify.md)):
-lowercased, non-alphanumeric runs replaced with hyphens, leading/trailing
-hyphens trimmed, truncated to 50 characters. Examples:
+### Data types
 
-| Issue number | Username | Title | Branch name |
-|-------------|----------|-------|-------------|
-| `42` | `john-doe` | `"Add user authentication"` | `john-doe/dispatch/42-add-user-authentication` |
-| `7` | `jane-smith` | `"Fix Bug #123!!"` | `jane-smith/dispatch/7-fix-bug-123` |
+**`IssueDetails`** -- the normalized work item returned by all datasources:
 
-The `<username>/dispatch/` prefix serves as a namespace to distinguish
-dispatch-created branches from manually created ones and to avoid branch name
-collisions between developers. This is useful for CI/CD pipelines that want to
-trigger only on dispatch branches (e.g.,
-`on: push: branches: ['*/dispatch/**']`).
-
-### Pull request body and auto-close conventions
-
-The `createPullRequest` method accepts a `body` parameter. When the caller
-provides a non-empty `body`, it is used as the PR description as-is. When the
-`body` is empty or falsy, each datasource falls back to a platform-specific
-issue-linking keyword:
-
-| Datasource | Fallback PR body | Effect on merge |
-|------------|-----------------|-----------------|
-| **GitHub** | `Closes #<issueNumber>` | GitHub auto-closes the linked issue when the PR is merged |
-| **Azure DevOps** | `Resolves AB#<issueNumber>` | Azure DevOps resolves the linked work item; the `--work-items` flag also creates a formal link |
-| **Markdown** | _(no PR created)_ | Returns `""` -- the markdown datasource does not create PRs |
-
-### Existing PR handling
-
-Both the GitHub and Azure DevOps implementations handle the case where a pull
-request already exists for the branch:
-
-- **GitHub:** If `gh pr create` fails with "already exists", it falls back to
-  `gh pr view <branch> --json url --jq .url` to return the existing PR URL.
-- **Azure DevOps:** If `az repos pr create` fails with "already exists", it
-  falls back to `az repos pr list --source-branch <branch> --status active`
-  to find and return the existing PR URL.
-
-### The `IssueDetails` interface
-
-All datasources normalize their platform-specific data into this common
-structure:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `number` | `string` | Issue ID, work item ID, or filename |
-| `title` | `string` | Title of the issue |
-| `body` | `string` | Full description (may contain HTML or markdown) |
-| `labels` | `string[]` | Labels, tags, or categories |
+| Field | Type | Notes |
+|-------|------|-------|
+| `number` | `string` | Issue number, work item ID, or filename |
+| `title` | `string` | Issue title |
+| `body` | `string` | Full description (markdown or HTML) |
+| `labels` | `string[]` | Tags/labels/categories |
 | `state` | `string` | Current state (open, closed, active, etc.) |
-| `url` | `string` | URL to the issue in the tracker's web UI |
-| `comments` | `string[]` | Discussion comments as `**author:** text` |
-| `acceptanceCriteria` | `string` | Acceptance criteria (Azure DevOps only) |
-| `iterationPath?` | `string` | Iteration path / sprint (Azure DevOps only) |
-| `areaPath?` | `string` | Area path / team (Azure DevOps only) |
+| `url` | `string` | Web UI URL |
+| `comments` | `string[]` | Discussion comments |
+| `acceptanceCriteria` | `string` | Acceptance criteria (Azure DevOps) |
+| `iterationPath?` | `string` | Sprint path (Azure DevOps) |
+| `areaPath?` | `string` | Team path (Azure DevOps) |
 | `assignee?` | `string` | Assignee display name |
-| `priority?` | `number` | Priority (1 = Critical … 4 = Low) |
+| `priority?` | `number` | 1 = Critical ... 4 = Low |
 | `storyPoints?` | `number` | Story points / effort / size |
 | `workItemType?` | `string` | Work item type (e.g. "User Story", "Bug") |
 
-### The `DatasourceName` type
+**`IssueFetchOptions`** -- options passed to CRUD methods:
 
-`DatasourceName` is defined as `"github" | "azdevops" | "md"` -- a TypeScript
-string literal union type. This differs from the older `IssueSourceName` which
-was `"github" | "azdevops"` (no markdown support). When adding a new datasource,
-you must update both the union type in `src/datasources/interface.ts` and the
-registry map in `src/datasources/index.ts`.
+| Field | Type | Notes |
+|-------|------|-------|
+| `cwd?` | `string` | Working directory for repo context |
+| `org?` | `string` | Organization URL (Azure DevOps) |
+| `project?` | `string` | Project name (Azure DevOps) |
+| `workItemType?` | `string` | Work item type filter |
+| `iteration?` | `string` | Iteration path or `@CurrentIteration` macro |
+| `area?` | `string` | Area path filter |
+| `pattern?` | `string \| string[]` | Glob pattern(s) for `list()` filtering (Markdown) |
 
-### The `DispatchLifecycleOptions` interface
+**`DispatchLifecycleOptions`** -- options for git lifecycle methods:
 
-Git lifecycle methods accept this options interface instead of
-`IssueFetchOptions`:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `cwd` | `string` (required) | Working directory (git repo root) |
-
-Unlike `IssueFetchOptions` where `cwd` is optional (defaulting to
-`process.cwd()`), `DispatchLifecycleOptions` requires `cwd` explicitly. The
-`org` and `project` fields are not needed because git lifecycle operations work
-directly with the local git repository, not with tracker APIs.
-
-The Azure DevOps `createPullRequest` method is the one exception that also
-shells out to `az repos pr create`, but it derives the organization and project
-context from the `az` CLI defaults or the git remote URL rather than from
-explicit options.
-
-## The datasource registry
-
-The registry in `src/datasources/index.ts` maps `DatasourceName` values to
-`Datasource` implementations:
-
-| Export | Purpose |
-|--------|---------|
-| `DATASOURCE_NAMES` | Array of all registered datasource names (for CLI validation and help text) |
-| `getDatasource(name)` | Returns the datasource implementation or throws if not registered |
-| `detectDatasource(cwd)` | Auto-detects the datasource from the git `origin` remote URL |
-| `getGitRemoteUrl(cwd)` | Returns the `origin` remote URL, or `null` if unavailable |
-| `parseAzDevOpsRemoteUrl(url)` | Parses Azure DevOps remote URLs (HTTPS, SSH, legacy) and returns `{ orgUrl, project }`, or `null` if unrecognized |
+| Field | Type | Notes |
+|-------|------|-------|
+| `cwd` | `string` | Working directory (git repo root) |
+| `username?` | `string` | Optional short username, overrides git-derived value |
 
 ### Auto-detection
 
-When the user omits `--source`, `detectDatasource(cwd)` inspects the git
-`origin` remote URL and matches it against patterns in order (first match wins):
+The registry in `src/datasources/index.ts` provides `detectDatasource(cwd)`,
+which reads the `origin` remote URL and matches it against known patterns:
 
-| Pattern | Detected source | Example URLs |
-|---------|----------------|-------------|
-| `/github\.com/i` | `github` | `https://github.com/owner/repo`, `git@github.com:owner/repo.git` |
-| `/dev\.azure\.com/i` | `azdevops` | `https://dev.azure.com/org/project` |
-| `/visualstudio\.com/i` | `azdevops` | `https://org.visualstudio.com/project` |
+```mermaid
+flowchart TD
+    A[detectDatasource] --> B[getGitRemoteUrl]
+    B -->|null| C[return null]
+    B -->|url| D{Match patterns}
+    D -->|github.com| E[return 'github']
+    D -->|dev.azure.com| F[return 'azdevops']
+    D -->|visualstudio.com| F
+    D -->|no match| C
+```
 
-The `visualstudio.com` pattern exists because Azure DevOps was formerly known
-as Visual Studio Team Services (VSTS). In September 2018, Microsoft rebranded
-the service and migrated URLs from `{org}.visualstudio.com` to
-`dev.azure.com/{org}`. Many organizations still use the legacy URL format,
-so the auto-detection pattern supports both.
+Pattern matching is done in order; the first match wins. If no remote URL is
+available or no pattern matches, `null` is returned and the caller must either
+fall back to the `md` datasource or prompt the user.
 
-Both SSH and HTTPS URL formats are supported because the regex tests for the
-hostname string anywhere in the URL.
+### Branch naming convention
 
-If no pattern matches, the function returns `null`. The caller (typically the
-spec pipeline or orchestrator) is responsible for handling the `null` case --
-usually by logging an error and suggesting the user specify `--source`
-explicitly.
+All three datasources produce branch names in the format:
 
-### Auto-detection limitations
+```
+{username}/dispatch/issue-{number}
+```
 
-**Multiple remotes.** `detectDatasource()` only inspects the `origin` remote
-(hardcoded at `src/datasources/index.ts:72`). Repositories with multiple
-remotes (e.g., `origin` pointing to GitHub and `azure` pointing to Azure
-DevOps) will only detect based on `origin`. Use `--source` to override.
+The `title` parameter is accepted by `buildBranchName()` for interface
+compatibility but is unused (parameter named `_title` in all implementations).
 
-**GitHub Enterprise.** Repositories hosted on GitHub Enterprise Server (e.g.,
-`github.mycompany.com`) will not match the `github.com` pattern. Use
-`--source github` to force GitHub detection for Enterprise hosts.
+The `username` is derived by `deriveShortUsername()` in `src/datasources/index.ts`:
 
-**No git repository.** If the working directory is not a git repository, `git
-remote get-url origin` fails. The `catch` block returns `null`, and the caller
-handles the error.
+- **Multi-word git name:** first 2 chars of first name + first 6 chars of last
+  name (e.g. "Jane Smith" becomes `jasmith`)
+- **Single-word or no name:** first 8 chars of the email local part
+- **Fallback:** `"unknown"` for GitHub/Azure DevOps, `"local"` for Markdown
 
-**Cannot override auto-detection at the datasource level.** The `--source` flag
-(or config file `source` key) is the mechanism for forcing a specific
-datasource regardless of the git remote URL.
+The `username` field in `DispatchLifecycleOptions` can override the derived
+value. All datasources check `opts.username` before calling
+`deriveShortUsername()`.
 
-### Azure DevOps remote URL parsing
+### Default branch detection
 
-The `parseAzDevOpsRemoteUrl()` function (`src/datasources/index.ts:112-149`)
-extracts the organization URL and project name from Azure DevOps git remote
-URLs. It supports three URL formats:
+All three datasources share identical logic for `getDefaultBranch()`:
 
-| Format | Example | Parsed `orgUrl` | Parsed `project` |
-|--------|---------|----------------|-----------------|
-| **HTTPS** | `https://dev.azure.com/myorg/myproj/_git/repo` | `https://dev.azure.com/myorg` | `myproj` |
-| **SSH** | `git@ssh.dev.azure.com:v3/myorg/myproj/repo` | `https://dev.azure.com/myorg` | `myproj` |
-| **Legacy** | `https://myorg.visualstudio.com/myproj/_git/repo` | `https://dev.azure.com/myorg` | `myproj` |
+1. Run `git symbolic-ref refs/remotes/origin/HEAD` and extract the branch name
+   after the `refs/remotes/origin/` prefix.
+2. Validate the result with `isValidBranchName()`.
+3. If symbolic-ref fails, check if `main` exists via `git rev-parse --verify main`.
+4. Fall back to `master` if `main` does not exist.
 
-The organization URL is always normalized to `https://dev.azure.com/{org}`,
-even for legacy `visualstudio.com` inputs. URL-encoded path segments are
-decoded. The legacy format also handles the optional `DefaultCollection/`
-path segment (e.g., `https://org.visualstudio.com/DefaultCollection/proj/_git/repo`).
+### Current branch detection
 
-Returns `null` if the URL does not match any recognized Azure DevOps format.
+`getCurrentBranch()` runs `git rev-parse --abbrev-ref HEAD`. When in detached
+HEAD state (returns the literal string `"HEAD"`), it falls back to
+`getDefaultBranch()`.
 
-This function is used by the Azure DevOps datasource and by the orchestrator
-to resolve `--org` and `--project` defaults automatically from the git remote
-when they are not provided explicitly.
+### Worktree conflict recovery
 
-## How the `close` operation differs across datasources
+All three datasources share identical logic in `createAndSwitchBranch()`:
 
-The `close()` method has different semantics depending on the backend:
+1. Attempt `git checkout -b {branch}` to create and switch.
+2. If the branch already exists, fall back to `git checkout {branch}`.
+3. If checkout fails with "already used by worktree", run `git worktree prune`
+   then retry the checkout.
 
-| Datasource | Close implementation | Reversible? |
-|------------|---------------------|-------------|
-| **GitHub** | Calls `gh issue close <id>` which sets the issue state to "closed" via the GitHub API | Yes -- use `gh issue reopen` |
-| **Azure DevOps** | Calls `az boards work-item update --state Closed` which transitions the work item to the "Closed" state | Yes -- update the state back to "Active" or another valid state |
-| **Markdown** | Moves the file from `.dispatch/specs/` to `.dispatch/specs/archive/` via `fs.rename()` | Yes -- manually move the file back from the archive directory |
+Azure DevOps additionally validates the branch name with `isValidBranchName()`
+before any git operations and throws `InvalidBranchNameError` on failure.
 
-The GitHub and Azure DevOps implementations perform state changes on the remote
-tracker, while the markdown implementation performs a local file move. All three
-implementations create the target directory or state as needed.
+### Commit staging
 
-## Consumers of the datasource system
+`commitAllChanges()` in all three datasources:
 
-The `Datasource` interface is consumed by several parts of the pipeline:
+1. Runs `git add -A` to stage everything.
+2. Runs `git diff --cached --stat` to check if anything is staged.
+3. Skips the commit silently if nothing is staged.
+4. Runs `git commit -m {message}` otherwise.
 
-| Consumer | Import | Operations used |
-|----------|--------|-----------------|
-| Dispatch pipeline (`src/orchestrator/dispatch-pipeline.ts`) | `getDatasource` | `close` (auto-close issues when all tasks succeed; see [Datasource Helpers](./datasource-helpers.md#closecompletedspecissues)), git lifecycle methods (branching, committing, pushing, PR creation) |
-| Spec pipeline (`src/orchestrator/spec-pipeline.ts`) | `getDatasource`, `detectDatasource` | `fetch`, `list`, `update` |
-| Datasource helpers (`src/orchestrator/datasource-helpers.ts`) | `getDatasource`, `detectDatasource` | `fetch` (via `fetchItemsById`), `close` (via `closeCompletedSpecIssues`) |
-| Spec generator (`src/spec-generator.ts`) | `getDatasource` | `fetch` (retrieve issue details for AI prompts) |
-| Deprecated compat layer (`src/issue-fetchers/index.ts`) | `getDatasource`, `detectDatasource` | `fetch`, `update`, `close` (bound as shims) |
+### Authentication flow
 
-## Adding a new datasource
+GitHub and Azure DevOps use device-code OAuth flows managed by
+`src/helpers/auth.ts`. See [integrations.md](./integrations.md) for the full
+authentication sequence diagram.
 
-To add a new datasource (e.g., Jira, Linear, GitLab):
+```mermaid
+sequenceDiagram
+    participant User
+    participant Dispatch
+    participant AuthCache as ~/.dispatch/auth.json
+    participant Provider as GitHub / Azure AD
 
-1. Create `src/datasources/<name>.ts` exporting a `datasource` object that
-   satisfies the `Datasource` interface (all 14 methods: 5 CRUD + 1 identity
-   + 1 capability query + 7 git lifecycle).
-2. Add the name to the `DatasourceName` union in `src/datasources/interface.ts`.
-3. Import and register the implementation in the `DATASOURCES` map in
-   `src/datasources/index.ts`.
-4. Optionally add a URL pattern to the `SOURCE_PATTERNS` array in
-   `src/datasources/index.ts` for auto-detection support.
-5. Implement `supportsGit()` to return `true` if the datasource supports git
-   branching, pushing, and PR creation, or `false` if it is a local-only
-   backend. When `supportsGit()` returns `false`, the dispatch pipeline skips
-   all git lifecycle operations.
-6. Implement git lifecycle methods. If `supportsGit()` returns `false`,
-   implement them as no-ops. The `buildBranchName` method should still return
-   a valid branch name using the `<username>/dispatch/<number>-<slug>`
-   convention. `createPullRequest` should return `""` for no-op
-   implementations.
-7. Add tests in `src/tests/datasource.test.ts`.
+    Dispatch->>AuthCache: Load cached token
+    alt Valid token exists
+        AuthCache-->>Dispatch: Return token
+    else No token or expired
+        Dispatch->>Provider: Initiate device-code flow
+        Provider-->>Dispatch: Return device code + URL
+        Dispatch->>User: Display code and URL
+        User->>Provider: Authorize in browser
+        Provider-->>Dispatch: Return access token
+        Dispatch->>AuthCache: Save token (mode 0o600)
+    end
+    Dispatch->>Provider: Authenticated API calls
+```
 
-TypeScript's exhaustiveness checking on the `DatasourceName` union ensures
-that all consumers handle the new backend at compile time.
+### SDK architecture
 
-## Component index
+The datasource system uses SDK-based integrations rather than CLI tools:
 
-- [GitHub Datasource](./github-datasource.md) -- GitHub CLI integration,
-  authentication, and operations
-- [Azure DevOps Datasource](./azdevops-datasource.md) -- Azure CLI
-  integration, WIQL queries, and work item operations
-- [Markdown Datasource](./markdown-datasource.md) -- Local filesystem
-  operations, file naming, and archival
-- [Datasource Helpers](./datasource-helpers.md) -- Orchestration bridge:
-  temp file lifecycle, issue ID extraction, and auto-close logic
-- [Integrations & Troubleshooting](./integrations.md) -- Cross-cutting
-  concerns: subprocess behavior, error handling, and external tool
-  dependencies
-- [Testing](./testing.md) -- Test suite covering the markdown datasource
-  and datasource registry
+| Datasource | SDK | Authentication |
+|------------|-----|----------------|
+| GitHub | `@octokit/rest` + `@octokit/auth-oauth-device` | OAuth device-flow, `repo` scope |
+| Azure DevOps | `azure-devops-node-api` + `@azure/identity` | `DeviceCodeCredential`, work/school accounts only |
+| Markdown | `fs/promises` + `glob` | None (local filesystem) |
+
+The only CLI dependency is `git` itself, invoked via `child_process.execFile`
+for branch operations, commits, and pushes.
+
+### Credential redaction
+
+Both GitHub and Azure DevOps datasources include a `redactUrl()` helper that
+strips userinfo from URLs before including them in error messages, replacing
+`https://user:pass@host/...` with `https://***@host/...`.
+
+### URL parsing
+
+Two URL parser functions in `src/datasources/index.ts` extract owner/repo
+or org/project from git remote URLs:
+
+**`parseGitHubRemoteUrl()`** supports 3 formats:
+
+- HTTPS: `https://[user@]github.com/{owner}/{repo}[.git]`
+- SCP-style SSH: `git@github.com:{owner}/{repo}[.git]`
+- URL-style SSH: `ssh://git@github.com/{owner}/{repo}[.git]`
+
+**`parseAzDevOpsRemoteUrl()`** supports 3 formats:
+
+- HTTPS: `https://[user@]dev.azure.com/{org}/{project}/_git/{repo}`
+- SSH: `git@ssh.dev.azure.com:v3/{org}/{project}/{repo}`
+- Legacy: `https://{org}.visualstudio.com/[DefaultCollection/]{project}/_git/{repo}`
+
+All parsers decode URL-encoded segments and normalize Azure DevOps org URLs to
+`https://dev.azure.com/{org}`.
 
 ## Related documentation
 
-- [Architecture Overview](../architecture.md) -- System-wide design and
-  pipeline topology
-- [Issue Fetching](../issue-fetching/overview.md) -- The deprecated
-  `IssueFetcher` interface that the datasource system supersedes
-- [Spec Generation](../spec-generation/overview.md) -- How the spec pipeline
-  uses datasources to fetch issues and generate specs
-- [CLI & Configuration](../cli-orchestration/cli.md) -- `--source`, `--org`,
-  `--project`, and `--output-dir` flags
-- [CLI Orchestrator](../cli-orchestration/orchestrator.md) -- How the
-  orchestrator invokes datasource operations and helpers
-- [Git Operations](../planning-and-dispatch/git.md) -- Post-completion git
-  commits that run after datasource lifecycle operations
-- [Shared Utilities — Slugify](../shared-utilities/slugify.md) -- The `slugify()`
-  function used for branch name and filename generation
-- [Configuration](../cli-orchestration/configuration.md) -- Persistent config
-  including `source`, `org`, and `project` settings
-- [Prerequisites & Safety Checks](../prereqs-and-safety/overview.md) -- How
-  the prerequisite checker validates that `git`, `gh`, and `az` CLI tools are
-  available before pipeline execution
-- [Prerequisite External Integrations](../prereqs-and-safety/integrations.md) --
-  CLI tool detection patterns for datasource dependencies
+- [Datasource Helpers](./datasource-helpers.md) -- bridge functions between
+  the orchestrator and datasource layer (PR bodies, temp files, issue parsing)
+- [GitHub Datasource](./github-datasource.md) -- GitHub-specific implementation
+  details
+- [Azure DevOps Datasource](./azdevops-datasource.md) -- Azure DevOps-specific
+  implementation details
+- [Markdown Datasource](./markdown-datasource.md) -- local markdown file
+  datasource
+- [Configuration](../cli-orchestration/configuration.md) -- `--source` option
+  and datasource selection
+- [Orchestrator Pipeline](../cli-orchestration/orchestrator.md) -- how the
+  pipeline discovers and dispatches work items from datasources
+- [Authentication](../cli-orchestration/authentication.md) -- device-code OAuth
+  flows for GitHub and Azure DevOps
+- [Datasource URL Parsing Tests](../testing/datasource-url-parsing-tests.md) --
+  tests for `parseGitHubRemoteUrl()` and `parseAzDevOpsRemoteUrl()`
+- [GitHub Datasource Tests](../testing/github-datasource-tests.md) -- tests
+  for the GitHub datasource implementation
+- [Datasource Tests](../testing/datasource-tests.md) -- interface-level
+  datasource tests

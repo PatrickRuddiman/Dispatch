@@ -150,7 +150,7 @@ everything else.
 
 - All other unchecked task lines (`[ ]`)
 
-**Why this filtering exists:** The [planner](../planning-and-dispatch/planner.md) agent should focus on a single task.
+**Why this filtering exists:** The [planner](../agent-system/planner-agent.md) agent should focus on a single task.
 Including sibling unchecked tasks would risk the planner attempting to address
 multiple tasks or making incorrect assumptions. Checked tasks and prose are
 kept because they provide implementation context. See

@@ -218,6 +218,101 @@ ones.
 
 ---
 
+## Authentication (`ensureAuthReady`)
+
+**Used in:** `src/orchestrator/spec-pipeline.ts:604` (pre-authentication
+before batch processing), `src/helpers/auth.ts` (implementation)
+**See also:** [Overview — Authentication](./overview.md#authentication)
+
+The spec pipeline pre-authenticates tracker datasources before batch
+processing begins. This ensures device-code prompts (which require user
+interaction) appear while stdout is still available, before the TUI or
+batch output takes over.
+
+### How authentication flows
+
+```mermaid
+flowchart TD
+    START["ensureAuthReady(source, cwd, org)"] --> CHECK{"source?"}
+
+    CHECK -->|"github"| GH_REMOTE["getGitRemoteUrl(cwd)"]
+    GH_REMOTE -->|"has URL"| GH_PARSE["parseGitHubRemoteUrl(url)"]
+    GH_REMOTE -->|"no remote"| GH_SKIP["Log warning, skip auth"]
+    GH_PARSE -->|"valid"| GH_AUTH["getGithubOctokit()"]
+    GH_PARSE -->|"invalid"| GH_SKIP2["Log warning, skip auth"]
+    GH_AUTH --> GH_CACHE{"Token cached?"}
+    GH_CACHE -->|"yes"| GH_DONE["Return cached Octokit"]
+    GH_CACHE -->|"no"| GH_DEVICE["OAuth device-code flow<br/>User enters code at github.com"]
+    GH_DEVICE --> GH_SAVE["Save token to ~/.dispatch/auth.json"]
+    GH_SAVE --> GH_DONE
+
+    CHECK -->|"azdevops"| AZ_ORG{"org provided?"}
+    AZ_ORG -->|"yes"| AZ_AUTH["getAzureConnection(orgUrl)"]
+    AZ_ORG -->|"no"| AZ_REMOTE["getGitRemoteUrl(cwd)"]
+    AZ_REMOTE -->|"has URL"| AZ_PARSE["parseAzDevOpsRemoteUrl(url)"]
+    AZ_REMOTE -->|"no remote"| AZ_SKIP["Log warning, skip auth"]
+    AZ_PARSE -->|"valid"| AZ_AUTH
+    AZ_PARSE -->|"invalid"| AZ_SKIP2["Log warning, skip auth"]
+    AZ_AUTH --> AZ_CACHE{"Token cached & valid?"}
+    AZ_CACHE -->|"yes (> 5min to expiry)"| AZ_DONE["Return cached WebApi"]
+    AZ_CACHE -->|"no or expiring"| AZ_DEVICE["Azure device-code flow<br/>User enters code at microsoft.com"]
+    AZ_DEVICE --> AZ_SAVE["Save token + expiresAt to ~/.dispatch/auth.json"]
+    AZ_SAVE --> AZ_DONE
+
+    CHECK -->|"md"| MD_DONE["No auth needed, return"]
+```
+
+### Token cache file
+
+Tokens are persisted at `~/.dispatch/auth.json`:
+
+```json
+{
+  "github": { "token": "gho_xxxx..." },
+  "azure": { "token": "eyJ0...", "expiresAt": "2025-01-16T10:30:00.000Z" }
+}
+```
+
+- **File permissions:** `0o600` (owner read/write only) set via `chmod()` on
+  non-Windows platforms. On Windows, the `chmod()` call is skipped.
+- **GitHub tokens:** No expiry tracking. Tokens persist until revoked at
+  github.com.
+- **Azure tokens:** Expiry is tracked with a 5-minute buffer
+  (`EXPIRY_BUFFER_MS = 300000`). If the cached token has less than 5 minutes
+  remaining, a new device-code flow is triggered.
+
+### Device-code flow user experience
+
+Both GitHub and Azure authentication use the device-code flow, which requires
+the user to:
+
+1. See a code and URL displayed in the terminal.
+2. Open the URL in a browser (opened automatically via the `open` package).
+3. Enter the code to authorize.
+
+The prompt message is routed through `authPromptHandler` if one is registered
+(e.g., for the TUI), otherwise through `log.info()`.
+
+### Azure DevOps account limitation
+
+Azure DevOps only supports work/school accounts. The device-code prompt
+includes a note: "Azure DevOps requires a work or school account (personal
+Microsoft accounts are not supported)." Personal Microsoft accounts will
+fail authentication.
+
+### Troubleshooting authentication
+
+| Symptom | Likely cause | Resolution |
+|---------|-------------|------------|
+| Device-code prompt appears mid-batch | `ensureAuthReady()` was skipped or token expired during long batch | Re-run the command; tokens will be refreshed |
+| "No git remote found" warning | Working directory has no `origin` remote | Add remote or use `--org` flag |
+| Azure auth fails with personal account | Personal Microsoft accounts not supported | Use a work/school account |
+| Token not persisting | `~/.dispatch/` directory permission issue | Check directory exists and is writable |
+| Browser does not open | `open` package cannot find browser | Manually navigate to the URL shown in terminal |
+| Stale GitHub token | Token revoked on github.com | Delete `~/.dispatch/auth.json` and re-authenticate |
+
+---
+
 ## Datasource System
 
 **Used in:** `src/orchestrator/spec-pipeline.ts` (issue fetching,
@@ -236,15 +331,25 @@ and discussion comments.
 
 ### Datasource sync (post-generation)
 
-After specs are generated, the pipeline syncs results back to the datasource:
+After specs are generated, the pipeline syncs results back to the datasource.
+The full sync-back state machine is documented with a Mermaid diagram in the
+[overview](./overview.md#datasource-sync-back-state-machine).
 
 | Mode | Datasource | Behavior |
 |------|-----------|----------|
 | Tracker | Non-md (GitHub, AzDevOps) | Updates existing issues, deletes local spec files |
 | Tracker | Md | Keeps local files in-place |
 | File | Non-md (GitHub, AzDevOps) | Creates new tracker issues, deletes local spec files |
-| File | Md | Keeps files in-place |
+| File + md + filename matches | Md | Updates in-place via `datasource.update()` |
+| File + md + filename unmatched | Md | Creates new spec, deletes old file, updates tracking |
 | Inline text | Any | No sync (inline text has no tracker origin) |
+
+### Fetch timeout
+
+Datasource fetch operations are wrapped in `withTimeout()` with a hardcoded
+`FETCH_TIMEOUT_MS = 30000` (30 seconds) defined at
+`spec-pipeline.ts:38`. This prevents a single slow datasource call from
+blocking the entire pipeline. The timeout is **not configurable** via CLI.
 
 ### Troubleshooting datasource issues
 
