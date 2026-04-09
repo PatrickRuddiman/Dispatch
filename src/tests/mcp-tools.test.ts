@@ -327,6 +327,44 @@ describe("registerSpecTools", () => {
     expect(result.content[0]!.text).toContain("Error reading");
   });
 
+  it("spec_list includes recentRuns from database", async () => {
+    const server = createMockServer();
+    registerSpecTools(server as never, "/cwd");
+    mockListSpecRuns.mockReturnValue([{ runId: "sr-1", status: "completed" }]);
+    const result = await server.getHandler("spec_list")({});
+    const data = JSON.parse(result.content[0]!.text);
+    expect(data.recentRuns).toHaveLength(1);
+    expect(data.recentRuns[0].runId).toBe("sr-1");
+  });
+
+  it("spec_list reports non-ENOENT errors in response", async () => {
+    const server = createMockServer();
+    registerSpecTools(server as never, "/cwd");
+    mockReaddir.mockRejectedValueOnce(Object.assign(new Error("permission denied"), { code: "EACCES" }));
+    const result = await server.getHandler("spec_list")({});
+    const data = JSON.parse(result.content[0]!.text);
+    expect(data.error).toContain("permission denied");
+    expect(data.files).toEqual([]);
+  });
+
+  it("spec_runs_list returns isError when listSpecRuns throws", async () => {
+    const server = createMockServer();
+    registerSpecTools(server as never, "/cwd");
+    mockListSpecRuns.mockImplementation(() => { throw new Error("DB not open"); });
+    const result = await server.getHandler("spec_runs_list")({ limit: 10 });
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("DB not open");
+  });
+
+  it("spec_run_status returns isError when getSpecRun throws", async () => {
+    const server = createMockServer();
+    registerSpecTools(server as never, "/cwd");
+    mockGetSpecRun.mockImplementation(() => { throw new Error("DB not open"); });
+    const result = await server.getHandler("spec_run_status")({ runId: "sr-1" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("DB not open");
+  });
+
   it("spec_runs_list returns spec runs", async () => {
     const server = createMockServer();
     registerSpecTools(server as never, "/cwd");
@@ -404,6 +442,24 @@ describe("registerMonitorTools", () => {
     const data = JSON.parse(result.content[0]!.text);
     expect(data).toHaveLength(1);
     expect(mockListRunsByStatus).toHaveBeenCalledWith("running", 10);
+  });
+
+  it("status_get returns isError when getRun throws", async () => {
+    const server = createMockServer();
+    registerMonitorTools(server as never, "/cwd");
+    mockGetRun.mockImplementation(() => { throw new Error("DB not open"); });
+    const result = await server.getHandler("status_get")({ runId: "run-1" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("DB not open");
+  });
+
+  it("runs_list returns isError when listRuns throws", async () => {
+    const server = createMockServer();
+    registerMonitorTools(server as never, "/cwd");
+    mockListRuns.mockImplementation(() => { throw new Error("DB not open"); });
+    const result = await server.getHandler("runs_list")({ limit: 20 });
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("DB not open");
   });
 
   it("issues_list returns isError when no source configured", async () => {
