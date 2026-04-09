@@ -6,7 +6,7 @@ import { z } from "zod";
 import { join } from "node:path";
 import { readdir } from "node:fs/promises";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { getRun, listRuns, getTasksForRun, listRunsByStatus } from "../state/manager.js";
+import { getRun, listRuns, getTasksForRun, listRunsByStatus, waitForRunCompletion } from "../state/manager.js";
 import { getDatasource } from "../../datasources/index.js";
 import { loadConfig } from "../../config.js";
 import { DATASOURCE_NAMES } from "../../datasources/interface.js";
@@ -15,22 +15,41 @@ export function registerMonitorTools(server: McpServer, cwd: string): void {
   // ── status_get ────────────────────────────────────────────────
   server.tool(
     "status_get",
-    "Get the current status of a dispatch or spec run, including per-task details.",
+    "Get the current status of a dispatch or spec run, including per-task details. Use waitMs to hold the response until the run completes or the timeout elapses.",
     {
       runId: z.string().describe("The runId returned by dispatch_run or spec_generate"),
+      waitMs: z.number().int().min(0).max(120000).optional().default(0)
+        .describe("Hold response until run completes or timeout (ms). 0 = return immediately."),
     },
     async (args) => {
       try {
-        const run = getRun(args.runId);
+        let run = getRun(args.runId);
         if (!run) {
           return {
             content: [{ type: "text", text: `Run ${args.runId} not found` }],
             isError: true,
           };
         }
+
+        // Long-poll if requested and still running
+        if (run.status === "running" && args.waitMs > 0) {
+          const completed = await waitForRunCompletion(
+            args.runId,
+            args.waitMs,
+            () => getRun(args.runId)?.status ?? null,
+          );
+          if (completed) {
+            run = getRun(args.runId)!;
+          }
+        }
+
         const tasks = getTasksForRun(args.runId);
+        const response: Record<string, unknown> = { run, tasks };
+        if (run.status === "running") {
+          response.retryAfterMs = 5000;
+        }
         return {
-          content: [{ type: "text", text: JSON.stringify({ run, tasks }) }],
+          content: [{ type: "text", text: JSON.stringify(response) }],
         };
       } catch (err) {
         return {

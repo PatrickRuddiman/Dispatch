@@ -34,15 +34,22 @@ export type LogCallback = (message: string, level?: "info" | "warn" | "error") =
 interface LiveRun {
   runId: string;
   callbacks: LogCallback[];
+  completionCallbacks: Array<() => void>;
 }
 
 const liveRuns = new Map<string, LiveRun>();
 
 export function registerLiveRun(runId: string): void {
-  liveRuns.set(runId, { runId, callbacks: [] });
+  liveRuns.set(runId, { runId, callbacks: [], completionCallbacks: [] });
 }
 
 export function unregisterLiveRun(runId: string): void {
+  const run = liveRuns.get(runId);
+  if (run) {
+    for (const cb of run.completionCallbacks) {
+      try { cb(); } catch { /* swallow */ }
+    }
+  }
   liveRuns.delete(runId);
 }
 
@@ -65,6 +72,76 @@ export function emitLog(runId: string, message: string, level: "info" | "warn" |
       }
     }
   }
+}
+
+/** Check whether a run is currently registered as live (in-flight). */
+export function isLiveRun(runId: string): boolean {
+  return liveRuns.has(runId);
+}
+
+/** Register a callback that fires when unregisterLiveRun is called for this run. */
+export function addCompletionCallback(runId: string, cb: () => void): void {
+  const run = liveRuns.get(runId);
+  if (run) {
+    run.completionCallbacks.push(cb);
+  }
+}
+
+/**
+ * Wait for a run to leave the "running" state.
+ *
+ * 1. Checks DB immediately — if already terminal, returns true.
+ * 2. If live, registers a completion callback for instant wakeup.
+ * 3. Polls DB every 2s as safety net (race conditions, orphaned runs).
+ * 4. Times out after waitMs (capped at 120s), returning false.
+ */
+export function waitForRunCompletion(
+  runId: string,
+  waitMs: number,
+  getStatus: () => string | null,
+): Promise<boolean> {
+  const effectiveWait = Math.min(Math.max(waitMs, 0), 120_000);
+  if (effectiveWait <= 0) return Promise.resolve(false);
+
+  // Immediate check
+  const currentStatus = getStatus();
+  if (currentStatus !== null && currentStatus !== "running") {
+    return Promise.resolve(true);
+  }
+
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    let pollTimer: ReturnType<typeof setInterval> | undefined;
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const cleanup = () => {
+      if (pollTimer) clearInterval(pollTimer);
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+    };
+
+    const settle = (completed: boolean) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(completed);
+    };
+
+    // Event-driven wakeup via completion callback
+    if (isLiveRun(runId)) {
+      addCompletionCallback(runId, () => settle(true));
+    }
+
+    // DB poll safety net (every 2s)
+    pollTimer = setInterval(() => {
+      const s = getStatus();
+      if (s !== null && s !== "running") {
+        settle(true);
+      }
+    }, 2_000);
+
+    // Overall timeout
+    timeoutTimer = setTimeout(() => settle(false), effectiveWait);
+  });
 }
 
 // ── Status field runtime validators ──────────────────────────
