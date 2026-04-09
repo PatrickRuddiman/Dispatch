@@ -5,8 +5,6 @@ on:
     branches:
       - main
       - "release/*"
-    paths:
-      - package.json
   workflow_dispatch:
 
 concurrency:
@@ -35,6 +33,15 @@ jobs:
         id: resolve
         run: |
           BASE_VERSION=$(node -p "require('./package.json').version")
+
+          # On main, only publish when package.json actually changed (version bump)
+          if [[ "${{ github.ref_name }}" == "main" ]] && ! git diff --name-only HEAD~1 HEAD 2>/dev/null | grep -q '^package.json$'; then
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            echo "channel=latest" >> "$GITHUB_OUTPUT"
+            echo "version=${BASE_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "Skipping: package.json not changed on main"
+            exit 0
+          fi
 
           if [[ "${{ github.ref_name }}" == "main" ]]; then
             NPM_VERSION=$(npm view @pruddiman/dispatch dist-tags.latest 2>/dev/null || echo "0.0.0")
