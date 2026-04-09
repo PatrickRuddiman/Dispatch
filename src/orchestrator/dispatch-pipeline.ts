@@ -576,7 +576,7 @@ export async function runDispatchPipeline(
             const taskId = buildTaskId(task);
             const taskText = task.text;
             if (type === "task_start") {
-              progressCallback({ type, taskId, taskText, phase: extra?.phase });
+              progressCallback({ type, taskId, taskText, phase: extra?.phase, file: task.file, line: task.line });
             } else if (type === "task_done") {
               progressCallback({ type, taskId, taskText });
             } else {

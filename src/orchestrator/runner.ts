@@ -24,7 +24,7 @@ import { runDispatchPipeline } from "./dispatch-pipeline.js";
 
 /** Progress event emitted by the dispatch pipeline for MCP monitoring. */
 export type DispatchProgressEvent =
-  | { type: "task_start"; runId?: string; taskId: string; taskText: string; phase?: string }
+  | { type: "task_start"; runId?: string; taskId: string; taskText: string; phase?: string; file?: string; line?: number }
   | { type: "task_done";  runId?: string; taskId: string; taskText: string }
   | { type: "task_failed"; runId?: string; taskId: string; taskText: string; error: string }
   | { type: "phase_change"; runId?: string; phase: string; message?: string }

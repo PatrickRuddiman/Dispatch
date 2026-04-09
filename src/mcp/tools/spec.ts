@@ -6,11 +6,10 @@ import { z } from "zod";
 import { join, resolve, sep } from "node:path";
 import { readdir, readFile } from "node:fs/promises";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { runSpecPipeline } from "../../orchestrator/spec-pipeline.js";
-import { createSpecRun, finishSpecRun, listSpecRuns, getSpecRun, emitLog } from "../state/manager.js";
-import type { SpecStatus } from "../state/database.js";
+import { createSpecRun, finishSpecRun, listSpecRuns, getSpecRun } from "../state/manager.js";
 import { PROVIDER_NAMES } from "../../providers/interface.js";
 import { DATASOURCE_NAMES } from "../../datasources/interface.js";
+import { forkDispatchRun } from "./_fork-run.js";
 
 export function registerSpecTools(server: McpServer, cwd: string): void {
   // ── spec_generate ─────────────────────────────────────────────
@@ -29,50 +28,28 @@ export function registerSpecTools(server: McpServer, cwd: string): void {
     async (args) => {
       const runId = createSpecRun({ cwd, issues: args.issues });
 
-      // Fire-and-forget — tools return runId immediately
-      setImmediate(() => { void (async () => {
-        try {
-          emitLog(runId, `Starting spec generation for: ${args.issues}`);
-          const result = await runSpecPipeline({
-            issues: args.issues,
-            provider: args.provider ?? "opencode",
-            issueSource: args.source,
-            concurrency: args.concurrency,
-            dryRun: args.dryRun,
-            cwd,
-            progressCallback: (event) => {
-              switch (event.type) {
-                case "item_start":
-                  emitLog(runId, `Generating spec for: ${event.itemTitle ?? event.itemId}`);
-                  break;
-                case "item_done":
-                  emitLog(runId, `Spec done: ${event.itemTitle ?? event.itemId}`);
-                  break;
-                case "item_failed":
-                  emitLog(runId, `Spec failed: ${event.itemTitle ?? event.itemId} — ${event.error}`, "error");
-                  break;
-                case "log":
-                  emitLog(runId, event.message);
-                  break;
-                default: {
-                  const _exhaustive: never = event;
-                  void _exhaustive;
-                }
-              }
-            },
-          });
-          finishSpecRun(runId, "completed", {
-            total: result.total,
-            generated: result.generated,
-            failed: result.failed,
-          });
-          emitLog(runId, `Spec generation complete: ${result.generated} generated, ${result.failed} failed`);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          finishSpecRun(runId, "failed", { total: 0, generated: 0, failed: 0 }, msg);
-          emitLog(runId, `Spec generation error: ${msg}`, "error");
-        }
-      })(); });
+      forkDispatchRun(runId, server, {
+        type: "spec",
+        cwd,
+        opts: {
+          issues: args.issues,
+          provider: args.provider ?? "opencode",
+          issueSource: args.source,
+          concurrency: args.concurrency,
+          dryRun: args.dryRun,
+          cwd,
+        },
+      }, {
+        onDone: (result) => {
+          if ("generated" in result) {
+            finishSpecRun(runId, "completed", {
+              total: result["total"] as number,
+              generated: result["generated"] as number,
+              failed: result["failed"] as number,
+            });
+          }
+        },
+      });
 
       return {
         content: [{ type: "text", text: JSON.stringify({ runId, status: "running" }) }],
