@@ -17,6 +17,10 @@ import type {
 } from "./interface.js";
 import { createProgressReporter } from "./progress.js";
 import { log } from "../helpers/logger.js";
+import { withTimeout } from "../helpers/timeout.js";
+
+/** Maximum time (ms) to wait for a Claude session stream to complete after sending a prompt. */
+const SESSION_READY_TIMEOUT_MS = 600_000;
 
 /**
  * List available Claude models.
@@ -99,17 +103,30 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
         await session.send(text);
 
         const parts: string[] = [];
-        for await (const msg of session.stream()) {
-          if (msg.type === "assistant") {
-            const msgText = msg.message.content
-              .filter((block: { type: string }) => block.type === "text")
-              .map((block: { type: string; text: string }) => block.text)
-              .join("");
-            if (msgText) {
-              reporter.emit(msgText);
-              parts.push(msgText);
+        let receivedAssistant = false;
+
+        await withTimeout(
+          (async () => {
+            for await (const msg of session.stream()) {
+              if (msg.type === "assistant") {
+                receivedAssistant = true;
+                const msgText = msg.message.content
+                  .filter((block) => block.type === "text")
+                  .map((block) => (block as { text: string }).text)
+                  .join("");
+                if (msgText) {
+                  reporter.emit(msgText);
+                  parts.push(msgText);
+                }
+              }
             }
-          }
+          })(),
+          SESSION_READY_TIMEOUT_MS,
+          "claude session stream",
+        );
+
+        if (!receivedAssistant) {
+          throw new Error("Claude stream ended before receiving an assistant message");
         }
 
         const result = parts.join("") || null;
