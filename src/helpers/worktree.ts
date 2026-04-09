@@ -11,6 +11,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { slugify } from "./slugify.js";
 import { log } from "./logger.js";
 
@@ -62,46 +63,92 @@ export async function createWorktree(
   const worktreePath = join(repoRoot, WORKTREE_DIR, name);
 
   if (existsSync(worktreePath)) {
-    log.debug(`Reusing existing worktree at ${worktreePath}`);
-    return worktreePath;
+    try {
+      const listOutput = await git(["worktree", "list", "--porcelain"], repoRoot);
+      const isRegistered = listOutput.includes(`worktree ${worktreePath}\n`);
+      if (isRegistered) {
+        // Reset to clean state
+        try {
+          await git(["checkout", "--force", branchName], worktreePath);
+          await git(["clean", "-fd"], worktreePath);
+          log.debug(`Reusing validated worktree at ${worktreePath}`);
+          return worktreePath;
+        } catch {
+          // Checkout failed (wrong branch, etc.) — remove and recreate
+          log.debug(`Worktree checkout failed, removing and recreating: ${worktreePath}`);
+        }
+      } else {
+        log.debug(`Directory exists but not a registered worktree: ${worktreePath}`);
+      }
+    } catch {
+      log.debug(`Worktree validation failed for ${worktreePath}`);
+    }
+    // Remove stale directory and fall through to creation
+    await rm(worktreePath, { recursive: true, force: true });
+    // Also prune to clean up any stale git refs
+    await git(["worktree", "prune"], repoRoot).catch(() => {});
   }
 
-  try {
-    const args = ["worktree", "add", worktreePath, "-b", branchName];
-    if (startPoint) args.push(startPoint);
-    await git(args, repoRoot);
-    log.debug(`Created worktree at ${worktreePath} on branch ${branchName}`);
-  } catch (err) {
-    const message = log.extractMessage(err);
-    if (message.includes("already exists")) {
-      // Branch already exists — retry without -b to use the existing branch.
-      // If this also fails (e.g. worktree path conflict), fall through to
-      // prune-and-retry before giving up.
-      try {
-        await git(["worktree", "add", worktreePath, branchName], repoRoot);
-        log.debug(`Created worktree at ${worktreePath} using existing branch ${branchName}`);
-        return worktreePath;
-      } catch (retryErr) {
-        const retryMsg = log.extractMessage(retryErr);
-        if (retryMsg.includes("already used by worktree")) {
-          await git(["worktree", "prune"], repoRoot);
+  const MAX_RETRIES = 5;
+  const BASE_DELAY_MS = 200;
+
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const args = ["worktree", "add", worktreePath, "-b", branchName];
+      if (startPoint) args.push(startPoint);
+      await git(args, repoRoot);
+      log.debug(`Created worktree at ${worktreePath} on branch ${branchName}`);
+      return worktreePath;
+    } catch (err) {
+      lastError = err;
+      const message = log.extractMessage(err);
+
+      // Handle "branch already exists" — retry without -b
+      if (message.includes("already exists")) {
+        try {
+          await git(["worktree", "add", worktreePath, branchName], repoRoot);
+          log.debug(`Created worktree at ${worktreePath} using existing branch ${branchName}`);
+          return worktreePath;
+        } catch (retryErr) {
+          lastError = retryErr;
+          const retryMsg = log.extractMessage(retryErr);
+          if (retryMsg.includes("already used by worktree")) {
+            await git(["worktree", "prune"], repoRoot);
+            try {
+              await git(["worktree", "add", worktreePath, branchName], repoRoot);
+              log.debug(`Created worktree at ${worktreePath} after pruning stale ref`);
+              return worktreePath;
+            } catch (pruneRetryErr) {
+              lastError = pruneRetryErr;
+            }
+          }
+        }
+      } else if (message.includes("already used by worktree")) {
+        await git(["worktree", "prune"], repoRoot);
+        try {
           await git(["worktree", "add", worktreePath, branchName], repoRoot);
           log.debug(`Created worktree at ${worktreePath} after pruning stale ref`);
-        } else {
-          throw retryErr;
+          return worktreePath;
+        } catch (pruneRetryErr) {
+          lastError = pruneRetryErr;
         }
+      } else if (!message.includes("lock") && !message.includes("already")) {
+        // Non-retryable error — throw immediately
+        throw err;
       }
-    } else if (message.includes("already used by worktree")) {
-      // Branch is locked to a stale worktree ref — prune and retry
-      await git(["worktree", "prune"], repoRoot);
-      await git(["worktree", "add", worktreePath, branchName], repoRoot);
-      log.debug(`Created worktree at ${worktreePath} after pruning stale ref`);
-    } else {
-      throw err;
+
+      // Retryable error (lock contention, race condition) — backoff and retry
+      if (attempt < MAX_RETRIES) {
+        const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1);
+        log.debug(`Worktree creation attempt ${attempt}/${MAX_RETRIES} failed (${message}), retrying in ${delay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
     }
   }
 
-  return worktreePath;
+  throw lastError;
 }
 
 /**

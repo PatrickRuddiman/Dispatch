@@ -15,6 +15,14 @@ export interface DispatchResult {
   error?: string;
 }
 
+/** Patterns that indicate the response is a rate-limit error, not real output. */
+const rateLimitPatterns = [
+  /you[''\u2019]?ve hit your (rate )?limit/i,
+  /rate limit exceeded/i,
+  /too many requests/i,
+  /quota exceeded/i,
+];
+
 /**
  * Dispatch a single task to the provider in its own session.
  * Each task gets a fresh session for context isolation.
@@ -42,6 +50,14 @@ export async function dispatchTask(
       log.debug("Task dispatch returned null response");
       fileLoggerStorage.getStore()?.warn("dispatchTask: null response");
       return { task, success: false, error: "No response from agent" };
+    }
+
+    const isRateLimited = rateLimitPatterns.some((p) => p.test(response));
+    if (isRateLimited) {
+      const truncated = response.slice(0, 200);
+      log.debug(`Task dispatch hit rate limit: ${truncated}`);
+      fileLoggerStorage.getStore()?.warn(`dispatchTask: rate limit detected — ${truncated}`);
+      return { task, success: false, error: `Rate limit: ${truncated}` };
     }
 
     log.debug(`Task dispatch completed (${response.length} chars response)`);
