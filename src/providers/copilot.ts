@@ -50,7 +50,11 @@ export async function listModels(opts?: ProviderBootOptions): Promise<string[]> 
     const models = await client.listModels();
     return models.map((m) => m.id).sort();
   } finally {
-    await client.stop().catch(() => {});
+    // Intentional fire-and-forget teardown: errors stopping a temporary
+    // list-models client are not actionable, but log them for debugging.
+    await client.stop().catch((err) => {
+      log.debug(`Failed to stop Copilot list-models client: ${log.formatErrorChain(err)}`);
+    });
   }
 }
 

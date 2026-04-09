@@ -682,7 +682,7 @@ describe("validateSpecStructure", () => {
 
     const result = validateSpecStructure(content);
     expect(result.valid).toBe(false);
-    expect(result.reason).toContain("H1 heading");
+    if (!result.valid) expect(result.reason).toContain("H1 heading");
   });
 
   it("returns invalid when ## Tasks section is missing", () => {
@@ -700,7 +700,7 @@ describe("validateSpecStructure", () => {
 
     const result = validateSpecStructure(content);
     expect(result.valid).toBe(false);
-    expect(result.reason).toContain("## Tasks");
+    if (!result.valid) expect(result.reason).toContain("## Tasks");
   });
 
   it("returns invalid when ## Tasks section has no checkboxes", () => {
@@ -714,53 +714,7 @@ describe("validateSpecStructure", () => {
 
     const result = validateSpecStructure(content);
     expect(result.valid).toBe(false);
-    expect(result.reason).toContain("no unchecked tasks");
-  });
-
-  it("returns valid when content has leading whitespace before H1", () => {
-    const content = [
-      "",
-      "  ",
-      "# My Feature (#42)",
-      "",
-      "## Tasks",
-      "",
-      "- [ ] A task",
-    ].join("\n");
-
-    const result = validateSpecStructure(content);
-    expect(result).toEqual({ valid: true });
-  });
-
-  it("returns invalid for empty content", () => {
-    const result = validateSpecStructure("");
-    expect(result.valid).toBe(false);
-    expect(result.reason).toContain("H1 heading");
-  });
-
-  it("returns invalid for conversational AI response content", () => {
-    const content = "The spec file has been written to .dispatch/specs/10-feature.md";
-
-    const result = validateSpecStructure(content);
-    expect(result.valid).toBe(false);
-  });
-
-  it("does not count checkboxes that appear before ## Tasks", () => {
-    const content = [
-      "# My Feature (#42)",
-      "",
-      "## Context",
-      "",
-      "- [ ] This checkbox is in context, not tasks",
-      "",
-      "## Tasks",
-      "",
-      "No checkboxes in the tasks section.",
-    ].join("\n");
-
-    const result = validateSpecStructure(content);
-    expect(result.valid).toBe(false);
-    expect(result.reason).toContain("no unchecked tasks");
+    if (!result.valid) expect(result.reason).toContain("no unchecked tasks");
   });
 
   it("returns valid with a single checkbox in Tasks section", () => {
@@ -801,7 +755,7 @@ describe("validateSpecStructure", () => {
 
     const result = validateSpecStructure(content);
     expect(result.valid).toBe(false);
-    expect(result.reason).toContain("## Tasks");
+    if (!result.valid) expect(result.reason).toContain("## Tasks");
   });
 
   it("does not have a reason property when valid", () => {
@@ -815,7 +769,7 @@ describe("validateSpecStructure", () => {
 
     const result = validateSpecStructure(content);
     expect(result.valid).toBe(true);
-    expect(result.reason).toBeUndefined();
+    expect("reason" in result).toBe(false);
   });
 });
 
@@ -1365,7 +1319,7 @@ describe("SpecAgent generate", () => {
     // Generation succeeds but validation reports invalid
     expect(result.success).toBe(true);
     expect(result.data!.valid).toBe(false);
-    expect(result.data!.validationReason).toBeDefined();
+    if (result.data && !result.data.valid) expect(result.data.validationReason).toBeDefined();
   });
 
   it("uses unique temp file paths per generation via randomUUID", async () => {

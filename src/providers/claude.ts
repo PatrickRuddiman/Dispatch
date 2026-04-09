@@ -9,7 +9,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { unstable_v2_createSession, type SDKSession } from "@anthropic-ai/claude-agent-sdk";
+import { query, unstable_v2_createSession, type Options, type ModelInfo, type SDKSession } from "@anthropic-ai/claude-agent-sdk";
 import type {
   ProviderInstance,
   ProviderBootOptions,
@@ -21,16 +21,32 @@ import { log } from "../helpers/logger.js";
 /**
  * List available Claude models.
  *
- * The Claude Agent SDK does not expose a model listing API, so this returns
- * a hardcoded list of known Claude model identifiers.
+ * Uses the V1 query() API to ask the SDK for supported models at runtime.
+ * Falls back to a hardcoded list if the dynamic query fails.
  */
-export async function listModels(_opts?: ProviderBootOptions): Promise<string[]> {
-  return [
-    "claude-haiku-3-5",
-    "claude-opus-4-6",
-    "claude-sonnet-4",
-    "claude-sonnet-4-5",
-  ];
+export async function listModels(opts?: ProviderBootOptions): Promise<string[]> {
+  try {
+    const queryOpts: Options = {
+      model: opts?.model ?? "claude-sonnet-4",
+      permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
+    };
+    const q = query({ prompt: "", options: queryOpts });
+    try {
+      const models = await q.supportedModels();
+      return models.map((m: ModelInfo) => m.value).sort();
+    } finally {
+      q.close();
+    }
+  } catch (err) {
+    log.debug(`Failed to list models dynamically: ${log.formatErrorChain(err)}`);
+    return [
+      "claude-haiku-3-5",
+      "claude-opus-4-6",
+      "claude-sonnet-4",
+      "claude-sonnet-4-5",
+    ];
+  }
 }
 
 /**
@@ -124,8 +140,12 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
       log.debug("Cleaning up Claude provider...");
       for (const session of sessions.values()) {
         try {
-          session.close();
-        } catch {}
+          // session.close() may return a promise — await it so cleanup errors
+          // are surfaced in debug logs rather than becoming unhandled rejections.
+          await Promise.resolve(session.close());
+        } catch (err) {
+          log.debug(`Failed to close Claude session: ${log.formatErrorChain(err)}`);
+        }
       }
       sessions.clear();
     },

@@ -20,12 +20,13 @@ import { registerCleanup } from "../helpers/cleanup.js";
 import { createWorktree, removeWorktree, worktreeName, generateFeatureBranchName } from "../helpers/worktree.js";
 import { isValidBranchName } from "../helpers/branch-validation.js";
 import { createTui, type TuiState } from "../tui.js";
-import type { ProviderName, ProviderInstance } from "../providers/interface.js";
-import { bootProvider } from "../providers/index.js";
+import type { ProviderName } from "../providers/interface.js";
+import { ProviderPool, type PoolEntry } from "../providers/pool.js";
+import { resolveAgentProviderConfig } from "../config.js";
 import { getDatasource } from "../datasources/index.js";
 import type { DatasourceName, DispatchLifecycleOptions, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
 import { ensureAuthReady, setAuthPromptHandler } from "../helpers/auth.js";
-import type { OrchestrateRunOptions, DispatchSummary } from "./runner.js";
+import type { OrchestrateRunOptions, DispatchSummary, DispatchProgressEvent } from "./runner.js";
 import {
   fetchItemsById,
   writeItemsToTempDir,
@@ -45,6 +46,7 @@ import { extractTitle } from "../datasources/md.js";
 import chalk from "chalk";
 import { elapsed, renderHeaderLines } from "../helpers/format.js";
 import { FileLogger, fileLoggerStorage } from "../helpers/file-logger.js";
+import { buildTaskId } from "../helpers/run-state.js";
 
 const exec = promisify(execFile);
 
@@ -107,6 +109,9 @@ export async function runDispatchPipeline(
     feature,
     provider = "opencode",
     model,
+    fastProvider,
+    fastModel,
+    agents,
     source,
     org,
     project,
@@ -117,8 +122,44 @@ export async function runDispatchPipeline(
     planRetries,
     retries,
     username: usernameOverride,
+    progressCallback,
   } = opts;
   let noBranch = noBranchOpt;
+
+  // Resolve per-agent provider+model configs
+  const configOpts = { provider, model, fastProvider, fastModel, agents };
+  const agentConfigs = {
+    planner: resolveAgentProviderConfig("planner", configOpts),
+    executor: resolveAgentProviderConfig("executor", configOpts),
+    commit: resolveAgentProviderConfig("commit", configOpts),
+  };
+
+  // Collect all unique provider+model combos as fallback entries for pools
+  const seen = new Set<string>();
+  const allEntries: PoolEntry[] = [];
+  let priority = 0;
+  for (const cfg of Object.values(agentConfigs)) {
+    const key = `${cfg.provider}:${cfg.model ?? "default"}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      allEntries.push({ provider: cfg.provider, model: cfg.model, priority: priority++ });
+    }
+  }
+
+  /**
+   * Create a ProviderPool for an agent, with its configured provider as primary
+   * and all other configured providers as fallbacks.
+   */
+  function createPool(primary: { provider: ProviderName; model?: string }, bootCwd: string): ProviderPool {
+    const primaryKey = `${primary.provider}:${primary.model ?? "default"}`;
+    const entries: PoolEntry[] = [
+      { provider: primary.provider, model: primary.model, priority: 0 },
+      ...allEntries
+        .filter((e) => `${e.provider}:${e.model ?? "default"}` !== primaryKey)
+        .map((e, i) => ({ ...e, priority: i + 1 })),
+    ];
+    return new ProviderPool({ entries, bootOpts: { url: serverUrl, cwd: bootCwd } });
+  }
 
   // Planning timeout/retry defaults
   const resolvedRetries = retries ?? DEFAULT_RETRY_COUNT;
@@ -288,29 +329,40 @@ export async function runDispatchPipeline(
     if (verbose && serverUrl) log.debug(`Server URL: ${serverUrl}`);
 
     // When using worktrees, providers are booted per-worktree inside
-    // processIssueFile. Otherwise, boot a single shared provider.
-    let instance: ProviderInstance | undefined;
+    // processIssueFile. Otherwise, boot a single shared provider pool.
     let planner: PlannerAgent | null = null;
     let executor: ExecutorAgent | undefined;
     let commitAgent: CommitAgent | undefined;
+    const sharedPools: ProviderPool[] = [];
 
     if (!useWorktrees) {
-      instance = await bootProvider(provider, { url: serverUrl, cwd, model });
-      registerCleanup(() => instance!.cleanup());
-      if (instance.model) {
-        tui.state.model = instance.model;
+      // Create per-agent pools with failover support
+      const executorPool = createPool(agentConfigs.executor, cwd);
+      const plannerPool = createPool(agentConfigs.planner, cwd);
+      const commitPool = createPool(agentConfigs.commit, cwd);
+      sharedPools.push(executorPool, plannerPool, commitPool);
+      for (const pool of sharedPools) registerCleanup(() => pool.cleanup());
+
+      // Populate TUI model display from executor pool's primary entry
+      if (executorPool.model) {
+        tui.state.model = executorPool.model;
       }
-      if (verbose && instance.model) log.debug(`Model: ${instance.model}`);
+      if (verbose) {
+        log.debug(`Executor: ${agentConfigs.executor.provider}${agentConfigs.executor.model ? ` (${agentConfigs.executor.model})` : ""}`);
+        log.debug(`Planner: ${agentConfigs.planner.provider}${agentConfigs.planner.model ? ` (${agentConfigs.planner.model})` : ""}`);
+        log.debug(`Commit: ${agentConfigs.commit.provider}${agentConfigs.commit.model ? ` (${agentConfigs.commit.model})` : ""}`);
+      }
 
       // ── 4. Boot planner agent (unless --no-plan) ────────────────
-      planner = noPlan ? null : await bootPlanner({ provider: instance, cwd });
-      executor = await bootExecutor({ provider: instance, cwd });
-      commitAgent = await bootCommit({ provider: instance, cwd });
+      planner = noPlan ? null : await bootPlanner({ provider: plannerPool, cwd });
+      executor = await bootExecutor({ provider: executorPool, cwd });
+      commitAgent = await bootCommit({ provider: commitPool, cwd });
     }
 
     // ── 5. Dispatch tasks ───────────────────────────────────────
     tui.state.phase = "dispatching";
     if (verbose) log.info(`Dispatching ${allTasks.length} task(s)...`);
+    progressCallback?.({ type: "phase_change", phase: "dispatching", message: `Dispatching ${allTasks.length} task(s)` });
     const results: DispatchResult[] = [];
     let halted = false;
 
@@ -453,24 +505,31 @@ export async function runDispatchPipeline(
         const issueLifecycleOpts: DispatchLifecycleOptions = { cwd: issueCwd, username: usernameOverride };
 
         fileLogger?.phase("Provider/agent boot");
-        let localInstance: ProviderInstance;
         let localPlanner: PlannerAgent | null;
         let localExecutor: ExecutorAgent;
         let localCommitAgent: CommitAgent;
 
         if (useWorktrees) {
-          localInstance = await bootProvider(provider, { url: serverUrl, cwd: issueCwd, model });
-          registerCleanup(() => localInstance.cleanup());
-          if (localInstance.model && !tui.state.model) {
-            tui.state.model = localInstance.model;
+          // Create per-agent pools for this worktree
+          const localExecutorPool = createPool(agentConfigs.executor, issueCwd);
+          const localPlannerPool = createPool(agentConfigs.planner, issueCwd);
+          const localCommitPool = createPool(agentConfigs.commit, issueCwd);
+          registerCleanup(() => localExecutorPool.cleanup());
+          registerCleanup(() => localPlannerPool.cleanup());
+          registerCleanup(() => localCommitPool.cleanup());
+
+          if (!tui.state.model && localExecutorPool.model) {
+            tui.state.model = localExecutorPool.model;
           }
-          if (verbose && localInstance.model) log.debug(`Model: ${localInstance.model}`);
-          localPlanner = noPlan ? null : await bootPlanner({ provider: localInstance, cwd: issueCwd });
-          localExecutor = await bootExecutor({ provider: localInstance, cwd: issueCwd });
-          localCommitAgent = await bootCommit({ provider: localInstance, cwd: issueCwd });
-          fileLogger?.info(`Provider booted: ${localInstance.model ?? provider}`);
+          if (verbose) {
+            log.debug(`Worktree executor: ${agentConfigs.executor.provider}${agentConfigs.executor.model ? ` (${agentConfigs.executor.model})` : ""}`);
+          }
+
+          localPlanner = noPlan ? null : await bootPlanner({ provider: localPlannerPool, cwd: issueCwd });
+          localExecutor = await bootExecutor({ provider: localExecutorPool, cwd: issueCwd });
+          localCommitAgent = await bootCommit({ provider: localCommitPool, cwd: issueCwd });
+          fileLogger?.info(`Provider pools booted: executor=${agentConfigs.executor.provider}, planner=${agentConfigs.planner.provider}, commit=${agentConfigs.commit.provider}`);
         } else {
-          localInstance = instance!;
           localPlanner = planner;
           localExecutor = executor!;
           localCommitAgent = commitAgent!;
@@ -511,6 +570,19 @@ export async function runDispatchPipeline(
 
           tuiTask.elapsed = startTime;
           tuiTask.error = undefined;
+
+          const emitProgress = (type: "task_start" | "task_done" | "task_failed", extra?: { phase?: string; error?: string }) => {
+            if (!progressCallback) return;
+            const taskId = buildTaskId(task);
+            const taskText = task.text;
+            if (type === "task_start") {
+              progressCallback({ type, taskId, taskText, phase: extra?.phase, file: task.file, line: task.line });
+            } else if (type === "task_done") {
+              progressCallback({ type, taskId, taskText });
+            } else {
+              progressCallback({ type, taskId, taskText, error: extra?.error ?? "unknown error" });
+            }
+          };
 
           if (localPlanner) {
             tuiTask.status = "planning";
@@ -574,6 +646,7 @@ export async function runDispatchPipeline(
           tuiTask.status = "running";
           fileLogger?.phase(`Executing task: ${task.text}`);
           if (verbose) log.info(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: executing — "${task.text}"`);
+           emitProgress("task_start", { phase: "executing" });
           const execResult = await withRetry(
             async () => {
               const result = await localExecutor.execute({
@@ -601,6 +674,7 @@ export async function runDispatchPipeline(
             fileLogger?.error(`Execution failed: ${error}`);
             tuiTask.elapsed = Date.now() - startTime;
             pauseTask(task, error);
+            emitProgress("task_failed", { error });
             if (verbose) log.error(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: paused — "${task.text}" (${elapsed(tuiTask.elapsed)})${error ? `: ${error}` : ""}`);
             return { kind: "paused", error };
           }
@@ -628,6 +702,7 @@ export async function runDispatchPipeline(
           tuiTask.status = "done";
           tuiTask.error = undefined;
           tuiTask.elapsed = Date.now() - startTime;
+          emitProgress("task_done");
           if (verbose) log.success(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: done — "${task.text}" (${elapsed(tuiTask.elapsed)})`);
           return { kind: "success", result: execResult.data.dispatchResult };
         };
@@ -701,9 +776,7 @@ export async function runDispatchPipeline(
             }
           }
 
-          if (!tui.state.model && localInstance.model) {
-            tui.state.model = localInstance.model;
-          }
+          // TUI model is populated at pool creation time
 
           if (stopAfterIssue) break;
         }
@@ -860,7 +933,6 @@ export async function runDispatchPipeline(
         if (useWorktrees) {
           await localExecutor.cleanup();
           await localPlanner?.cleanup();
-          await localInstance.cleanup();
         }
 
         return { halted: stopAfterIssue };
@@ -955,7 +1027,7 @@ export async function runDispatchPipeline(
     await commitAgent?.cleanup();
     await executor?.cleanup();
     await planner?.cleanup();
-    await instance?.cleanup();
+    // Pool cleanup is handled via registerCleanup() above
 
     const completed = results.filter((result) => result.success).length;
     const failed = results.filter((result) => !result.success).length;

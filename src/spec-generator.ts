@@ -47,6 +47,13 @@ export const RECOGNIZED_H2 = new Set([
   "## Key Guidelines",
 ]);
 
+/** Progress event emitted by the spec pipeline for MCP monitoring. */
+export type SpecProgressEvent =
+  | { type: "item_start";  runId?: string; itemId: string; itemTitle?: string }
+  | { type: "item_done";   runId?: string; itemId: string; itemTitle?: string }
+  | { type: "item_failed"; runId?: string; itemId: string; itemTitle?: string; error: string }
+  | { type: "log";         runId?: string; message: string };
+
 export interface SpecOptions {
   /** Comma-separated issue numbers, glob pattern(s), or "list" to use datasource.list() */
   issues: string | string[];
@@ -84,6 +91,8 @@ export interface SpecOptions {
   specWarnTimeout?: number;
   /** Kill-phase timeout in minutes — hard termination after the warn phase expires (default: 10) */
   specKillTimeout?: number;
+  /** Optional callback for MCP progress notifications. */
+  progressCallback?: (event: SpecProgressEvent) => void;
 }
 
 /**
@@ -218,12 +227,9 @@ export function extractSpecContent(raw: string): string {
   return content;
 }
 
-export interface ValidationResult {
-  /** Whether the spec content has valid structure */
-  valid: boolean;
-  /** Human-readable reason when validation fails */
-  reason?: string;
-}
+export type ValidationResult =
+  | { valid: true }
+  | { valid: false; reason: string };
 
 /**
  * Validate that spec content has the expected structural markers.

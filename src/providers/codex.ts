@@ -56,7 +56,11 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
   type AgentLoopInstance = InstanceType<typeof AgentLoop>;
 
   interface CodexSessionState {
-    agent: AgentLoopInstance;
+    /**
+     * The AgentLoop instance. Set synchronously in createSession() before the
+     * session is stored in the map — always defined when accessed via prompt().
+     */
+    agent: AgentLoopInstance | undefined;
     onProgress?: ProviderPromptOptions["onProgress"];
     reporter: ReturnType<typeof createProgressReporter>;
     loadingReported: boolean;
@@ -73,7 +77,7 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
       try {
         const sessionId = randomUUID();
         const state: CodexSessionState = {
-          agent: undefined as never,
+          agent: undefined,
           reporter: createProgressReporter(),
           loadingReported: false,
         };
@@ -144,6 +148,8 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
       state.loadingReported = false;
       try {
         state.reporter.emit("Waiting for Codex response");
+        // agent is always set before the session is stored — this guard is a safety net
+        if (!state.agent) throw new Error(`Codex session ${sessionId} has no agent`);
         const items = await state.agent.run([text]);
 
         const parts: string[] = [];
@@ -191,7 +197,8 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
       log.debug("Cleaning up Codex provider...");
       for (const state of sessions.values()) {
         try {
-          state.agent.terminate();
+          // agent is always set before session is stored — guard is a safety net
+          state.agent?.terminate();
         } catch {}
       }
       sessions.clear();

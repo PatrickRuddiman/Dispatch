@@ -24,8 +24,9 @@ const AGENTS: Record<AgentName, BootFn> = {
 
 /**
  * All registered agent names — useful for CLI help text and validation.
+ * Safe to cast: Object.keys() on a Record<AgentName, …> always returns AgentName values.
  */
-export const AGENT_NAMES = Object.keys(AGENTS) as AgentName[];
+export const AGENT_NAMES: readonly AgentName[] = Object.keys(AGENTS) as AgentName[];
 
 /**
  * Boot an agent by name.

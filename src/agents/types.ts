@@ -73,11 +73,18 @@ export interface ExecutorData {
 }
 
 /** Domain payload for the spec agent. */
-export interface SpecData {
-  /** The cleaned spec content. */
-  content: string;
-  /** Whether the spec passed structural validation. */
-  valid: boolean;
-  /** Validation failure reason, if any. */
-  validationReason?: string;
-}
+export type SpecData =
+  | {
+      /** The cleaned spec content. */
+      content: string;
+      /** Spec passed structural validation. */
+      valid: true;
+    }
+  | {
+      /** The cleaned spec content (may be partial). */
+      content: string;
+      /** Spec failed structural validation. */
+      valid: false;
+      /** Human-readable reason for the validation failure. */
+      validationReason: string;
+    };
