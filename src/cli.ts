@@ -395,8 +395,9 @@ async function main() {
       .helpOption(false)
       .allowUnknownOption(true)
       .allowExcessArguments(true)
-      .option("--port <number>", "Port to listen on", (v: string) => parseInt(v, 10), 9110)
-      .option("--host <host>", "Host to bind to", "127.0.0.1")
+      .option("--http", "Use HTTP transport instead of stdio (for remote/multi-client use)")
+      .option("--port <number>", "Port to listen on (HTTP mode only)", (v: string) => parseInt(v, 10), 9110)
+      .option("--host <host>", "Host to bind to (HTTP mode only)", "127.0.0.1")
       .option("--cwd <dir>", "Working directory", (v: string) => resolve(v));
 
     try {
@@ -409,15 +410,18 @@ async function main() {
       throw err;
     }
 
-    const mcpOpts = mcpProgram.opts<{ port: number; host: string; cwd?: string }>();
-    const { startMcpServer } = await import("./mcp/index.js");
-    await startMcpServer({
-      port: mcpOpts.port,
-      host: mcpOpts.host,
-      cwd: mcpOpts.cwd ?? process.cwd(),
-    });
-    // startMcpServer installs signal handlers and the http server keeps the
-    // event loop alive; we only reach here if something calls process.exit().
+    const mcpOpts = mcpProgram.opts<{ http?: boolean; port: number; host: string; cwd?: string }>();
+    const cwd = mcpOpts.cwd ?? process.cwd();
+
+    if (mcpOpts.http) {
+      const { startMcpServer } = await import("./mcp/index.js");
+      await startMcpServer({ port: mcpOpts.port, host: mcpOpts.host, cwd });
+    } else {
+      const { startStdioMcpServer } = await import("./mcp/index.js");
+      await startStdioMcpServer({ cwd });
+    }
+    // startMcpServer / startStdioMcpServer install signal handlers and keep
+    // the event loop alive; we only reach here if something calls process.exit().
     return;
   }
 

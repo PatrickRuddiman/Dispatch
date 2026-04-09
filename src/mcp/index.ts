@@ -1,12 +1,12 @@
 /**
  * Entry point for `dispatch mcp`.
  *
- * Opens the SQLite database, starts the MCP HTTP server, and registers
- * signal handlers for graceful shutdown.
+ * Opens the SQLite database, starts the MCP server (stdio by default, HTTP
+ * when --http is passed), and registers signal handlers for graceful shutdown.
  */
 
 import { openDatabase, closeDatabase } from "./state/database.js";
-import { createMcpServer } from "./server.js";
+import { createMcpServer, createStdioMcpServer } from "./server.js";
 
 export interface McpServerOptions {
   port: number;
@@ -46,4 +46,42 @@ export async function startMcpServer(opts: McpServerOptions): Promise<void> {
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
   // Keep the process alive — the HTTP server holds the event loop open.
+}
+
+export interface StdioMcpServerOptions {
+  cwd: string;
+}
+
+export async function startStdioMcpServer(opts: StdioMcpServerOptions): Promise<void> {
+  const { cwd } = opts;
+
+  // Initialise the SQLite database for this working directory.
+  // All status messages go to stderr so stdout stays clean for MCP protocol.
+  openDatabase(cwd);
+
+  const handle = await createStdioMcpServer(cwd);
+
+  process.stderr.write("Dispatch MCP server ready (stdio transport). Press Ctrl+C to stop.\n");
+
+  async function shutdown(signal: string) {
+    process.stderr.write(`\nReceived ${signal}, shutting down MCP server...\n`);
+    try {
+      await handle.close();
+    } catch (err) {
+      process.stderr.write(`[dispatch-mcp] Error during server close: ${String(err)}\n`);
+    }
+    try {
+      closeDatabase();
+    } catch (err) {
+      process.stderr.write(`[dispatch-mcp] Error closing database: ${String(err)}\n`);
+    }
+    process.exit(0);
+  }
+
+  // Fire-and-forget: signal handlers are intentionally not awaited — the
+  // shutdown() function calls process.exit(0) itself when done.
+  process.on("SIGINT", () => void shutdown("SIGINT"));
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+
+  // Keep the process alive — the StdioServerTransport holds stdin open.
 }

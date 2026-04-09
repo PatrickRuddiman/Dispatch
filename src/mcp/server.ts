@@ -10,6 +10,7 @@
 import http from "node:http";
 import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { registerSpecTools } from "./tools/spec.js";
 import { registerDispatchTools } from "./tools/dispatch.js";
@@ -21,6 +22,47 @@ import { addLogCallback } from "./state/manager.js";
 export interface McpServerHandle {
   httpServer: http.Server;
   close(): Promise<void>;
+}
+
+export interface StdioMcpServerHandle {
+  close(): Promise<void>;
+}
+
+/**
+ * Create and return a running MCP stdio server.
+ *
+ * Reads JSON-RPC messages from stdin and writes responses to stdout.
+ * All diagnostic output is written to stderr so it does not corrupt the
+ * MCP protocol stream.
+ *
+ * @param cwd  Working directory for Dispatch commands
+ */
+export async function createStdioMcpServer(cwd: string): Promise<StdioMcpServerHandle> {
+  const mcpServer = new McpServer(
+    { name: "dispatch", version: "1.0.0" },
+    { capabilities: { logging: {} } },
+  );
+
+  // Register all tool groups
+  registerSpecTools(mcpServer, cwd);
+  registerDispatchTools(mcpServer, cwd);
+  registerMonitorTools(mcpServer, cwd);
+  registerRecoveryTools(mcpServer, cwd);
+  registerConfigTools(mcpServer, cwd);
+
+  const transport = new StdioServerTransport();
+  await mcpServer.connect(transport);
+
+  return {
+    close: async () => {
+      await transport.close().catch((err: unknown) => {
+        process.stderr.write(`[dispatch-mcp] transport.close error: ${String(err)}\n`);
+      });
+      await mcpServer.close().catch((err: unknown) => {
+        process.stderr.write(`[dispatch-mcp] mcpServer.close error: ${String(err)}\n`);
+      });
+    },
+  };
 }
 
 /**
