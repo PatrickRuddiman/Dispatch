@@ -169,43 +169,6 @@ describe("validateConfigValue", () => {
     expect(result).toContain("Invalid source");
   });
 
-  it("accepts valid testTimeout (within bounds)", () => {
-    expect(validateConfigValue("testTimeout", String(CONFIG_BOUNDS.testTimeout.min))).toBe(null);
-    expect(validateConfigValue("testTimeout", "10")).toBe(null);
-    expect(validateConfigValue("testTimeout", "1.5")).toBe(null);
-    expect(validateConfigValue("testTimeout", String(CONFIG_BOUNDS.testTimeout.max))).toBe(null);
-  });
-
-  it("rejects testTimeout below minimum", () => {
-    const zero = validateConfigValue("testTimeout", "0");
-    expect(zero).not.toBe(null);
-    expect(zero).toContain("between");
-
-    const negative = validateConfigValue("testTimeout", "-5");
-    expect(negative).not.toBe(null);
-    expect(negative).toContain("between");
-  });
-
-  it("rejects testTimeout above maximum", () => {
-    const result = validateConfigValue("testTimeout", String(CONFIG_BOUNDS.testTimeout.max + 1));
-    expect(result).not.toBe(null);
-    expect(result).toContain("between");
-  });
-
-  it("rejects non-numeric testTimeout", () => {
-    const text = validateConfigValue("testTimeout", "abc");
-    expect(text).not.toBe(null);
-    expect(text).toContain("between");
-
-    const empty = validateConfigValue("testTimeout", "");
-    expect(empty).not.toBe(null);
-  });
-
-  it("rejects Infinity and NaN for testTimeout", () => {
-    expect(validateConfigValue("testTimeout", "Infinity")).not.toBe(null);
-    expect(validateConfigValue("testTimeout", "NaN")).not.toBe(null);
-  });
-
   it("accepts valid planTimeout (within bounds)", () => {
     expect(validateConfigValue("planTimeout", String(CONFIG_BOUNDS.planTimeout.min))).toBe(null);
     expect(validateConfigValue("planTimeout", "10")).toBe(null);

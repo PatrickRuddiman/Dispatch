@@ -15,7 +15,7 @@ import { slugify } from "../helpers/slugify.js";
 import { log } from "../helpers/logger.js";
 import { InvalidBranchNameError, isValidBranchName } from "../helpers/branch-validation.js";
 import { getAzureConnection } from "../helpers/auth.js";
-import { getGitRemoteUrl, parseAzDevOpsRemoteUrl } from "./index.js";
+import { getGitRemoteUrl, parseAzDevOpsRemoteUrl, deriveShortUsername } from "./index.js";
 import type { WebApi } from "azure-devops-node-api";
 import type { TeamContext } from "azure-devops-node-api/interfaces/CoreInterfaces.js";
 import type { JsonPatchDocument } from "azure-devops-node-api/interfaces/common/VSSInterfaces.js";
@@ -194,40 +194,6 @@ async function fetchComments(
   } catch {
     return [];
   }
-}
-
-/**
- * Derive a short username from git config.
- * - Multi-word name: first 2 chars of first name + first 6 of last name
- * - Single word or no name: first 8 chars of email local part
- * - Falls back to the provided `fallback` value
- */
-async function deriveShortUsername(cwd: string, fallback: string): Promise<string> {
-  try {
-    const raw = (await git(["config", "user.name"], cwd)).trim();
-    if (raw) {
-      const parts = raw.toLowerCase().replace(/[^a-z\s]/g, "").trim().split(/\s+/);
-      if (parts.length >= 2) {
-        return (parts[0].slice(0, 2) + parts[parts.length - 1].slice(0, 6)) || fallback;
-      }
-    }
-  } catch {
-    // fall through to email
-  }
-
-  try {
-    const raw = (await git(["config", "user.email"], cwd)).trim();
-    if (raw) {
-      const localPart = raw.split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
-      if (localPart) {
-        return localPart.slice(0, 8);
-      }
-    }
-  } catch {
-    // fall through
-  }
-
-  return fallback;
 }
 
 export const datasource: Datasource = {

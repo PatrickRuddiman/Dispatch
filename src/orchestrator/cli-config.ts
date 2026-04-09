@@ -29,7 +29,6 @@ const CONFIG_TO_CLI: Record<ConfigKey, keyof RawCliArgs> = {
   fastModel: "fastModel",
   agents: "agents",
   source: "issueSource",
-  testTimeout: "testTimeout",
   planTimeout: "planTimeout",
   specTimeout: "specTimeout",
   specWarnTimeout: "specWarnTimeout",
@@ -110,7 +109,7 @@ export async function resolveCliConfig(args: RawCliArgs): Promise<RawCliArgs> {
   // ── Auto-detect datasource when not explicitly set ─────────
   const sourceConfigured =
     explicitFlags.has("issueSource") || config.source !== undefined;
-  const needsSource = !(merged.fixTests && merged.issueIds.length === 0) && !merged.spec && !merged.respec;
+  const needsSource = !merged.spec && !merged.respec;
 
   if (needsSource && !sourceConfigured) {
     const detected = await detectDatasource(merged.cwd);

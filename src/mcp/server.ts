@@ -17,7 +17,6 @@ import { registerDispatchTools } from "./tools/dispatch.js";
 import { registerMonitorTools } from "./tools/monitor.js";
 import { registerRecoveryTools } from "./tools/recovery.js";
 import { registerConfigTools } from "./tools/config.js";
-import { registerFixTestsTools } from "./tools/fix-tests.js";
 import { addLogCallback } from "./state/manager.js";
 
 export interface McpServerHandle {
@@ -50,7 +49,6 @@ export async function createStdioMcpServer(cwd: string): Promise<StdioMcpServerH
   registerMonitorTools(mcpServer, cwd);
   registerRecoveryTools(mcpServer, cwd);
   registerConfigTools(mcpServer, cwd);
-  registerFixTestsTools(mcpServer, cwd);
 
   const transport = new StdioServerTransport();
   await mcpServer.connect(transport);
@@ -92,7 +90,6 @@ export async function createMcpServer(opts: {
   registerMonitorTools(mcpServer, cwd);
   registerRecoveryTools(mcpServer, cwd);
   registerConfigTools(mcpServer, cwd);
-  registerFixTestsTools(mcpServer, cwd);
 
   // Each connected transport gets its own transport instance (stateful mode).
   // We keep a map so POST /mcp requests carrying a session ID can be routed

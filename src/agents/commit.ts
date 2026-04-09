@@ -106,7 +106,7 @@ export async function boot(opts: AgentBootOptions): Promise<CommitAgent> {
 
         const parsed = parseCommitResponse(response);
 
-        if (!parsed.commitMessage && !parsed.prTitle) {
+        if (!parsed.commitMessage || !parsed.prTitle) {
           return {
             commitMessage: "",
             prTitle: "",

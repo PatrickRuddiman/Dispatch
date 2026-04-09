@@ -36,9 +36,10 @@ vi.mock("../datasources/index.js", async (importOriginal) => {
   };
 });
 
-import { datasource, getCommitMessages } from "../datasources/github.js";
+import { datasource, getCommitMessages, ownerRepoCache } from "../datasources/github.js";
 
 beforeEach(() => {
+  ownerRepoCache.clear();
   mockExecFile.mockReset();
   mockOctokit.rest.issues.listForRepo.mockReset();
   mockOctokit.rest.issues.get.mockReset();

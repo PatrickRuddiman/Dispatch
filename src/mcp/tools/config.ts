@@ -8,7 +8,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { loadConfig, saveConfig, validateConfigValue, CONFIG_KEYS, type ConfigKey } from "../../config.js";
 
 /** Config keys that store numeric values. */
-const NUMERIC_KEYS: ConfigKey[] = ["testTimeout", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency"];
+const NUMERIC_KEYS: ConfigKey[] = ["planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency"];
 
 export function registerConfigTools(server: McpServer, cwd: string): void {
   server.tool(

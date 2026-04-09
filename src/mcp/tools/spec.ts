@@ -126,11 +126,14 @@ export function registerSpecTools(server: McpServer, cwd: string): void {
         }
       }
       let recentRuns: unknown[] = [];
+      let runsError: string | undefined;
       try {
         recentRuns = listSpecRuns(5);
-      } catch { /* DB may not be initialized */ }
+      } catch (err) {
+        runsError = `Could not load recent runs: ${err instanceof Error ? err.message : String(err)}`;
+      }
       return {
-        content: [{ type: "text", text: JSON.stringify({ files, specsDir, recentRuns, ...(dirError ? { error: dirError } : {}) }) }],
+        content: [{ type: "text", text: JSON.stringify({ files, specsDir, recentRuns, ...(dirError ? { error: dirError } : {}), ...(runsError ? { runsWarning: runsError } : {}) }) }],
       };
     }
   );

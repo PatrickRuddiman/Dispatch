@@ -104,7 +104,7 @@ vi.mock("../config.js", () => ({
   loadConfig: mockLoadConfig,
   saveConfig: mockSaveConfig,
   validateConfigValue: mockValidateConfigValue,
-  CONFIG_KEYS: ["provider", "model", "fastProvider", "fastModel", "agents", "source", "testTimeout", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area", "username"] as const,
+  CONFIG_KEYS: ["provider", "model", "fastProvider", "fastModel", "agents", "source", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area", "username"] as const,
 }));
 
 vi.mock("../datasources/index.js", () => ({

@@ -48,7 +48,6 @@ export interface DispatchConfig {
    */
   fastModel?: string;
   source?: DatasourceName;
-  testTimeout?: number;
   planTimeout?: number;
   specTimeout?: number;
   specWarnTimeout?: number;
@@ -85,7 +84,6 @@ export interface DispatchConfig {
 
 /** Minimum and maximum bounds for numeric configuration values. */
 export const CONFIG_BOUNDS = {
-  testTimeout: { min: 1, max: 120 },
   planTimeout: { min: 1, max: 120 },
   specTimeout: { min: 1, max: 120 },
   specWarnTimeout: { min: 1, max: 120 },
@@ -94,7 +92,7 @@ export const CONFIG_BOUNDS = {
 } as const;
 
 /** Valid configuration key names. */
-export const CONFIG_KEYS = ["provider", "model", "fastProvider", "fastModel", "agents", "source", "testTimeout", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area", "username"] as const;
+export const CONFIG_KEYS = ["provider", "model", "fastProvider", "fastModel", "agents", "source", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area", "username"] as const;
 
 /** A valid configuration key name. */
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -172,14 +170,6 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
         return `Invalid source "${value}". Available: ${DATASOURCE_NAMES.join(", ")}`;
       }
       return null;
-
-    case "testTimeout": {
-      const num = Number(value);
-      if (!Number.isFinite(num) || num < CONFIG_BOUNDS.testTimeout.min || num > CONFIG_BOUNDS.testTimeout.max) {
-        return `Invalid testTimeout "${value}". Must be a number between ${CONFIG_BOUNDS.testTimeout.min} and ${CONFIG_BOUNDS.testTimeout.max} (minutes)`;
-      }
-      return null;
-    }
 
     case "planTimeout": {
       const num = Number(value);

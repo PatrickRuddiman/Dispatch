@@ -20,13 +20,7 @@ interface StartSpecMessage {
   opts: Record<string, unknown>;
 }
 
-interface StartFixTestsMessage {
-  type: "fix-tests";
-  cwd: string;
-  opts: Record<string, unknown>;
-}
-
-type WorkerMessage = StartDispatchMessage | StartSpecMessage | StartFixTestsMessage;
+type WorkerMessage = StartDispatchMessage | StartSpecMessage;
 
 process.on("message", (msg: WorkerMessage) => {
   void handleMessage(msg);
@@ -49,13 +43,6 @@ async function handleMessage(msg: WorkerMessage): Promise<void> {
         progressCallback: (event: Record<string, unknown>) => {
           process.send!({ type: "spec_progress", event });
         },
-      } as never);
-      process.send!({ type: "done", result });
-    } else if (msg.type === "fix-tests") {
-      const orchestrator = await bootOrchestrator({ cwd: msg.cwd });
-      const result = await orchestrator.run({
-        mode: "fix-tests",
-        ...msg.opts,
       } as never);
       process.send!({ type: "done", result });
     }

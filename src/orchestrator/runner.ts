@@ -11,9 +11,6 @@ import type { DatasourceName } from "../datasources/interface.js";
 import type { SpecOptions, SpecSummary } from "../spec-generator.js";
 import { defaultConcurrency, DEFAULT_SPEC_TIMEOUT_MIN, resolveSource } from "../spec-generator.js";
 import { getDatasource } from "../datasources/index.js";
-import { fetchItemsById } from "./datasource-helpers.js";
-import { createWorktree, removeWorktree } from "../helpers/worktree.js";
-import { registerCleanup } from "../helpers/cleanup.js";
 import { log } from "../helpers/logger.js";
 import { confirmLargeBatch } from "../helpers/confirm-large-batch.js";
 import { checkPrereqs } from "../helpers/prereqs.js";
@@ -88,7 +85,6 @@ export interface RawCliArgs {
   verbose: boolean;
   spec?: string | string[];
   respec?: string | string[];
-  fixTests?: boolean;
   issueSource?: DatasourceName;
   org?: string;
   project?: string;
@@ -102,7 +98,6 @@ export interface RawCliArgs {
   specWarnTimeout?: number;
   specKillTimeout?: number;
   planRetries?: number;
-  testTimeout?: number;
   retries?: number;
   feature?: string | boolean;
   outputDir?: string;
@@ -117,21 +112,6 @@ export interface DispatchSummary {
   results: DispatchResult[];
 }
 
-/** Per-issue result for fix-tests runs targeting specific issues. */
-export interface IssueResult {
-  issueId: string;
-  branch: string;
-  success: boolean;
-  error?: string;
-}
-
-export interface FixTestsSummary {
-  mode: "fix-tests";
-  success: boolean;
-  error?: string;
-  issueResults?: IssueResult[];
-}
-
 /** Dispatch-mode run options with explicit mode discriminator. */
 export interface DispatchRunOptions extends OrchestrateRunOptions {
   mode: "dispatch";
@@ -142,26 +122,11 @@ export interface SpecRunOptions extends Omit<SpecOptions, "cwd"> {
   mode: "spec";
 }
 
-/** Fix-tests-mode run options with explicit mode discriminator. */
-export interface FixTestsRunOptions {
-  mode: "fix-tests";
-  testTimeout?: number;
-  issueIds?: string[];
-  provider?: ProviderName;
-  serverUrl?: string;
-  verbose?: boolean;
-  dryRun?: boolean;
-  source?: DatasourceName;
-  org?: string;
-  project?: string;
-  cwd?: string;
-}
-
 /** Discriminated union of all runner run options. */
-export type UnifiedRunOptions = DispatchRunOptions | SpecRunOptions | FixTestsRunOptions;
+export type UnifiedRunOptions = DispatchRunOptions | SpecRunOptions;
 
 /** Unified result type — DispatchSummary or SpecSummary depending on mode. */
-export type RunResult = DispatchSummary | SpecSummary | FixTestsSummary;
+export type RunResult = DispatchSummary | SpecSummary;
 
 /** A booted runner that coordinates dispatch and spec pipelines. */
 export interface OrchestratorAgent {
@@ -169,87 +134,6 @@ export interface OrchestratorAgent {
   generateSpecs(opts: SpecOptions): Promise<SpecSummary>;
   run(opts: UnifiedRunOptions): Promise<RunResult>;
   runFromCli(args: RawCliArgs): Promise<RunResult>;
-}
-
-/** Options for the multi-issue worktree fix-tests flow. */
-interface MultiIssueFixTestsOptions {
-  cwd: string;
-  issueIds: string[];
-  source: DatasourceName;
-  provider: ProviderName;
-  serverUrl?: string;
-  verbose: boolean;
-  testTimeout?: number;
-  org?: string;
-  project?: string;
-  username?: string;
-}
-
-/**
- * Run fix-tests across multiple issues, each in its own worktree.
- *
- * Fetches the specified issues from the configured datasource,
- * creates a worktree per issue, runs `runFixTestsPipeline` inside
- * each worktree, and collects per-issue results.
- */
-async function runMultiIssueFixTests(opts: MultiIssueFixTestsOptions): Promise<FixTestsSummary> {
-  const { runFixTestsPipeline } = await import("./fix-tests-pipeline.js");
-  const datasource = getDatasource(opts.source);
-  const fetchOpts = { cwd: opts.cwd, org: opts.org, project: opts.project };
-  const items = await fetchItemsById(opts.issueIds, datasource, fetchOpts);
-
-  if (items.length === 0) {
-    log.warn("No issues found for the given IDs");
-    return { mode: "fix-tests", success: false, error: "No issues found" };
-  }
-
-  let username = "";
-  try {
-    username = await datasource.getUsername({ cwd: opts.cwd, username: opts.username });
-  } catch (err) {
-    log.warn(`Could not resolve git username for branch naming: ${log.formatErrorChain(err)}`);
-  }
-
-  log.info(`Running fix-tests for ${items.length} issue(s) in worktrees`);
-
-  const issueResults: IssueResult[] = [];
-
-  for (const item of items) {
-    const branchName = datasource.buildBranchName(item.number, item.title, username);
-    const issueFilename = `${item.number}-fix-tests.md`;
-    let worktreePath: string | undefined;
-
-    try {
-      worktreePath = await createWorktree(opts.cwd, issueFilename, branchName);
-      registerCleanup(async () => { await removeWorktree(opts.cwd, issueFilename); });
-      log.info(`Created worktree for issue #${item.number} at ${worktreePath}`);
-
-      const result = await runFixTestsPipeline({
-        cwd: worktreePath,
-        provider: opts.provider,
-        serverUrl: opts.serverUrl,
-        verbose: opts.verbose,
-        testTimeout: opts.testTimeout,
-      });
-
-      issueResults.push({ issueId: item.number, branch: branchName, success: result.success, error: result.error });
-    } catch (err) {
-      const message = log.extractMessage(err);
-      log.error(`Fix-tests failed for issue #${item.number}: ${message}`);
-      issueResults.push({ issueId: item.number, branch: branchName, success: false, error: message });
-    } finally {
-      if (worktreePath) {
-        try {
-          await removeWorktree(opts.cwd, issueFilename);
-        } catch (err) {
-          log.warn(`Could not remove worktree for issue #${item.number}: ${log.formatErrorChain(err)}`);
-        }
-      }
-    }
-  }
-
-  const allSuccess = issueResults.length > 0 && issueResults.every((r) => r.success);
-  return { mode: "fix-tests", success: allSuccess, issueResults };
 }
 
 /** Boot a runner. */
@@ -266,28 +150,6 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
         case "spec": {
           const { mode: _, ...rest } = opts;
           return runner.generateSpecs({ ...rest, cwd });
-        }
-        case "fix-tests": {
-          const { runFixTestsPipeline } = await import("./fix-tests-pipeline.js");
-
-          // No issue IDs — run in current cwd (existing behavior)
-          if (!opts.issueIds || opts.issueIds.length === 0) {
-            return runFixTestsPipeline({ cwd, provider: opts.provider ?? "opencode", serverUrl: opts.serverUrl, verbose: opts.verbose ?? false, testTimeout: opts.testTimeout });
-          }
-
-          // Multi-issue fix-tests via worktrees
-          const source = opts.source;
-          if (!source) {
-            log.error("No datasource configured for multi-issue fix-tests.");
-            return { mode: "fix-tests" as const, success: false, error: "No datasource configured" };
-          }
-
-          return runMultiIssueFixTests({
-            cwd, issueIds: opts.issueIds, source,
-            provider: opts.provider ?? "opencode", serverUrl: opts.serverUrl,
-            verbose: opts.verbose ?? false, testTimeout: opts.testTimeout,
-            org: opts.org, project: opts.project,
-          });
         }
         case "dispatch": {
           const { mode: _, ...rest } = opts;
@@ -315,11 +177,10 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
       // Ensure .dispatch/worktrees/ is gitignored in the main repo
       await ensureGitignoreEntry(m.cwd, ".dispatch/worktrees/");
 
-      // ── Mutual exclusion: --spec, --respec, --fix-tests ────
+      // ── Mutual exclusion: --spec, --respec, --feature ──────
       const modeFlags = [
         m.spec !== undefined && "--spec",
         m.respec !== undefined && "--respec",
-        m.fixTests && "--fix-tests",
         m.feature && "--feature",
       ].filter((f): f is string => typeof f === "string");
 
@@ -332,29 +193,6 @@ export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
       if (m.feature && m.noBranch) {
         log.error("--feature and --no-branch are mutually exclusive");
         process.exit(1);
-      }
-
-      if (m.fixTests) {
-        const { runFixTestsPipeline } = await import("./fix-tests-pipeline.js");
-
-        // No issue IDs — run in current cwd (existing behavior)
-        if (m.issueIds.length === 0) {
-          return runFixTestsPipeline({ cwd: m.cwd, provider: m.provider, serverUrl: m.serverUrl, verbose: m.verbose, testTimeout: m.testTimeout });
-        }
-
-        // Multi-issue fix-tests via worktrees
-        const source = m.issueSource;
-        if (!source) {
-          log.error("No datasource configured. Use --source or run 'dispatch config' to set up defaults.");
-          process.exit(1);
-        }
-
-        return runMultiIssueFixTests({
-          cwd: m.cwd, issueIds: m.issueIds, source,
-          provider: m.provider, serverUrl: m.serverUrl,
-          verbose: m.verbose, testTimeout: m.testTimeout,
-          org: m.org, project: m.project, username: m.username,
-        });
       }
 
       if (m.spec) {

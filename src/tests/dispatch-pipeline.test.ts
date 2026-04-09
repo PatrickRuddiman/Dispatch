@@ -1787,6 +1787,8 @@ describe("worktree dispatch pipeline", () => {
           });
           return "quit";
         });
+        await vi.advanceTimersByTimeAsync(100);
+        await vi.runAllTimersAsync();
 
         const result = await resultPromise;
 
@@ -1871,6 +1873,8 @@ describe("worktree dispatch pipeline", () => {
         expect(tui.state.recovery?.selectedAction).toBe("rerun");
         return "quit";
       });
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.runAllTimersAsync();
       const result = await resultPromise;
 
       expect(result.completed).toBe(0);

@@ -260,8 +260,10 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
     log.warn("You can re-run 'dispatch config' or authenticate later at runtime.");
   }
 
-  // ── Build new config ───────────────────────────────────────
+  // ── Merge prompted fields onto existing config ─────────────
+  const existingConfig = await loadConfig(configDir);
   const newConfig: DispatchConfig = {
+    ...existingConfig,
     provider,
     source,
   };

@@ -83,6 +83,42 @@ const SOURCE_PATTERNS: { pattern: RegExp; source: DatasourceName }[] = [
  * Returns the detected `DatasourceName`, or `null` if the remote URL
  * does not match any known pattern.
  */
+/**
+ * Derive a short username from git config.
+ * - Multi-word name: first 2 chars of first name + first 6 of last name
+ * - Single word or no name: first 8 chars of email local part
+ * - Falls back to the provided `fallback` value
+ */
+export async function deriveShortUsername(cwd: string, fallback: string): Promise<string> {
+  try {
+    const { stdout: nameOut } = await exec("git", ["config", "user.name"], { cwd, shell: process.platform === "win32" });
+    const raw = nameOut.trim();
+    if (raw) {
+      const parts = raw.toLowerCase().replace(/[^a-z\s]/g, "").trim().split(/\s+/);
+      if (parts.length >= 2) {
+        return (parts[0].slice(0, 2) + parts[parts.length - 1].slice(0, 6)) || fallback;
+      }
+    }
+  } catch {
+    // fall through to email
+  }
+
+  try {
+    const { stdout: emailOut } = await exec("git", ["config", "user.email"], { cwd, shell: process.platform === "win32" });
+    const raw = emailOut.trim();
+    if (raw) {
+      const localPart = raw.split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (localPart) {
+        return localPart.slice(0, 8);
+      }
+    }
+  } catch {
+    // fall through
+  }
+
+  return fallback;
+}
+
 export async function detectDatasource(
   cwd: string
 ): Promise<DatasourceName | null> {

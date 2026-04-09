@@ -33,8 +33,6 @@ export const HELP = `
     dispatch --respec <ids>          Regenerate specs for specific issues
     dispatch --respec <glob>         Regenerate specs matching a glob pattern
     dispatch --spec "description"    Generate a spec from an inline text description
-    dispatch --fix-tests [issue-id...]  Run tests and fix failures via AI agent (optionally on specific issue branches)
-
   Options:
     --dry-run              List tasks without dispatching (also works with --spec)
     --no-plan              Skip the planner agent, dispatch directly
@@ -52,7 +50,6 @@ export const HELP = `
     --plan-timeout <min>   Planning timeout in minutes (default: 30)
     --retries <n>          Retry attempts for all agents (default: 3)
     --plan-retries <n>     Retry attempts after planning timeout (overrides --retries for planner)
-    --test-timeout <min>   Test timeout in minutes (default: 5)
     --cwd <dir>            Working directory (default: cwd)
 
   Spec options:
@@ -103,10 +100,6 @@ export const HELP = `
     dispatch --feature
     dispatch --feature my-feature
     dispatch 14 15 16 --feature my-feature
-    dispatch --fix-tests
-    dispatch --fix-tests 14
-    dispatch --fix-tests 14 15 16
-    dispatch --fix-tests 14,15,16
     dispatch config
 `.trimStart();
 
@@ -137,7 +130,6 @@ export const CLI_OPTIONS_MAP: Record<string, string> = {
   verbose: "verbose",
   spec: "spec",
   respec: "respec",
-  fixTests: "fixTests",
   feature: "feature",
   source: "issueSource",
   provider: "provider",
@@ -152,7 +144,6 @@ export const CLI_OPTIONS_MAP: Record<string, string> = {
   specKillTimeout: "specKillTimeout",
   retries: "retries",
   planRetries: "planRetries",
-  testTimeout: "testTimeout",
   cwd: "cwd",
   org: "org",
   project: "project",
@@ -179,7 +170,6 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
     .option("--feature [name]", "Group issues into a single feature branch")
     .option("--force", "Ignore prior run state")
     .option("--verbose", "Show detailed debug output")
-    .option("--fix-tests", "Run tests and fix failures (optionally pass issue IDs to target specific branches)")
     .option("--spec <values...>", "Spec mode: issue numbers, glob, or text")
     .option("--respec [values...]", "Regenerate specs")
     .addOption(
@@ -275,15 +265,6 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
         return n;
       },
     )
-    .option(
-      "--test-timeout <min>",
-      "Test timeout in minutes",
-      (val: string): number => {
-        const n = parseFloat(val);
-        if (isNaN(n) || n <= 0) throw new CommanderError(1, "commander.invalidArgument", "--test-timeout must be a positive number (minutes)");
-        return n;
-      },
-    )
     .option("--cwd <dir>", "Working directory", (val: string) => resolve(val))
     .option("--output-dir <dir>", "Output directory", (val: string) => resolve(val))
     .option("--org <url>", "Azure DevOps organization URL")
@@ -328,7 +309,6 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
       args.respec = opts.respec.length === 1 ? opts.respec[0] : opts.respec;
     }
   }
-  if (opts.fixTests) args.fixTests = true;
   if (opts.feature) args.feature = opts.feature;
   if (opts.model !== undefined) args.model = opts.model;
   if (opts.fastProvider !== undefined) args.fastProvider = opts.fastProvider;
@@ -342,7 +322,6 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
   if (opts.specKillTimeout !== undefined) args.specKillTimeout = opts.specKillTimeout;
   if (opts.retries !== undefined) args.retries = opts.retries;
   if (opts.planRetries !== undefined) args.planRetries = opts.planRetries;
-  if (opts.testTimeout !== undefined) args.testTimeout = opts.testTimeout;
   if (opts.org !== undefined) args.org = opts.org;
   if (opts.project !== undefined) args.project = opts.project;
   if (opts.outputDir !== undefined) args.outputDir = opts.outputDir;
@@ -459,8 +438,7 @@ async function main() {
   const summary = await orchestrator.runFromCli({ ...rawArgs, explicitFlags });
 
   // Determine exit code from summary
-  const failed = "failed" in summary ? summary.failed : ("success" in summary && !summary.success ? 1 : 0);
-  process.exit(failed > 0 ? 1 : 0);
+  process.exit(summary.failed > 0 ? 1 : 0);
 }
 
 main().catch(async (err) => {
