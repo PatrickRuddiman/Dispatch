@@ -41,10 +41,7 @@ export const HELP = `
     --feature [name]       Group issues into a single feature branch and PR
     --force                Ignore prior run state and re-run all tasks
     --concurrency <n>      Max parallel dispatches (default: min(cpus, freeMB/500), max: ${MAX_CONCURRENCY})
-    --provider <name>      Agent backend: ${PROVIDER_NAMES.join(", ")} (default: opencode)
-    --model <model>        Model override (provider-specific format)
-    --fast-provider <name> Provider for fast tier (planner/commit agents, saves cost)
-    --fast-model <model>   Model for fast tier (planner/commit agents, saves cost)
+    --provider <name>      Force a specific provider: ${PROVIDER_NAMES.join(", ")} (auto-selected by default)
     --source <name>        Issue source: ${DATASOURCE_NAMES.join(", ")} (optional; auto-detected from git remote)
     --server-url <url>     URL of a running provider server
     --plan-timeout <min>   Planning timeout in minutes (default: 30)
@@ -87,16 +84,16 @@ export const HELP = `
     dispatch 14 --dry-run
     dispatch 14 --provider copilot
     dispatch --spec 42,43,44
-    dispatch --spec 42,43 --source github --provider copilot
+    dispatch --spec 42,43 --source github
     dispatch --spec 100,200 --source azdevops --org https://dev.azure.com/myorg --project MyProject
     dispatch --spec "drafts/*.md"
     dispatch --spec "drafts/*.md" --source github
-    dispatch --spec "./my-feature.md" --provider copilot
+    dispatch --spec "./my-feature.md"
     dispatch --respec
     dispatch --respec 42,43,44
     dispatch --respec "specs/*.md"
     dispatch --spec "add dark mode toggle to settings page"
-    dispatch --spec "feature A should do x" --provider copilot
+    dispatch --spec "feature A should do x"
     dispatch --feature
     dispatch --feature my-feature
     dispatch 14 15 16 --feature my-feature
@@ -133,9 +130,6 @@ export const CLI_OPTIONS_MAP: Record<string, string> = {
   feature: "feature",
   source: "issueSource",
   provider: "provider",
-  model: "model",
-  fastProvider: "fastProvider",
-  fastModel: "fastModel",
   concurrency: "concurrency",
   serverUrl: "serverUrl",
   planTimeout: "planTimeout",
@@ -173,13 +167,8 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
     .option("--spec <values...>", "Spec mode: issue numbers, glob, or text")
     .option("--respec [values...]", "Regenerate specs")
     .addOption(
-      new Option("--provider <name>", "Agent backend").choices(PROVIDER_NAMES),
+      new Option("--provider <name>", "Force a specific provider (auto-selected by default)").choices(PROVIDER_NAMES),
     )
-    .option("--model <model>", "Model override (provider-specific format)")
-    .addOption(
-      new Option("--fast-provider <name>", "Fast tier provider (planner/commit)").choices(PROVIDER_NAMES),
-    )
-    .option("--fast-model <model>", "Fast tier model (planner/commit)")
     .addOption(
       new Option("--source <name>", "Issue source").choices(
         [...DATASOURCE_NAMES],
@@ -291,7 +280,7 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
     noBranch: !opts.branch,
     noWorktree: !opts.worktree,
     force: opts.force ?? false,
-    provider: opts.provider ?? "opencode",
+    provider: opts.provider,
     cwd: opts.cwd ?? process.cwd(),
     help: opts.help ?? false,
     version: opts.version ?? false,
@@ -310,9 +299,6 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
     }
   }
   if (opts.feature) args.feature = opts.feature;
-  if (opts.model !== undefined) args.model = opts.model;
-  if (opts.fastProvider !== undefined) args.fastProvider = opts.fastProvider;
-  if (opts.fastModel !== undefined) args.fastModel = opts.fastModel;
   if (opts.source !== undefined) args.issueSource = opts.source;
   if (opts.concurrency !== undefined) args.concurrency = opts.concurrency;
   if (opts.serverUrl !== undefined) args.serverUrl = opts.serverUrl;

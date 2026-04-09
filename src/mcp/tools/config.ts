@@ -33,9 +33,9 @@ export function registerConfigTools(server: McpServer, cwd: string): void {
       value: z.string().describe("Value to set (strings, numbers as string, provider/source names)"),
     },
     async (args) => {
-      if (args.key === "agents") {
+      if (args.key === "enabledProviders") {
         return {
-          content: [{ type: "text", text: "The 'agents' key requires object-level configuration. Edit .dispatch/config.json directly or use 'dispatch config'." }],
+          content: [{ type: "text", text: "The 'enabledProviders' key requires array-level configuration. Run 'dispatch config' to set up providers." }],
           isError: true,
         };
       }

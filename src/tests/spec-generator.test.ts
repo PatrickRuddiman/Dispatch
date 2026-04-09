@@ -44,7 +44,19 @@ vi.mock("../helpers/cleanup.js", () => ({
 
 vi.mock("../providers/index.js", () => ({
   bootProvider: vi.fn(),
-  PROVIDER_NAMES: ["opencode", "copilot"],
+  PROVIDER_NAMES: ["opencode", "copilot", "claude", "codex"],
+  getAuthenticatedProviders: vi.fn().mockResolvedValue(["opencode"]),
+  checkProviderAuthenticated: vi.fn().mockResolvedValue(true),
+  getProviderAuthStatus: vi.fn().mockResolvedValue({ status: "authenticated" }),
+}));
+
+vi.mock("../providers/router.js", () => ({
+  routeAllAgents: vi.fn().mockReturnValue({
+    planner: [{ provider: "opencode", model: "claude-haiku-4", priority: 0 }],
+    executor: [{ provider: "opencode", model: "claude-sonnet-4-5", priority: 0 }],
+    commit: [{ provider: "opencode", model: "claude-haiku-4", priority: 0 }],
+  }),
+  routeAgent: vi.fn().mockReturnValue([{ provider: "opencode", model: "claude-sonnet-4-5", priority: 0 }]),
 }));
 
 vi.mock("../helpers/format.js", () => ({

@@ -16,7 +16,9 @@ import type { IssueDetails, IssueFetchOptions, Datasource, DatasourceName } from
 import { getDatasource } from "../datasources/index.js";
 import { extractTitle } from "../datasources/md.js";
 import type { ProviderInstance, ProviderName } from "../providers/interface.js";
-import { bootProvider } from "../providers/index.js";
+import { PROVIDER_NAMES } from "../providers/interface.js";
+import { bootProvider, getAuthenticatedProviders } from "../providers/index.js";
+import { routeAgent } from "../providers/router.js";
 import type { SpecAgent } from "../agents/spec.js";
 import { boot as bootSpecAgent } from "../agents/spec.js";
 import { registerCleanup } from "../helpers/cleanup.js";
@@ -572,8 +574,8 @@ function logSummary(
 export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
   const {
     issues,
-    provider,
-    model,
+    provider: forceProvider,
+    enabledProviders,
     serverUrl,
     cwd: specCwd,
     outputDir = join(specCwd, ".dispatch", "specs"),
@@ -640,8 +642,21 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     return { total: 0, generated: 0, failed: 0, files: [], issueNumbers: [], durationMs: Date.now() - pipelineStart, fileDurationsMs: {} };
   }
 
+  // ── Resolve provider via router ────────────────────────────
+  const available = enabledProviders?.length
+    ? enabledProviders
+    : await getAuthenticatedProviders(PROVIDER_NAMES);
+
+  if (available.length === 0) {
+    throw new Error("No authenticated providers available. Run 'dispatch config' to set up providers.");
+  }
+
+  const specRoute = routeAgent("spec", available, forceProvider);
+  const resolvedProvider = specRoute[0].provider;
+  const resolvedModel = specRoute[0].model;
+
   // ── Boot provider and spec agent ───────────────────────────
-  const { specAgent, instance } = await bootPipeline(provider, serverUrl, specCwd, model, source);
+  const { specAgent, instance } = await bootPipeline(resolvedProvider, serverUrl, specCwd, resolvedModel, source);
 
   // ── Start TUI ──────────────────────────────────────────────
   const verbose = log.verbose;
@@ -655,7 +670,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
       mode: "spec",
       startTime: Date.now(),
       filesFound: 0,
-      provider,
+      provider: resolvedProvider,
       model: instance.model,
       source,
     };
@@ -668,7 +683,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
   } else {
     tui = createTui();
     tui.state.mode = "spec";
-    tui.state.provider = provider;
+    tui.state.provider = resolvedProvider;
     tui.state.model = instance.model;
     tui.state.source = source;
   }

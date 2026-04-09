@@ -47,7 +47,7 @@ const { mockRunSpecPipeline } = vi.hoisted(() => ({
 const { mockLoadConfig, mockSaveConfig, mockValidateConfigValue } = vi.hoisted(() => ({
   mockLoadConfig: vi.fn().mockResolvedValue({
     source: "github",
-    provider: "opencode",
+    enabledProviders: ["opencode"],
     concurrency: 1,
   }),
   mockSaveConfig: vi.fn().mockResolvedValue(undefined),
@@ -104,11 +104,13 @@ vi.mock("../config.js", () => ({
   loadConfig: mockLoadConfig,
   saveConfig: mockSaveConfig,
   validateConfigValue: mockValidateConfigValue,
-  CONFIG_KEYS: ["provider", "model", "fastProvider", "fastModel", "agents", "source", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area", "username"] as const,
+  CONFIG_KEYS: ["enabledProviders", "source", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area", "username"] as const,
 }));
 
 vi.mock("../datasources/index.js", () => ({
   getDatasource: mockGetDatasource,
+  detectDatasource: vi.fn().mockResolvedValue("github"),
+  DATASOURCE_NAMES: ["github", "azdevops", "md"],
 }));
 
 vi.mock("node:fs/promises", () => ({
@@ -163,7 +165,7 @@ beforeEach(() => {
   mockCreateSpecRun.mockReturnValue("test-spec-run-id");
   mockOrchestrate.mockResolvedValue({ total: 1, completed: 1, failed: 0 });
   mockRunSpecPipeline.mockResolvedValue({ total: 1, generated: 1, failed: 0 });
-  mockLoadConfig.mockResolvedValue({ source: "github", provider: "opencode", concurrency: 1 });
+  mockLoadConfig.mockResolvedValue({ source: "github", enabledProviders: ["opencode"], concurrency: 1 });
   mockGetDatasource.mockReturnValue({
     list: vi.fn().mockResolvedValue([
       { number: "1", title: "Issue 1", state: "open", labels: [], url: "http://example.com/1" },
@@ -278,7 +280,7 @@ describe("registerSpecTools", () => {
         cwd: "/cwd",
         opts: expect.objectContaining({
           issues: "42",
-          provider: "opencode",
+          enabledProviders: ["opencode"],
         }),
       }),
       expect.objectContaining({
@@ -683,7 +685,7 @@ describe("registerConfigTools", () => {
     registerConfigTools(server as never, "/cwd");
     mockLoadConfig.mockResolvedValue({
       source: "github",
-      provider: "opencode",
+      enabledProviders: ["opencode"],
       nextIssueId: 99,
     });
     const result = await server.getHandler("config_get")({});

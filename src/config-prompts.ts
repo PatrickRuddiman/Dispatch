@@ -1,8 +1,9 @@
 /**
  * Interactive configuration wizard for Dispatch.
  *
- * Guides users through provider, datasource, and model selection
- * via an interactive terminal flow.
+ * Walks users through provider auth setup and datasource selection.
+ * Provider/model selection is handled automatically by the smart router —
+ * the user just needs to authenticate the providers they want to use.
  */
 
 import { select, confirm, input } from "@inquirer/prompts";
@@ -11,13 +12,8 @@ import { log } from "./helpers/logger.js";
 import {
   loadConfig,
   saveConfig,
-  AGENT_NAMES,
   type DispatchConfig,
-  type AgentConfig,
 } from "./config.js";
-import type { AgentName } from "./agents/interface.js";
-import { PROVIDER_NAMES, listProviderModels, checkProviderInstalled } from "./providers/index.js";
-import type { ProviderName } from "./providers/interface.js";
 import {
   DATASOURCE_NAMES,
   detectDatasource,
@@ -26,16 +22,30 @@ import {
 } from "./datasources/index.js";
 import type { DatasourceName } from "./datasources/interface.js";
 import { ensureAuthReady } from "./helpers/auth.js";
+import { getProviderStatuses, type AuthStatus } from "./providers/registry.js";
+import { setupProviderAuth } from "./providers/auth-setup.js";
+
+/** Format auth status with a colored indicator. */
+function formatAuthStatus(status: AuthStatus): string {
+  switch (status.status) {
+    case "authenticated":
+      return chalk.green("authenticated");
+    case "not-configured":
+      return chalk.red("not configured");
+    case "expired":
+      return chalk.yellow("expired");
+  }
+}
 
 /**
  * Run the interactive configuration wizard.
  *
- * Loads existing config, walks the user through provider, model, and
- * datasource selection, displays a summary, and saves on confirmation.
+ * Detects provider auth status, guides through auth setup,
+ * then handles datasource selection and saves the config.
  */
 export async function runInteractiveConfigWizard(configDir?: string): Promise<void> {
   console.log();
-  log.info(chalk.bold("Dispatch Configuration Wizard"));
+  log.info(chalk.bold("Dispatch Setup"));
   console.log();
 
   // ── Load existing config ───────────────────────────────────
@@ -46,7 +56,11 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
     log.dim("Current configuration:");
     for (const [key, value] of Object.entries(existing)) {
       if (value !== undefined) {
-        log.dim(`  ${key} = ${value}`);
+        if (key === "enabledProviders" && Array.isArray(value)) {
+          log.dim(`  ${key} = ${(value as string[]).join(", ")}`);
+        } else {
+          log.dim(`  ${key} = ${value}`);
+        }
       }
     }
     console.log();
@@ -63,110 +77,72 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
     console.log();
   }
 
-  // ── Provider selection ─────────────────────────────────────
-  const installStatuses = await Promise.all(
-    PROVIDER_NAMES.map((name) => checkProviderInstalled(name)),
+  // ── Provider auth detection ───────────────────────────────
+  log.info("Detecting provider authentication status...");
+  console.log();
+
+  let providerStatuses = await getProviderStatuses();
+
+  // Display status table
+  for (const ps of providerStatuses) {
+    const tierLabel = ps.tier === "free" ? chalk.dim("(free tier)") : chalk.dim("(API key)");
+    const statusLabel = formatAuthStatus(ps.authStatus);
+    const indicator = ps.authStatus.status === "authenticated"
+      ? chalk.green("  ✓")
+      : chalk.red("  ✗");
+    console.log(`${indicator}  ${chalk.bold(ps.displayName.padEnd(18))} ${statusLabel}  ${tierLabel}`);
+  }
+  console.log();
+
+  // ── Auth setup for unauthenticated providers ──────────────
+  const unauthenticated = providerStatuses.filter(
+    (ps) => ps.authStatus.status !== "authenticated",
   );
 
-  const provider = await select<ProviderName>({
-    message: "Select a provider:",
-    choices: PROVIDER_NAMES.map((name, i) => ({
-      name: `${installStatuses[i] ? chalk.green("●") : chalk.red("●")} ${name}`,
-      value: name,
-    })),
-    default: existing.provider,
-  });
-
-  // ── Model selection ────────────────────────────────────────
-  let selectedModel: string | undefined = existing.model;
-  try {
-    log.dim("Fetching available models...");
-    const models = await listProviderModels(provider);
-    if (models.length > 0) {
-      const modelChoice = await select<string>({
-        message: "Select a model:",
-        choices: [
-          { name: "default (provider decides)", value: "" },
-          ...models.map((m) => ({ name: m, value: m })),
-        ],
-        default: existing.model ?? "",
-      });
-      selectedModel = modelChoice || undefined;
-    } else {
-      log.dim("No models returned by provider — skipping model selection.");
-      selectedModel = existing.model;
-    }
-  } catch {
-    log.dim("Could not list models (provider may not be running) — skipping model selection.");
-    selectedModel = existing.model;
-  }
-
-  // ── Per-agent provider/model overrides ──────────────────────
-  const agentOverrides: Partial<Record<AgentName, AgentConfig>> = {};
-  const hasExistingAgents = existing.agents && Object.keys(existing.agents).length > 0;
-
-  const useAgentOverrides = await confirm({
-    message: "Configure per-agent provider/model overrides? (advanced, saves cost)",
-    default: hasExistingAgents ?? false,
-  });
-
-  if (useAgentOverrides) {
-    console.log();
-    log.dim(`Each agent inherits from the top-level provider (${provider}) unless overridden.`);
-    console.log();
-
-    for (const role of AGENT_NAMES) {
-      const existingAgent = existing.agents?.[role];
-      const wantOverride = await confirm({
-        message: `Override ${role} agent?`,
-        default: existingAgent !== undefined,
+  if (unauthenticated.length > 0) {
+    for (const ps of unauthenticated) {
+      const wantSetup = await confirm({
+        message: `Set up authentication for ${ps.displayName}?`,
+        default: false,
       });
 
-      if (!wantOverride) continue;
-
-      // Provider selection for this agent
-      const agentProvider = await select<ProviderName | "">({
-        message: `  ${role} — provider:`,
-        choices: [
-          { name: `inherit (${provider})`, value: "" },
-          ...PROVIDER_NAMES.map((name, i) => ({
-            name: `${installStatuses[i] ? chalk.green("●") : chalk.red("●")} ${name}`,
-            value: name,
-          })),
-        ],
-        default: existingAgent?.provider ?? "",
-      });
-
-      // Model selection for this agent
-      const effectiveProvider = (agentProvider || provider) as ProviderName;
-      let agentModel: string | undefined;
-      try {
-        const agentModels = await listProviderModels(effectiveProvider);
-        if (agentModels.length > 0) {
-          const modelChoice = await select<string>({
-            message: `  ${role} — model:`,
-            choices: [
-              { name: "inherit (top-level model)", value: "" },
-              ...agentModels.map((m) => ({ name: m, value: m })),
-            ],
-            default: existingAgent?.model ?? "",
-          });
-          agentModel = modelChoice || undefined;
-        }
-      } catch {
-        log.dim(`  Could not list models for ${effectiveProvider} — skipping model selection.`);
-        agentModel = existingAgent?.model;
-      }
-
-      // Only store if something differs from top-level
-      if (agentProvider || agentModel) {
-        const cfg: AgentConfig = {};
-        if (agentProvider) cfg.provider = agentProvider as ProviderName;
-        if (agentModel) cfg.model = agentModel;
-        agentOverrides[role] = cfg;
+      if (wantSetup) {
+        console.log();
+        await setupProviderAuth(ps.name);
+        console.log();
       }
     }
+
+    // Re-check status after setup
+    providerStatuses = await getProviderStatuses();
   }
+
+  const authenticatedProviders = providerStatuses
+    .filter((ps) => ps.authStatus.status === "authenticated")
+    .map((ps) => ps.name);
+
+  if (authenticatedProviders.length === 0) {
+    log.error("At least one provider must be authenticated to use Dispatch.");
+    log.dim("Re-run 'dispatch config' after setting up provider credentials.");
+    return;
+  }
+
+  // Show final status
+  console.log();
+  log.info(chalk.bold("Provider status:"));
+  for (const ps of providerStatuses) {
+    const indicator = ps.authStatus.status === "authenticated"
+      ? chalk.green("✓")
+      : chalk.red("✗");
+    console.log(`  ${indicator} ${ps.displayName}`);
+  }
+  console.log();
+
+  log.info(
+    `${authenticatedProviders.length} provider(s) ready. ` +
+    `Dispatch will automatically route tasks to the best available provider.`,
+  );
+  console.log();
 
   // ── Auto-detect datasource from git remote ─────────────────
   const detectedSource = await detectDatasource(process.cwd());
@@ -260,20 +236,14 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
     log.warn("You can re-run 'dispatch config' or authenticate later at runtime.");
   }
 
-  // ── Merge prompted fields onto existing config ─────────────
+  // ── Build new config ──────────────────────────────────────
   const existingConfig = await loadConfig(configDir);
   const newConfig: DispatchConfig = {
     ...existingConfig,
-    provider,
+    enabledProviders: authenticatedProviders,
     source,
   };
 
-  if (selectedModel !== undefined) {
-    newConfig.model = selectedModel;
-  }
-  if (Object.keys(agentOverrides).length > 0) {
-    newConfig.agents = agentOverrides;
-  }
   if (org !== undefined) newConfig.org = org;
   if (project !== undefined) newConfig.project = project;
   if (workItemType !== undefined) newConfig.workItemType = workItemType;
@@ -285,14 +255,8 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
   log.info(chalk.bold("Configuration summary:"));
   for (const [key, value] of Object.entries(newConfig)) {
     if (value !== undefined) {
-      if (key === "agents" && typeof value === "object") {
-        console.log(`  ${chalk.cyan("agents")}:`);
-        for (const [role, cfg] of Object.entries(value as Record<string, AgentConfig>)) {
-          const parts: string[] = [];
-          if (cfg.provider) parts.push(`provider=${cfg.provider}`);
-          if (cfg.model) parts.push(`model=${cfg.model}`);
-          console.log(`    ${chalk.cyan(role)} = ${parts.join(", ")}`);
-        }
+      if (key === "enabledProviders" && Array.isArray(value)) {
+        console.log(`  ${chalk.cyan(key)} = ${(value as string[]).join(", ")}`);
       } else {
         console.log(`  ${chalk.cyan(key)} = ${value}`);
       }

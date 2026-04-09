@@ -51,6 +51,7 @@
     "@octokit/auth-oauth-device": "^7.1.5",
     "@octokit/rest": "^21.1.1",
     "@openai/codex-sdk": "^0.118.0",
+    "@github/copilot-sdk": "^0.2.1",
     "@opencode-ai/sdk": "^1.4.2",
     "azure-devops-node-api": "^14.1.0",
     "better-sqlite3": "^12.8.0",
@@ -61,7 +62,6 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@github/copilot-sdk": "^0.2.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.13.4",
     "@vitest/coverage-v8": "^4.0.18",

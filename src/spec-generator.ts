@@ -59,10 +59,10 @@ export interface SpecOptions {
   issues: string | string[];
   /** Explicit datasource override (auto-detected if omitted) */
   issueSource?: DatasourceName;
-  /** AI agent backend */
-  provider: ProviderName;
-  /** Model override to pass to the provider (provider-specific format). */
-  model?: string;
+  /** Force a specific provider for all roles (CLI --provider override). */
+  provider?: ProviderName;
+  /** Authenticated providers from config — router uses these for auto-selection. */
+  enabledProviders?: ProviderName[];
   /** URL of a running provider server */
   serverUrl?: string;
   /** Working directory */

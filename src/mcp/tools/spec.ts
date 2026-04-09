@@ -73,8 +73,7 @@ export function registerSpecTools(server: McpServer, cwd: string): void {
         cwd,
         opts: {
           issues: resolvedIssues,
-          provider: config.provider,
-          model: config.model,
+          enabledProviders: config.enabledProviders,
           issueSource: config.source,
           org: config.org,
           project: config.project,

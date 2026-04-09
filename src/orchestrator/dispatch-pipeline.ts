@@ -22,7 +22,9 @@ import { isValidBranchName } from "../helpers/branch-validation.js";
 import { createTui, type TuiState } from "../tui.js";
 import type { ProviderName } from "../providers/interface.js";
 import { ProviderPool, type PoolEntry } from "../providers/pool.js";
-import { resolveAgentProviderConfig } from "../config.js";
+import { routeAllAgents } from "../providers/router.js";
+import { getAuthenticatedProviders } from "../providers/index.js";
+import { PROVIDER_NAMES } from "../providers/interface.js";
 import { getDatasource } from "../datasources/index.js";
 import type { DatasourceName, DispatchLifecycleOptions, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
 import { ensureAuthReady, setAuthPromptHandler } from "../helpers/auth.js";
@@ -107,11 +109,8 @@ export async function runDispatchPipeline(
     noBranch: noBranchOpt,
     noWorktree,
     feature,
-    provider = "opencode",
-    model,
-    fastProvider,
-    fastModel,
-    agents,
+    provider,
+    enabledProviders,
     source,
     org,
     project,
@@ -126,38 +125,20 @@ export async function runDispatchPipeline(
   } = opts;
   let noBranch = noBranchOpt;
 
-  // Resolve per-agent provider+model configs
-  const configOpts = { provider, model, fastProvider, fastModel, agents };
-  const agentConfigs = {
-    planner: resolveAgentProviderConfig("planner", configOpts),
-    executor: resolveAgentProviderConfig("executor", configOpts),
-    commit: resolveAgentProviderConfig("commit", configOpts),
-  };
+  // Determine authenticated providers for routing
+  const available = enabledProviders?.length
+    ? enabledProviders
+    : await getAuthenticatedProviders(PROVIDER_NAMES);
 
-  // Collect all unique provider+model combos as fallback entries for pools
-  const seen = new Set<string>();
-  const allEntries: PoolEntry[] = [];
-  let priority = 0;
-  for (const cfg of Object.values(agentConfigs)) {
-    const key = `${cfg.provider}:${cfg.model ?? "default"}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      allEntries.push({ provider: cfg.provider, model: cfg.model, priority: priority++ });
-    }
+  if (available.length === 0) {
+    throw new Error("No authenticated providers available. Run 'dispatch config' to set up providers.");
   }
 
-  /**
-   * Create a ProviderPool for an agent, with its configured provider as primary
-   * and all other configured providers as fallbacks.
-   */
-  function createPool(primary: { provider: ProviderName; model?: string }, bootCwd: string): ProviderPool {
-    const primaryKey = `${primary.provider}:${primary.model ?? "default"}`;
-    const entries: PoolEntry[] = [
-      { provider: primary.provider, model: primary.model, priority: 0 },
-      ...allEntries
-        .filter((e) => `${e.provider}:${e.model ?? "default"}` !== primaryKey)
-        .map((e, i) => ({ ...e, priority: i + 1 })),
-    ];
+  // Route agents to providers via the smart router
+  const agentRoutes = routeAllAgents(available, provider);
+
+  /** Create a ProviderPool for an agent role using router-produced entries. */
+  function createPool(entries: PoolEntry[], bootCwd: string): ProviderPool {
     return new ProviderPool({ entries, bootOpts: { url: serverUrl, cwd: bootCwd } });
   }
 
@@ -187,7 +168,8 @@ export async function runDispatchPipeline(
 
   if (verbose) {
     // Print inline header banner (same pattern as spec pipeline)
-    const headerLines = renderHeaderLines({ provider, source });
+    const primaryProvider = agentRoutes.executor[0]?.provider;
+    const headerLines = renderHeaderLines({ provider: primaryProvider, source });
     console.log("");
     for (const line of headerLines) console.log(line);
     console.log(chalk.dim("  ─".repeat(24)));
@@ -200,7 +182,7 @@ export async function runDispatchPipeline(
       phase: "discovering",
       startTime: Date.now(),
       filesFound: 0,
-      provider,
+      provider: primaryProvider,
       source,
     };
     tui = {
@@ -211,7 +193,7 @@ export async function runDispatchPipeline(
     };
   } else {
     tui = createTui();
-    tui.state.provider = provider;
+    tui.state.provider = agentRoutes.executor[0]?.provider;
     tui.state.source = source;
 
     // Route auth device-code prompts into the TUI notification banner
@@ -337,9 +319,9 @@ export async function runDispatchPipeline(
 
     if (!useWorktrees) {
       // Create per-agent pools with failover support
-      const executorPool = createPool(agentConfigs.executor, cwd);
-      const plannerPool = createPool(agentConfigs.planner, cwd);
-      const commitPool = createPool(agentConfigs.commit, cwd);
+      const executorPool = createPool(agentRoutes.executor, cwd);
+      const plannerPool = createPool(agentRoutes.planner, cwd);
+      const commitPool = createPool(agentRoutes.commit, cwd);
       sharedPools.push(executorPool, plannerPool, commitPool);
       for (const pool of sharedPools) registerCleanup(() => pool.cleanup());
 
@@ -348,9 +330,10 @@ export async function runDispatchPipeline(
         tui.state.model = executorPool.model;
       }
       if (verbose) {
-        log.debug(`Executor: ${agentConfigs.executor.provider}${agentConfigs.executor.model ? ` (${agentConfigs.executor.model})` : ""}`);
-        log.debug(`Planner: ${agentConfigs.planner.provider}${agentConfigs.planner.model ? ` (${agentConfigs.planner.model})` : ""}`);
-        log.debug(`Commit: ${agentConfigs.commit.provider}${agentConfigs.commit.model ? ` (${agentConfigs.commit.model})` : ""}`);
+        const fmtRoute = (entries: PoolEntry[]) => entries.map((e) => `${e.provider}${e.model ? ` (${e.model})` : ""}`).join(" > ");
+        log.debug(`Executor route: ${fmtRoute(agentRoutes.executor)}`);
+        log.debug(`Planner route: ${fmtRoute(agentRoutes.planner)}`);
+        log.debug(`Commit route: ${fmtRoute(agentRoutes.commit)}`);
       }
 
       // ── 4. Boot planner agent (unless --no-plan) ────────────────
@@ -511,9 +494,9 @@ export async function runDispatchPipeline(
 
         if (useWorktrees) {
           // Create per-agent pools for this worktree
-          const localExecutorPool = createPool(agentConfigs.executor, issueCwd);
-          const localPlannerPool = createPool(agentConfigs.planner, issueCwd);
-          const localCommitPool = createPool(agentConfigs.commit, issueCwd);
+          const localExecutorPool = createPool(agentRoutes.executor, issueCwd);
+          const localPlannerPool = createPool(agentRoutes.planner, issueCwd);
+          const localCommitPool = createPool(agentRoutes.commit, issueCwd);
           registerCleanup(() => localExecutorPool.cleanup());
           registerCleanup(() => localPlannerPool.cleanup());
           registerCleanup(() => localCommitPool.cleanup());
@@ -522,13 +505,13 @@ export async function runDispatchPipeline(
             tui.state.model = localExecutorPool.model;
           }
           if (verbose) {
-            log.debug(`Worktree executor: ${agentConfigs.executor.provider}${agentConfigs.executor.model ? ` (${agentConfigs.executor.model})` : ""}`);
+            log.debug(`Worktree executor route: ${agentRoutes.executor.map((e) => e.provider).join(" > ")}`);
           }
 
           localPlanner = noPlan ? null : await bootPlanner({ provider: localPlannerPool, cwd: issueCwd });
           localExecutor = await bootExecutor({ provider: localExecutorPool, cwd: issueCwd });
           localCommitAgent = await bootCommit({ provider: localCommitPool, cwd: issueCwd });
-          fileLogger?.info(`Provider pools booted: executor=${agentConfigs.executor.provider}, planner=${agentConfigs.planner.provider}, commit=${agentConfigs.commit.provider}`);
+          fileLogger?.info(`Provider pools booted: executor=${agentRoutes.executor[0]?.provider}, planner=${agentRoutes.planner[0]?.provider}, commit=${agentRoutes.commit[0]?.provider}`);
         } else {
           localPlanner = planner;
           localExecutor = executor!;

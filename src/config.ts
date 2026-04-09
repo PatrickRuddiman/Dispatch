@@ -10,43 +10,19 @@ import { PROVIDER_NAMES } from "./providers/index.js";
 import { DATASOURCE_NAMES } from "./datasources/index.js";
 import type { ProviderName } from "./providers/interface.js";
 import type { DatasourceName } from "./datasources/interface.js";
-import type { AgentName } from "./agents/interface.js";
 import { runInteractiveConfigWizard } from "./config-prompts.js";
-
-/**
- * Per-agent provider/model override.
- * Missing fields inherit from the top-level `provider`/`model`.
- */
-export interface AgentConfig {
-  provider?: ProviderName;
-  model?: string;
-}
 
 /**
  * Persistent configuration options for Dispatch.
  * All fields are optional since the config file may contain any subset.
  */
 export interface DispatchConfig {
-  provider?: ProviderName;
   /**
-   * Model to use when spawning agents, in provider-specific format.
-   *   - Copilot: bare model ID (e.g. "claude-sonnet-4-5")
-   *   - OpenCode: "provider/model" (e.g. "anthropic/claude-sonnet-4")
-   * When omitted the provider uses its auto-detected default.
-   * This is the "strong" tier model used by executor and spec agents.
+   * Providers the user has authenticated and enabled.
+   * Populated by the config wizard during auth setup.
+   * The router uses this list to decide which providers to route to.
    */
-  model?: string;
-  /**
-   * Provider for the "fast" (cost-saving) tier used by planner and commit agents.
-   * Defaults to `provider` when omitted.
-   */
-  fastProvider?: ProviderName;
-  /**
-   * Model for the "fast" (cost-saving) tier, in provider-specific format.
-   * Used by planner and commit agents to reduce costs.
-   * Defaults to `model` when omitted.
-   */
-  fastModel?: string;
+  enabledProviders?: ProviderName[];
   source?: DatasourceName;
   planTimeout?: number;
   specTimeout?: number;
@@ -58,24 +34,6 @@ export interface DispatchConfig {
   workItemType?: string;
   iteration?: string;
   area?: string;
-  /**
-   * Per-agent provider/model overrides. Each agent role can independently
-   * specify a provider and model. Missing fields inherit from the top-level
-   * `provider`/`model` (or `fastProvider`/`fastModel` for planner/commit).
-   *
-   * Example:
-   * ```json
-   * {
-   *   "provider": "claude",
-   *   "model": "claude-sonnet-4",
-   *   "agents": {
-   *     "planner": { "provider": "copilot", "model": "claude-haiku-4" },
-   *     "commit": { "model": "claude-haiku-4" }
-   *   }
-   * }
-   * ```
-   */
-  agents?: Partial<Record<AgentName, AgentConfig>>;
   /** Short username prefix for branch names (e.g. "pr" instead of "patrick-ruddiman"). */
   username?: string;
   /** Internal auto-increment counter for MD datasource issue IDs. Defaults to 1 when absent. */
@@ -92,7 +50,7 @@ export const CONFIG_BOUNDS = {
 } as const;
 
 /** Valid configuration key names. */
-export const CONFIG_KEYS = ["provider", "model", "fastProvider", "fastModel", "agents", "source", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area", "username"] as const;
+export const CONFIG_KEYS = ["enabledProviders", "source", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area", "username"] as const;
 
 /** A valid configuration key name. */
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -109,16 +67,79 @@ export function getConfigPath(configDir?: string): string {
 /**
  * Load the config from disk.
  * Returns `{}` if the file doesn't exist or contains invalid JSON.
+ * Migrates legacy configs that used `provider`/`model`/`agents` fields.
  * Accepts an optional `configDir` override for testing.
  */
 export async function loadConfig(configDir?: string): Promise<DispatchConfig> {
   const configPath = getConfigPath(configDir);
   try {
     const raw = await readFile(configPath, "utf-8");
-    return JSON.parse(raw) as DispatchConfig;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return migrateConfig(parsed);
   } catch {
     return {};
   }
+}
+
+/**
+ * Migrate legacy config format to the new schema.
+ *
+ * Old configs had: provider, model, fastProvider, fastModel, agents
+ * New configs have: enabledProviders
+ *
+ * Legacy fields are silently dropped. The provider name is extracted
+ * into enabledProviders if not already set.
+ */
+function migrateConfig(raw: Record<string, unknown>): DispatchConfig {
+  const config: DispatchConfig = {};
+
+  // Migrate legacy provider field into enabledProviders
+  if (!raw.enabledProviders && raw.provider) {
+    const providers = new Set<ProviderName>();
+    const legacyProvider = raw.provider as ProviderName;
+    if (PROVIDER_NAMES.includes(legacyProvider)) {
+      providers.add(legacyProvider);
+    }
+    // Also pick up fastProvider if different
+    if (raw.fastProvider) {
+      const fastProvider = raw.fastProvider as ProviderName;
+      if (PROVIDER_NAMES.includes(fastProvider)) {
+        providers.add(fastProvider);
+      }
+    }
+    // Pick up per-agent providers
+    if (raw.agents && typeof raw.agents === "object") {
+      for (const agentCfg of Object.values(raw.agents as Record<string, { provider?: string }>)) {
+        if (agentCfg?.provider && PROVIDER_NAMES.includes(agentCfg.provider as ProviderName)) {
+          providers.add(agentCfg.provider as ProviderName);
+        }
+      }
+    }
+    if (providers.size > 0) {
+      config.enabledProviders = [...providers];
+    }
+  } else if (Array.isArray(raw.enabledProviders)) {
+    config.enabledProviders = (raw.enabledProviders as string[]).filter((p) =>
+      PROVIDER_NAMES.includes(p as ProviderName),
+    ) as ProviderName[];
+  }
+
+  // Copy over non-legacy fields
+  if (raw.source !== undefined) config.source = raw.source as DatasourceName;
+  if (raw.planTimeout !== undefined) config.planTimeout = raw.planTimeout as number;
+  if (raw.specTimeout !== undefined) config.specTimeout = raw.specTimeout as number;
+  if (raw.specWarnTimeout !== undefined) config.specWarnTimeout = raw.specWarnTimeout as number;
+  if (raw.specKillTimeout !== undefined) config.specKillTimeout = raw.specKillTimeout as number;
+  if (raw.concurrency !== undefined) config.concurrency = raw.concurrency as number;
+  if (raw.org !== undefined) config.org = raw.org as string;
+  if (raw.project !== undefined) config.project = raw.project as string;
+  if (raw.workItemType !== undefined) config.workItemType = raw.workItemType as string;
+  if (raw.iteration !== undefined) config.iteration = raw.iteration as string;
+  if (raw.area !== undefined) config.area = raw.area as string;
+  if (raw.username !== undefined) config.username = raw.username as string;
+  if (raw.nextIssueId !== undefined) config.nextIssueId = raw.nextIssueId as number;
+
+  return config;
 }
 
 /**
@@ -141,28 +162,8 @@ export async function saveConfig(
  */
 export function validateConfigValue(key: ConfigKey, value: string): string | null {
   switch (key) {
-    case "provider":
-      if (!PROVIDER_NAMES.includes(value as ProviderName)) {
-        return `Invalid provider "${value}". Available: ${PROVIDER_NAMES.join(", ")}`;
-      }
-      return null;
-
-    case "model":
-    case "fastModel":
-      if (!value || value.trim() === "") {
-        return `Invalid ${key}: value must not be empty`;
-      }
-      return null;
-
-    case "fastProvider":
-      if (!PROVIDER_NAMES.includes(value as ProviderName)) {
-        return `Invalid fastProvider "${value}". Available: ${PROVIDER_NAMES.join(", ")}`;
-      }
-      return null;
-
-    case "agents":
-      // agents is an object, not a scalar — skip string-level validation.
-      // Structural validation happens at load time.
+    case "enabledProviders":
+      // Array field — skip string-level validation.
       return null;
 
     case "source":
@@ -237,40 +238,9 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
     default: {
       const _exhaustive: never = key;
       return `Unknown config key "${_exhaustive}"`;
-    }  }
+    }
+  }
 }
-
-/** Valid agent role names for per-agent config. */
-const AGENT_NAMES: AgentName[] = ["planner", "executor", "spec", "commit"];
-
-/** Agent roles that default to the fast tier when fastProvider/fastModel are set. */
-const FAST_ROLES: AgentName[] = ["planner", "commit"];
-
-/**
- * Resolve the effective provider+model for a given agent role.
- *
- * Priority: `agents.<role>` > `fastProvider`/`fastModel` (planner/commit only) > top-level.
- */
-export function resolveAgentProviderConfig(
-  role: AgentName,
-  opts: {
-    provider: ProviderName;
-    model?: string;
-    fastProvider?: ProviderName;
-    fastModel?: string;
-    agents?: Partial<Record<AgentName, AgentConfig>>;
-  },
-): { provider: ProviderName; model?: string } {
-  const override = opts.agents?.[role];
-  const isFastRole = FAST_ROLES.includes(role);
-  return {
-    provider: override?.provider ?? (isFastRole ? opts.fastProvider : undefined) ?? opts.provider,
-    model: override?.model ?? (isFastRole ? opts.fastModel : undefined) ?? opts.model,
-  };
-}
-
-/** All valid agent role names. Exported for config wizard use. */
-export { AGENT_NAMES };
 
 /**
  * Handle the `dispatch config` subcommand.

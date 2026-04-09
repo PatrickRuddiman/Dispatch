@@ -23,11 +23,7 @@ import { detectDatasource, DATASOURCE_NAMES } from "../datasources/index.js";
  * to fill in CLI flag defaults from the config file.
  */
 const CONFIG_TO_CLI: Record<ConfigKey, keyof RawCliArgs> = {
-  provider: "provider",
-  model: "model",
-  fastProvider: "fastProvider",
-  fastModel: "fastModel",
-  agents: "agents",
+  enabledProviders: "enabledProviders",
   source: "issueSource",
   planTimeout: "planTimeout",
   specTimeout: "specTimeout",
@@ -57,8 +53,7 @@ function setCliField<K extends keyof RawCliArgs>(
  *
  * 1. Loads the persistent config file (`{cwd}/.dispatch/config.json`)
  * 2. Merges config defaults beneath CLI flags (CLI wins when explicit)
- * 3. Validates that mandatory configuration (provider + source) is present
- *    — calls `process.exit(1)` on validation failure, matching current behavior
+ * 3. Validates that providers are available (via enabledProviders or --provider)
  * 4. Auto-detects the datasource from the git remote when not explicitly set
  *    — skipped for spec/respec modes, which defer source resolution to the
  *      pipeline's own `resolveSource()` (context-aware fallback logic)
@@ -83,15 +78,15 @@ export async function resolveCliConfig(args: RawCliArgs): Promise<RawCliArgs> {
     }
   }
 
-  // ── Mandatory config validation ────────────────────────────
-  const providerConfigured =
-    explicitFlags.has("provider") || config.provider !== undefined;
+  // ── Provider validation ───────────────────────────────────
+  // Either --provider CLI flag or enabledProviders from config must be present.
+  // The router will auto-detect authenticated providers as a fallback.
+  const hasProvider = explicitFlags.has("provider") && merged.provider;
+  const hasEnabledProviders = merged.enabledProviders && merged.enabledProviders.length > 0;
 
-  if (!providerConfigured) {
-    log.error("Missing required configuration: provider");
-    log.dim("  Run 'dispatch config' to configure defaults interactively.");
-    log.dim("  Or pass it as a CLI flag: --provider <name>");
-    process.exit(1);
+  if (!hasProvider && !hasEnabledProviders) {
+    log.warn("No providers configured. The router will attempt to auto-detect authenticated providers.");
+    log.dim("  Run 'dispatch config' to set up providers, or pass --provider <name>.");
   }
 
   // ── Output-dir validation ─────────────────────────────────

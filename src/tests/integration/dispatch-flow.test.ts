@@ -49,6 +49,19 @@ vi.mock("../../providers/index.js", () => ({
     prompt: mocks.mockPrompt,
     cleanup: mocks.mockProviderCleanup,
   } satisfies ProviderInstance),
+  getAuthenticatedProviders: vi.fn().mockResolvedValue(["opencode"]),
+  checkProviderAuthenticated: vi.fn().mockResolvedValue(true),
+  getProviderAuthStatus: vi.fn().mockResolvedValue({ status: "authenticated" }),
+  PROVIDER_NAMES: ["opencode", "copilot", "claude", "codex"],
+}));
+
+vi.mock("../../providers/router.js", () => ({
+  routeAllAgents: vi.fn().mockReturnValue({
+    planner: [{ provider: "opencode", model: "claude-haiku-4", priority: 0 }],
+    executor: [{ provider: "opencode", model: "claude-sonnet-4-5", priority: 0 }],
+    commit: [{ provider: "opencode", model: "claude-haiku-4", priority: 0 }],
+  }),
+  routeAgent: vi.fn().mockReturnValue([{ provider: "opencode", model: "claude-sonnet-4-5", priority: 0 }]),
 }));
 
 vi.mock("../../agents/planner.js", () => ({
@@ -187,6 +200,7 @@ describe("integration: dispatch pipeline with md datasource", () => {
         noPlan: false,
         noBranch: true,
         provider: "opencode",
+        enabledProviders: ["opencode"],
         source: "md",
         planTimeout: 1,
         planRetries: 0,
@@ -242,6 +256,7 @@ describe("integration: dispatch pipeline with md datasource", () => {
         noPlan: false,
         noBranch: true,
         provider: "opencode",
+        enabledProviders: ["opencode"],
         source: "md",
         planTimeout: 1,
         planRetries: 0,
@@ -282,6 +297,7 @@ describe("integration: dispatch pipeline with md datasource", () => {
         noPlan: true,
         noBranch: true,
         provider: "opencode",
+        enabledProviders: ["opencode"],
         source: "md",
         planTimeout: 1,
         planRetries: 0,
@@ -343,6 +359,7 @@ describe("integration: dispatch pipeline with md datasource", () => {
         noPlan: false,
         noBranch: true,
         provider: "opencode",
+        enabledProviders: ["opencode"],
         source: "md",
         planTimeout: 1,
         planRetries: 0,
