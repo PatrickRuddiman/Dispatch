@@ -189,4 +189,74 @@ describe("dispatchTask", () => {
     expect(prompt).toContain("Operating System");
     expect(prompt).toContain("Do NOT write intermediate scripts");
   });
+
+  it("detects 'You've hit your limit' as rate-limit failure", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue(
+        "You've hit your limit \u00b7 resets 6pm (UTC)"
+      ),
+    });
+    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Rate limit");
+  });
+
+  it("detects 'rate limit exceeded' as rate-limit failure", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue(
+        "rate limit exceeded, please try again later"
+      ),
+    });
+    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Rate limit");
+  });
+
+  it("detects 'Too many requests' as rate-limit failure", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue(
+        "Too many requests"
+      ),
+    });
+    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Rate limit");
+  });
+
+  it("detects 'quota exceeded' as rate-limit failure", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue(
+        "Your quota exceeded for today"
+      ),
+    });
+    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Rate limit");
+  });
+
+  it("treats normal response as success", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue(
+        "Task complete. I've implemented the changes as requested."
+      ),
+    });
+    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test");
+
+    expect(result.success).toBe(true);
+  });
+
+  it("does not false-positive on 'limit' in normal task output", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue(
+        "I've implemented the rate limiting feature as requested. Task complete."
+      ),
+    });
+    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test");
+
+    expect(result.success).toBe(true);
+  });
 });
