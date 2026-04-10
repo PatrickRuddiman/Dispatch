@@ -90,7 +90,7 @@ async function checkCodexAuth(): Promise<AuthStatus> {
   }
   // Try codex CLI auth check
   try {
-    await exec("codex", ["auth", "status"], { timeout: AUTH_PROBE_TIMEOUT_MS });
+    await exec("codex", ["login", "status"], { timeout: AUTH_PROBE_TIMEOUT_MS });
     return { status: "authenticated" };
   } catch {
     return {
@@ -112,7 +112,7 @@ async function checkOpencodeAuth(): Promise<AuthStatus> {
   }
   // Try opencode CLI auth check
   try {
-    await exec("opencode", ["auth", "status"], { timeout: AUTH_PROBE_TIMEOUT_MS });
+    await exec("opencode", ["auth", "list"], { timeout: AUTH_PROBE_TIMEOUT_MS });
     return { status: "authenticated" };
   } catch {
     return {
