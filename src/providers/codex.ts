@@ -14,6 +14,9 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type {
   ProviderInstance,
   ProviderBootOptions,
@@ -46,13 +49,11 @@ async function loadCodexSdk(): Promise<typeof import("@openai/codex-sdk")> {
 async function resolveOpenAIToken(): Promise<string | null> {
   if (process.env.OPENAI_API_KEY) return process.env.OPENAI_API_KEY;
   try {
-    const { readFile } = await import("node:fs/promises");
-    const { join } = await import("node:path");
-    const { homedir } = await import("node:os");
     const authPath = join(homedir(), ".codex", "auth.json");
     const raw = JSON.parse(await readFile(authPath, "utf-8"));
     return raw?.tokens?.access_token ?? null;
-  } catch {
+  } catch (err) {
+    log.debug(`resolveOpenAIToken: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }

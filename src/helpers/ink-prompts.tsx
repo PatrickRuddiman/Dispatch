@@ -6,7 +6,7 @@
  * via `vi.mock("../helpers/ink-prompts.js", ...)`.
  */
 
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { render, Box, Text, useInput, useApp } from "ink";
 import SelectInput from "ink-select-input";
 import TextInput from "ink-text-input";
@@ -103,6 +103,8 @@ export function multiSelect<T>(opts: {
         opts.choices.forEach((c, i) => { if (c.default) initial.add(i); });
         return initial;
       });
+      const selectedRef = useRef(selected);
+      useEffect(() => { selectedRef.current = selected; }, [selected]);
 
       useInput((input, key) => {
         if (key.upArrow) {
@@ -118,7 +120,7 @@ export function multiSelect<T>(opts: {
           });
         } else if (key.return) {
           const result = opts.choices
-            .filter((_, i) => selected.has(i))
+            .filter((_, i) => selectedRef.current.has(i))
             .map((c) => c.value);
           resolve(result);
           exit();
@@ -138,7 +140,7 @@ export function multiSelect<T>(opts: {
             const checkbox = isSelected ? "◉" : "◯";
             const pointer = isCursor ? "❯" : " ";
             return (
-              <Box key={i}>
+              <Box key={choice.name}>
                 <Text color={isCursor ? PALETTE.accent : undefined}>
                   {pointer} {checkbox} {choice.name}
                 </Text>

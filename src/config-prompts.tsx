@@ -181,17 +181,20 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
 
       // Fetch available models with timeout
       let models: string[];
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
       try {
         log.dim(`  Fetching available models...`);
         models = await Promise.race([
           listProviderModels(name),
-          new Promise<string[]>((_, reject) =>
-            setTimeout(() => reject(new Error("timeout")), MODEL_LIST_TIMEOUT_MS),
-          ),
+          new Promise<string[]>((_, reject) => {
+            timeoutId = setTimeout(() => reject(new Error("timeout")), MODEL_LIST_TIMEOUT_MS);
+          }),
         ]);
       } catch {
         log.warn(`  Could not fetch model list — showing defaults only`);
         models = [meta.defaultStrongModel, meta.defaultFastModel];
+      } finally {
+        clearTimeout(timeoutId);
       }
 
       // Deduplicate and ensure defaults are in the list

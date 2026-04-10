@@ -151,20 +151,22 @@ function migrateConfig(raw: Record<string, unknown>): DispatchConfig {
     }
   }
 
-  // Copy over non-legacy fields
-  if (raw.source !== undefined) config.source = raw.source as DatasourceName;
-  if (raw.planTimeout !== undefined) config.planTimeout = raw.planTimeout as number;
-  if (raw.specTimeout !== undefined) config.specTimeout = raw.specTimeout as number;
-  if (raw.specWarnTimeout !== undefined) config.specWarnTimeout = raw.specWarnTimeout as number;
-  if (raw.specKillTimeout !== undefined) config.specKillTimeout = raw.specKillTimeout as number;
-  if (raw.concurrency !== undefined) config.concurrency = raw.concurrency as number;
-  if (raw.org !== undefined) config.org = raw.org as string;
-  if (raw.project !== undefined) config.project = raw.project as string;
-  if (raw.workItemType !== undefined) config.workItemType = raw.workItemType as string;
-  if (raw.iteration !== undefined) config.iteration = raw.iteration as string;
-  if (raw.area !== undefined) config.area = raw.area as string;
-  if (raw.username !== undefined) config.username = raw.username as string;
-  if (raw.nextIssueId !== undefined) config.nextIssueId = raw.nextIssueId as number;
+  // Copy over non-legacy fields with runtime type guards
+  if (typeof raw.source === "string" && DATASOURCE_NAMES.includes(raw.source as DatasourceName)) {
+    config.source = raw.source as DatasourceName;
+  }
+  if (typeof raw.planTimeout === "number") config.planTimeout = raw.planTimeout;
+  if (typeof raw.specTimeout === "number") config.specTimeout = raw.specTimeout;
+  if (typeof raw.specWarnTimeout === "number") config.specWarnTimeout = raw.specWarnTimeout;
+  if (typeof raw.specKillTimeout === "number") config.specKillTimeout = raw.specKillTimeout;
+  if (typeof raw.concurrency === "number") config.concurrency = raw.concurrency;
+  if (typeof raw.org === "string") config.org = raw.org;
+  if (typeof raw.project === "string") config.project = raw.project;
+  if (typeof raw.workItemType === "string") config.workItemType = raw.workItemType;
+  if (typeof raw.iteration === "string") config.iteration = raw.iteration;
+  if (typeof raw.area === "string") config.area = raw.area;
+  if (typeof raw.username === "string") config.username = raw.username;
+  if (typeof raw.nextIssueId === "number") config.nextIssueId = raw.nextIssueId;
 
   return config;
 }

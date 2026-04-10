@@ -14,6 +14,8 @@
  *   4. `session.messages()` — fetch the completed response
  */
 
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import {
   createOpencode,
   createOpencodeClient,
@@ -43,8 +45,6 @@ const SESSION_READY_TIMEOUT_MS = 600_000;
  */
 export async function listModels(_opts?: ProviderBootOptions): Promise<string[]> {
   try {
-    const { execFile } = await import("node:child_process");
-    const { promisify } = await import("node:util");
     const exec = promisify(execFile);
     const { stdout } = await exec("opencode", ["models"], { timeout: 10_000 });
     return stdout

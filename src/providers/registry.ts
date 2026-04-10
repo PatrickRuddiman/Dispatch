@@ -117,7 +117,7 @@ async function checkOpencodeAuth(): Promise<AuthStatus> {
   } catch {
     return {
       status: "not-configured",
-      hint: "Run 'opencode auth login' or set provider API keys",
+      hint: "OpenCode is installed but no credentials configured. Run 'opencode auth login' or set provider API keys",
     };
   }
 }
