@@ -12,7 +12,7 @@
 The GitHub fetcher (`src/issue-fetchers/github.ts`) retrieves issue details
 from GitHub repositories by shelling out to the
 [GitHub CLI (`gh`)](https://cli.github.com/manual/). It normalizes the JSON
-output into the common [`IssueDetails`](./overview.md#the-issuedetails-interface)
+output into the common [`IssueDetails`](../datasource-system/overview.md#issuedetails)
 interface.
 
 ## Prerequisites
@@ -96,7 +96,7 @@ gh auth login --hostname github.mycompany.com
 After authentication, `gh` commands automatically route to the correct host
 based on the repository's remote URL.
 
-**Important:** The [auto-detection](./overview.md#auto-detection-of-issue-source)
+**Important:** The [auto-detection](../datasource-system/overview.md#auto-detection)
 logic only matches `github.com` in the remote URL. For GHES hosts, you must
 use `--source github` explicitly:
 
@@ -130,7 +130,7 @@ error-handling patterns, see
 | `state` | `state` | Direct (e.g., `"OPEN"`, `"CLOSED"`), defaults to `"OPEN"` |
 | `url` | `url` | Direct, defaults to `""` |
 | `comments` | `comments` | Each comment formatted as `**author:** body` |
-| (none) | `acceptanceCriteria` | Always `""` -- see [design note](./overview.md#acceptance-criteria-on-github) |
+| (none) | `acceptanceCriteria` | Always `""` -- GitHub issues do not have a dedicated acceptance criteria field |
 
 ### Comment formatting
 
@@ -247,8 +247,8 @@ git repository with a GitHub remote, the `gh` command fails.
 
 ## Related documentation
 
-- [Overview](./overview.md) -- Architecture, data flow, and IssueDetails
-  interface
+- [Datasource System Overview](../datasource-system/overview.md) -- Architecture,
+  data flow, and IssueDetails interface
 - [Azure DevOps Fetcher](./azdevops-fetcher.md) -- The alternative fetcher
   for Azure DevOps work items
 - [GitHub Datasource](../datasource-system/github-datasource.md) -- The actual
@@ -273,6 +273,8 @@ git repository with a GitHub remote, the `gh` command fails.
   (note: the GitHub datasource/fetcher has no unit tests)
 - [Prerequisites & Safety Checks](../prereqs-and-safety/overview.md) --
   How `checkPrereqs()` validates `gh` CLI availability at startup
+- [GitHub Datasource Tests](../testing/github-datasource-tests.md) -- unit
+  tests for GitHub datasource operations (fetching, branch naming, PR creation)
 
 ## External references
 

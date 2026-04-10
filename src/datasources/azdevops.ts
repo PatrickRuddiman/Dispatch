@@ -15,7 +15,7 @@ import { slugify } from "../helpers/slugify.js";
 import { log } from "../helpers/logger.js";
 import { InvalidBranchNameError, isValidBranchName } from "../helpers/branch-validation.js";
 import { getAzureConnection } from "../helpers/auth.js";
-import { getGitRemoteUrl, parseAzDevOpsRemoteUrl } from "./index.js";
+import { getGitRemoteUrl, parseAzDevOpsRemoteUrl, deriveShortUsername } from "./index.js";
 import type { WebApi } from "azure-devops-node-api";
 import type { TeamContext } from "azure-devops-node-api/interfaces/CoreInterfaces.js";
 import type { JsonPatchDocument } from "azure-devops-node-api/interfaces/common/VSSInterfaces.js";
@@ -121,7 +121,7 @@ export async function detectWorkItemType(
     if (!Array.isArray(types) || types.length === 0) return null;
 
     const names = types.map((t) => t.name).filter((n): n is string => !!n);
-    const preferred = ["User Story", "Product Backlog Item", "Requirement", "Issue"];
+    const preferred = ["User Story", "Product Backlog Item", "Requirement", "Issue"] as const;
     for (const p of preferred) {
       if (names.includes(p)) return p;
     }
@@ -154,7 +154,7 @@ export async function detectDoneState(
 
       // Fallback: check for known terminal states in priority order
       const names = states.map((s) => s.name).filter((n): n is string => !!n);
-      const fallbacks = ["Done", "Closed", "Resolved", "Completed"];
+      const fallbacks = ["Done", "Closed", "Resolved", "Completed"] as const;
       for (const f of fallbacks) {
         if (names.includes(f)) {
           doneStateCache.set(cacheKey, f);
@@ -196,40 +196,6 @@ async function fetchComments(
   }
 }
 
-/**
- * Derive a short username from git config.
- * - Multi-word name: first 2 chars of first name + first 6 of last name
- * - Single word or no name: first 8 chars of email local part
- * - Falls back to the provided `fallback` value
- */
-async function deriveShortUsername(cwd: string, fallback: string): Promise<string> {
-  try {
-    const raw = (await git(["config", "user.name"], cwd)).trim();
-    if (raw) {
-      const parts = raw.toLowerCase().replace(/[^a-z\s]/g, "").trim().split(/\s+/);
-      if (parts.length >= 2) {
-        return (parts[0].slice(0, 2) + parts[parts.length - 1].slice(0, 6)) || fallback;
-      }
-    }
-  } catch {
-    // fall through to email
-  }
-
-  try {
-    const raw = (await git(["config", "user.email"], cwd)).trim();
-    if (raw) {
-      const localPart = raw.split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
-      if (localPart) {
-        return localPart.slice(0, 8);
-      }
-    }
-  } catch {
-    // fall through
-  }
-
-  return fallback;
-}
-
 export const datasource: Datasource = {
   name: "azdevops",
 
@@ -266,6 +232,8 @@ export const datasource: Datasource = {
 
     const wiql = `SELECT [System.Id] FROM workitems WHERE ${conditions.join(" AND ")} ORDER BY [System.CreatedDate] DESC`;
 
+    // The SDK's queryByWiql accepts a partial TeamContext with only `project` set.
+    // Cast is safe: we only use the project field for routing, matching SDK usage patterns.
     const queryResult = await witApi.queryByWiql({ query: wiql }, { project } as TeamContext);
     const workItemRefs = queryResult.workItems ?? [];
     if (workItemRefs.length === 0) return [];
@@ -286,6 +254,8 @@ export const datasource: Datasource = {
       for (let i = 0; i < itemsArray.length; i += CONCURRENCY) {
         const batch = itemsArray.slice(i, i + CONCURRENCY);
         const batchResults = await Promise.all(
+          // item.id is guaranteed non-null here: the ids array was built by filtering
+          // out null ids from workItemRefs, and itemsArray came from getWorkItems(ids).
           batch.map((item) => fetchComments(item.id!, project, connection))
         );
         commentsArray.push(...batchResults);
@@ -330,7 +300,8 @@ export const datasource: Datasource = {
       { op: "add", path: "/fields/System.Title", value: title },
       { op: "add", path: "/fields/System.Description", value: body },
     ];
-    // customHeaders is the first arg (pass null), document second, id third
+    // The azure-devops-node-api SDK's updateWorkItem signature requires a `customHeaders`
+    // first argument; passing null is the documented way to omit it (no typed alternative).
     await witApi.updateWorkItem(null as any, document as JsonPatchDocument, Number(issueId));
   },
 
@@ -354,6 +325,7 @@ export const datasource: Datasource = {
     const document = [
       { op: "add", path: "/fields/System.State", value: state },
     ];
+    // null as any: SDK customHeaders param — passing null is the documented way to omit it.
     await witApi.updateWorkItem(null as any, document as JsonPatchDocument, Number(issueId));
   },
 
@@ -380,6 +352,7 @@ export const datasource: Datasource = {
     ];
 
     const item = await witApi.createWorkItem(
+      // null as any: SDK customHeaders param — passing null is the documented way to omit it.
       null as any,
       document as JsonPatchDocument,
       project,

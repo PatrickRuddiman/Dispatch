@@ -7,7 +7,6 @@ const { mocks } = vi.hoisted(() => {
   return {
     mocks: {
       mockGenerate: vi.fn(),
-      mockAgentCleanup: vi.fn().mockResolvedValue(undefined),
       mockProviderCleanup: vi.fn().mockResolvedValue(undefined),
       mockCreateSession: vi.fn().mockResolvedValue("sess-1"),
       mockPrompt: vi.fn().mockResolvedValue("done"),
@@ -64,6 +63,8 @@ vi.mock("../spec-generator.js", () => ({
   isGlobOrFilePath: vi.fn(),
   resolveSource: vi.fn(),
   defaultConcurrency: vi.fn().mockReturnValue(2),
+  extractSpecContent: vi.fn((content: string) => content),
+  validateSpecStructure: vi.fn().mockReturnValue({ valid: true }),
 }));
 
 vi.mock("../datasources/index.js", () => ({
@@ -87,17 +88,26 @@ vi.mock("../providers/index.js", () => ({
     prompt: mocks.mockPrompt,
     cleanup: mocks.mockProviderCleanup,
   }),
+  getAuthenticatedProviders: vi.fn().mockResolvedValue(["opencode"]),
+  checkProviderAuthenticated: vi.fn().mockResolvedValue(true),
+  getProviderAuthStatus: vi.fn().mockResolvedValue({ status: "authenticated" }),
+  PROVIDER_NAMES: ["opencode", "copilot", "claude", "codex"],
 }));
 
-vi.mock("../agents/spec.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../agents/spec.js")>();
+vi.mock("../providers/router.js", () => ({
+  routeAllSkills: vi.fn().mockReturnValue({
+    planner: [{ provider: "opencode", model: "claude-haiku-4", priority: 0 }],
+    executor: [{ provider: "opencode", model: "claude-sonnet-4-5", priority: 0 }],
+    commit: [{ provider: "opencode", model: "claude-haiku-4", priority: 0 }],
+  }),
+  routeSkill: vi.fn().mockReturnValue([{ provider: "opencode", model: "claude-sonnet-4-5", priority: 0 }]),
+}));
+
+vi.mock("../dispatcher.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../dispatcher.js")>();
   return {
     ...actual,
-    boot: vi.fn().mockResolvedValue({
-      name: "spec",
-      generate: mocks.mockGenerate,
-      cleanup: mocks.mockAgentCleanup,
-    }),
+    dispatch: mocks.mockGenerate,
   };
 });
 
@@ -125,7 +135,7 @@ vi.mock("../helpers/auth.js", () => ({
 // ─── Import function under test (after mocks) ──────────────────────
 
 import { runSpecPipeline } from "../orchestrator/spec-pipeline.js";
-import { buildSpecPrompt } from "../agents/spec.js";
+import { buildSpecPrompt } from "../skills/spec.js";
 import { log } from "../helpers/logger.js";
 import { isIssueNumbers, isGlobOrFilePath, resolveSource } from "../spec-generator.js";
 import { getDatasource } from "../datasources/index.js";
@@ -135,6 +145,8 @@ import { confirmLargeBatch } from "../helpers/confirm-large-batch.js";
 import { bootProvider } from "../providers/index.js";
 import { setAuthPromptHandler } from "../helpers/auth.js";
 import type { SpecOptions } from "../spec-generator.js";
+import type { IssueDetails } from "../datasources/interface.js";
+import { TimeoutError } from "../helpers/timeout.js";
 import { createMockDatasource } from "./fixtures.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -208,7 +220,6 @@ describe("runSpecPipeline", () => {
     mocks.mockUpdate.mockResolvedValue(undefined);
     mocks.mockCreate.mockResolvedValue({ number: "99", title: "Created Issue" });
     mocks.mockProviderCleanup.mockResolvedValue(undefined);
-    mocks.mockAgentCleanup.mockResolvedValue(undefined);
 
     // Default: large batch confirmation auto-accepts
     vi.mocked(confirmLargeBatch).mockResolvedValue(true);
@@ -343,8 +354,9 @@ describe("runSpecPipeline", () => {
           acceptanceCriteria: "",
         });
 
-      mocks.mockGenerate.mockImplementation(async ({ issue, cwd, outputPath }) => {
-        prompts.set(issue.number, buildSpecPrompt(issue, cwd, outputPath));
+      mocks.mockGenerate.mockImplementation(async (_skill: unknown, input: { issue?: IssueDetails; cwd: string; outputPath: string; tmpPath: string }) => {
+        const { issue, cwd, tmpPath } = input;
+        prompts.set(issue!.number, buildSpecPrompt(issue!, cwd, tmpPath));
 
         return {
           data: {
@@ -365,11 +377,11 @@ describe("runSpecPipeline", () => {
 
       const generateCalls = mocks.mockGenerate.mock.calls;
       const issueNumbers = generateCalls
-        .map(([opts]) => opts.issue?.number)
+        .map((call: unknown[]) => (call[1] as { issue?: { number: string } }).issue?.number)
         .filter((issueNumber): issueNumber is string => issueNumber != null)
         .sort();
       const outputPaths = generateCalls
-        .map(([opts]) => opts.outputPath)
+        .map((call: unknown[]) => (call[1] as { outputPath: string }).outputPath)
         .sort();
 
       expect(issueNumbers).toEqual(["1", "2"]);
@@ -416,7 +428,10 @@ describe("runSpecPipeline", () => {
 
       expect(mocks.mockGenerate).toHaveBeenCalledOnce();
       expect(mocks.mockGenerate).toHaveBeenCalledWith(
+        expect.anything(),
         expect.objectContaining({ filePath: expect.any(String) }),
+        expect.anything(),
+        expect.anything(),
       );
       expect(result.total).toBe(1);
       expect(result.generated).toBe(1);
@@ -596,10 +611,9 @@ describe("runSpecPipeline", () => {
   // ── Cleanup ─────────────────────────────────────────────────────
 
   describe("cleanup", () => {
-    it("calls specAgent.cleanup() and instance.cleanup()", async () => {
+    it("calls instance.cleanup()", async () => {
       await runSpecPipeline(baseOpts({ issues: "1", concurrency: 1 }));
 
-      expect(mocks.mockAgentCleanup).toHaveBeenCalledOnce();
       expect(mocks.mockProviderCleanup).toHaveBeenCalledOnce();
     });
 
@@ -610,7 +624,6 @@ describe("runSpecPipeline", () => {
       expect(result.generated).toBe(1);
       expect(result.failed).toBe(0);
       expect(mocks.mockUpdate).toHaveBeenCalledOnce();
-      expect(mocks.mockAgentCleanup).toHaveBeenCalledOnce();
       expect(mocks.mockProviderCleanup).toHaveBeenCalledOnce();
     });
   });
@@ -641,8 +654,8 @@ describe("runSpecPipeline", () => {
           acceptanceCriteria: "",
         });
 
-      mocks.mockGenerate.mockImplementation((options: { issue?: { number: string } }) => {
-        const issueNumber = options.issue?.number ?? "unknown";
+      mocks.mockGenerate.mockImplementation((_skill: unknown, input: { issue?: { number: string } }) => {
+        const issueNumber = input.issue?.number ?? "unknown";
         const pending = deferred<{
           data: { content: string; valid: boolean };
           success: true;
@@ -657,7 +670,7 @@ describe("runSpecPipeline", () => {
         expect(mocks.mockGenerate).toHaveBeenCalledTimes(2);
       });
 
-      expect(mocks.mockGenerate.mock.calls.map(([options]) => options.issue?.number)).toEqual(["1", "2"]);
+      expect(mocks.mockGenerate.mock.calls.map((call: unknown[]) => (call[1] as { issue?: { number: string } }).issue?.number)).toEqual(["1", "2"]);
 
       pendingByIssue.get("2")?.resolve({
         success: true,
@@ -820,7 +833,7 @@ describe("runSpecPipeline", () => {
 
   describe("error paths", () => {
     it("counts generate() exception as failed (not just { success: false })", async () => {
-      mocks.mockGenerate.mockRejectedValueOnce(new Error("agent crashed"));
+      mocks.mockGenerate.mockRejectedValueOnce(new Error("skill crashed"));
 
       const result = await runSpecPipeline(baseOpts({ issues: "1", concurrency: 1, retries: 0 }));
 
@@ -1076,8 +1089,8 @@ describe("runSpecPipeline", () => {
         acceptanceCriteria: "",
       }));
 
-      mocks.mockGenerate.mockImplementation(async (opts: { issue?: { number: string } }) => {
-        const id = opts.issue?.number ?? "unknown";
+      mocks.mockGenerate.mockImplementation(async (_skill: unknown, input: { issue?: { number: string } }) => {
+        const id = input.issue?.number ?? "unknown";
         events.push(`start:${id}`);
 
         // Item "1" takes much longer than others
@@ -1213,8 +1226,8 @@ describe("runSpecPipeline", () => {
         acceptanceCriteria: "",
       }));
 
-      mocks.mockGenerate.mockImplementation(async (opts: { issue?: { number: string } }) => {
-        const id = opts.issue?.number ?? "unknown";
+      mocks.mockGenerate.mockImplementation(async (_skill: unknown, input: { issue?: { number: string } }) => {
+        const id = input.issue?.number ?? "unknown";
         events.push(`start:${id}`);
         await new Promise((r) => setTimeout(r, 10));
         events.push(`end:${id}`);
@@ -1247,7 +1260,12 @@ describe("runSpecPipeline", () => {
     });
 
     it("uses the default spec timeout when specWarnTimeout/specKillTimeout are omitted", async () => {
-      mocks.mockGenerate.mockImplementation(() => new Promise(() => {}));
+      // Simulate dispatch rejecting with a TimeoutError after the timebox duration
+      mocks.mockGenerate.mockImplementation(() =>
+        new Promise((_resolve, reject) => {
+          setTimeout(() => reject(new TimeoutError(1_200_000, "dispatch timebox")), 1_200_000);
+        }),
+      );
 
       const resultPromise = runSpecPipeline(
         baseOpts({ issues: "1", retries: 0, concurrency: 1 }),
@@ -1268,14 +1286,18 @@ describe("runSpecPipeline", () => {
           ([message]) =>
             typeof message === "string" &&
             message.includes("Timed out after 1200000ms") &&
-            message.includes("specAgent.generate(#1)"),
+            message.includes("#1"),
         ),
       ).toBe(true);
     });
 
     it("retries after a spec generation timeout and succeeds on the next attempt", async () => {
       mocks.mockGenerate
-        .mockImplementationOnce(() => new Promise(() => {}))
+        .mockImplementationOnce(() =>
+          new Promise((_resolve, reject) => {
+            setTimeout(() => reject(new TimeoutError(60, "dispatch timebox")), 60);
+          }),
+        )
         .mockResolvedValueOnce({
           data: {
             content: "# Generated Spec\n\n## Tasks\n\n- [ ] Do something",
@@ -1297,12 +1319,16 @@ describe("runSpecPipeline", () => {
       expect(result.generated).toBe(1);
       expect(result.failed).toBe(0);
       expect(vi.mocked(log.warn)).toHaveBeenCalledWith(
-        expect.stringContaining("Attempt 1/2 failed [specAgent.generate(#1)]"),
+        expect.stringContaining("Attempt 1/2 failed [dispatch(spec, #1)]"),
       );
     });
 
     it("runs cleanup and counts the timed out item once when generation times out", async () => {
-      mocks.mockGenerate.mockImplementation(() => new Promise(() => {}));
+      mocks.mockGenerate.mockImplementation(() =>
+        new Promise((_resolve, reject) => {
+          setTimeout(() => reject(new TimeoutError(60, "dispatch timebox")), 60);
+        }),
+      );
 
       const resultPromise = runSpecPipeline(
         baseOpts({ issues: "1", retries: 0, specWarnTimeout: 0.001, specKillTimeout: 0, concurrency: 1 }),
@@ -1315,7 +1341,6 @@ describe("runSpecPipeline", () => {
 
       expect(result.generated).toBe(0);
       expect(result.failed).toBe(1);
-      expect(mocks.mockAgentCleanup).toHaveBeenCalledOnce();
       expect(mocks.mockProviderCleanup).toHaveBeenCalledOnce();
       expect(mocks.mockUpdate).not.toHaveBeenCalled();
       expect(unlink).not.toHaveBeenCalled();
@@ -1323,7 +1348,11 @@ describe("runSpecPipeline", () => {
 
     it("fails only the timed out item and still completes the rest of the batch", async () => {
       mocks.mockGenerate
-        .mockImplementationOnce(() => new Promise(() => {}))
+        .mockImplementationOnce(() =>
+          new Promise((_resolve, reject) => {
+            setTimeout(() => reject(new TimeoutError(60, "dispatch timebox")), 60);
+          }),
+        )
         .mockResolvedValueOnce({
           data: {
             content: "# Generated Spec\n\n## Tasks\n\n- [ ] Do something",
@@ -1331,7 +1360,11 @@ describe("runSpecPipeline", () => {
           },
           success: true,
         })
-        .mockImplementationOnce(() => new Promise(() => {}));
+        .mockImplementationOnce(() =>
+          new Promise((_resolve, reject) => {
+            setTimeout(() => reject(new TimeoutError(60, "dispatch timebox")), 60);
+          }),
+        );
 
       const resultPromise = runSpecPipeline(
         baseOpts({ issues: "1,2", retries: 1, specWarnTimeout: 0.001, specKillTimeout: 0, concurrency: 2 }),
@@ -1349,7 +1382,6 @@ describe("runSpecPipeline", () => {
       expect(mocks.mockGenerate).toHaveBeenCalledTimes(3);
       expect(mocks.mockUpdate).toHaveBeenCalledTimes(1);
       expect(unlink).toHaveBeenCalledTimes(1);
-      expect(mocks.mockAgentCleanup).toHaveBeenCalledOnce();
       expect(mocks.mockProviderCleanup).toHaveBeenCalledOnce();
     });
   });

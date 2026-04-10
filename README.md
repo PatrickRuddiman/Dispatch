@@ -130,8 +130,6 @@ dispatch --respec
 # Group issues into a single feature branch and PR
 dispatch --feature my-feature
 
-# Run tests and fix failures via AI
-dispatch --fix-tests
 ```
 
 ## Authentication
@@ -155,7 +153,6 @@ Authentication happens **early in the CLI lifecycle** — during `dispatch confi
 | **Dispatch** | *(default)* | Plan and execute tasks; manage full git lifecycle |
 | **Spec generation** | `--spec` | Convert issues into structured markdown spec files |
 | **Respec** | `--respec` | Regenerate existing specs (all, by ID, or by glob) |
-| **Fix tests** | `--fix-tests` | Detect and auto-fix failing tests via AI |
 | **Feature** | `--feature [name]` | Group issues into a single feature branch and PR |
 
 ## Task files
@@ -196,7 +193,6 @@ Config is stored at `.dispatch/config.json` (relative to the working directory w
   "provider": "copilot",
   "model": "claude-sonnet-4-5",
   "source": "github",
-  "testTimeout": 60
 }
 ```
 
@@ -205,7 +201,6 @@ Config is stored at `.dispatch/config.json` (relative to the working directory w
 | `provider` | AI backend: `opencode` (default), `copilot`, `claude`, or `codex` |
 | `model` | Model to use when spawning agents (provider-specific format) |
 | `source` | Issue tracker: `github`, `azdevops`, or `md` |
-| `testTimeout` | Test execution timeout in minutes (default: 5, range: 1–120) |
 | `planTimeout` | Planning timeout in minutes (default: 30, range: 1–120) |
 | `concurrency` | Max parallel dispatches (range: 1–64) |
 | `org` | Azure DevOps organization URL |
@@ -233,7 +228,6 @@ Config is stored at `.dispatch/config.json` (relative to the working directory w
 | `--plan-timeout <min>` | `30` | Planning timeout in minutes |
 | `--retries <n>` | `3` | Retry attempts for all agents |
 | `--plan-retries <n>` | *(from --retries)* | Retry attempts for the planner agent (overrides `--retries`) |
-| `--test-timeout <min>` | `5` | Test timeout in minutes |
 | `--server-url <url>` | *(none)* | Connect to a running provider server |
 | `--cwd <dir>` | `process.cwd()` | Working directory |
 | `--verbose` | `false` | Show detailed debug output |
@@ -250,12 +244,6 @@ In interactive dispatch runs, exhausted automatic retries pause the failed task 
 | `--output-dir <dir>` | Output directory for spec files (default: `.dispatch/specs`) |
 | `--org <url>` | Azure DevOps organization URL |
 | `--project <name>` | Azure DevOps project name |
-
-### Fix tests mode
-
-| Option | Description |
-|--------|-------------|
-| `--fix-tests [issue-ids...]` | Run tests and fix failures via AI. Optionally pass issue IDs to target specific branches in worktrees. |
 
 ## Datasource auto-detection
 

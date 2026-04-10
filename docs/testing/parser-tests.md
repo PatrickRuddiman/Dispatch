@@ -173,7 +173,7 @@ remain CRLF; LF files remain LF.
 ### buildTaskContext (8 tests)
 
 Tests the [`buildTaskContext()`](../task-parsing/api-reference.md#buildtaskcontext) function, which produces filtered markdown
-content for [planner agents](../planning-and-dispatch/planner.md) by removing all unchecked tasks except the
+content for [planner agents](../agent-system/planner-agent.md) by removing all unchecked tasks except the
 current one.
 
 | Test | What it verifies |

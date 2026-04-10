@@ -54,21 +54,7 @@ vi.mock("../orchestrator/dispatch-pipeline.js", () => ({
   }),
 }));
 
-vi.mock("../orchestrator/fix-tests-pipeline.js", () => ({
-  runFixTestsPipeline: vi.fn().mockResolvedValue({ mode: "fix-tests", success: true }),
-}));
-
-vi.mock("../helpers/worktree.js", () => ({
-  createWorktree: vi.fn().mockResolvedValue("/tmp/test-worktree"),
-  removeWorktree: vi.fn().mockResolvedValue(undefined),
-}));
-
-vi.mock("../helpers/cleanup.js", () => ({
-  registerCleanup: vi.fn(),
-}));
-
 vi.mock("../orchestrator/datasource-helpers.js", () => ({
-  fetchItemsById: vi.fn().mockResolvedValue([]),
   parseIssueFilename: vi.fn(),
 }));
 
@@ -80,11 +66,6 @@ import { resolveCliConfig } from "../orchestrator/cli-config.js";
 import { DEFAULT_SPEC_TIMEOUT_MIN, resolveSource } from "../spec-generator.js";
 import { runSpecPipeline } from "../orchestrator/spec-pipeline.js";
 import { runDispatchPipeline } from "../orchestrator/dispatch-pipeline.js";
-import { runFixTestsPipeline } from "../orchestrator/fix-tests-pipeline.js";
-import { createWorktree, removeWorktree } from "../helpers/worktree.js";
-import { fetchItemsById } from "../orchestrator/datasource-helpers.js";
-import { getDatasource } from "../datasources/index.js";
-import { registerCleanup } from "../helpers/cleanup.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
@@ -196,18 +177,6 @@ describe("run()", () => {
     expect(runDispatchPipeline).not.toHaveBeenCalled();
   });
 
-  it("routes to runFixTestsPipeline when mode is 'fix-tests'", async () => {
-    const runner = await boot({ cwd: "/tmp/test" });
-    await runner.run({ mode: "fix-tests" });
-
-    const { runFixTestsPipeline } = await import("../orchestrator/fix-tests-pipeline.js");
-    expect(runFixTestsPipeline).toHaveBeenCalledWith({
-      cwd: "/tmp/test", provider: "opencode", serverUrl: undefined, verbose: false,
-    });
-    expect(runDispatchPipeline).not.toHaveBeenCalled();
-    expect(runSpecPipeline).not.toHaveBeenCalled();
-  });
-
   it("routes to orchestrate when mode is 'dispatch'", async () => {
     const runner = await boot({ cwd: "/tmp/test" });
     await runner.run({ mode: "dispatch", issueIds: ["1"], dryRun: false });
@@ -256,7 +225,7 @@ describe("runFromCli()", () => {
     expect(resolveCliConfig).toHaveBeenCalledWith(args);
   });
 
-  it("routes to dispatch pipeline when no spec/respec/fixTests flags", async () => {
+  it("routes to dispatch pipeline when no spec/respec flags", async () => {
     const runner = await boot({ cwd: "/tmp/test" });
     await runner.runFromCli(createRawCliArgs({ issueIds: ["1", "2"] }));
 
@@ -321,222 +290,6 @@ describe("runFromCli()", () => {
     );
   });
 
-  it("routes to fix-tests pipeline when --fix-tests is set", async () => {
-    const runner = await boot({ cwd: "/tmp/test" });
-    await runner.runFromCli(createRawCliArgs({ fixTests: true }));
-
-    const { runFixTestsPipeline } = await import("../orchestrator/fix-tests-pipeline.js");
-    expect(runFixTestsPipeline).toHaveBeenCalled();
-    expect(runDispatchPipeline).not.toHaveBeenCalled();
-    expect(runSpecPipeline).not.toHaveBeenCalled();
-  });
-
-  it("exits with error when --spec and --fix-tests are both set", async () => {
-    const runner = await boot({ cwd: "/tmp/test" });
-
-    await expect(
-      runner.runFromCli(createRawCliArgs({ spec: "1", fixTests: true })),
-    ).rejects.toThrow("process.exit called");
-
-    expect(log.error).toHaveBeenCalledWith(
-      expect.stringContaining("mutually exclusive"),
-    );
-  });
-
-  it("exits with error when --respec and --fix-tests are both set", async () => {
-    const runner = await boot({ cwd: "/tmp/test" });
-
-    await expect(
-      runner.runFromCli(createRawCliArgs({ respec: "1", fixTests: true })),
-    ).rejects.toThrow("process.exit called");
-
-    expect(log.error).toHaveBeenCalledWith(
-      expect.stringContaining("mutually exclusive"),
-    );
-  });
-
-  it("routes to fix-tests pipeline in worktrees when --fix-tests is combined with issue IDs", async () => {
-    const mockDatasource = {
-      name: "github" as const,
-      buildBranchName: vi.fn().mockReturnValue("user/42-fix-bug"),
-      getUsername: vi.fn().mockResolvedValue("testuser"),
-    };
-    vi.mocked(getDatasource).mockReturnValue(mockDatasource as any);
-    vi.mocked(fetchItemsById).mockResolvedValue([
-      { number: "42", title: "Fix bug", body: "", labels: [], state: "open", url: "", comments: [], acceptanceCriteria: "" },
-    ]);
-    vi.mocked(createWorktree).mockResolvedValue("/tmp/worktree-42");
-    vi.mocked(runFixTestsPipeline).mockResolvedValue({ mode: "fix-tests", success: true });
-
-    const runner = await boot({ cwd: "/tmp/test" });
-    const result = await runner.runFromCli(createRawCliArgs({ fixTests: true, issueIds: ["42"] }));
-
-    expect(fetchItemsById).toHaveBeenCalled();
-    expect(createWorktree).toHaveBeenCalled();
-    expect(runFixTestsPipeline).toHaveBeenCalledWith(
-      expect.objectContaining({ cwd: "/tmp/worktree-42" }),
-    );
-    expect(result).toMatchObject({ mode: "fix-tests", success: true, issueResults: expect.any(Array) });
-  });
-
-  it("returns failure when no issues found for fix-tests with issue IDs", async () => {
-    const mockDatasource = {
-      name: "github" as const,
-      buildBranchName: vi.fn(),
-      getUsername: vi.fn().mockResolvedValue("testuser"),
-    };
-    vi.mocked(getDatasource).mockReturnValue(mockDatasource as any);
-    vi.mocked(fetchItemsById).mockResolvedValue([]);
-
-    const runner = await boot({ cwd: "/tmp/test" });
-    const result = await runner.runFromCli(createRawCliArgs({ fixTests: true, issueIds: ["999"] }));
-
-    expect(result).toMatchObject({ mode: "fix-tests", success: false });
-  });
-
-  it("calls getDatasource and fetchItemsById with correct arguments for multi-issue fix-tests", async () => {
-    const mockDatasource = {
-      name: "github" as const,
-      buildBranchName: vi.fn().mockReturnValue("testuser/10-some-issue"),
-      getUsername: vi.fn().mockResolvedValue("testuser"),
-    };
-    vi.mocked(getDatasource).mockReturnValue(mockDatasource as any);
-    vi.mocked(fetchItemsById).mockResolvedValue([
-      { number: "10", title: "Some issue", body: "", labels: [], state: "open", url: "", comments: [], acceptanceCriteria: "" },
-    ]);
-    vi.mocked(createWorktree).mockResolvedValue("/tmp/worktree-10");
-    vi.mocked(runFixTestsPipeline).mockResolvedValue({ mode: "fix-tests", success: true });
-
-    const runner = await boot({ cwd: "/tmp/test" });
-    await runner.runFromCli(createRawCliArgs({ fixTests: true, issueIds: ["10"], issueSource: "md" }));
-
-    expect(getDatasource).toHaveBeenCalledWith("md");
-    expect(fetchItemsById).toHaveBeenCalledWith(
-      ["10"],
-      mockDatasource,
-      expect.objectContaining({ cwd: "/tmp/test-cwd" }),
-    );
-  });
-
-  it("creates and cleans up worktrees for multiple issues", async () => {
-    const mockDatasource = {
-      name: "github" as const,
-      buildBranchName: vi.fn()
-        .mockReturnValueOnce("testuser/1-first-issue")
-        .mockReturnValueOnce("testuser/2-second-issue"),
-      getUsername: vi.fn().mockResolvedValue("testuser"),
-    };
-    vi.mocked(getDatasource).mockReturnValue(mockDatasource as any);
-    vi.mocked(fetchItemsById).mockResolvedValue([
-      { number: "1", title: "First issue", body: "", labels: [], state: "open", url: "", comments: [], acceptanceCriteria: "" },
-      { number: "2", title: "Second issue", body: "", labels: [], state: "open", url: "", comments: [], acceptanceCriteria: "" },
-    ]);
-    vi.mocked(createWorktree)
-      .mockResolvedValueOnce("/tmp/worktree-1")
-      .mockResolvedValueOnce("/tmp/worktree-2");
-    vi.mocked(runFixTestsPipeline).mockResolvedValue({ mode: "fix-tests", success: true });
-
-    const runner = await boot({ cwd: "/tmp/test" });
-    await runner.runFromCli(createRawCliArgs({ fixTests: true, issueIds: ["1", "2"] }));
-
-    expect(createWorktree).toHaveBeenCalledTimes(2);
-    expect(createWorktree).toHaveBeenCalledWith("/tmp/test-cwd", "1-fix-tests.md", "testuser/1-first-issue");
-    expect(createWorktree).toHaveBeenCalledWith("/tmp/test-cwd", "2-fix-tests.md", "testuser/2-second-issue");
-
-    expect(removeWorktree).toHaveBeenCalledTimes(2);
-    expect(removeWorktree).toHaveBeenCalledWith("/tmp/test-cwd", "1-fix-tests.md");
-    expect(removeWorktree).toHaveBeenCalledWith("/tmp/test-cwd", "2-fix-tests.md");
-
-    expect(registerCleanup).toHaveBeenCalledTimes(2);
-  });
-
-  it("aggregates per-issue results when all issues succeed", async () => {
-    const mockDatasource = {
-      name: "github" as const,
-      buildBranchName: vi.fn()
-        .mockReturnValueOnce("testuser/5-fix-login")
-        .mockReturnValueOnce("testuser/6-fix-logout"),
-      getUsername: vi.fn().mockResolvedValue("testuser"),
-    };
-    vi.mocked(getDatasource).mockReturnValue(mockDatasource as any);
-    vi.mocked(fetchItemsById).mockResolvedValue([
-      { number: "5", title: "Fix login", body: "", labels: [], state: "open", url: "", comments: [], acceptanceCriteria: "" },
-      { number: "6", title: "Fix logout", body: "", labels: [], state: "open", url: "", comments: [], acceptanceCriteria: "" },
-    ]);
-    vi.mocked(createWorktree)
-      .mockResolvedValueOnce("/tmp/worktree-5")
-      .mockResolvedValueOnce("/tmp/worktree-6");
-    vi.mocked(runFixTestsPipeline).mockResolvedValue({ mode: "fix-tests", success: true });
-
-    const runner = await boot({ cwd: "/tmp/test" });
-    const result = await runner.runFromCli(createRawCliArgs({ fixTests: true, issueIds: ["5", "6"] }));
-
-    expect(result).toEqual({
-      mode: "fix-tests",
-      success: true,
-      issueResults: [
-        { issueId: "5", branch: "testuser/5-fix-login", success: true, error: undefined },
-        { issueId: "6", branch: "testuser/6-fix-logout", success: true, error: undefined },
-      ],
-    });
-  });
-
-  it("aggregates per-issue results with mixed success and failure", async () => {
-    const mockDatasource = {
-      name: "github" as const,
-      buildBranchName: vi.fn()
-        .mockReturnValueOnce("testuser/7-works")
-        .mockReturnValueOnce("testuser/8-broken"),
-      getUsername: vi.fn().mockResolvedValue("testuser"),
-    };
-    vi.mocked(getDatasource).mockReturnValue(mockDatasource as any);
-    vi.mocked(fetchItemsById).mockResolvedValue([
-      { number: "7", title: "Works", body: "", labels: [], state: "open", url: "", comments: [], acceptanceCriteria: "" },
-      { number: "8", title: "Broken", body: "", labels: [], state: "open", url: "", comments: [], acceptanceCriteria: "" },
-    ]);
-    vi.mocked(createWorktree)
-      .mockResolvedValueOnce("/tmp/worktree-7")
-      .mockResolvedValueOnce("/tmp/worktree-8");
-    vi.mocked(runFixTestsPipeline)
-      .mockResolvedValueOnce({ mode: "fix-tests", success: true })
-      .mockResolvedValueOnce({ mode: "fix-tests", success: false, error: "Tests still failing" });
-
-    const runner = await boot({ cwd: "/tmp/test" });
-    const result = await runner.runFromCli(createRawCliArgs({ fixTests: true, issueIds: ["7", "8"] }));
-
-    expect(result).toMatchObject({ mode: "fix-tests", success: false });
-    const summary = result as { issueResults: Array<{ issueId: string; branch: string; success: boolean; error?: string }> };
-    expect(summary.issueResults).toHaveLength(2);
-    expect(summary.issueResults[0]).toEqual({ issueId: "7", branch: "testuser/7-works", success: true, error: undefined });
-    expect(summary.issueResults[1]).toEqual({ issueId: "8", branch: "testuser/8-broken", success: false, error: "Tests still failing" });
-  });
-
-  it("cleans up worktrees even when pipeline throws", async () => {
-    const mockDatasource = {
-      name: "github" as const,
-      buildBranchName: vi.fn().mockReturnValue("testuser/99-crash"),
-      getUsername: vi.fn().mockResolvedValue("testuser"),
-    };
-    vi.mocked(getDatasource).mockReturnValue(mockDatasource as any);
-    vi.mocked(fetchItemsById).mockResolvedValue([
-      { number: "99", title: "Crash", body: "", labels: [], state: "open", url: "", comments: [], acceptanceCriteria: "" },
-    ]);
-    vi.mocked(createWorktree).mockResolvedValue("/tmp/worktree-99");
-    vi.mocked(runFixTestsPipeline).mockRejectedValue(new Error("pipeline exploded"));
-
-    const runner = await boot({ cwd: "/tmp/test" });
-    const result = await runner.runFromCli(createRawCliArgs({ fixTests: true, issueIds: ["99"] }));
-
-    expect(removeWorktree).toHaveBeenCalledWith("/tmp/test-cwd", "99-fix-tests.md");
-    expect(result).toMatchObject({
-      mode: "fix-tests",
-      success: false,
-      issueResults: [
-        expect.objectContaining({ issueId: "99", success: false, error: "pipeline exploded" }),
-      ],
-    });
-  });
-
   it("exits with error when --feature and --no-branch are both set", async () => {
     const runner = await boot({ cwd: "/tmp/test" });
 
@@ -554,18 +307,6 @@ describe("runFromCli()", () => {
 
     await expect(
       runner.runFromCli(createRawCliArgs({ feature: true, spec: "1" })),
-    ).rejects.toThrow("process.exit called");
-
-    expect(log.error).toHaveBeenCalledWith(
-      expect.stringContaining("mutually exclusive"),
-    );
-  });
-
-  it("exits with error when --feature and --fix-tests are both set", async () => {
-    const runner = await boot({ cwd: "/tmp/test" });
-
-    await expect(
-      runner.runFromCli(createRawCliArgs({ feature: true, fixTests: true })),
     ).rejects.toThrow("process.exit called");
 
     expect(log.error).toHaveBeenCalledWith(

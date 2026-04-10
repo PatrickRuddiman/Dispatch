@@ -4,6 +4,9 @@ import { log } from "../helpers/logger.js";
 
 // ─── withRetry ──────────────────────────────────────────────────────
 
+/** Shorthand to skip backoff delays in most tests. */
+const NO_DELAY = { baseDelayMs: 0 };
+
 describe("withRetry", () => {
   beforeEach(() => {
     vi.spyOn(log, "warn").mockImplementation(() => {});
@@ -41,7 +44,7 @@ describe("withRetry", () => {
       .mockRejectedValueOnce(new Error("fail-1"))
       .mockResolvedValue("recovered");
 
-    const result = await withRetry(fn, 3);
+    const result = await withRetry(fn, 3, NO_DELAY);
 
     expect(result).toBe("recovered");
     expect(fn).toHaveBeenCalledTimes(2);
@@ -53,7 +56,7 @@ describe("withRetry", () => {
       .mockRejectedValueOnce(new Error("fail-2"))
       .mockResolvedValue("third-time");
 
-    const result = await withRetry(fn, 3);
+    const result = await withRetry(fn, 3, NO_DELAY);
 
     expect(result).toBe("third-time");
     expect(fn).toHaveBeenCalledTimes(3);
@@ -68,7 +71,7 @@ describe("withRetry", () => {
       .mockRejectedValueOnce(new Error("fail-3"))
       .mockRejectedValueOnce(new Error("fail-4"));
 
-    await expect(withRetry(fn, 3)).rejects.toThrow("fail-4");
+    await expect(withRetry(fn, 3, NO_DELAY)).rejects.toThrow("fail-4");
     expect(fn).toHaveBeenCalledTimes(4);
   });
 
@@ -87,7 +90,7 @@ describe("withRetry", () => {
       .mockRejectedValueOnce(new Error("err-2"))
       .mockResolvedValue("ok");
 
-    await withRetry(fn, 3);
+    await withRetry(fn, 3, NO_DELAY);
 
     expect(log.warn).toHaveBeenCalledTimes(2);
     expect(log.debug).toHaveBeenCalledTimes(2);
@@ -99,7 +102,7 @@ describe("withRetry", () => {
       .mockRejectedValueOnce(new Error("err-2"))
       .mockRejectedValueOnce(new Error("err-3"));
 
-    await expect(withRetry(fn, 2)).rejects.toThrow("err-3");
+    await expect(withRetry(fn, 2, NO_DELAY)).rejects.toThrow("err-3");
 
     // Only the first two failures should be logged (attempts 1 and 2 of 3)
     expect(log.warn).toHaveBeenCalledTimes(2);
@@ -111,7 +114,7 @@ describe("withRetry", () => {
       .mockRejectedValueOnce(new Error("boom"))
       .mockResolvedValue("ok");
 
-    await withRetry(fn, 2, { label: "planner.plan()" });
+    await withRetry(fn, 2, { label: "planner.plan()", baseDelayMs: 0 });
 
     expect(log.warn).toHaveBeenCalledWith(
       expect.stringContaining("[planner.plan()]"),
@@ -126,7 +129,7 @@ describe("withRetry", () => {
       .mockRejectedValueOnce(new Error("oops"))
       .mockResolvedValue("ok");
 
-    await withRetry(fn, 3);
+    await withRetry(fn, 3, NO_DELAY);
 
     expect(log.warn).toHaveBeenCalledWith(
       expect.stringContaining("1/4"),
@@ -134,6 +137,31 @@ describe("withRetry", () => {
     expect(log.debug).toHaveBeenCalledWith(
       expect.stringContaining("2/4"),
     );
+  });
+
+  // ─── Backoff behaviour ──────────────────────────────────────────
+
+  it("applies exponential backoff between retry attempts", async () => {
+    const delays: number[] = [];
+    const origSetTimeout = globalThis.setTimeout;
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((fn: () => void, ms?: number) => {
+      delays.push(ms ?? 0);
+      return origSetTimeout(fn, 0);
+    }) as typeof setTimeout);
+
+    const fn = vi.fn()
+      .mockRejectedValueOnce(new Error("fail-1"))
+      .mockRejectedValueOnce(new Error("fail-2"))
+      .mockResolvedValue("ok");
+
+    await withRetry(fn, 3, { baseDelayMs: 100 });
+
+    // Delays should increase exponentially: ~100 (100*2^0 + jitter), ~200 (100*2^1 + jitter)
+    expect(delays).toHaveLength(2);
+    expect(delays[0]).toBeGreaterThanOrEqual(100);
+    expect(delays[0]).toBeLessThan(200);
+    expect(delays[1]).toBeGreaterThanOrEqual(200);
+    expect(delays[1]).toBeLessThan(300);
   });
 
   // ─── Edge cases ──────────────────────────────────────────────────

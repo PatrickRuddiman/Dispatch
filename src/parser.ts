@@ -3,7 +3,7 @@
  * and provides utilities to mark them as complete `[x]`.
  *
  * Non-task content (headings, prose, notes) is preserved in `TaskFile.context`
- * so the planner agent can use it for implementation guidance.
+ * so the planner can use it for implementation guidance.
  */
 
 import { readFile, writeFile } from "node:fs/promises";

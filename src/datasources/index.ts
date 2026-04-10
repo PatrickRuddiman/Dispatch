@@ -12,6 +12,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Datasource, DatasourceName } from "./interface.js";
+import { DATASOURCE_NAMES } from "./interface.js";
 import { datasource as githubDatasource } from "./github.js";
 import { datasource as azdevopsDatasource } from "./azdevops.js";
 import { datasource as mdDatasource } from "./md.js";
@@ -26,9 +27,9 @@ const DATASOURCES: Partial<Record<DatasourceName, Datasource>> = {
 };
 
 /**
- * All registered datasource names — useful for CLI help text and validation.
+ * All registered datasource names — re-exported from the canonical definition in interface.ts.
  */
-export const DATASOURCE_NAMES = Object.keys(DATASOURCES) as DatasourceName[];
+export { DATASOURCE_NAMES } from "./interface.js";
 
 /**
  * Get a datasource by name.
@@ -82,6 +83,42 @@ const SOURCE_PATTERNS: { pattern: RegExp; source: DatasourceName }[] = [
  * Returns the detected `DatasourceName`, or `null` if the remote URL
  * does not match any known pattern.
  */
+/**
+ * Derive a short username from git config.
+ * - Multi-word name: first 2 chars of first name + first 6 of last name
+ * - Single word or no name: first 8 chars of email local part
+ * - Falls back to the provided `fallback` value
+ */
+export async function deriveShortUsername(cwd: string, fallback: string): Promise<string> {
+  try {
+    const { stdout: nameOut } = await exec("git", ["config", "user.name"], { cwd, shell: process.platform === "win32" });
+    const raw = nameOut.trim();
+    if (raw) {
+      const parts = raw.toLowerCase().replace(/[^a-z\s]/g, "").trim().split(/\s+/);
+      if (parts.length >= 2) {
+        return (parts[0].slice(0, 2) + parts[parts.length - 1].slice(0, 6)) || fallback;
+      }
+    }
+  } catch {
+    // fall through to email
+  }
+
+  try {
+    const { stdout: emailOut } = await exec("git", ["config", "user.email"], { cwd, shell: process.platform === "win32" });
+    const raw = emailOut.trim();
+    if (raw) {
+      const localPart = raw.split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (localPart) {
+        return localPart.slice(0, 8);
+      }
+    }
+  } catch {
+    // fall through
+  }
+
+  return fallback;
+}
+
 export async function detectDatasource(
   cwd: string
 ): Promise<DatasourceName | null> {

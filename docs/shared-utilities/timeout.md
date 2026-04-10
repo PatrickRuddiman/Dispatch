@@ -177,7 +177,7 @@ these tests.
   `planRetries`, `specTimeout`, and `retries` configuration reference
 - [Orchestrator](../cli-orchestration/orchestrator.md) -- The dispatch and spec
   pipelines that consume `withTimeout`
-- [Planner](../planning-and-dispatch/planner.md) -- The planning phase
+- [Planner](../agent-system/planner-agent.md) -- The planning phase
   subject to `withTimeout` deadline enforcement
 - [Spec Generation](../spec-generation/overview.md) -- The spec pipeline's
   per-attempt timeout and retry layering
@@ -194,3 +194,7 @@ these tests.
   that runs before timeout-wrapped pipeline operations
 - [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) --
   Concurrency concerns in the task processing pipeline
+- [Spec Agent Tests](../testing/spec-agent-tests.md) -- Tests covering spec
+  generation timeout behavior
+- [Commit Agent](../agent-system/commit-agent.md) -- Post-execution agent
+  whose prompt calls may be bounded by timeout wrappers

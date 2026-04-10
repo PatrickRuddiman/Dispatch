@@ -380,9 +380,9 @@ dispatch "tasks/**/*.md" --provider copilot
   graceful shutdown and signal handling
 - [Configuration System](../cli-orchestration/configuration.md) -- Persistent
   `--provider` and `--server-url` defaults, including the `serverUrl` config option
-- [Dispatcher](../planning-and-dispatch/dispatcher.md) -- how the dispatcher
+- [Dispatcher](../agent-system/executor-agent.md) -- how the dispatcher
   creates sessions and sends prompts
-- [Planner](../planning-and-dispatch/planner.md) -- how the planner creates
+- [Planner](../agent-system/planner-agent.md) -- how the planner creates
   sessions for read-only exploration
 - [CLI Options](../cli-orchestration/cli.md) -- `--provider copilot` and
   `--server-url` flags

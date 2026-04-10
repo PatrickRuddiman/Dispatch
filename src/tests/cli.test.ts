@@ -27,7 +27,6 @@ vi.mock("../datasources/index.js", () => ({
 vi.mock("../config.js", () => ({
   handleConfigCommand: vi.fn(),
   CONFIG_BOUNDS: {
-    testTimeout: { min: 1, max: 120 },
     planTimeout: { min: 1, max: 120 },
     specTimeout: { min: 1, max: 120 },
     specWarnTimeout: { min: 1, max: 120 },
@@ -139,87 +138,6 @@ describe("parseArgs --respec with other flags", () => {
   it("collects multiple file paths as an array", () => {
     const [args] = parseArgs(["--respec", "specs/a.md", "specs/b.md"]);
     expect(args.respec).toEqual(["specs/a.md", "specs/b.md"]);
-  });
-});
-
-describe("parseArgs --fix-tests", () => {
-  it("sets fixTests to true when --fix-tests is passed", () => {
-    const [args, flags] = parseArgs(["--fix-tests"]);
-    expect(args.fixTests).toBe(true);
-    expect(flags.has("fixTests")).toBe(true);
-  });
-
-  it("leaves fixTests undefined when --fix-tests is not provided", () => {
-    const [args, flags] = parseArgs([]);
-    expect(args.fixTests).toBeUndefined();
-    expect(flags.has("fixTests")).toBe(false);
-  });
-
-  it("combines --fix-tests with --verbose correctly", () => {
-    const [args] = parseArgs(["--fix-tests", "--verbose"]);
-    expect(args.fixTests).toBe(true);
-    expect(args.verbose).toBe(true);
-  });
-
-  it("combines --fix-tests with --provider correctly", () => {
-    const [args] = parseArgs(["--fix-tests", "--provider", "copilot"]);
-    expect(args.fixTests).toBe(true);
-    expect(args.provider).toBe("copilot");
-  });
-
-  it("combines --fix-tests with --dry-run correctly", () => {
-    const [args] = parseArgs(["--fix-tests", "--dry-run"]);
-    expect(args.fixTests).toBe(true);
-    expect(args.dryRun).toBe(true);
-  });
-
-  it("combines --fix-tests with positional issue IDs", () => {
-    const [args, flags] = parseArgs(["--fix-tests", "14", "15"]);
-    expect(args.fixTests).toBe(true);
-    expect(args.issueIds).toEqual(["14", "15"]);
-    expect(flags.has("fixTests")).toBe(true);
-  });
-
-  it("combines --fix-tests with a single positional issue ID", () => {
-    const [args] = parseArgs(["--fix-tests", "42"]);
-    expect(args.fixTests).toBe(true);
-    expect(args.issueIds).toEqual(["42"]);
-  });
-
-  it("combines --fix-tests with positional issue IDs and --verbose", () => {
-    const [args] = parseArgs(["--fix-tests", "14", "15", "--verbose"]);
-    expect(args.fixTests).toBe(true);
-    expect(args.issueIds).toEqual(["14", "15"]);
-    expect(args.verbose).toBe(true);
-  });
-});
-
-describe("parseArgs --fix-tests mutual exclusion (at parser level)", () => {
-  it("allows --fix-tests and --spec to both be set (mutual exclusion is enforced by orchestrator)", () => {
-    const [args, flags] = parseArgs(["--fix-tests", "--spec", "42"]);
-    expect(args.fixTests).toBe(true);
-    expect(args.spec).toBe("42");
-    expect(flags.has("fixTests")).toBe(true);
-    expect(flags.has("spec")).toBe(true);
-  });
-
-  it("allows --fix-tests and --respec to both be set (mutual exclusion is enforced by orchestrator)", () => {
-    const [args, flags] = parseArgs(["--fix-tests", "--respec", "42"]);
-    expect(args.fixTests).toBe(true);
-    expect(args.respec).toBe("42");
-    expect(flags.has("fixTests")).toBe(true);
-    expect(flags.has("respec")).toBe(true);
-  });
-
-  it("does not set fixTests when only --spec is provided", () => {
-    const [args] = parseArgs(["--spec", "42"]);
-    expect(args.fixTests).toBeUndefined();
-  });
-
-  it("does not set fixTests when only positional issue IDs are provided", () => {
-    const [args] = parseArgs(["42"]);
-    expect(args.fixTests).toBeUndefined();
-    expect(args.issueIds).toContain("42");
   });
 });
 
@@ -486,17 +404,6 @@ describe("parseArgs value flags", () => {
     expect(args.specKillTimeout).toBe(1.5);
   });
 
-  it("parses --test-timeout <n>", () => {
-    const [args, flags] = parseArgs(["--test-timeout", "5"]);
-    expect(args.testTimeout).toBe(5);
-    expect(flags.has("testTimeout")).toBe(true);
-  });
-
-  it("parses --test-timeout with decimal", () => {
-    const [args] = parseArgs(["--test-timeout", "1.5"]);
-    expect(args.testTimeout).toBe(1.5);
-  });
-
   it("parses --plan-retries <n>", () => {
     const [args, flags] = parseArgs(["--plan-retries", "3"]);
     expect(args.planRetries).toBe(3);
@@ -632,21 +539,6 @@ describe("parseArgs error cases", () => {
     expect(mockExit).toHaveBeenCalledWith(1);
   });
 
-  it("exits for non-positive --test-timeout", () => {
-    expect(() => parseArgs(["--test-timeout", "0"])).toThrow();
-    expect(mockExit).toHaveBeenCalledWith(1);
-  });
-
-  it("exits for non-numeric --test-timeout", () => {
-    expect(() => parseArgs(["--test-timeout", "abc"])).toThrow();
-    expect(mockExit).toHaveBeenCalledWith(1);
-  });
-
-  it("exits for negative --test-timeout", () => {
-    expect(() => parseArgs(["--test-timeout", "-1"])).toThrow();
-    expect(mockExit).toHaveBeenCalledWith(1);
-  });
-
   it("exits for negative --plan-retries", () => {
     expect(() => parseArgs(["--plan-retries", "-1"])).toThrow();
     expect(mockExit).toHaveBeenCalledWith(1);
@@ -689,11 +581,9 @@ describe("help text completeness", () => {
    *   --no-plan        → plan      (negated boolean, Commander strips "no-")
    *   --no-branch      → branch
    *   --no-worktree    → worktree
-   *   --fix-tests      → fixTests
    *   --server-url     → serverUrl
    *   --plan-timeout   → planTimeout
    *   --plan-retries   → planRetries
-   *   --test-timeout   → testTimeout
    *   --output-dir     → outputDir
    *
    * For the negated options (plan, branch, worktree), the CLI flag form is
@@ -811,10 +701,23 @@ describe("help text completeness", () => {
 
   it("advertises the updated planning timeout and retry defaults", () => {
     expect(HELP).toContain("Planning timeout in minutes (default: 30)");
-    expect(HELP).toMatch(/--retries <n>\s+Retry attempts for all agents \(default: 3\)/);
+    expect(HELP).toMatch(/--retries <n>\s+Retry attempts for all skills \(default: 3\)/);
   });
 
   it("documents paused rerun recovery for interactive dispatch help", () => {
     expect(HELP).toContain("Interactive dispatch runs pause exhausted failed tasks");
+  });
+
+  it("documents dispatch config --cwd usage", () => {
+    expect(HELP).toContain("dispatch config --cwd");
+  });
+
+  it("documents config-file-only settings", () => {
+    expect(HELP).toContain("workItemType");
+    expect(HELP).toContain("username (branch prefix)");
+  });
+
+  it("shows --feature combined with issue IDs in examples", () => {
+    expect(HELP).toContain("dispatch 14 15 16 --feature my-feature");
   });
 });
