@@ -12,9 +12,11 @@ wizard (`src/config-prompts.ts`) for guided setup, a config resolution layer
 
 The configuration system allows users to set persistent defaults for frequently
 used CLI options, avoiding the need to pass `--provider copilot --source github`
-on every invocation. It supports four configurable keys and provides a
-`dispatch config` subcommand that launches an interactive wizard for managing
-stored values. The resolved configuration feeds into the
+on every invocation. It supports configurable keys for provider selection,
+model selection (including per-agent and fast/strong tier overrides), datasource
+selection, timeouts, and concurrency. It provides a `dispatch config`
+subcommand that launches an interactive wizard for managing stored values.
+The resolved configuration feeds into the
 [orchestrator](orchestrator.md) pipeline and the [prerequisite checker](../prereqs-and-safety/prereqs.md).
 
 ## Why it exists
@@ -66,16 +68,35 @@ The config file is a plain JSON object with optional fields:
 {
   "provider": "copilot",
   "model": "claude-sonnet-4-5",
+  "fastProvider": "copilot",
+  "fastModel": "claude-haiku-4",
   "source": "github",
-  "testTimeout": 10,
   "planTimeout": 30,
   "specTimeout": 10,
-  "concurrency": 4
+  "concurrency": 4,
+  "username": "pr"
 }
 ```
 
 All fields are optional. The file is written as pretty-printed JSON with
 2-space indentation and a trailing newline (`JSON.stringify(config, null, 2) + "\n"`).
+
+For advanced per-agent provider/model overrides:
+
+```json
+{
+  "provider": "claude",
+  "model": "claude-sonnet-4",
+  "agents": {
+    "planner": { "provider": "copilot", "model": "claude-haiku-4" },
+    "commit": { "model": "claude-haiku-4" }
+  }
+}
+```
+
+See [Fast vs strong tier model configuration](#fast-vs-strong-tier-model-configuration)
+and [Per-agent provider/model overrides](#per-agent-providermodel-overrides)
+for details on the model resolution hierarchy.
 
 For Azure DevOps projects, the config file may also include:
 
@@ -161,10 +182,11 @@ different developers may need different provider or model settings.
 
 | Key | Type | Valid values | Description |
 |-----|------|-------------|-------------|
-| `provider` | string | `"opencode"`, `"copilot"`, `"claude"`, `"codex"` | AI agent backend (see [Provider System](../provider-system/overview.md)) |
-| `model` | string | Any non-empty string (provider-specific format) | Model to use when spawning agents. Copilot uses bare model IDs (e.g., `"claude-sonnet-4-5"`), OpenCode uses `"provider/model"` format (e.g., `"anthropic/claude-sonnet-4"`). When omitted, the provider uses its auto-detected default. |
+| `provider` | string | `"opencode"`, `"copilot"`, `"claude"`, `"codex"` | AI agent backend (see [Provider System](../provider-system/overview.md)). This is the "strong" tier provider used by executor and spec agents. |
+| `model` | string | Any non-empty string (provider-specific format) | Model to use when spawning agents. Copilot uses bare model IDs (e.g., `"claude-sonnet-4-5"`), OpenCode uses `"provider/model"` format (e.g., `"anthropic/claude-sonnet-4"`). When omitted, the provider uses its auto-detected default. This is the "strong" tier model. |
+| `fastProvider` | string | `"opencode"`, `"copilot"`, `"claude"`, `"codex"` | Provider for the "fast" (cost-saving) tier used by planner and commit agents. Defaults to `provider` when omitted. See [Fast vs strong tier](#fast-vs-strong-tier-model-configuration). |
+| `fastModel` | string | Any non-empty string (provider-specific format) | Model for the "fast" tier. Used by planner and commit agents to reduce costs. Defaults to `model` when omitted. |
 | `source` | string | `"github"`, `"azdevops"`, `"md"` | Default datasource for issue fetching (see [Datasource System](../datasource-system/overview.md)) |
-| `testTimeout` | number | 1–120 (minutes) | Test timeout in minutes for the `--fix-tests` mode. |
 | `planTimeout` | number | 1–120 (minutes) | Planning timeout in minutes for the planner agent (see [Timeout Utility](../shared-utilities/timeout.md)). |
 | `specTimeout` | number | 1–120 (minutes) | Spec generation timeout in minutes for `--spec` and `--respec` runs. |
 | `specWarnTimeout` | number | 1–120 (minutes) | Spec warn-phase timeout: the agent receives a time-warning nudge after this duration. |
@@ -175,6 +197,9 @@ different developers may need different provider or model settings.
 | `workItemType` | string | Any non-empty string | Azure DevOps work item type filter (e.g., `"User Story"`, `"Bug"`). |
 | `iteration` | string | Any non-empty string | Azure DevOps iteration path (e.g., `"MyProject\\Sprint 1"`, `"@CurrentIteration"`). |
 | `area` | string | Any non-empty string | Azure DevOps area path (e.g., `"MyProject\\Team A"`). |
+| `agents` | object | `Partial<Record<AgentName, AgentConfig>>` | Per-agent provider/model overrides. Each agent role can independently specify a provider and model. See [Per-agent overrides](#per-agent-providermodel-overrides). |
+| `username` | string | 1–20 chars, alphanumeric + hyphens | Short username prefix for branch names (e.g., `"pr"` instead of `"patrick-ruddiman"`). Used by `datasource.buildBranchName()` when constructing per-issue branches. |
+| `nextIssueId` | number | Positive integer | Internal auto-increment counter for the [Markdown datasource](../datasource-system/markdown-datasource.md). Defaults to `1` when absent. Incremented each time a new local issue is created via `--spec` with the `md` datasource. Users should not need to set this manually. |
 
 ### Validation rules
 
@@ -185,24 +210,29 @@ different developers may need different provider or model settings.
   `Invalid provider "<value>". Available: opencode, copilot, claude, codex`
 - **`model`** must be a non-empty string. Empty or whitespace-only values
   produce: `Invalid model: value must not be empty`
+- **`fastProvider`** must be in `PROVIDER_NAMES` (same list as `provider`).
+  Invalid values produce:
+  `Invalid fastProvider "<value>". Available: opencode, copilot, claude, codex`
+- **`fastModel`** must be a non-empty string (same rule as `model`). Empty or
+  whitespace-only values produce: `Invalid fastModel: value must not be empty`
+- **`agents`** is validated structurally, not as a scalar string. The
+  `validateConfigValue()` function skips string-level validation for this key;
+  structural validation happens at load time.
 - **`source`** must be in `DATASOURCE_NAMES` (currently `"github"`,
   `"azdevops"`, `"md"`). Invalid values produce:
   `Invalid source "<value>". Available: github, azdevops, md`
-- **`testTimeout`** must be a finite number between 1 and 120 (inclusive).
+- **`planTimeout`** must be a finite number between 1 and 120 (inclusive).
   Values outside the range, non-numeric strings, `Infinity`, and `NaN` are
   rejected. The error message is:
-  `Invalid testTimeout "<value>". Must be a number between 1 and 120 (minutes)`
-- **`planTimeout`** must be a finite number between 1 and 120 (inclusive).
-  Uses the same validation logic as `testTimeout`. The error message is:
   `Invalid planTimeout "<value>". Must be a number between 1 and 120 (minutes)`
 - **`specTimeout`** must be a finite number between 1 and 120 (inclusive).
-  Uses the same validation logic as `testTimeout`. The error message is:
+  Uses the same validation logic as `planTimeout`. The error message is:
   `Invalid specTimeout "<value>". Must be a number between 1 and 120 (minutes)`
 - **`specWarnTimeout`** must be a finite number between 1 and 120 (inclusive).
-  Uses the same validation logic as `testTimeout`. The error message is:
+  Uses the same validation logic as `planTimeout`. The error message is:
   `Invalid specWarnTimeout "<value>". Must be a number between 1 and 120 (minutes)`
 - **`specKillTimeout`** must be a finite number between 1 and 120 (inclusive).
-  Uses the same validation logic as `testTimeout`. The error message is:
+  Uses the same validation logic as `planTimeout`. The error message is:
   `Invalid specKillTimeout "<value>". Must be a number between 1 and 120 (minutes)`
 - **`concurrency`** must be an integer between 1 and 64 (inclusive).
   Non-integers (e.g., `"1.5"`) are rejected even if within range. The error
@@ -211,6 +241,12 @@ different developers may need different provider or model settings.
 - **`org`**, **`project`**, **`workItemType`**, **`iteration`**, **`area`**
   must be non-empty strings. Empty or whitespace-only values produce:
   `Invalid <key>: value must not be empty`
+- **`username`** must be a non-empty string of at most 20 characters,
+  containing only alphanumeric characters and hyphens (`/^[a-zA-Z0-9-]+$/`).
+  Validation produces one of three errors:
+  - `Invalid username: value must not be empty` (empty or whitespace-only)
+  - `Invalid username "<value>". Must be at most 20 characters` (too long)
+  - `Invalid username "<value>". Must contain only alphanumeric characters and hyphens` (invalid characters)
 
 ### Numeric bounds (`CONFIG_BOUNDS`)
 
@@ -219,7 +255,6 @@ for numeric configuration values:
 
 | Key | Min | Max | Type | Description |
 |-----|-----|-----|------|-------------|
-| `testTimeout` | 1 | 120 | number | Minutes |
 | `planTimeout` | 1 | 120 | number | Minutes |
 | `specTimeout` | 1 | 120 | number | Minutes |
 | `specWarnTimeout` | 1 | 120 | number | Minutes |
@@ -237,22 +272,134 @@ The config system uses different key names than the CLI in some cases:
 |------------|----------|----------------|
 | `provider` | `--provider` | `provider` |
 | `model` | `--model` | `model` |
+| `fastProvider` | `--fast-provider` | `fastProvider` |
+| `fastModel` | `--fast-model` | `fastModel` |
 | `source` | `--source` | `issueSource` |
-| `testTimeout` | `--test-timeout` | `testTimeout` |
 | `planTimeout` | `--plan-timeout` | `planTimeout` |
 | `specTimeout` | `--spec-timeout` | `specTimeout` |
+| `specWarnTimeout` | `--spec-warn-timeout` | `specWarnTimeout` |
+| `specKillTimeout` | `--spec-kill-timeout` | `specKillTimeout` |
 | `concurrency` | `--concurrency` | `concurrency` |
 | `org` | `--org` | `org` |
 | `project` | `--project` | `project` |
 | `workItemType` | `--work-item-type` | `workItemType` |
 | `iteration` | `--iteration` | `iteration` |
 | `area` | `--area` | `area` |
+| `agents` | *(config-only)* | *(via `resolveAgentProviderConfig()`)* |
+| `username` | *(config-only)* | *(read by datasource at branch-name time)* |
+| `nextIssueId` | *(config-only, internal)* | *(auto-incremented by MD datasource)* |
 
 The `source` to `issueSource` mapping (`src/orchestrator/cli-config.ts:28`)
 is the only field where the config key differs from the CLI field name. This
 is because the CLI uses `--source` (matching the config key), but the internal
 `RawCliArgs` interface uses `issueSource` to avoid confusion with other uses
 of "source" in the codebase.
+
+## Fast vs strong tier model configuration
+
+Dispatch uses a two-tier model system that allows cost optimization by
+routing different agent roles to different providers and models:
+
+- **Strong tier** (`provider` / `model`): Used by executor and spec agents,
+  which perform complex code generation and analysis tasks. These agents
+  benefit from the most capable (and typically more expensive) models.
+
+- **Fast tier** (`fastProvider` / `fastModel`): Used by planner and commit
+  agents, which perform simpler tasks (generating plans, writing commit
+  messages). These agents can use cheaper, faster models without degrading
+  output quality.
+
+The `FAST_ROLES` constant (`src/config.ts:257`) defines which agent roles
+use the fast tier: currently `"planner"` and `"commit"`.
+
+### Cost optimization example
+
+```json
+{
+  "provider": "claude",
+  "model": "claude-sonnet-4",
+  "fastProvider": "copilot",
+  "fastModel": "claude-haiku-4"
+}
+```
+
+This configuration uses Claude Sonnet for code execution (strong tier) and
+Copilot with Claude Haiku for planning and commit messages (fast tier),
+reducing overall cost while maintaining quality for the most important tasks.
+
+When `fastProvider` and `fastModel` are omitted, all agents use the top-level
+`provider` and `model` values.
+
+## Per-agent provider/model overrides
+
+For maximum control, the `agents` config field allows overriding the
+provider and model for each individual agent role. The `DispatchConfig`
+interface defines this as `Partial<Record<AgentName, AgentConfig>>` where
+`AgentName` is one of `"planner"`, `"executor"`, `"spec"`, or `"commit"`
+(`src/config.ts:254`).
+
+```json
+{
+  "provider": "claude",
+  "model": "claude-sonnet-4",
+  "agents": {
+    "planner": { "provider": "copilot", "model": "claude-haiku-4" },
+    "commit": { "model": "claude-haiku-4" },
+    "spec": { "provider": "opencode" }
+  }
+}
+```
+
+In this example:
+- **planner** uses Copilot with Claude Haiku (explicit override)
+- **commit** uses Claude (inherited from top-level) with Claude Haiku (explicit model override)
+- **spec** uses OpenCode with Claude Sonnet (inherited model)
+- **executor** uses Claude with Claude Sonnet (fully inherited from top-level)
+
+### Resolution function: `resolveAgentProviderConfig()`
+
+The `resolveAgentProviderConfig()` function (`src/config.ts:264-280`)
+resolves the effective provider and model for any agent role using a
+three-level priority chain:
+
+```mermaid
+flowchart TD
+    A["resolveAgentProviderConfig(role, opts)"] --> B{"agents.<role>.provider<br/>defined?"}
+    B -->|Yes| C["Use agents.<role>.provider"]
+    B -->|No| D{"Is role a FAST_ROLE?<br/>(planner or commit)"}
+    D -->|Yes| E{"fastProvider<br/>defined?"}
+    E -->|Yes| F["Use fastProvider"]
+    E -->|No| G["Use top-level provider"]
+    D -->|No| G
+
+    A --> H{"agents.<role>.model<br/>defined?"}
+    H -->|Yes| I["Use agents.<role>.model"]
+    H -->|No| J{"Is role a FAST_ROLE?"}
+    J -->|Yes| K{"fastModel<br/>defined?"}
+    K -->|Yes| L["Use fastModel"]
+    K -->|No| M["Use top-level model"]
+    J -->|No| M
+```
+
+The priority chain for both provider and model is:
+
+1. **`agents.<role>`** — explicit per-agent override (highest priority)
+2. **`fastProvider`/`fastModel`** — fast tier defaults (only for planner and
+   commit roles)
+3. **Top-level `provider`/`model`** — global defaults (lowest priority)
+
+This function is called at agent boot time by the orchestrator to determine
+which provider and model each agent should use. It is a pure function with
+no side effects.
+
+### Config wizard support
+
+The configuration wizard (`src/config-prompts.ts:104-169`) includes a step
+for per-agent overrides, gated behind a confirm prompt: *"Configure per-agent
+provider/model overrides? (advanced, saves cost)"*. When enabled, the wizard
+iterates over all four agent roles (`AGENT_NAMES`) and offers provider and
+model selection for each. The user can choose to "inherit" from the top-level
+or select a specific provider/model for that role.
 
 ## The `dispatch config` command
 
@@ -574,14 +721,13 @@ Unlike provider validation, datasource (`source`) is **not** validated as
 mandatory in all cases. The behavior depends on the operating mode
 (`src/orchestrator/cli-config.ts:97-113`):
 
-- **Dispatch mode** (no `--spec`, `--respec`, or `--fix-tests`): If the source
+- **Dispatch mode** (no `--spec` or `--respec`): If the source
   is not configured via CLI or config file, `resolveCliConfig()` runs
   `detectDatasource(cwd)` to auto-detect from the git remote. If detection
   fails (no recognizable remote URL), the process exits with an error.
 - **Spec/respec mode**: Datasource resolution is deferred to the spec
   pipeline's own `resolveSource()` function, which has context-aware fallback
   logic.
-- **Fix-tests mode**: No datasource is needed; the check is skipped entirely.
 
 ### Output-dir validation
 
@@ -742,8 +888,7 @@ const failed = "failed" in summary ? summary.failed : ("success" in summary && !
 process.exit(failed > 0 ? 1 : 0);
 ```
 
-This handles both `DispatchSummary` (which has a `failed` count) and
-`FixTestsSummary` (which has a `success` boolean). There is no distinction
+This handles `DispatchSummary` (which has a `failed` count).
 between partial failure and total failure.
 
 ## Graceful shutdown and cleanup
@@ -801,7 +946,7 @@ The CLI delegates to the orchestrator via a two-step process
    - Calls `resolveCliConfig(args)` to load and merge config defaults
    - Runs prerequisite checks via `checkPrereqs()`
    - Ensures `.dispatch/worktrees/` is gitignored
-   - Enforces mutual exclusion of `--spec`, `--respec`, and `--fix-tests`
+   - Enforces mutual exclusion of `--spec`, `--respec`, and `--feature`
    - Routes to the appropriate pipeline based on mode flags
 
 ### Three operating modes
@@ -811,13 +956,8 @@ exclusive modes:
 
 | Mode | Trigger | Pipeline |
 |------|---------|----------|
-| **Fix-tests** | `--fix-tests` | `runFixTestsPipeline()` (dynamically imported) |
 | **Spec/Respec** | `--spec` or `--respec` | `generateSpecs()` via `runSpecPipeline()` |
 | **Dispatch** | Default (with optional issue IDs) | `orchestrate()` via `runDispatchPipeline()` |
-
-The `--fix-tests` flag is mutually exclusive with positional issue IDs
-(`src/orchestrator/runner.ts:166-169`). If combined, the process exits with
-an error.
 
 ### Dependencies initialized during boot
 
@@ -848,10 +988,14 @@ If the config file is deleted between `loadConfig()` and a subsequent
 ### Config keys reference
 
 The interactive wizard supports the following config keys: `provider`,
-`model`, `source`, `testTimeout`, `planTimeout`, `specTimeout`, `concurrency`, `org`,
-`project`, `workItemType`, `iteration`, `area`.
+`model`, `fastProvider`, `fastModel`, `agents`, `source`,
+`planTimeout`, `specTimeout`, `specWarnTimeout`, `specKillTimeout`,
+`concurrency`, `org`, `project`, `workItemType`, `iteration`, `area`,
+`username`.
 Keys like `dryRun`, `noPlan`, `noBranch`, `noWorktree`, `force`, and
 `verbose` are CLI-only flags and cannot be persisted via `dispatch config`.
+The `nextIssueId` key is an internal auto-increment counter managed by the
+Markdown datasource; it is not exposed in the wizard.
 See [the --no-branch flag](cli.md#the---no-branch-flag) for details on that
 flag's behavior, and the
 [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) for how
@@ -861,6 +1005,11 @@ flag's behavior, and the
 
 - [CLI argument parser](cli.md) -- command-line interface, options reference,
   and argument parsing
+- [Authentication](authentication.md) -- GitHub and Azure device-code flows,
+  token storage, and the `ensureAuthReady()` entry point used during config
+  wizard setup
+- [MCP Subcommand](mcp-subcommand.md) -- MCP server subcommand started via
+  `dispatch mcp`
 - [Orchestrator pipeline](orchestrator.md) -- how resolved options drive the
   dispatch pipeline
 - [TUI](tui.md) -- terminal dashboard that reflects configuration-driven
@@ -887,5 +1036,10 @@ flag's behavior, and the
   and debug output is toggled via configuration
 - [Copilot Backend](../provider-system/copilot-backend.md) -- how `--server-url`
   connects to an existing Copilot CLI server
-- [Planner Agent](../planning-and-dispatch/planner.md) -- how `--no-plan` and
+- [Planner Agent](../agent-system/planner-agent.md) -- how `--no-plan` and
   `--plan-timeout` affect the planning phase
+- [Binary Detection](../provider-system/binary-detection.md) -- how
+  `checkProviderInstalled()` detects provider binaries on PATH during wizard
+  setup
+- [Concurrency Utilities](../shared-utilities/concurrency.md) -- semaphore and
+  pool patterns that enforce the `concurrency` config value at runtime

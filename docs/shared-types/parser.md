@@ -15,7 +15,7 @@ It:
    [Markdown Syntax Reference](../task-parsing/markdown-syntax.md) for
    accepted formats)
 2. Builds filtered views of markdown content for individual task
-   [planning](../planning-and-dispatch/planner.md)
+   [planning](../agent-system/planner-agent.md)
 3. Performs targeted line-level mutations to check off completed tasks
 
 ## Why it exists
@@ -27,7 +27,7 @@ parser provides this by:
   (`parseTaskFile`), enabling direct unit testing without filesystem access
   (see [Testing Guide](../task-parsing/testing-guide.md))
 - Providing a **context filtering** function (`buildTaskContext`) that prevents
-  [planner agents](../planning-and-dispatch/planner.md) from being confused by
+  [planner agents](../agent-system/planner-agent.md) from being confused by
   sibling tasks
 - Encapsulating the **read-modify-write** mutation pattern for task completion in
   a single function with clear error semantics (see

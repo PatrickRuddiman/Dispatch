@@ -275,3 +275,7 @@ corresponding datasource is selected).
     Datasource requiring the `az` CLI validated by these integrations.
 -   [GitHub Datasource](../datasource-system/github-datasource.md) --
     Datasource requiring the `gh` CLI validated by these integrations.
+-   [Binary Detection](../provider-system/binary-detection.md) --
+    Lower-level binary detection logic used by `checkProviderInstalled()`.
+-   [Configuration](../cli-orchestration/configuration.md) -- Config
+    resolution that determines which datasource and provider prereqs to check.

@@ -191,7 +191,7 @@ additional changes:
 - **Orchestrator**: `bootProvider()` routes to your boot function (see [Orchestrator](../cli-orchestration/orchestrator.md)).
 - **Planner and Dispatcher**: These modules accept any `ProviderInstance` and
   call `createSession()` and `prompt()` -- they are completely agnostic to the
-  backend (see [Planner](../planning-and-dispatch/planner.md) and [Dispatcher](../planning-and-dispatch/dispatcher.md)).
+  backend (see [Planner](../agent-system/planner-agent.md) and [Dispatcher](../planning-and-dispatch/dispatcher.md)).
 
 ## Why not a plugin system?
 
@@ -220,7 +220,7 @@ runtime flexibility.
   functions are registered and invoked on process exit
 - [Dispatcher](../planning-and-dispatch/dispatcher.md) -- How the dispatcher
   consumes `ProviderInstance`
-- [Planner Agent](../planning-and-dispatch/planner.md) -- How the planner
+- [Planner Agent](../agent-system/planner-agent.md) -- How the planner
   consumes `ProviderInstance.prompt()`
 - [Spec Generation](../spec-generation/overview.md) -- The `--spec` pipeline
   that also boots and uses providers
@@ -232,7 +232,7 @@ runtime flexibility.
   test patterns
 - [Provider Tests](../testing/provider-tests.md) -- Detailed guide for
   provider unit tests including SDK mocking and `vi.hoisted()` patterns
-- [Provider Binary Detection](../prereqs-and-safety/provider-detection.md) --
+- [Provider Binary Detection](./binary-detection.md) --
   How provider binaries are detected during the configuration wizard; new
   providers should add their binary to the `PROVIDER_BINARIES` map in
   `src/providers/detect.ts`

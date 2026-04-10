@@ -479,8 +479,6 @@ interface).
 
 ## Related documentation
 
-- [Issue Fetching overview](../issue-fetching/overview.md) -- Architecture and
-  data flow for the issue fetching subsystem
 - [GitHub Fetcher](../issue-fetching/github-fetcher.md) -- GitHub CLI setup
   and troubleshooting
 - [Azure DevOps Fetcher](../issue-fetching/azdevops-fetcher.md) -- Azure CLI

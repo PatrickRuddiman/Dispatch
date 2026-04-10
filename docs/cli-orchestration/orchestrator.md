@@ -3,8 +3,8 @@
 The orchestrator (`src/orchestrator/runner.ts`) is the top-level coordination
 layer for the dispatch tool. It exposes a `boot()` factory that produces an
 `OrchestratorAgent` — a thin façade that routes CLI arguments into one of three
-mutually exclusive pipelines: **dispatch** (issue execution), **spec** (spec
-generation), and **fix-tests** (automated test repair). The runner owns no
+mutually exclusive pipelines: **dispatch** (issue execution) and **spec** (spec
+generation). The runner owns no
 domain logic itself; it resolves configuration, checks prerequisites, enforces
 mutual exclusion of mode flags, and delegates to the appropriate pipeline module.
 
@@ -18,7 +18,7 @@ The orchestrator exposes four methods via the `OrchestratorAgent` interface:
    [prerequisite checks](../prereqs-and-safety/prereqs.md), ensures
    `.dispatch/worktrees/` is [gitignored](../git-and-worktree/gitignore-helper.md),
    enforces [mutual exclusion of mode flags](#mode-routing-and-mutual-exclusion),
-   and then routes to either the spec pipeline, fix-tests pipeline, respec
+   and then routes to either the spec pipeline, respec
    discovery flow, or the dispatch pipeline.
 
 2. **`orchestrate()`**: The core dispatch function that accepts an
@@ -85,9 +85,6 @@ on the `mode` field:
 
 - **`mode: "spec"`**: Strips the `mode` discriminator, injects `cwd` from boot,
   and delegates to `generateSpecs()`.
-- **`mode: "fix-tests"`**: Uses [dynamic `import()`](#why-fix-tests-uses-dynamic-import)
-  to load the fix-tests pipeline and calls `runFixTestsPipeline()` with
-  hardcoded `provider: "opencode"`.
 - **`mode: "dispatch"`**: Strips the `mode` discriminator and delegates to
   `orchestrate()`.
 
@@ -103,7 +100,7 @@ uses a four-way mutual exclusion check across mode flags.
 
 ### Mode flag matrix
 
-The `modeFlags` array filters four flags — `--spec`, `--respec`, `--fix-tests`,
+The `modeFlags` array filters three flags — `--spec`, `--respec`,
 and `--feature` — and rejects the invocation if more than one is truthy:
 
 ```mermaid
@@ -111,16 +108,13 @@ flowchart TD
     A["runFromCli(args)"] --> B["resolveCliConfig(args)"]
     B --> C["checkPrereqs()"]
     C --> D["ensureGitignoreEntry<br/>.dispatch/worktrees/"]
-    D --> E{"Count mode flags:<br/>--spec, --respec,<br/>--fix-tests, --feature"}
+    D --> E{"Count mode flags:<br/>--spec, --respec,<br/>--feature"}
 
     E -->|"> 1"| F["log.error: mutually exclusive<br/>process.exit(1)"]
     E -->|"≤ 1"| G{"--feature && --no-branch?"}
     G -->|Yes| H["log.error: mutually exclusive<br/>process.exit(1)"]
-    G -->|No| I{"--fix-tests && issueIds?"}
-    I -->|Yes| J["log.error: cannot combine<br/>process.exit(1)"]
-    I -->|No| K{"Which mode?"}
+    G -->|No| K{"Which mode?"}
 
-    K -->|"--fix-tests"| L["runFixTestsPipeline()"]
     K -->|"--spec"| M["generateSpecs()"]
     K -->|"--respec"| N{"respec empty?"}
     K -->|"default"| O["orchestrate()<br/>dispatch pipeline"]
@@ -135,15 +129,10 @@ flowchart TD
 |-----------------|----------|---------------|
 | `--spec` alone | Yes | — |
 | `--respec` alone | Yes | — |
-| `--fix-tests` alone | Yes | — |
 | `--feature` alone | Yes | — |
 | `--spec` + `--respec` | No | `--spec and --respec are mutually exclusive` |
-| `--spec` + `--fix-tests` | No | `--spec and --fix-tests are mutually exclusive` |
 | `--spec` + `--feature` | No | `--spec and --feature are mutually exclusive` |
-| `--respec` + `--fix-tests` | No | `--respec and --fix-tests are mutually exclusive` |
-| `--feature` + `--fix-tests` | No | `--feature and --fix-tests are mutually exclusive` |
 | `--feature` + `--no-branch` | No | `--feature and --no-branch are mutually exclusive` |
-| `--fix-tests` + issue IDs | No | `--fix-tests cannot be combined with issue IDs` |
 
 All validation failures call `process.exit(1)` immediately after logging the
 error. There is no retry or recovery — these are configuration errors that
@@ -215,35 +204,6 @@ the correct downstream classification:
 - **Non-numeric identifiers** (from the markdown datasource, which uses
   filenames as identifiers) → array → file/glob mode
 
-## Fix-tests pipeline delegation
-
-The `--fix-tests` flag activates the fix-tests pipeline, which runs the
-project's test suite and uses an AI agent to fix failures.
-
-### Why fix-tests hardcodes `provider: "opencode"`
-
-In the `run()` method (`src/orchestrator/runner.ts:138`), the fix-tests pipeline
-is always called with `provider: "opencode"` regardless of the user's configured
-provider. In `runFromCli()` (`src/orchestrator/runner.ts:186`), the user's
-configured provider is passed through. This discrepancy means:
-
-- **`run({ mode: "fix-tests" })`** (programmatic API): Always uses OpenCode.
-- **`runFromCli({ fixTests: true })`** (CLI path): Passes the user's
-  `--provider` flag through to the pipeline.
-
-The `run()` hardcoding exists because the fix-tests pipeline was initially
-developed against the OpenCode provider's tool capabilities. The `runFromCli()`
-path was later updated to respect the user's provider choice.
-
-### Why fix-tests uses dynamic `import()`
-
-Both the `run()` and `runFromCli()` paths use `await import("./fix-tests-pipeline.js")`
-instead of a static `import` at the top of the file. This is a **code-splitting
-optimization**: when running in dispatch or spec mode, the fix-tests pipeline
-module and its dependencies (test runner, test discovery) are never loaded. This
-reduces startup time and memory usage for the common case where `--fix-tests`
-is not used.
-
 ## Error handling in the runner
 
 The runner itself performs **no retry logic**. Errors from any pipeline propagate
@@ -255,7 +215,6 @@ unmodified to the caller:
   tasks lives inside `src/orchestrator/dispatch-pipeline.ts`.
 - **Spec pipeline errors**: Propagate directly. Per-item retry logic lives
   inside `src/orchestrator/spec-pipeline.ts` via `withRetry()`.
-- **Fix-tests pipeline errors**: Propagate directly.
 
 The runner is designed as a thin routing layer. All error recovery, retry
 strategies, and graceful degradation are the responsibility of the individual
@@ -263,7 +222,7 @@ pipeline modules.
 
 ## Why it exists
 
-The orchestrator is the "glue" that turns independent modules ([parser](../task-parsing/overview.md), [planner](../planning-and-dispatch/planner.md),
+The orchestrator is the "glue" that turns independent modules ([parser](../task-parsing/overview.md), [planner](../agent-system/planner-agent.md),
 [dispatcher](../planning-and-dispatch/dispatcher.md), [git](../planning-and-dispatch/git.md), [provider](../provider-system/overview.md)) into a coherent pipeline. Without it, each module
 would need to know about the others. The orchestrator enforces execution order,
 manages the provider lifecycle (including the [cleanup registry](../shared-types/cleanup.md)), and translates between module interfaces.
@@ -460,7 +419,7 @@ for (const tf of taskFiles) {
 }
 ```
 
-This exists because the [planner](../planning-and-dispatch/planner.md) needs the raw file content to call
+This exists because the [planner](../agent-system/planner-agent.md) needs the raw file content to call
 [`buildTaskContext()`](../task-parsing/api-reference.md#buildtaskcontext), which filters out sibling unchecked tasks. The `TaskFile`
 objects already contain this content in `tf.content`, but the lookup is
 structured by file path because a single file may contain multiple tasks, and
@@ -688,7 +647,6 @@ Raw CLI arguments before config resolution
 | `verbose` | `boolean` | Debug output |
 | `spec` | `string \| string[]?` | Spec mode input |
 | `respec` | `string \| string[]?` | Respec mode input |
-| `fixTests` | `boolean?` | Fix-tests mode flag |
 | `issueSource` | `DatasourceName?` | Datasource backend |
 | `org` | `string?` | Azure DevOps org URL |
 | `project` | `string?` | Azure DevOps project |
@@ -697,7 +655,6 @@ Raw CLI arguments before config resolution
 | `area` | `string?` | Azure DevOps area filter |
 | `planTimeout` | `number?` | Planning timeout in minutes |
 | `planRetries` | `number?` | Planning retry attempts |
-| `testTimeout` | `number?` | Test timeout in minutes |
 | `retries` | `number?` | General retry attempts |
 | `feature` | `boolean?` | Feature mode flag |
 | `outputDir` | `string?` | Spec output directory |
@@ -737,21 +694,20 @@ A discriminated union of all runner run options
 is invoked by the `run()` method:
 
 ```
-type UnifiedRunOptions = DispatchRunOptions | SpecRunOptions | FixTestsRunOptions;
+type UnifiedRunOptions = DispatchRunOptions | SpecRunOptions;
 ```
 
 | Variant | Mode | Description |
 |---------|------|-------------|
 | `DispatchRunOptions` | `"dispatch"` | Extends `OrchestrateRunOptions` with `mode: "dispatch"` |
 | `SpecRunOptions` | `"spec"` | Extends `SpecOptions` (minus `cwd`) with `mode: "spec"` |
-| `FixTestsRunOptions` | `"fix-tests"` | Contains `mode: "fix-tests"` and optional `testTimeout` |
 
 ### RunResult
 
 Union of all possible return types (`src/orchestrator/runner.ts:112`):
 
 ```
-type RunResult = DispatchSummary | SpecSummary | FixTestsSummary;
+type RunResult = DispatchSummary | SpecSummary;
 ```
 
 ### DispatchSummary
@@ -766,15 +722,30 @@ Returned from `orchestrate()` to the CLI:
 | `skipped` | `number` | Tasks skipped (dry-run mode only) |
 | `results` | `DispatchResult[]` | Per-task result objects |
 
-### FixTestsSummary
+### DispatchProgressEvent
 
-Returned from `runFixTestsPipeline()` (`src/orchestrator/runner.ts:86-90`):
+Progress events emitted via the `progressCallback` on `OrchestrateRunOptions`
+for MCP monitoring. Event types include:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `mode` | `"fix-tests"` | Literal discriminator |
-| `success` | `boolean` | Whether the test fix attempt succeeded |
-| `error` | `string?` | Error message if unsuccessful |
+| Event type | Fields | Description |
+|------------|--------|-------------|
+| `task_start` | `taskId`, `taskText`, optional `phase`, `file`, `line` | A task has begun execution |
+| `task_done` | `taskId`, `taskText` | A task completed successfully |
+| `task_failed` | `taskId`, `taskText`, `error` | A task failed |
+| `phase_change` | optional message | Pipeline-level phase transition |
+| `log` | free-form message | Diagnostic log entry |
+
+Events carry an optional `runId` for correlation.
+
+## Progress callback for MCP integration
+
+The `progressCallback` on `OrchestrateRunOptions` enables the MCP server to
+receive real-time progress notifications without polling. This allows MCP
+clients to monitor dispatch execution without requiring access to the TUI or
+log files.
+
+The callback is optional — CLI invocations do not set it. The MCP server sets
+it when invoking the orchestrator programmatically via the `run()` method.
 
 ### `parseIssueFilename` re-export
 
@@ -806,7 +777,7 @@ for details.
   lifecycle
 - [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) -- concurrent
   write safety concerns for `markTaskComplete()`
-- [Issue Fetching](../issue-fetching/overview.md) -- how `detectIssueSource()`
+- [Issue Fetching](../deprecated-compat/overview.md) -- how `detectIssueSource()`
   and `getIssueFetcher()` work for auto-closing
 - [Spec Generation](../spec-generation/overview.md) -- how the `--spec` pipeline
   generates markdown spec files from issues
@@ -837,9 +808,15 @@ for details.
   `.dispatch/worktrees/` is gitignored on every CLI run
 - [Run State & Lifecycle](../git-and-worktree/run-state.md) -- Worktree run
   state tracking and future resume feature for interrupted orchestrator runs
-- [Executor Agent](../planning-and-dispatch/executor.md) -- the dispatch +
+- [Executor Agent](../agent-system/executor-agent.md) -- the dispatch +
   mark-complete coupling that the orchestrator invokes per task
-- [Planner Agent](../planning-and-dispatch/planner.md) -- the read-only
+- [Planner Agent](../agent-system/planner-agent.md) -- the read-only
   planning phase that the orchestrator calls before execution
 - [Logger](../shared-types/logger.md) -- dry-run task listing and verbose
   debug output used by the orchestrator
+- [Dispatch Pipeline Tests](../testing/dispatch-pipeline-tests.md) -- unit
+  tests for the dispatch pipeline's orchestration, grouping, and error handling
+- [Integration & E2E Tests](../testing/tests-integration-e2e.md) -- end-to-end
+  tests that exercise the full pipeline with real git repos and datasources
+- [Feature Branch Mode](../dispatch-pipeline/feature-branch-mode.md) -- how
+  `--feature` groups multiple issues into a single branch and PR

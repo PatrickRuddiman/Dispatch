@@ -1,10 +1,9 @@
 /**
  * Shared config resolution for MCP tools.
  *
- * Loads `.dispatch/config.json` and returns the config. Throws if the
- * config file is missing or has no provider configured — MCP tools
- * require explicit configuration (unlike the CLI which has an
- * interactive wizard fallback).
+ * Loads `.dispatch/config.json` and returns the config. Throws if no
+ * providers are configured — MCP tools require explicit configuration
+ * (unlike the CLI which can auto-detect authenticated providers).
  */
 
 import { join } from "node:path";
@@ -14,7 +13,7 @@ import { detectDatasource } from "../../datasources/index.js";
 /**
  * Load and validate the Dispatch config for MCP tool use.
  *
- * - Throws if no provider is configured (neither in config nor passed by caller).
+ * - Throws if no enabled providers are configured.
  * - Auto-detects datasource from git remote when not configured.
  */
 export async function loadMcpConfig(
@@ -23,11 +22,11 @@ export async function loadMcpConfig(
 ): Promise<DispatchConfig> {
   const config = await loadConfig(join(cwd, ".dispatch"));
 
-  // Provider must be configured (config file or caller override)
-  const provider = overrides?.provider ?? config.provider;
-  if (!provider) {
+  // At least one provider must be configured (or passed by caller)
+  const hasProviders = config.enabledProviders && config.enabledProviders.length > 0;
+  if (!hasProviders && !overrides?.provider) {
     throw new Error(
-      "Missing required configuration: provider. Run 'dispatch config' to set up defaults.",
+      "Missing required configuration: no providers configured. Run 'dispatch config' to set up providers.",
     );
   }
 
@@ -40,5 +39,5 @@ export async function loadMcpConfig(
     }
   }
 
-  return { ...config, provider: provider as DispatchConfig["provider"], source: source as DispatchConfig["source"] };
+  return { ...config, source: source as DispatchConfig["source"] };
 }

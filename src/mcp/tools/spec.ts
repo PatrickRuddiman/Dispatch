@@ -11,6 +11,7 @@ import { PROVIDER_NAMES } from "../../providers/interface.js";
 import { DATASOURCE_NAMES } from "../../datasources/interface.js";
 import { forkDispatchRun } from "./_fork-run.js";
 import { loadMcpConfig } from "./_resolve-config.js";
+import { getDatasource } from "../../datasources/index.js";
 
 export function registerSpecTools(server: McpServer, cwd: string): void {
   // ── spec_generate ─────────────────────────────────────────────
@@ -25,6 +26,7 @@ export function registerSpecTools(server: McpServer, cwd: string): void {
       source: z.enum(DATASOURCE_NAMES).optional().describe("Issue datasource: github, azdevops, md (default: from config)"),
       concurrency: z.number().int().min(1).max(32).optional().describe("Max parallel spec generations"),
       dryRun: z.boolean().optional().describe("Preview without generating"),
+      respec: z.boolean().optional().describe("Regenerate existing specs (overwrites). When issues is '*' or empty, regenerates all discovered specs."),
     },
     async (args) => {
       let config;
@@ -37,15 +39,41 @@ export function registerSpecTools(server: McpServer, cwd: string): void {
         };
       }
 
-      const runId = createSpecRun({ cwd, issues: args.issues });
+      // Respec: discover all existing spec IDs when issues is "*" or empty
+      let resolvedIssues = args.issues;
+      if (args.respec && (args.issues === "*" || args.issues.trim() === "")) {
+        if (!config.source) {
+          return {
+            content: [{ type: "text", text: "No datasource configured. Pass source or run 'dispatch config'." }],
+            isError: true,
+          };
+        }
+        const datasource = getDatasource(config.source);
+        const existing = await datasource.list({
+          cwd,
+          org: config.org,
+          project: config.project,
+          workItemType: config.workItemType,
+          iteration: config.iteration,
+          area: config.area,
+        });
+        if (existing.length === 0) {
+          return {
+            content: [{ type: "text", text: "No existing specs found to regenerate" }],
+            isError: true,
+          };
+        }
+        resolvedIssues = existing.map((item) => item.number).join(",");
+      }
+
+      const runId = createSpecRun({ cwd, issues: resolvedIssues });
 
       forkDispatchRun(runId, server, {
         type: "spec",
         cwd,
         opts: {
-          issues: args.issues,
-          provider: config.provider,
-          model: config.model,
+          issues: resolvedIssues,
+          enabledProviders: config.enabledProviders,
           issueSource: config.source,
           org: config.org,
           project: config.project,
@@ -97,11 +125,14 @@ export function registerSpecTools(server: McpServer, cwd: string): void {
         }
       }
       let recentRuns: unknown[] = [];
+      let runsError: string | undefined;
       try {
         recentRuns = listSpecRuns(5);
-      } catch { /* DB may not be initialized */ }
+      } catch (err) {
+        runsError = `Could not load recent runs: ${err instanceof Error ? err.message : String(err)}`;
+      }
       return {
-        content: [{ type: "text", text: JSON.stringify({ files, specsDir, recentRuns, ...(dirError ? { error: dirError } : {}) }) }],
+        content: [{ type: "text", text: JSON.stringify({ files, specsDir, recentRuns, ...(dirError ? { error: dirError } : {}), ...(runsError ? { runsWarning: runsError } : {}) }) }],
       };
     }
   );

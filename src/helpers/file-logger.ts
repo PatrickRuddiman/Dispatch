@@ -4,7 +4,7 @@
  * Writes timestamped, plain-text log entries to `.dispatch/logs/issue-{id}.log`.
  * Each log line is prefixed with an ISO 8601 timestamp. The logger provides
  * standard level methods (`info`, `debug`, `warn`, `error`) plus structured
- * methods for prompts, responses, phase transitions, and agent lifecycle events.
+ * methods for prompts, responses, phase transitions, and skill lifecycle events.
  *
  * An `AsyncLocalStorage<FileLogger>` instance is exported for scoping file
  * loggers to async contexts, allowing each issue processed in parallel to
@@ -81,9 +81,9 @@ export class FileLogger {
     this.write("PHASE", `${banner}\n${name}\n${banner}`);
   }
 
-  agentEvent(agent: string, event: string, detail?: string): void {
-    const msg = detail ? `[${agent}] ${event}: ${detail}` : `[${agent}] ${event}`;
-    this.write("AGENT", msg);
+  skillEvent(skill: string, event: string, detail?: string): void {
+    const msg = detail ? `[${skill}] ${event}: ${detail}` : `[${skill}] ${event}`;
+    this.write("SKILL", msg);
   }
 
   close(): void {

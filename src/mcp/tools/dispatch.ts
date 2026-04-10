@@ -18,13 +18,16 @@ export function registerDispatchTools(server: McpServer, cwd: string): void {
     "Execute dispatch pipeline for one or more issue IDs. Returns a runId immediately; progress is pushed via logging notifications.",
     {
       issueIds: z.array(z.string()).min(1).describe("Issue IDs to dispatch (e.g. ['42', '43'])"),
-      provider: z.enum(PROVIDER_NAMES).optional().describe("Agent provider (default: from config)"),
+      provider: z.enum(PROVIDER_NAMES).optional().describe("Provider (default: from config)"),
       source: z.enum(DATASOURCE_NAMES).optional().describe("Issue datasource: github, azdevops, md (default: from config)"),
       concurrency: z.number().int().min(1).max(32).optional().describe("Max parallel tasks"),
-      noPlan: z.boolean().optional().describe("Skip the planner agent"),
+      noPlan: z.boolean().optional().describe("Skip the planner"),
       noBranch: z.boolean().optional().describe("Skip branch creation and PR lifecycle"),
       noWorktree: z.boolean().optional().describe("Skip git worktree isolation"),
       retries: z.number().int().min(0).max(10).optional().describe("Retry attempts per task"),
+      feature: z.string().optional().describe("Group issues into a single feature branch with this name"),
+      planRetries: z.number().int().min(0).max(10).optional().describe("Number of planner retry attempts"),
+      force: z.boolean().optional().describe("Bypass safety checks (e.g. large batch confirmation)"),
     },
     async (args) => {
       let config;
@@ -45,11 +48,8 @@ export function registerDispatchTools(server: McpServer, cwd: string): void {
         opts: {
           issueIds: args.issueIds,
           dryRun: false,
-          provider: config.provider,
-          model: config.model,
-          fastProvider: config.fastProvider,
-          fastModel: config.fastModel,
-          agents: config.agents,
+          provider: args.provider,
+          enabledProviders: config.enabledProviders,
           source: config.source,
           org: config.org,
           project: config.project,
@@ -63,6 +63,9 @@ export function registerDispatchTools(server: McpServer, cwd: string): void {
           noBranch: args.noBranch,
           noWorktree: args.noWorktree,
           retries: args.retries,
+          feature: args.feature,
+          planRetries: args.planRetries,
+          force: args.force,
         },
       });
 
@@ -87,11 +90,7 @@ export function registerDispatchTools(server: McpServer, cwd: string): void {
         const result = await orchestrator.orchestrate({
           issueIds: args.issueIds,
           dryRun: true,
-          provider: config.provider,
-          model: config.model,
-          fastProvider: config.fastProvider,
-          fastModel: config.fastModel,
-          agents: config.agents,
+          enabledProviders: config.enabledProviders,
           source: config.source,
           org: config.org,
           project: config.project,

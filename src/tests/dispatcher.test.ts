@@ -2,29 +2,44 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Task } from "../parser.js";
 import type { ProviderInstance } from "../providers/interface.js";
 import { createMockProvider, createMockTask } from "./fixtures.js";
+import type { Skill } from "../skills/interface.js";
+import type { ExecutorData } from "../skills/types.js";
+import { executorSkill } from "../skills/executor.js";
 
 vi.mock("../helpers/logger.js", () => ({
   log: {
     debug: vi.fn(),
+    warn: vi.fn(),
     formatErrorChain: vi.fn().mockReturnValue("mock error chain"),
     extractMessage: vi.fn((e: unknown) => e instanceof Error ? e.message : String(e)),
   },
 }));
 
-import { dispatchTask } from "../dispatcher.js";
+vi.mock("../helpers/file-logger.js", () => ({
+  fileLoggerStorage: {
+    getStore: vi.fn().mockReturnValue(null),
+  },
+}));
+
+import { dispatch } from "../dispatcher.js";
 
 const TASK_FIXTURE = createMockTask();
 
-describe("dispatchTask", () => {
+describe("dispatch", () => {
   beforeEach(() => {
     vi.resetAllMocks();
   });
 
   it("returns success when provider responds (no plan)", async () => {
     const provider = createMockProvider();
-    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test");
+    const result = await dispatch(executorSkill, {
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
+      plan: null,
+    }, provider);
 
-    expect(result).toEqual({ task: TASK_FIXTURE, success: true });
+    expect(result.success).toBe(true);
+    expect(result.data).toBeDefined();
     expect(provider.createSession).toHaveBeenCalledOnce();
     expect(provider.prompt).toHaveBeenCalledOnce();
 
@@ -38,9 +53,13 @@ describe("dispatchTask", () => {
 
   it("returns success with planned prompt when plan is provided", async () => {
     const provider = createMockProvider();
-    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test", "Step 1: do X");
+    const result = await dispatch(executorSkill, {
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
+      plan: "Step 1: do X",
+    }, provider);
 
-    expect(result).toEqual({ task: TASK_FIXTURE, success: true });
+    expect(result.success).toBe(true);
 
     const prompt = vi.mocked(provider.prompt).mock.calls[0][1];
     expect(prompt).toContain("Execution Plan");
@@ -51,13 +70,14 @@ describe("dispatchTask", () => {
     const provider = createMockProvider({
       prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue(null),
     });
-    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test");
-
-    expect(result).toEqual({
+    const result = await dispatch(executorSkill, {
       task: TASK_FIXTURE,
-      success: false,
-      error: "No response from agent",
-    });
+      cwd: "/tmp/test",
+      plan: null,
+    }, provider);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("No response");
   });
 
   it("returns failure when createSession throws an Error", async () => {
@@ -66,13 +86,14 @@ describe("dispatchTask", () => {
         new Error("Session creation failed")
       ),
     });
-    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test");
-
-    expect(result).toEqual({
+    const result = await dispatch(executorSkill, {
       task: TASK_FIXTURE,
-      success: false,
-      error: "Session creation failed",
-    });
+      cwd: "/tmp/test",
+      plan: null,
+    }, provider);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Session creation failed");
     expect(provider.prompt).not.toHaveBeenCalled();
   });
 
@@ -80,26 +101,28 @@ describe("dispatchTask", () => {
     const provider = createMockProvider({
       prompt: vi.fn<ProviderInstance["prompt"]>().mockRejectedValue(new Error("Prompt failed")),
     });
-    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test");
-
-    expect(result).toEqual({
+    const result = await dispatch(executorSkill, {
       task: TASK_FIXTURE,
-      success: false,
-      error: "Prompt failed",
-    });
+      cwd: "/tmp/test",
+      plan: null,
+    }, provider);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Prompt failed");
   });
 
   it("handles non-Error exceptions", async () => {
     const provider = createMockProvider({
       prompt: vi.fn<ProviderInstance["prompt"]>().mockRejectedValue("raw string error"),
     });
-    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test");
-
-    expect(result).toEqual({
+    const result = await dispatch(executorSkill, {
       task: TASK_FIXTURE,
-      success: false,
-      error: "raw string error",
-    });
+      cwd: "/tmp/test",
+      plan: null,
+    }, provider);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("raw string error");
   });
 
   it("handles empty task text", async () => {
@@ -111,9 +134,13 @@ describe("dispatchTask", () => {
       raw: "- [ ] ",
       file: "/tmp/test/42-feature.md",
     };
-    const result = await dispatchTask(provider, emptyTask, "/tmp/test");
+    const result = await dispatch(executorSkill, {
+      task: emptyTask,
+      cwd: "/tmp/test",
+      plan: null,
+    }, provider);
 
-    expect(result).toEqual({ task: emptyTask, success: true });
+    expect(result.success).toBe(true);
   });
 
   it("includes commit instruction when task text mentions commit", async () => {
@@ -122,7 +149,11 @@ describe("dispatchTask", () => {
       ...TASK_FIXTURE,
       text: "Fix bug. Commit with message: fix: resolve bug",
     };
-    const result = await dispatchTask(provider, commitTask, "/tmp/test");
+    const result = await dispatch(executorSkill, {
+      task: commitTask,
+      cwd: "/tmp/test",
+      plan: null,
+    }, provider);
 
     expect(result.success).toBe(true);
     const prompt = vi.mocked(provider.prompt).mock.calls[0][1];
@@ -131,7 +162,11 @@ describe("dispatchTask", () => {
 
   it("excludes commit instruction when task text does not mention commit", async () => {
     const provider = createMockProvider();
-    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test");
+    const result = await dispatch(executorSkill, {
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
+      plan: null,
+    }, provider);
 
     expect(result.success).toBe(true);
     const prompt = vi.mocked(provider.prompt).mock.calls[0][1];
@@ -140,7 +175,12 @@ describe("dispatchTask", () => {
 
   it("includes worktree isolation instructions when worktreeRoot is provided", async () => {
     const provider = createMockProvider();
-    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test", undefined, "/tmp/worktree");
+    const result = await dispatch(executorSkill, {
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
+      plan: null,
+      worktreeRoot: "/tmp/worktree",
+    }, provider);
 
     expect(result.success).toBe(true);
     const prompt = vi.mocked(provider.prompt).mock.calls[0][1];
@@ -151,7 +191,11 @@ describe("dispatchTask", () => {
 
   it("excludes worktree isolation instructions when worktreeRoot is not provided", async () => {
     const provider = createMockProvider();
-    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test");
+    const result = await dispatch(executorSkill, {
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
+      plan: null,
+    }, provider);
 
     expect(result.success).toBe(true);
     const prompt = vi.mocked(provider.prompt).mock.calls[0][1];
@@ -160,7 +204,12 @@ describe("dispatchTask", () => {
 
   it("includes worktree isolation in planned prompt when worktreeRoot is provided", async () => {
     const provider = createMockProvider();
-    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test", "Step 1: do X", "/tmp/worktree");
+    const result = await dispatch(executorSkill, {
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
+      plan: "Step 1: do X",
+      worktreeRoot: "/tmp/worktree",
+    }, provider);
 
     expect(result.success).toBe(true);
     const prompt = vi.mocked(provider.prompt).mock.calls[0][1];
@@ -172,7 +221,11 @@ describe("dispatchTask", () => {
 
   it("includes environment section in prompt (no plan)", async () => {
     const provider = createMockProvider();
-    await dispatchTask(provider, TASK_FIXTURE, "/tmp/test");
+    await dispatch(executorSkill, {
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
+      plan: null,
+    }, provider);
 
     const prompt = vi.mocked(provider.prompt).mock.calls[0][1];
     expect(prompt).toContain("## Environment");
@@ -182,7 +235,11 @@ describe("dispatchTask", () => {
 
   it("includes environment section in planned prompt", async () => {
     const provider = createMockProvider();
-    await dispatchTask(provider, TASK_FIXTURE, "/tmp/test", "Step 1: do X");
+    await dispatch(executorSkill, {
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
+      plan: "Step 1: do X",
+    }, provider);
 
     const prompt = vi.mocked(provider.prompt).mock.calls[0][1];
     expect(prompt).toContain("## Environment");
@@ -196,7 +253,11 @@ describe("dispatchTask", () => {
         "You've hit your limit \u00b7 resets 6pm (UTC)"
       ),
     });
-    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test");
+    const result = await dispatch(executorSkill, {
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
+      plan: null,
+    }, provider);
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("Rate limit");
@@ -208,7 +269,11 @@ describe("dispatchTask", () => {
         "rate limit exceeded, please try again later"
       ),
     });
-    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test");
+    const result = await dispatch(executorSkill, {
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
+      plan: null,
+    }, provider);
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("Rate limit");
@@ -220,7 +285,11 @@ describe("dispatchTask", () => {
         "Too many requests"
       ),
     });
-    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test");
+    const result = await dispatch(executorSkill, {
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
+      plan: null,
+    }, provider);
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("Rate limit");
@@ -232,7 +301,11 @@ describe("dispatchTask", () => {
         "Your quota exceeded for today"
       ),
     });
-    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test");
+    const result = await dispatch(executorSkill, {
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
+      plan: null,
+    }, provider);
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("Rate limit");
@@ -244,7 +317,11 @@ describe("dispatchTask", () => {
         "Task complete. I've implemented the changes as requested."
       ),
     });
-    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test");
+    const result = await dispatch(executorSkill, {
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
+      plan: null,
+    }, provider);
 
     expect(result.success).toBe(true);
   });
@@ -255,8 +332,41 @@ describe("dispatchTask", () => {
         "I've implemented the rate limiting feature as requested. Task complete."
       ),
     });
-    const result = await dispatchTask(provider, TASK_FIXTURE, "/tmp/test");
+    const result = await dispatch(executorSkill, {
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
+      plan: null,
+    }, provider);
 
     expect(result.success).toBe(true);
+  });
+
+  it("works with a simple custom skill", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("hello world"),
+    });
+
+    const simpleSkill: Skill<{ msg: string }, string> = {
+      name: "planner",
+      buildPrompt(input) { return input.msg; },
+      parseResult(response) { return response ?? ""; },
+    };
+
+    const result = await dispatch(simpleSkill, { msg: "test prompt" }, provider);
+
+    expect(result.success).toBe(true);
+    expect(result.data).toBe("hello world");
+    expect(vi.mocked(provider.prompt).mock.calls[0][1]).toBe("test prompt");
+  });
+
+  it("records durationMs", async () => {
+    const provider = createMockProvider();
+    const result = await dispatch(executorSkill, {
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
+      plan: null,
+    }, provider);
+
+    expect(result.durationMs).toBeGreaterThanOrEqual(0);
   });
 });

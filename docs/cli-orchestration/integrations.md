@@ -346,7 +346,7 @@ dispatch "tasks/**/*.md" --server-url http://localhost:4096
 
 Rate limits and cost depend on the OpenCode server configuration and the
 underlying AI model it uses. The dispatch tool sends one prompt per task
-(or two if [planning is enabled](../planning-and-dispatch/planner.md): one plan prompt + one execute prompt). With
+(or two if [planning is enabled](../agent-system/planner-agent.md): one plan prompt + one execute prompt). With
 [`--concurrency N`](cli.md#options-reference), up to N prompts may be in flight simultaneously. Consult
 OpenCode documentation for specific rate limit and pricing details.
 
@@ -410,42 +410,30 @@ JavaScript bundle.
 
 ### Configuration
 
-The tsup config is in `tsup.config.ts`:
+The tsup config is in `tsup.config.ts`. Key settings:
 
-```typescript
-import { defineConfig } from "tsup";
-import { readFileSync } from "node:fs";
-
-const { version } = JSON.parse(readFileSync("package.json", "utf-8"));
-
-export default defineConfig({
-  entry: ["src/cli.ts"],
-  format: ["esm"],
-  target: "node18",
-  outDir: "dist",
-  clean: true,
-  splitting: false,
-  sourcemap: true,
-  dts: false,
-  banner: {
-    js: "#!/usr/bin/env node",
-  },
-  define: {
-    __VERSION__: JSON.stringify(version),
-  },
-});
-```
-
-Key settings:
-
-- **Single entry point**: `src/cli.ts` -- all other modules are bundled
-  transitively.
+- **Two entry points**: `src/cli.ts` (the main CLI) and
+  `src/mcp/dispatch-worker.ts` (the MCP worker process forked at runtime).
+  Each entry point produces a separate bundle in `dist/`.
 - **ESM format**: Output is ES modules (matching `"type": "module"` in
   `package.json`).
-- **Node 18 target**: Uses Node.js 18+ APIs.
-- **Shebang banner**: `#!/usr/bin/env node` is prepended so the output is
-  directly executable.
-- **No code splitting**: All code is in a single `dist/cli.js` file.
+- **Node 20 target**: Uses Node.js 20+ APIs (matching `engines.node >=20.12.0`
+  in `package.json`).
+- **Multi-line banner**: The banner includes three parts:
+  1. `#!/usr/bin/env node` -- shebang so output files are directly executable.
+  2. `import { createRequire } from 'module';` -- imports the `createRequire`
+     helper.
+  3. `const require = createRequire(import.meta.url);` -- creates a `require()`
+     function for ESM bundles. This is needed because `noExternal` bundles
+     `@github/copilot-sdk` and `vscode-jsonrpc`, which internally use
+     `require()` calls that are unavailable in native ESM.
+- **`noExternal`**: Forces `@github/copilot-sdk` and `vscode-jsonrpc` to be
+  bundled into the output instead of left as external imports. Without this,
+  the bundled CLI would try to resolve these packages at runtime, requiring
+  them to be installed alongside the CLI. Bundling them ensures the published
+  `dist/` is self-contained for these packages.
+- **No code splitting**: `splitting: false` -- each entry point produces a
+  single file (`dist/cli.js`, `dist/dispatch-worker.js`).
 - **Source maps**: Enabled for debugging.
 - **No type declarations**: `dts: false` -- this is a CLI tool, not a library.
 
@@ -463,7 +451,7 @@ console.log(`dispatch v${__VERSION__}`);
 ```
 
 After tsup builds the project, this becomes a literal string in `dist/cli.js`
-(e.g., `dispatch v0.0.1`). No runtime file reads are needed.
+(e.g., `dispatch v1.5.0`). No runtime file reads are needed.
 
 tsup's `define` feature works like esbuild's `define` -- it performs global
 string replacement at build time. The replacement value must be a valid
@@ -592,7 +580,7 @@ The CLI calls `process.exit()` at several points:
 | `src/cli.ts:298` | `0` | `config` subcommand completed |
 | `src/cli.ts:321` | `0` | `--help` displayed |
 | `src/cli.ts:326` | `0` | `--version` displayed |
-| `src/cli.ts:336` | `0` or `1` | Normal completion (`1` if any task failed or fix-tests unsuccessful) |
+| `src/cli.ts:336` | `0` or `1` | Normal completion (`1` if any task failed) |
 | `src/cli.ts:342` | `1` | Unhandled exception in `main()` |
 
 ### Raw ANSI escape codes in non-TTY environments
@@ -638,7 +626,7 @@ troubleshooting, and unhandleable signals, see
 **Used in**: `src/providers/detect.ts:6`
 **Official docs**: [nodejs.org/api/child_process.html](https://nodejs.org/api/child_process.html)
 
-The `execFile` function (promisified) is used by [`checkProviderInstalled()`](../prereqs-and-safety/provider-detection.md)
+The `execFile` function (promisified) is used by [`checkProviderInstalled()`](../provider-system/binary-detection.md)
 (`src/providers/detect.ts:29-37`) to detect whether a provider's CLI binary
 is available on PATH. It executes `<binary> --version` and returns `true` if
 the process exits successfully, `false` otherwise.
@@ -700,11 +688,104 @@ clean up the provider by calling `runCleanup()`.
 See the [Orchestrator cleanup documentation](orchestrator.md#process-level-cleanup-via-registercleanup)
 for how this interacts with the orchestrator's own error recovery.
 
+---
+
+## @octokit/auth-oauth-device (GitHub authentication)
+
+**Package**: `@octokit/auth-oauth-device` v7.1.5
+**Used in**: `src/helpers/auth.ts:4`
+**Official docs**: [github.com/octokit/auth-oauth-device.js](https://github.com/octokit/auth-oauth-device.js)
+
+This package implements the GitHub OAuth
+[device authorization grant](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#device-flow)
+used by Dispatch to authenticate with the GitHub Issues API.
+
+### How Dispatch uses it
+
+The `createOAuthDeviceAuth` function is called in `src/helpers/auth.ts` with:
+
+- **`clientType`**: `"oauth-app"` (not a GitHub App).
+- **`clientId`**: The public GitHub OAuth client ID from `src/constants.ts`.
+- **`scopes`**: `["repo"]` -- grants read/write access to repository data
+  including issues, pull requests, and contents.
+- **`onVerification` callback**: Displays the user code and verification URL
+  to the terminal, then opens the browser via the `open` package.
+
+The device flow works in environments without a web server redirect URI
+(CLI tools, SSH sessions, headless servers). The user visits a URL, enters
+a code, and the CLI polls GitHub until authorization is complete.
+
+For full authentication architecture details, see
+[Authentication](authentication.md#github-oauth-device-flow).
+
+---
+
+## @azure/identity (Azure AD authentication)
+
+**Package**: `@azure/identity` v4.13.0
+**Used in**: `src/helpers/auth.ts:5`
+**Official docs**: [learn.microsoft.com/javascript/api/@azure/identity](https://learn.microsoft.com/en-us/javascript/api/@azure/identity/)
+
+This package provides Azure AD authentication credentials. Dispatch uses the
+`DeviceCodeCredential` class for interactive Azure DevOps authentication.
+
+### How Dispatch uses it
+
+The `DeviceCodeCredential` is instantiated with:
+
+- **`tenantId`**: The Azure AD tenant ID from `src/constants.ts`.
+- **`clientId`**: The Azure AD client ID from `src/constants.ts`.
+- **`userPromptCallback`**: Displays the device code and verification URL
+  to the terminal.
+
+The credential's `getToken()` method is called with the Azure DevOps
+scope from `src/constants.ts` to obtain an access token. Tokens are cached
+to `~/.dispatch/auth.json` with a 5-minute expiry buffer -- if the cached
+token expires within 5 minutes, a new one is obtained.
+
+For full authentication architecture details, see
+[Authentication](authentication.md#azure-ad-device-code-flow).
+
+---
+
+## @modelcontextprotocol/sdk (MCP server)
+
+**Package**: `@modelcontextprotocol/sdk` v1.29.0
+**Used in**: `src/mcp/server.ts:1-4`, `src/mcp/index.ts:1-4`
+**Official docs**: [modelcontextprotocol.io](https://modelcontextprotocol.io/introduction)
+
+This package provides the MCP server framework used by the `dispatch mcp`
+subcommand. It handles protocol negotiation, tool registration, transport
+abstraction, and JSON-RPC message framing.
+
+### Classes and functions used
+
+| Import | Usage | Location |
+|--------|-------|----------|
+| `McpServer` | Main server instance; registers tools and connects to transports | `src/mcp/server.ts:1` |
+| `StdioServerTransport` | Stdio transport for pipe-based MCP clients | `src/mcp/index.ts:2` |
+| `StreamableHTTPServerTransport` | HTTP transport with session management | `src/mcp/index.ts:3` |
+
+### Transport modes
+
+- **Stdio**: Uses `StdioServerTransport` -- reads JSON-RPC messages from stdin
+  and writes responses to stdout. Diagnostics go to stderr. Used when an MCP
+  client launches Dispatch as a child process.
+- **HTTP**: Uses `StreamableHTTPServerTransport` -- listens on a configurable
+  port (default 9110) and host (default `127.0.0.1`). Each session gets its
+  own transport instance, managed via a UUID-keyed `Map`.
+
+For full MCP architecture details, see [MCP Subcommand](mcp-subcommand.md).
+
 ## Related documentation
 
 - [CLI](cli.md) -- argument parsing with Commander.js and exit codes
 - [Configuration](configuration.md) -- config file, three-tier precedence,
   `dispatch config` subcommand
+- [Authentication](authentication.md) -- OAuth device flows for GitHub and Azure
+  AD, token storage, and `ensureAuthReady()` entry point
+- [MCP Subcommand](mcp-subcommand.md) -- MCP server architecture, transports,
+  and registered tools
 - [Orchestrator](orchestrator.md) -- glob usage and provider boot
 - [TUI](tui.md) -- ANSI rendering and TTY detection
 - [Logger](../shared-types/logger.md) -- chalk usage in logging
@@ -713,9 +794,9 @@ for how this interacts with the orchestrator's own error recovery.
 - [OpenCode Backend](../provider-system/opencode-backend.md) -- OpenCode-specific setup and troubleshooting
 - [Copilot Backend](../provider-system/copilot-backend.md) -- Copilot-specific setup and authentication
 - [Cleanup Registry](../shared-types/cleanup.md) -- Process-level cleanup mechanism
-- [Provider Detection](../prereqs-and-safety/provider-detection.md) -- Binary detection used by config wizard
+- [Provider Detection](../provider-system/binary-detection.md) -- Binary detection used by config wizard
 - [Shared Integrations](../shared-types/integrations.md) -- Chalk, fs/promises, and signal handling reference
-- [Planner Agent](../planning-and-dispatch/planner.md) -- Planning phase referenced by rate limits discussion
+- [Planner Agent](../agent-system/planner-agent.md) -- Planning phase referenced by rate limits discussion
 - [Dispatcher](../planning-and-dispatch/dispatcher.md) -- Execution phase that consumes provider sessions
 - [Spec Generation](../spec-generation/overview.md) -- How the spec pipeline
   uses providers for AI-driven generation

@@ -7,6 +7,7 @@
  */
 
 import { fork, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -32,10 +33,17 @@ export function forkDispatchRun(
   workerMessage: Record<string, unknown>,
   options?: ForkRunOptions,
 ): ChildProcess {
-  // 1. Wire push notifications (reuse the existing helper from server.ts)
+  // 1. Verify the compiled worker exists before attempting to fork
+  if (!existsSync(WORKER_PATH)) {
+    throw new Error(
+      `Dispatch worker not found at ${WORKER_PATH}. Run 'npm run build' to compile the project before using MCP tools.`,
+    );
+  }
+
+  // 2. Wire push notifications (reuse the existing helper from server.ts)
   wireRunLogs(runId, server);
 
-  // 2. Fork worker
+  // 3. Fork worker
   const worker = fork(WORKER_PATH, [], { stdio: ["pipe", "pipe", "pipe", "ipc"] });
   worker.send(workerMessage);
 

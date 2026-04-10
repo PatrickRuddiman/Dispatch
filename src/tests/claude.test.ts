@@ -252,13 +252,14 @@ describe("prompt", () => {
     expect(onProgress).toHaveBeenCalledWith({ text: "streamed response text" });
   });
 
-  it("returns null when no assistant message found", async () => {
+  it("throws when no assistant message found", async () => {
     mockSession.stream.mockReturnValue((async function* () {})());
 
     const instance = await boot();
     const sessionId = await instance.createSession();
-    const result = await instance.prompt(sessionId, "hello");
-    expect(result).toBeNull();
+    await expect(instance.prompt(sessionId, "hello")).rejects.toThrow(
+      "Claude stream ended before receiving an assistant message",
+    );
   });
 
   it("throws when session.send fails", async () => {

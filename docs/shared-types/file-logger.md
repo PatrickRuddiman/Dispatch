@@ -85,7 +85,6 @@ flowchart TD
 |----------|----------------|----------------------|
 | Dispatch pipeline | `src/orchestrator/dispatch-pipeline.ts:689` | Wraps per-issue processing in `fileLoggerStorage.run()` |
 | Spec pipeline | `src/orchestrator/spec-pipeline.ts:417` | Wraps spec generation in `fileLoggerStorage.run()` |
-| Fix-tests pipeline | `src/orchestrator/fix-tests-pipeline.ts:220` | Wraps test-fix processing in `fileLoggerStorage.run()` |
 
 Each pipeline follows the same pattern:
 
@@ -175,8 +174,8 @@ private write(level: string, message: string): void {
 | `close()` | `CLOSE` | Marks the end of logging for this issue |
 
 The `agentEvent` and `agentResponse` methods are called directly by the
-[planner](../planning-and-dispatch/planner.md) and
-[executor](../planning-and-dispatch/executor.md) agents, providing visibility
+[planner](../agent-system/planner-agent.md) and
+[executor](../agent-system/executor-agent.md) agents, providing visibility
 into AI provider interactions that do not appear in the console output.
 
 ## Operational concerns
@@ -272,11 +271,9 @@ The file logger has comprehensive test coverage across two test files:
   agent that writes to the file logger context
 - [Spec Generation](../spec-generation/overview.md) — Pipeline that
   establishes `FileLogger` contexts for spec generation
-- [Planner Agent](../planning-and-dispatch/planner.md) — Uses `agentEvent()`
+- [Planner Agent](../agent-system/planner-agent.md) — Uses `agentEvent()`
   and `agentResponse()` for prompt tracing
-- [Executor Agent](../planning-and-dispatch/executor.md) — Uses `agentEvent()`
+- [Executor Agent](../agent-system/executor-agent.md) — Uses `agentEvent()`
   and `agentResponse()` for execution tracing
 - [Commit Agent](../agent-system/commit-agent.md) — Logs prompt and response
   events through the file logger context
-- [Fix-Tests Pipeline](../cli-orchestration/fix-tests-pipeline.md) — Pipeline
-  that establishes `FileLogger` contexts for test-fix processing

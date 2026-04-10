@@ -303,3 +303,9 @@ This would give each cleanup function 5 seconds before the loop moves on.
   documentation for the cleanup registry test suite (10 tests covering
   registration, execution order, error handling, re-entrancy, and signal
   integration) and shared mock factories
+- [Troubleshooting](../dispatch-pipeline/troubleshooting.md) -- Common failure
+  scenarios where cleanup behavior is relevant
+- [OpenCode Backend](../provider-system/opencode-backend.md) -- Idempotent
+  cleanup implementation for the OpenCode provider
+- [Copilot Backend](../provider-system/copilot-backend.md) -- Copilot-specific
+  cleanup implementation

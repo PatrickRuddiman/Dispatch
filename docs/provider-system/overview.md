@@ -1,158 +1,65 @@
-# Provider Abstraction Layer
+# Provider System
 
-The provider abstraction layer is the strategy pattern at the heart of dispatch
-that decouples the orchestration pipeline from any specific AI agent runtime. It
-allows the system to swap between OpenCode, GitHub Copilot, Claude, Codex, or
-future backends through a single `ProviderInstance` interface without changing
-the orchestrator, planner, or dispatcher code.
+The provider system is the abstraction layer that decouples Dispatch's AI agent
+orchestration from any specific AI coding assistant backend. It defines a uniform
+`ProviderInstance` interface (session creation, prompting, cleanup), a registry
+that maps provider names to boot functions, a binary-detection mechanism for CLI
+availability checks, a failover pool that transparently routes requests across
+multiple providers with cooldown-based throttle recovery, and shared utilities
+for progress reporting and error classification.
 
 ## Why this exists
 
-dispatch orchestrates AI coding agents to complete [tasks parsed from
-markdown files](../task-parsing/overview.md) (using the [checkbox syntax](../task-parsing/markdown-syntax.md)). Different teams use different agent runtimes -- some prefer
-OpenCode, others use GitHub Copilot. Rather than hardcoding a single agent, the
-provider layer lets users select their backend at the CLI level ([`--provider`](../cli-orchestration/cli.md)) or via [persistent configuration](../cli-orchestration/configuration.md)
-while the rest of the pipeline remains agnostic.
+Dispatch orchestrates AI coding agents to complete
+[tasks parsed from markdown files](../task-parsing/overview.md). Different teams
+use different agent runtimes -- some prefer Claude, others use GitHub Copilot or
+OpenCode. Rather than hardcoding a single agent, the provider layer lets users
+select their backend at the CLI level
+([`--provider`](../cli-orchestration/cli.md)) or via
+[persistent configuration](../cli-orchestration/configuration.md) while the rest
+of the pipeline remains agnostic.
 
-## Key source files
+The system also supports **failover pools** -- when a primary provider is
+rate-limited, the pool transparently fails over to a fallback provider without
+the calling agent knowing. This is critical for long-running dispatch runs that
+process many issues in parallel.
 
-| File | Role |
-|------|------|
-| `src/providers/interface.ts` | Defines the `ProviderInstance` interface and `ProviderName` union type |
-| `src/providers/index.ts` | Provider registry -- maps names to boot functions |
-| `src/providers/opencode.ts` | OpenCode backend implementation |
-| `src/providers/copilot.ts` | GitHub Copilot backend implementation |
-| `src/providers/claude.ts` | Claude backend implementation |
-| `src/providers/codex.ts` | Codex backend implementation |
-| `src/helpers/cleanup.ts` | Process-level cleanup registry for session leak prevention |
+## Architecture
 
-## The ProviderInstance interface
+The provider system has six modules, each with a distinct responsibility:
 
-Every provider backend must implement the four-method lifecycle contract defined
-in `src/providers/interface.ts:31-52`:
-
-| Method | Purpose | Returns |
-|--------|---------|---------|
-| `createSession()` | Create an isolated session for a single task | `Promise<string>` (opaque session ID) |
-| `prompt(sessionId, text)` | Send a prompt and wait for the agent response | `Promise<string \| null>` |
-| `cleanup()` | Tear down server processes and release resources | `Promise<void>` |
-| `name` (readonly) | Human-readable identifier for this provider | `string` |
-
-### Lifecycle: boot, session, prompt, cleanup
-
-```mermaid
-sequenceDiagram
-    participant CLI as cli.ts
-    participant Orch as orchestrator.ts
-    participant Reg as providers/index.ts
-    participant Prov as Provider Backend
-    participant Plan as planner.ts
-    participant Disp as dispatcher.ts
-
-    CLI->>Orch: orchestrate({ provider: "opencode" })
-    Orch->>Reg: bootProvider("opencode", opts)
-    Reg->>Prov: boot(opts)
-    Prov-->>Reg: ProviderInstance
-    Reg-->>Orch: ProviderInstance
-    Orch->>Orch: registerCleanup(() => instance.cleanup())
-
-    loop For each task
-        Orch->>Plan: planTask(instance, task, cwd)
-        Plan->>Prov: createSession()
-        Prov-->>Plan: sessionId
-        Plan->>Prov: prompt(sessionId, plannerPrompt)
-        Prov-->>Plan: plan text
-        Plan-->>Orch: PlanResult
-
-        Orch->>Disp: dispatchTask(instance, task, cwd, plan)
-        Disp->>Prov: createSession()
-        Prov-->>Disp: sessionId
-        Disp->>Prov: prompt(sessionId, executorPrompt)
-        Prov-->>Disp: agent response
-        Disp-->>Orch: DispatchResult
-    end
-
-    Orch->>Prov: cleanup()
-    Note over Orch: cleanup registry also calls cleanup() on signal exit
-```
-
-### Prompt dispatch state machine
-
-The following state machine shows the lifecycle of a single prompt dispatch
-through the provider layer. Both Copilot and OpenCode use event-based
-asynchronous patterns, though with different transport mechanisms:
-
-```mermaid
-stateDiagram-v2
-    [*] --> SessionCreating: createSession()
-    SessionCreating --> SessionReady: session ID returned
-    SessionCreating --> Failed: createSession() throws
-
-    SessionReady --> PromptSending: prompt(sessionId, text)
-
-    state PromptSending {
-        [*] --> CopilotPath: Copilot
-        [*] --> OpenCodePath: OpenCode
-
-        CopilotPath --> SendFired: session.send()
-        SendFired --> ListeningForIdle: session.on("session.idle")
-        ListeningForIdle --> CopilotFetchMessages: idle fires (within 600s)
-        ListeningForIdle --> ErrorState: session.error fires
-        ListeningForIdle --> ErrorState: 600s timeout
-        CopilotFetchMessages --> ResponseReceived: session.getMessages()
-
-        OpenCodePath --> FireAndForget: promptAsync()
-        FireAndForget --> SSESubscribed: 204 accepted
-        SSESubscribed --> FilteringEvents: for await (event)
-        FilteringEvents --> FilteringEvents: wrong session / streaming delta
-        FilteringEvents --> OpenCodeFetchMessages: session.idle
-        FilteringEvents --> ErrorState: session.error
-        OpenCodeFetchMessages --> ErrorState: message fetch fails after disconnect
-        OpenCodeFetchMessages --> ResponseReceived: messages fetched
-    }
-
-    ResponseReceived --> ExtractingText: extract content
-    ExtractingText --> Success: non-null string
-    ExtractingText --> NullResponse: no text content
-    ErrorState --> Failed: throw Error
-    NullResponse --> Failed: "No response from agent"
-    Success --> [*]
-    Failed --> [*]
-```
-
-## The provider registry
-
-The registry in `src/providers/index.ts` uses a static `Record<ProviderName, BootFn>`
-map that associates each provider name with its `boot()` function. It exports two
-things the rest of the system consumes:
-
-- **`PROVIDER_NAMES`** -- an array of all registered provider names, used by the
-  CLI for `--provider` validation (`src/cli.ts:94`).
-- **`bootProvider(name, opts)`** -- instantiates a provider by name; throws if the
-  name is not in the registry.
+| Module | Role |
+|--------|------|
+| `src/providers/interface.ts` | Defines `ProviderInstance`, `ProviderName`, boot options, and progress types |
+| `src/providers/index.ts` | Provider registry -- maps names to boot and listModels functions |
+| `src/providers/pool.ts` | `ProviderPool` -- transparent failover wrapper with lazy boot, cooldowns, and session remapping |
+| `src/providers/errors.ts` | Heuristic throttle/rate-limit error classification |
+| `src/providers/detect.ts` | CLI binary availability detection via `child_process.execFile` |
+| `src/providers/progress.ts` | ANSI-sanitized progress reporting with deduplication |
 
 ```mermaid
 graph TD
-    subgraph "Provider Registry (providers/index.ts)"
-        REG["PROVIDERS map<br/>Record&lt;ProviderName, BootFn&gt;"]
+    subgraph "Provider System"
+        IF["interface.ts<br/>ProviderInstance contract"]
+        REG["index.ts<br/>Provider registry"]
+        POOL["pool.ts<br/>ProviderPool failover"]
+        ERR["errors.ts<br/>Throttle detection"]
+        DET["detect.ts<br/>Binary detection"]
+        PROG["progress.ts<br/>Progress sanitizer"]
     end
 
-    subgraph "Interface (provider.ts)"
-        IF["ProviderInstance interface"]
-        PN["ProviderName union type<br/>&quot;opencode&quot; | &quot;copilot&quot; | &quot;claude&quot; | &quot;codex&quot;"]
-    end
-
-    subgraph "Backends"
-        OC["providers/opencode.ts<br/>@opencode-ai/sdk"]
-        CP["providers/copilot.ts<br/>@github/copilot-sdk"]
-        CL["providers/claude.ts<br/>@anthropic-ai/claude-agent-sdk"]
-        CX["providers/codex.ts<br/>(codex backend)"]
+    subgraph "Provider Implementations"
+        OC["opencode.ts"]
+        CP["copilot.ts"]
+        CL["claude.ts"]
+        CX["codex.ts"]
     end
 
     subgraph "Consumers"
-        ORCH["orchestrator.ts"]
-        PLAN["planner.ts"]
+        ORCH["dispatch-pipeline.ts"]
+        AGENTS["Agent system"]
         DISP["dispatcher.ts"]
+        CLI["cli.ts / config-prompts.ts"]
     end
 
     REG --> OC
@@ -163,261 +70,237 @@ graph TD
     CP -.->|implements| IF
     CL -.->|implements| IF
     CX -.->|implements| IF
-    ORCH -->|bootProvider| REG
-    PLAN -->|createSession, prompt| IF
-    DISP -->|createSession, prompt| IF
-    ORCH -->|cleanup| IF
+    POOL -->|uses| REG
+    POOL -->|uses| ERR
+    ORCH -->|creates| POOL
+    AGENTS -->|receives| IF
+    DISP -->|receives| IF
+    CLI -->|uses| DET
+    CLI -->|uses| REG
+    OC -->|uses| PROG
+    CP -->|uses| PROG
+    CL -->|uses| PROG
+    CX -->|uses| PROG
 ```
 
-## How the orchestrator selects a provider
+## The ProviderInstance interface
 
-Provider selection flows from the user through the CLI to the orchestrator:
+Every provider backend must implement the lifecycle contract defined in
+`src/providers/interface.ts:50-88`:
 
-1. The user passes `--provider copilot` (or omits it for the default `opencode`).
-2. `src/cli.ts:91-98` validates the value against `PROVIDER_NAMES`. If the value
-   is not recognized, the process exits with an error listing available providers.
-3. The validated `ProviderName` is passed to `orchestrate()` in the options object
-   (`src/orchestrator.ts:42`), which defaults to `"opencode"`.
-4. The orchestrator calls `bootProvider(provider, { url: serverUrl, cwd })` at
-   `src/orchestrator.ts:150`.
+| Member | Type | Contract |
+|--------|------|----------|
+| `name` | `readonly string` | Human-readable identifier (e.g., `"opencode"`, `"copilot"`) |
+| `model` | `readonly string?` | Full model identifier in `provider/model` format, if available |
+| `createSession()` | `() => Promise<string>` | Create an isolated session for a single task; return an opaque session ID |
+| `prompt(sessionId, text, options?)` | See signature | Send a prompt, wait for the response; return text or `null` |
+| `send?(sessionId, text)` | `(string, string) => Promise<void>` | Optional: inject a follow-up message without waiting for a response |
+| `cleanup()` | `() => Promise<void>` | Release all resources; safe to call multiple times |
 
-Users can override the default at the CLI level:
+### The `send()` method
 
-```sh
-dispatch "tasks/**/*.md" --provider copilot
-dispatch "tasks/**/*.md" --provider opencode --server-url http://localhost:4096
-```
+The optional `send()` method enables mid-session messaging without blocking for
+a response. It is used by the spec agent to send time-warning nudges to the AI
+during long-running spec generation. Providers that support non-blocking
+follow-up messages implement this method; those that do not (like Codex, whose
+`agent.run()` is blocking and non-interruptible) omit it.
 
-## Why ProviderName is a compile-time union
+### Boot options
 
-`ProviderName` is defined as `"opencode" | "copilot" | "claude" | "codex"` -- a
-string literal union type rather than a runtime-discovered plugin set. This is a
-deliberate design choice:
+From `src/providers/interface.ts:23-36`:
 
-- **Type safety**: TypeScript can verify at compile time that only valid provider
-  names flow through the CLI, orchestrator, and registry. Misspelled names are
-  caught by `tsc`, not at runtime.
-- **Simplicity**: The project has four providers. A plugin discovery system
-  (dynamic `import()`, file scanning, or a plugin manifest) would add complexity
-  without proportional benefit.
-- **Explicitness**: All available providers are visible in a single union type and
-  a single registry map, making the system easy to audit.
+| Option | Type | Purpose |
+|--------|------|---------|
+| `url` | `string?` | Connect to an already-running server instead of spawning one |
+| `cwd` | `string?` | Working directory for the agent |
+| `model` | `string?` | Model override in provider-specific format |
 
-The tradeoff is that adding a new provider requires a code change and
-recompilation. See the [adding a provider guide](./adding-a-provider.md) for the
-complete checklist.
+Model format is provider-specific:
+- **Copilot**: bare model ID (e.g., `"claude-sonnet-4-5"`)
+- **OpenCode**: `"provider/model"` format (e.g., `"anthropic/claude-sonnet-4"`)
 
-## Error recovery on boot failure
+## The provider registry
 
-When `bootProvider()` fails (e.g., the backend executable is not found, the
-server refuses to start, or a network connection fails), the error propagates
-up through the orchestrator's `try/catch` block at `src/orchestrator.ts:171-173`.
-The behavior is:
+The registry in `src/providers/index.ts` uses two static
+`Record<ProviderName, Fn>` maps:
 
-1. The TUI is stopped (`tui.stop()`).
-2. The error is rethrown to the caller.
-3. The CLI's top-level `.catch()` handler at `src/cli.ts:151-153` logs the error
-   message and exits the process with code 1.
+- **`PROVIDERS`** -- maps provider names to `boot()` functions
+- **`LIST_MODELS`** -- maps provider names to `listModels()` functions
 
-**There is no automatic retry.** If `bootProvider` fails, the entire dispatch run
-aborts. This is intentional -- boot failures typically indicate a misconfiguration
-(missing CLI tool, bad server URL, missing credentials) that would not resolve on
-retry.
+It exports:
+
+- **`PROVIDER_NAMES`** -- the canonical array of all registered provider names,
+  used by the CLI for `--provider` validation and by MCP tool schemas for Zod
+  input validation.
+- **`bootProvider(name, opts)`** -- instantiates a provider by name; throws if
+  the name is not registered.
+- **`listProviderModels(name, opts)`** -- starts a temporary provider, fetches
+  available models, and tears down. Used by the interactive config wizard to
+  populate the model selection menu.
+- **`checkProviderInstalled(name)`** and **`PROVIDER_BINARIES`** -- re-exported
+  from `detect.ts` for binary availability checks.
+
+### How to add a new provider
+
+See the [Adding a New Provider](./adding-a-provider.md) guide for the complete
+three-step process: implement the interface, add to the `ProviderName` union,
+and register in the provider map.
+
+## Provider pool and failover
+
+The `ProviderPool` class in `src/providers/pool.ts` implements the
+`ProviderInstance` interface, wrapping multiple providers with transparent
+failover. Agents receive a pool and interact with it exactly like a single
+provider -- they never know about the pool or failover mechanics.
+
+For full details on pool construction, failover order, cooldown timers, session
+remapping, and the interaction with error classification, see the
+[Pool and Failover](./pool-and-failover.md) documentation.
+
+## Error classification
+
+The `isThrottleError()` function in `src/providers/errors.ts` uses heuristic
+pattern matching to detect rate-limit and throttle errors across all four
+provider SDKs. This classification drives the pool's failover decision.
+
+For the complete pattern list, false positive/negative analysis, and interaction
+with the `withRetry` safety net, see the
+[Error Classification](./error-classification.md) documentation.
+
+## Binary detection
+
+The `checkProviderInstalled()` function in `src/providers/detect.ts` verifies
+whether a provider's CLI binary is available on PATH by running it with
+`--version`. This is used by the interactive config wizard to show installation
+status indicators.
+
+For timeout behavior, platform considerations, and CI implications, see the
+[Binary Detection](./binary-detection.md) documentation.
+
+## Progress reporting
+
+The `createProgressReporter()` function in `src/providers/progress.ts` provides
+ANSI-sanitized, deduplicated progress snapshots that provider implementations
+use to relay streaming output to the TUI.
+
+For the sanitization pipeline, deduplication logic, and the problem it solves,
+see the [Progress Reporting](./progress-reporting.md) documentation.
 
 ## Session isolation model
 
-Each task gets its own session, created by the [planner](../planning-and-dispatch/planner.md) and the [dispatcher](../planning-and-dispatch/dispatcher.md)
-independently (`src/planner.ts:38`, `src/dispatcher.ts:31`). These modules
-receive the `ProviderInstance` as a parameter and create their own sessions --
-they never share session IDs.
+Each task gets its own session, created by the agent (planner, executor, spec,
+commit) independently. These agents receive the `ProviderInstance` (or
+`ProviderPool`) as a parameter and create their own sessions -- they never share
+session IDs.
 
 Session isolation guarantees:
 
-- **Conversation isolation**: Each session has its own conversation history. The
-  planner's exploration context does not bleed into the executor's context, and
-  one task's session does not see another task's prompts.
+- **Conversation isolation**: Each session has its own conversation history. One
+  task's session does not see another task's prompts.
+- **Context freshness**: Fresh sessions prevent "context rot" where accumulated
+  conversation history degrades agent performance.
 - **Shared environment**: Sessions are *not* sandboxed at the OS level. All
-  sessions within a provider share the same file system, working directory,
-  environment variables, and network access. The isolation is at the
-  agent-conversation level, not at the process or container level.
+  sessions within a provider share the same file system, working directory, and
+  network access. The isolation is at the agent-conversation level.
 
-This model is appropriate for the dispatch use case, where tasks operate on the
-same codebase but should not confuse the agent by mixing conversation contexts.
+### Why fresh sessions, not session reuse
+
+The `dispatcher.ts` header comment (line 2-3) explains the rationale: "creates a
+fresh session per task to keep contexts isolated and avoid context rot." This
+design means each task starts with a clean conversation, preventing earlier tasks
+from polluting the context of later ones.
+
+### Why failover creates a new session instead of replaying the conversation
+
+When the pool fails over from a throttled provider to a fallback
+(`src/providers/pool.ts:150-155`), it creates a **fresh session** on the fallback
+rather than replaying the prior conversation. This works because:
+
+1. Agents are stateless with respect to provider sessions -- each agent call
+   builds a self-contained prompt with all necessary context (task description,
+   environment info, plan if available).
+2. The prompt sent to the fallback is the same prompt that was sent to the
+   throttled provider, so no context is lost.
+3. Replaying would require storing and retransmitting prior messages, adding
+   complexity for minimal benefit in a system designed around single-prompt
+   sessions.
+
+## Provider credential management
+
+Credentials are managed differently by each provider SDK:
+
+| Provider | Credential mechanism |
+|----------|---------------------|
+| **OpenCode** | SDK-managed; reads from its own config layer (providers with `source: "env" | "config" | "custom"`) |
+| **Copilot** | Environment variables: `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN` (in that precedence order), or logged-in Copilot CLI user |
+| **Claude** | SDK reads `ANTHROPIC_API_KEY` from the environment |
+| **Codex** | SDK reads `OPENAI_API_KEY` from the environment |
+
+No centralized credential rotation mechanism exists in Dispatch itself.
+Credential lifecycle is owned by each provider's SDK.
 
 ## Cleanup and resource management
 
 ### The cleanup registry
 
-The process-level [cleanup registry](../shared-types/cleanup.md) (`src/helpers/cleanup.ts`) provides a safety net for
-resource cleanup on abnormal exit. See also the [Logger](../shared-types/logger.md) for how cleanup events
-are traced with `log.debug()`. It works as follows:
+The process-level [cleanup registry](../shared-types/cleanup.md)
+(`src/helpers/cleanup.ts`) provides a safety net for resource cleanup on
+abnormal exit:
 
-1. When the orchestrator boots a provider, it immediately registers the
-   provider's `cleanup()` function with the registry:
-   `registerCleanup(() => instance.cleanup())` (`src/agents/orchestrator.ts:151`).
-2. On **normal completion**, the orchestrator calls `instance.cleanup()` directly
-   on the success path.
-3. On **signal exit** (SIGINT, SIGTERM, unhandled error), the CLI's signal
-   handlers call `runCleanup()` from `src/helpers/cleanup.ts`, which drains the registry
-   and invokes all registered cleanup functions.
-4. After draining, the registry is cleared (`cleanups.splice(0)`), so repeated
-   calls to `runCleanup()` are harmless.
+1. When the pipeline boots a provider (or pool), it registers the provider's
+   `cleanup()` function with the registry.
+2. On **normal completion**, the pipeline calls `cleanup()` directly.
+3. On **signal exit** (SIGINT, SIGTERM), the CLI's signal handlers call
+   `runCleanup()`, which drains the registry.
 
-This dual-path design (explicit cleanup + registry safety net) means provider
-cleanup functions can be called twice: once explicitly by the orchestrator and
-once by the signal handler. This is why idempotency matters.
+The pool's `cleanup()` method (`src/providers/pool.ts:167-173`) calls
+`cleanup()` on all booted provider instances via `Promise.allSettled()`, ensuring
+one failing cleanup does not block others. It then clears all internal state
+(instances, session owners, cooldowns).
 
-### Session leak prevention
+## Configuration resolution
 
-Without the cleanup registry, a SIGINT during task dispatch would kill the
-process without stopping the spawned server (OpenCode) or the CLI child process
-(Copilot). The registry ensures these external processes are terminated even on
-abnormal exit.
+Provider and model selection flows through a three-tier resolution system:
 
-The registry also handles the case where `bootProvider` succeeds but an error
-occurs before the orchestrator reaches its explicit cleanup call. Since
-registration happens immediately after boot, the safety net is active for the
-entire dispatch run.
+1. **Per-agent overrides**: `config.agents.<role>.provider` and
+   `config.agents.<role>.model`
+2. **Fast tier** (planner and commit agents only): `config.fastProvider` and
+   `config.fastModel`
+3. **Top-level defaults**: `config.provider` and `config.model`
 
-### Cleanup and in-flight sessions
+The `resolveAgentProviderConfig()` function in `src/config.ts:264-280` resolves
+the effective provider and model for each agent role using this priority chain.
+The dispatch pipeline then deduplicates provider+model combos and constructs
+a `ProviderPool` for each agent with its configured provider as primary and all
+other configured providers as fallbacks
+(`src/orchestrator/dispatch-pipeline.ts:130-162`).
 
-**What happens if `cleanup()` is called while a prompt is in flight?**
-
-- **Copilot provider** (`src/providers/copilot.ts:78-88`): Calls `destroy()` on
-  all tracked sessions, then `client.stop()`. If a `send()` + event listener
-  promise is pending on a session, destroying that session will cause the
-  pending promise to reject (or resolve with no data, depending on the SDK's
-  internal behavior). The `.catch(() => {})` on each destroy call swallows
-  errors from sessions that may have already completed.
-- **OpenCode provider** (`src/providers/opencode.ts:166-171`): Calls
-  `stopServer?.()` (which invokes `oc.server.close()`). The underlying HTTP
-  server shuts down, which will cause the SSE stream to disconnect and the
-  subsequent message fetch to fail with a connection error.
-
-In practice, `cleanup()` is only called after all task dispatches have completed
-(`src/agents/orchestrator.ts:165`), so in-flight prompts during cleanup should
-not occur under normal operation.
-
-### Cleanup idempotency comparison
-
-The two providers handle double-cleanup differently:
-
-| Aspect | OpenCode | Copilot |
-|--------|----------|---------|
-| Idempotency guard | `cleaned` boolean flag (`src/providers/opencode.ts:35`) | None |
-| Second call behavior | Returns immediately (no-op) | Re-iterates empty session map, calls `client.stop()` again |
-| Safety of double-call | Guaranteed safe by guard | Safe in practice due to error swallowing (`.catch(() => {})`) |
-| Resource at risk | Spawned HTTP server (`server.close()`) | CLI child process (`client.stop()`) |
-
-The OpenCode provider's `cleaned` flag is a defensive pattern that prevents
-calling `server.close()` on an already-closed server. The Copilot provider
-achieves equivalent safety through error swallowing, though adding an explicit
-guard would make the intent clearer.
-
-Both approaches are safe for the current codebase. The difference is stylistic
-rather than functional.
-
-## Prompt model comparison
-
-The two backends use event-based asynchronous prompt models with different
-transport mechanisms:
-
-| Aspect | OpenCode | Copilot |
-|--------|----------|---------|
-| Prompt method | `promptAsync()` + SSE events | `session.send()` + idle/error events |
-| Execution model | Asynchronous (fire-and-forget + SSE stream) | Asynchronous (fire-and-forget + event listeners) |
-| HTTP timeout risk | None (204 returns immediately) | None (send() returns immediately) |
-| Progress visibility | Streaming deltas via SSE events | None until idle event fires |
-| Failure detection | `session.error`, stream disconnect surfaced by the follow-up message fetch, and caller-level deadlines | `session.error` event, 600-second idle timeout, and caller-level deadlines |
-| Prompt timeout / idle timeout | No provider-local timeout; caller-level deadlines still bound planning/spec attempts | 600 seconds via `withTimeout()` plus caller-level deadlines |
-| Resource overhead | SSE connection + AbortController per prompt | Event listeners unsubscribed in `finally` block |
-
-See [OpenCode async prompt model](./opencode-backend.md#asynchronous-prompt-model)
-and [Copilot event-based model](./copilot-backend.md#event-based-prompt-model)
-for implementation details.
-
-## Prompt timeouts and cancellation
-
-The `ProviderInstance` interface's `prompt()` signature returns
-`Promise<string | null>` with no timeout parameter. However, individual
-backends and calling pipelines layer resilience in different places:
-
-- **Copilot provider** (`src/providers/copilot.ts:127`): Wraps the idle/error
-  event listener in `withTimeout(promise, 600_000, "copilot session ready")`,
-  imposing a **600-second (10-minute) hard timeout**. This value is hardcoded and
-  not configurable via CLI flags. It is separate from the `--plan-timeout` flag,
-  which controls the planner agent timeout at the orchestrator level. If the
-  timeout fires, the promise rejects with a descriptive error message.
-- **OpenCode provider** (`src/providers/opencode.ts:153`): Watches the SSE
-  stream for `session.idle` and `session.error`, filters out events from other
-  sessions, and always aborts the subscription in a `finally` block. Unexpected
-  stream disconnects surface as prompt failures when the provider later tries to
-  fetch session messages. The provider does **not** apply a hardcoded idle
-  timeout for a silent but still-open stream.
-- **Orchestrator-level deadlines**: The planning and spec pipelines own the
-  overall wall-clock budget for one attempt. `--plan-timeout` bounds planner
-  attempts, while `--spec-timeout` bounds each `specAgent.generate(...)`
-  attempt before `--retries` logic runs.
-
-This layering matters: provider-local guards catch transport-specific failures,
-but pipeline-level deadlines are still the mechanism that turns a slow or stuck
-attempt into a retryable, per-item failure.
-
-## Response format differences
-
-The two backends produce responses in different formats, which the provider
-implementations normalize to `string | null`:
-
-- **Copilot**: After the `session.idle` event fires, `session.getMessages()`
-  retrieves the full conversation. The provider extracts the last event with
-  `type === "assistant.message"` and returns `event.data?.content`
-  (`src/providers/copilot.ts:138-142`), which is a plain string.
-- **OpenCode**: The provider fetches session messages after `session.idle`, finds
-  the last assistant message, filters its `parts` array for `TextPart` objects
-  (those with `type: "text"`), and joins their `.text` fields with newlines
-  (`src/providers/opencode.ts:154-157`). The multi-part design supports
-  non-text parts (images, tool calls, structured output), but dispatch only uses
-  the text content.
+For full details on configuration, see the
+[Configuration](../cli-orchestration/configuration.md) documentation.
 
 ## Related documentation
 
-- [OpenCode Backend](./opencode-backend.md) -- setup, configuration, and
-  troubleshooting for the OpenCode provider
-- [GitHub Copilot Backend](./copilot-backend.md) -- setup, authentication, and
-  troubleshooting for the Copilot provider
+- [Pool and Failover](./pool-and-failover.md) -- failover mechanics, cooldown
+  timers, session remapping, and the provider state machine
+- [Error Classification](./error-classification.md) -- throttle error detection
+  heuristics and interaction with retry layers
+- [Binary Detection](./binary-detection.md) -- CLI binary availability checking
+  and platform-specific behavior
+- [Progress Reporting](./progress-reporting.md) -- ANSI sanitization and
+  deduplicated progress snapshots
+- [Integrations](./integrations.md) -- external SDK dependencies, authentication,
+  lazy loading, test mocks, and the internal logger
 - [Adding a New Provider](./adding-a-provider.md) -- step-by-step guide for
   implementing and registering a new backend
-- [CLI & Orchestration](../cli-orchestration/overview.md) -- how the CLI parses arguments and
-  drives the orchestrator
-- [CLI Argument Parser](../cli-orchestration/cli.md) -- `--provider` flag
-  documentation and argument validation
-- [Planning & Dispatch Pipeline](../planning-and-dispatch/overview.md) -- how the planner
-  and dispatcher consume `ProviderInstance`
-- [Dispatcher](../planning-and-dispatch/dispatcher.md) -- How the dispatcher
-  creates sessions and sends prompts via the provider interface
-- [Shared Provider Types](../shared-types/provider.md) -- `ProviderName`,
-  `ProviderBootOptions`, and `ProviderInstance` type definitions
-- [Cleanup Registry](../shared-types/cleanup.md) -- Process-level cleanup
-  registry that ensures provider sessions are terminated on exit
-- [Logger](../shared-types/logger.md) -- Structured logging facade used for
-  verbose debug tracing of provider boot, sessions, and cleanup
-- [Spec Generation](../spec-generation/overview.md) -- How the spec pipeline
-  boots and uses providers for AI-driven spec generation
-- [Spec Generation Integrations](../spec-generation/integrations.md) -- Provider
-  authentication, troubleshooting, and external server mode
-- [Datasource System](../datasource-system/overview.md) -- The datasource
-  abstraction that provides work items for provider-driven tasks
-- [Markdown Syntax Reference](../task-parsing/markdown-syntax.md) -- Checkbox
-  format and `(P)`/`(S)` mode prefixes that determine task execution order
-- [Testing Overview](../testing/overview.md) -- Test suite framework and
-  coverage including provider-related test patterns
-- [Agent Framework](../agent-system/overview.md) -- The agent registry and
-  boot lifecycle that consumes `ProviderInstance` via `AgentBootOptions`
-- [Fix-Tests Pipeline](../cli-orchestration/fix-tests-pipeline.md) -- An
-  alternative pipeline that boots providers for automated test repair
-- [Provider Detection](../prereqs-and-safety/provider-detection.md) -- Binary
-  detection used by the config wizard to show install status
-- [Provider Tests](../testing/provider-tests.md) -- Detailed breakdown of
-  provider unit tests for Claude, Copilot, OpenCode, and the registry
-- [Prerequisites & Safety](../prereqs-and-safety/integrations.md) -- External
-  CLI tool dependencies including provider binary checks
+- [OpenCode Backend](./opencode-backend.md) -- OpenCode provider implementation
+- [Copilot Backend](./copilot-backend.md) -- Copilot provider implementation
+- [CLI & Configuration](../cli-orchestration/configuration.md) -- provider
+  selection and per-agent overrides
+- [Agent System](../agent-system/overview.md) -- agents that consume
+  `ProviderInstance` via `AgentBootOptions`
+- [Dispatch Pipeline](../cli-orchestration/dispatch-pipeline.md) -- how the
+  pipeline constructs pools and routes agents to providers
+- [Core Helpers](../shared-utilities/overview.md) -- logger, retry, and timeout
+  utilities used by the provider system
+- [Provider Tests](../testing/provider-tests.md) -- detailed breakdown of all
+  provider unit tests covering pool, failover, and backend behavior
