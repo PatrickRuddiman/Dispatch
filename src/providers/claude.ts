@@ -38,18 +38,18 @@ export async function listModels(opts?: ProviderBootOptions): Promise<string[]> 
     const q = query({ prompt: "", options: queryOpts });
     try {
       const models = await q.supportedModels();
-      return models.map((m: ModelInfo) => m.value).sort();
+      // SDK returns both short aliases ("sonnet") and full IDs ("claude-sonnet-4").
+      // Keep only full model IDs (contain a hyphen followed by a digit).
+      return models
+        .map((m: ModelInfo) => m.value)
+        .filter((v: string) => v.startsWith("claude-"))
+        .sort();
     } finally {
       q.close();
     }
   } catch (err) {
     log.debug(`Failed to list models dynamically: ${log.formatErrorChain(err)}`);
-    return [
-      "claude-haiku-3-5",
-      "claude-opus-4-6",
-      "claude-sonnet-4",
-      "claude-sonnet-4-5",
-    ];
+    return [];
   }
 }
 

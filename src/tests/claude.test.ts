@@ -85,27 +85,17 @@ describe("listModels", () => {
 
     const models = await listModels();
     expect(mockQuery.close).toHaveBeenCalled();
-    // Falls back to hardcoded list
-    expect(models).toEqual([
-      "claude-haiku-3-5",
-      "claude-opus-4-6",
-      "claude-sonnet-4",
-      "claude-sonnet-4-5",
-    ]);
+    // Falls back to empty list
+    expect(models).toEqual([]);
   });
 
-  it("falls back to hardcoded list when query() throws", async () => {
+  it("falls back to empty list when query() throws", async () => {
     mockQueryFn.mockImplementation(() => {
       throw new Error("query fail");
     });
 
     const models = await listModels();
-    expect(models).toEqual([
-      "claude-haiku-3-5",
-      "claude-opus-4-6",
-      "claude-sonnet-4",
-      "claude-sonnet-4-5",
-    ]);
+    expect(models).toEqual([]);
   });
 });
 

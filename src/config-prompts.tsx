@@ -176,7 +176,7 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
     for (const name of enabledProviders) {
       const meta = PROVIDER_REGISTRY[name];
       const existingOverride = providerModels[name];
-      console.log();
+      console.clear();
       log.info(`${meta.displayName} models:`);
 
       // Fetch available models with timeout

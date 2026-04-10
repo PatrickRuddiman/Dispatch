@@ -36,42 +36,25 @@ import { withTimeout } from "../helpers/timeout.js";
 const SESSION_READY_TIMEOUT_MS = 600_000;
 
 /**
- * List available OpenCode models for configured providers.
+ * List available OpenCode models.
  *
- * Starts a temporary server (or connects to an existing one), fetches
- * providers that have an API key configured, and returns their models
- * in "providerId/modelId" format (e.g. "anthropic/claude-sonnet-4").
+ * Uses the `opencode models` CLI command to fetch available models.
+ * Returns model IDs in "provider/model" format (e.g. "github-copilot/claude-sonnet-4").
  */
-export async function listModels(opts?: ProviderBootOptions): Promise<string[]> {
-  let client: OpencodeClient;
-  let stopServer: (() => void) | undefined;
-
-  if (opts?.url) {
-    client = createOpencodeClient({ baseUrl: opts.url });
-  } else {
-    // See boot() for details on the SDK cwd limitation.
-    if (opts?.cwd) {
-      log.debug(`listModels: requested cwd "${opts.cwd}" — OpenCode SDK does not support spawn-level cwd`);
-    }
-    try {
-      const oc = await createOpencode({ port: 0 });
-      client = oc.client;
-      stopServer = () => oc.server.close();
-    } catch (err) {
-      log.debug(`listModels: failed to start OpenCode server: ${log.formatErrorChain(err)}`);
-      throw err;
-    }
-  }
-
+export async function listModels(_opts?: ProviderBootOptions): Promise<string[]> {
   try {
-    const { data } = await client.config.providers();
-    if (!data) return [];
-    return data.providers
-      .filter((p) => p.source === "env" || p.source === "config" || p.source === "custom")
-      .flatMap((p) => Object.keys(p.models).map((modelId) => `${p.id}/${modelId}`))
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const exec = promisify(execFile);
+    const { stdout } = await exec("opencode", ["models"], { timeout: 10_000 });
+    return stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
       .sort();
-  } finally {
-    stopServer?.();
+  } catch (err) {
+    log.debug(`listModels: failed to list OpenCode models: ${log.formatErrorChain(err)}`);
+    return [];
   }
 }
 
