@@ -23,7 +23,7 @@ import { handleConfigCommand, CONFIG_BOUNDS } from "./config.js";
 export const MAX_CONCURRENCY = CONFIG_BOUNDS.concurrency.max;
 
 export const HELP = `
-  dispatch — AI agent orchestration CLI
+  dispatch — AI task orchestration CLI
 
   Usage:
     dispatch [issue-id...]           Dispatch specific issues (or all open issues if none given)
@@ -35,7 +35,7 @@ export const HELP = `
     dispatch --spec "description"    Generate a spec from an inline text description
   Options:
     --dry-run              List tasks without dispatching (also works with --spec)
-    --no-plan              Skip the planner agent, dispatch directly
+    --no-plan              Skip the planner, dispatch directly
     --no-branch            Skip branch creation, push, and PR lifecycle
     --no-worktree          Skip git worktree isolation for parallel issues
     --feature [name]       Group issues into a single feature branch and PR
@@ -45,7 +45,7 @@ export const HELP = `
     --source <name>        Issue source: ${DATASOURCE_NAMES.join(", ")} (optional; auto-detected from git remote)
     --server-url <url>     URL of a running provider server
     --plan-timeout <min>   Planning timeout in minutes (default: 30)
-    --retries <n>          Retry attempts for all agents (default: 3)
+    --retries <n>          Retry attempts for all skills (default: 3)
     --plan-retries <n>     Retry attempts after planning timeout (overrides --retries for planner)
     --cwd <dir>            Working directory (default: cwd)
 
@@ -158,7 +158,7 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
     .option("-h, --help", "Show help")
     .option("-v, --version", "Show version")
     .option("--dry-run", "List tasks without dispatching")
-    .option("--no-plan", "Skip the planner agent")
+    .option("--no-plan", "Skip the planner")
     .option("--no-branch", "Skip branch creation")
     .option("--no-worktree", "Skip git worktree isolation")
     .option("--feature [name]", "Group issues into a single feature branch")

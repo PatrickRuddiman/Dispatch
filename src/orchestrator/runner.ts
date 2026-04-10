@@ -3,7 +3,6 @@
  */
 
 import type { DispatchResult } from "../dispatcher.js";
-import type { AgentBootOptions } from "../agents/interface.js";
 import type { ProviderName } from "../providers/interface.js";
 import type { DatasourceName } from "../datasources/interface.js";
 import type { SpecOptions, SpecSummary } from "../spec-generator.js";
@@ -125,7 +124,7 @@ export interface OrchestratorAgent {
 }
 
 /** Boot a runner. */
-export async function boot(opts: AgentBootOptions): Promise<OrchestratorAgent> {
+export async function boot(opts: { cwd: string }): Promise<OrchestratorAgent> {
   const { cwd } = opts;
 
   const runner: OrchestratorAgent = {

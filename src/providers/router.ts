@@ -1,34 +1,33 @@
 /**
  * Smart provider router — automatically selects the best provider for each
- * agent role based on task requirements, cost, and provider availability.
+ * skill role based on task requirements, cost, and provider availability.
  *
- * Replaces the manual `resolveAgentProviderConfig()` from config.ts.
  * Produces `PoolEntry[]` arrays for direct consumption by ProviderPool.
  */
 
-import type { AgentName } from "../agents/interface.js";
+import type { SkillName } from "../skills/interface.js";
 import type { ProviderName } from "./interface.js";
 import type { PoolEntry } from "./pool.js";
 import { PROVIDER_REGISTRY, type ProviderMeta } from "./registry.js";
 
-/** Agent roles that need fast/cheap models. */
-const FAST_ROLES: ReadonlySet<AgentName> = new Set(["planner", "commit"]);
+/** Skill roles that need fast/cheap models. */
+const FAST_ROLES: ReadonlySet<SkillName> = new Set(["planner", "commit"]);
 
-/** Agent roles that need strong/capable models. */
-const STRONG_ROLES: ReadonlySet<AgentName> = new Set(["executor", "spec"]);
+/** Skill roles that need strong/capable models. */
+const STRONG_ROLES: ReadonlySet<SkillName> = new Set(["executor", "spec"]);
 
 /**
- * Route an agent role to a prioritized list of provider+model entries.
+ * Route a skill role to a prioritized list of provider+model entries.
  *
  * The returned entries are ordered by preference (cheapest/best first)
  * and can be passed directly to `new ProviderPool({ entries })`.
  *
- * @param role - The agent role to route (planner, executor, spec, commit)
+ * @param role - The skill role to route (planner, executor, spec, commit)
  * @param authenticatedProviders - Provider names that are installed and authenticated
  * @param forceProvider - Optional CLI override that forces a specific provider for all roles
  */
-export function routeAgent(
-  role: AgentName,
+export function routeSkill(
+  role: SkillName,
   authenticatedProviders: ProviderName[],
   forceProvider?: ProviderName,
 ): PoolEntry[] {
@@ -93,17 +92,17 @@ export function routeAgent(
 }
 
 /**
- * Route all agent roles at once, returning a map of role -> PoolEntry[].
+ * Route all skill roles at once, returning a map of role -> PoolEntry[].
  *
- * Convenience wrapper around `routeAgent()` for pipeline setup.
+ * Convenience wrapper around `routeSkill()` for pipeline setup.
  */
-export function routeAllAgents(
+export function routeAllSkills(
   authenticatedProviders: ProviderName[],
   forceProvider?: ProviderName,
 ): Record<"planner" | "executor" | "commit", PoolEntry[]> {
   return {
-    planner: routeAgent("planner", authenticatedProviders, forceProvider),
-    executor: routeAgent("executor", authenticatedProviders, forceProvider),
-    commit: routeAgent("commit", authenticatedProviders, forceProvider),
+    planner: routeSkill("planner", authenticatedProviders, forceProvider),
+    executor: routeSkill("executor", authenticatedProviders, forceProvider),
+    commit: routeSkill("commit", authenticatedProviders, forceProvider),
   };
 }

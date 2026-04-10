@@ -1,13 +1,20 @@
 /**
- * Task dispatcher — creates a fresh session per task to keep contexts
- * isolated and avoid context rot. Works with any registered provider.
+ * Dispatcher — executes skills by sending their prompts to a provider
+ * and processing the results. Each dispatch creates a fresh session
+ * for context isolation.
  */
 
-import type { ProviderInstance } from "./providers/interface.js";
+import type { Skill } from "./skills/interface.js";
+import type { SkillResult } from "./skills/types.js";
+import type { ProviderInstance, ProviderPromptOptions } from "./providers/interface.js";
 import type { Task } from "./parser.js";
 import { log } from "./helpers/logger.js";
 import { fileLoggerStorage } from "./helpers/file-logger.js";
-import { getEnvironmentBlock } from "./helpers/environment.js";
+import { TimeoutError } from "./helpers/timeout.js";
+
+// ---------------------------------------------------------------------------
+// Shared types
+// ---------------------------------------------------------------------------
 
 export interface DispatchResult {
   task: Task;
@@ -15,151 +22,139 @@ export interface DispatchResult {
   error?: string;
 }
 
-/** Patterns that indicate the response is a rate-limit error, not real output. */
-const rateLimitPatterns = [
-  /you[''\u2019]?ve hit your (rate )?limit/i,
-  /rate limit exceeded/i,
-  /too many requests/i,
-  /quota exceeded/i,
-];
+// ---------------------------------------------------------------------------
+// Dispatch options
+// ---------------------------------------------------------------------------
+
+/** Configuration for two-phase timebox (warn then kill). */
+export interface TimeboxConfig {
+  /** Duration in ms before sending a warning message. */
+  warnMs: number;
+  /** Duration in ms after the warning before hard-killing the prompt. */
+  killMs: number;
+  /** Warning message sent to the provider mid-session. */
+  warnMessage: string;
+}
+
+/** Options for the generic `dispatch()` function. */
+export interface DispatchOptions {
+  /** Provider prompt options (e.g. onProgress callback). */
+  promptOptions?: ProviderPromptOptions;
+  /** Two-phase timebox: warn then kill. */
+  timebox?: TimeboxConfig;
+}
+
+// ---------------------------------------------------------------------------
+// Generic dispatch
+// ---------------------------------------------------------------------------
 
 /**
- * Dispatch a single task to the provider in its own session.
- * Each task gets a fresh session for context isolation.
+ * Execute a skill by sending its prompt to a provider and parsing the result.
  *
- * When a `plan` is provided (from the planner agent), it replaces the
- * generic prompt with the planner's context-rich execution instructions.
+ * 1. Calls `skill.buildPrompt(input)` to construct the prompt
+ * 2. Creates a fresh provider session
+ * 3. Sends the prompt (optionally with timebox)
+ * 4. Calls `skill.parseResult(response, input)` to process the output
+ * 5. Wraps everything in a `SkillResult<TOutput>`
  */
-export async function dispatchTask(
-  instance: ProviderInstance,
-  task: Task,
-  cwd: string,
-  plan?: string,
-  worktreeRoot?: string,
-): Promise<DispatchResult> {
+export async function dispatch<TInput, TOutput>(
+  skill: Skill<TInput, TOutput>,
+  input: TInput,
+  provider: ProviderInstance,
+  options?: DispatchOptions,
+): Promise<SkillResult<TOutput>> {
+  const startTime = Date.now();
   try {
-    log.debug(`Dispatching task: ${task.file}:${task.line} — ${task.text.slice(0, 80)}`);
-    const sessionId = await instance.createSession();
-    const prompt = plan ? buildPlannedPrompt(task, cwd, plan, worktreeRoot) : buildPrompt(task, cwd, worktreeRoot);
-    log.debug(`Prompt built (${prompt.length} chars, ${plan ? "with plan" : "no plan"})`);
-    fileLoggerStorage.getStore()?.prompt("dispatchTask", prompt);
+    const prompt = skill.buildPrompt(input);
+    fileLoggerStorage.getStore()?.prompt(skill.name, prompt);
 
-    const response = await instance.prompt(sessionId, prompt);
+    const sessionId = await provider.createSession();
+    log.debug(`[${skill.name}] Prompt built (${prompt.length} chars)`);
 
-    if (response === null) {
-      log.debug("Task dispatch returned null response");
-      fileLoggerStorage.getStore()?.warn("dispatchTask: null response");
-      return { task, success: false, error: "No response from agent" };
+    let response: string | null;
+    if (options?.timebox) {
+      response = await promptWithTimebox(provider, sessionId, prompt, options.timebox, options.promptOptions);
+    } else {
+      response = await provider.prompt(sessionId, prompt, options?.promptOptions);
     }
 
-    const isRateLimited = rateLimitPatterns.some((p) => p.test(response));
-    if (isRateLimited) {
-      const truncated = response.slice(0, 200);
-      log.debug(`Task dispatch hit rate limit: ${truncated}`);
-      fileLoggerStorage.getStore()?.warn(`dispatchTask: rate limit detected — ${truncated}`);
-      return { task, success: false, error: `Rate limit: ${truncated}` };
-    }
+    if (response) fileLoggerStorage.getStore()?.response(skill.name, response);
 
-    log.debug(`Task dispatch completed (${response.length} chars response)`);
-    fileLoggerStorage.getStore()?.response("dispatchTask", response);
-    return { task, success: true };
+    const data = await skill.parseResult(response, input);
+
+    fileLoggerStorage.getStore()?.skillEvent(skill.name, "completed", `${Date.now() - startTime}ms`);
+    return { data, success: true, durationMs: Date.now() - startTime };
   } catch (err) {
     const message = log.extractMessage(err);
-    log.debug(`Task dispatch failed: ${log.formatErrorChain(err)}`);
-    fileLoggerStorage.getStore()?.error(`dispatchTask error: ${message}${err instanceof Error && err.stack ? `\n${err.stack}` : ""}`);
-    return { task, success: false, error: message };
+    fileLoggerStorage.getStore()?.error(`${skill.name} error: ${message}${err instanceof Error && err.stack ? `\n${err.stack}` : ""}`);
+    return { data: null, success: false, error: message, durationMs: Date.now() - startTime };
   }
 }
 
-/**
- * Build a focused prompt for a single task. Includes context about the
- * project but scopes the work to just this one unit.
- */
-function buildPrompt(task: Task, cwd: string, worktreeRoot?: string): string {
-  return [
-    `You are completing a task from a markdown task file.`,
-    ``,
-    `**Working directory:** ${cwd}`,
-    `**Source file:** ${task.file}`,
-    `**Task (line ${task.line}):** ${task.text}`,
-    ``,
-    getEnvironmentBlock(),
-    ``,
-    `Instructions:`,
-    `- Complete ONLY this specific task — do not work on other tasks.`,
-    `- Make the minimal, correct changes needed.`,
-    buildCommitInstruction(task.text),
-    ...buildWorktreeIsolation(worktreeRoot),
-    `- When finished, confirm by saying "Task complete."`,
-  ].join("\n");
-}
+// ---------------------------------------------------------------------------
+// Timebox support
+// ---------------------------------------------------------------------------
 
 /**
- * Build a prompt for the executor when a planner has already explored
- * the codebase and produced a detailed execution plan.
+ * Send a prompt with a two-phase timebox:
+ *   1. After `warnMs`, send a warning message via `provider.send()`
+ *   2. After an additional `killMs`, reject with a TimeoutError
  */
-function buildPlannedPrompt(task: Task, cwd: string, plan: string, worktreeRoot?: string): string {
-  return [
-    `You are an **executor agent** completing a task that has been pre-planned by a planner agent.`,
-    `The planner has already explored the codebase and produced detailed instructions below.`,
-    ``,
-    `**Working directory:** ${cwd}`,
-    `**Source file:** ${task.file}`,
-    `**Task (line ${task.line}):** ${task.text}`,
-    ``,
-    getEnvironmentBlock(),
-    ``,
-    `---`,
-    ``,
-    `## Execution Plan`,
-    ``,
-    plan,
-    ``,
-    `---`,
-    ``,
-    `## Executor Constraints`,
-    `- Follow the plan above precisely — do not deviate, skip steps, or reorder.`,
-    `- Complete ONLY this specific task — do not work on other tasks.`,
-    `- Make the minimal, correct changes needed — do not refactor unrelated code.`,
-    `- Do NOT explore the codebase. The planner has already done all necessary research. Only read or modify the files explicitly referenced in the plan.`,
-    `- Do NOT re-plan, question, or revise the plan. Trust it as given and execute it faithfully.`,
-    `- Do NOT search for additional context using grep, find, or similar tools unless the plan explicitly instructs you to.`,
-    buildCommitInstruction(task.text),
-    ...buildWorktreeIsolation(worktreeRoot),
-    `- When finished, confirm by saying "Task complete."`,
-  ].join("\n");
-}
+async function promptWithTimebox(
+  provider: ProviderInstance,
+  sessionId: string,
+  prompt: string,
+  timebox: TimeboxConfig,
+  promptOptions?: ProviderPromptOptions,
+): Promise<string | null> {
+  const { warnMs, killMs, warnMessage } = timebox;
 
-/**
- * Check whether a task description includes an instruction to commit.
- */
-function taskRequestsCommit(taskText: string): boolean {
-  return /\bcommit\b/i.test(taskText);
-}
+  return new Promise<string | null>((resolve, reject) => {
+    let settled = false;
+    let warnTimer: ReturnType<typeof setTimeout> | undefined;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
 
-/**
- * Build a commit instruction line based on whether the task requests a commit.
- */
-function buildCommitInstruction(taskText: string): string {
-  if (taskRequestsCommit(taskText)) {
-    return (
-      `- The task description includes a commit instruction. After completing the implementation, ` +
-      `stage all changes and create a conventional commit. Use one of these types: ` +
-      `feat, fix, docs, refactor, test, chore, style, perf, ci.`
+    const cleanup = () => {
+      if (warnTimer) clearTimeout(warnTimer);
+      if (killTimer) clearTimeout(killTimer);
+    };
+
+    // Start the warn timer
+    warnTimer = setTimeout(() => {
+      if (settled) return;
+      log.warn(`Timebox warn fired for session ${sessionId} — sending wrap-up message`);
+
+      if (provider.send) {
+        provider.send(sessionId, warnMessage).catch((err) => {
+          log.warn(`Failed to send timebox warning: ${log.extractMessage(err)}`);
+        });
+      } else {
+        log.warn(`Provider does not support send() — cannot deliver timebox warning`);
+      }
+
+      // Start the kill timer
+      killTimer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(new TimeoutError(warnMs + killMs, "dispatch timebox"));
+      }, killMs);
+    }, warnMs);
+
+    // Run the prompt
+    provider.prompt(sessionId, prompt, promptOptions).then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(value);
+      },
+      (err) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(err);
+      },
     );
-  }
-  return `- Do NOT commit changes — the orchestrator handles commits.`;
-}
-
-/**
- * Build worktree isolation instructions when operating inside a git worktree.
- * Returns an empty array when no worktreeRoot is provided (non-worktree mode).
- */
-function buildWorktreeIsolation(worktreeRoot?: string): string[] {
-  if (!worktreeRoot) return [];
-  return [
-    `- **Worktree isolation:** You are operating inside a git worktree at \`${worktreeRoot}\`. ` +
-      `You MUST NOT read, write, or execute commands that access files outside this directory. ` +
-      `All file paths must resolve within \`${worktreeRoot}\`.`,
-  ];
+  });
 }

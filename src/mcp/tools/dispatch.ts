@@ -18,10 +18,10 @@ export function registerDispatchTools(server: McpServer, cwd: string): void {
     "Execute dispatch pipeline for one or more issue IDs. Returns a runId immediately; progress is pushed via logging notifications.",
     {
       issueIds: z.array(z.string()).min(1).describe("Issue IDs to dispatch (e.g. ['42', '43'])"),
-      provider: z.enum(PROVIDER_NAMES).optional().describe("Agent provider (default: from config)"),
+      provider: z.enum(PROVIDER_NAMES).optional().describe("Provider (default: from config)"),
       source: z.enum(DATASOURCE_NAMES).optional().describe("Issue datasource: github, azdevops, md (default: from config)"),
       concurrency: z.number().int().min(1).max(32).optional().describe("Max parallel tasks"),
-      noPlan: z.boolean().optional().describe("Skip the planner agent"),
+      noPlan: z.boolean().optional().describe("Skip the planner"),
       noBranch: z.boolean().optional().describe("Skip branch creation and PR lifecycle"),
       noWorktree: z.boolean().optional().describe("Skip git worktree isolation"),
       retries: z.number().int().min(0).max(10).optional().describe("Retry attempts per task"),

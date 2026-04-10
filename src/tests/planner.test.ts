@@ -1,339 +1,159 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { ProviderInstance } from "../providers/interface.js";
-import { boot } from "../agents/planner.js";
-import { createMockProvider, createMockTask } from "./fixtures.js";
+import { describe, it, expect } from "vitest";
+import { plannerSkill } from "../skills/planner.js";
+import { createMockTask } from "./fixtures.js";
 
 const TASK_FIXTURE = createMockTask();
 
-describe("boot", () => {
-  it("throws when provider is not supplied", async () => {
-    await expect(boot({ cwd: "/tmp" })).rejects.toThrow(
-      "Planner agent requires a provider instance in boot options"
-    );
+describe("plannerSkill", () => {
+  it("has name 'planner'", () => {
+    expect(plannerSkill.name).toBe("planner");
   });
 
-  it("returns an agent with name 'planner'", async () => {
-    const provider = createMockProvider();
-    const agent = await boot({ cwd: "/tmp", provider });
-    expect(agent.name).toBe("planner");
-  });
-
-  it("returns an agent with plan and cleanup methods", async () => {
-    const provider = createMockProvider();
-    const agent = await boot({ cwd: "/tmp", provider });
-    expect(typeof agent.plan).toBe("function");
-    expect(typeof agent.cleanup).toBe("function");
+  it("has buildPrompt and parseResult functions", () => {
+    expect(typeof plannerSkill.buildPrompt).toBe("function");
+    expect(typeof plannerSkill.parseResult).toBe("function");
   });
 });
 
-describe("plan", () => {
-  beforeEach(() => {
-    vi.resetAllMocks();
-  });
-
-  it("creates a session and prompts the provider", async () => {
-    const provider = createMockProvider({
-      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("Step 1: do X"),
+describe("buildPrompt", () => {
+  it("includes task metadata in the prompt", () => {
+    const prompt = plannerSkill.buildPrompt({
+      task: TASK_FIXTURE,
+      cwd: "/workspace",
     });
 
-    const agent = await boot({ cwd: "/tmp/test", provider });
-    const result = await agent.plan(TASK_FIXTURE);
-
-    expect(provider.createSession).toHaveBeenCalledOnce();
-    expect(provider.prompt).toHaveBeenCalledOnce();
-    expect(provider.prompt).toHaveBeenCalledWith(
-      "session-1",
-      expect.stringContaining("Implement the widget")
-    );
-    expect(result.success).toBe(true);
-    expect(result.data?.prompt).toBe("Step 1: do X");
-    expect(result.error).toBeUndefined();
-    expect(result.durationMs).toBeGreaterThanOrEqual(0);
+    expect(prompt).toContain("/workspace");
+    expect(prompt).toContain(TASK_FIXTURE.file);
+    expect(prompt).toContain(`line ${TASK_FIXTURE.line}`);
+    expect(prompt).toContain(TASK_FIXTURE.text);
   });
 
-  it("includes task metadata in the prompt sent to the provider", async () => {
-    const provider = createMockProvider({
-      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("plan output"),
+  it("includes file context in the prompt when provided", () => {
+    const prompt = plannerSkill.buildPrompt({
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
+      fileContext: "# Heading\nSome context about the task",
     });
 
-    const agent = await boot({ cwd: "/workspace", provider });
-    await agent.plan(TASK_FIXTURE);
-
-    const promptArg = vi.mocked(provider.prompt).mock.calls[0][1];
-    expect(promptArg).toContain("/workspace");
-    expect(promptArg).toContain(TASK_FIXTURE.file);
-    expect(promptArg).toContain(`line ${TASK_FIXTURE.line}`);
-    expect(promptArg).toContain(TASK_FIXTURE.text);
+    expect(prompt).toContain("Task File Contents");
+    expect(prompt).toContain("# Heading\nSome context about the task");
   });
 
-  it("includes file context in the prompt when provided", async () => {
-    const provider = createMockProvider({
-      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("plan output"),
+  it("does not include file context section when fileContext is not provided", () => {
+    const prompt = plannerSkill.buildPrompt({
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
     });
 
-    const agent = await boot({ cwd: "/tmp/test", provider });
-    await agent.plan(TASK_FIXTURE, "# Heading\nSome context about the task");
-
-    const promptArg = vi.mocked(provider.prompt).mock.calls[0][1];
-    expect(promptArg).toContain("Task File Contents");
-    expect(promptArg).toContain("# Heading\nSome context about the task");
+    expect(prompt).not.toContain("Task File Contents");
   });
 
-  it("does not include file context section when fileContext is not provided", async () => {
-    const provider = createMockProvider({
-      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("plan output"),
+  it("includes worktree isolation instructions when worktreeRoot is provided", () => {
+    const prompt = plannerSkill.buildPrompt({
+      task: TASK_FIXTURE,
+      cwd: "/worktree/path",
+      worktreeRoot: "/worktree/path",
     });
 
-    const agent = await boot({ cwd: "/tmp/test", provider });
-    await agent.plan(TASK_FIXTURE);
-
-    const promptArg = vi.mocked(provider.prompt).mock.calls[0][1];
-    expect(promptArg).not.toContain("Task File Contents");
+    expect(prompt).toContain("Worktree Isolation");
+    expect(prompt).toContain("/worktree/path");
+    expect(prompt).toContain("MUST be confined");
   });
 
-  it("returns failure when provider returns empty string", async () => {
-    const provider = createMockProvider({
-      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue(""),
+  it("does not include worktree isolation instructions when worktreeRoot is not provided", () => {
+    const prompt = plannerSkill.buildPrompt({
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
     });
 
-    const agent = await boot({ cwd: "/tmp/test", provider });
-    const result = await agent.plan(TASK_FIXTURE);
-
-    expect(result.success).toBe(false);
-    expect(result.data).toBeNull();
-    expect(result.error).toBe("Planner returned empty plan");
-    expect(result.durationMs).toBeGreaterThanOrEqual(0);
+    expect(prompt).not.toContain("Worktree Isolation");
   });
 
-  it("returns failure when provider returns whitespace-only string", async () => {
-    const provider = createMockProvider({
-      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("   \n  \t  "),
+  it("includes all worktree restriction instructions in the prompt", () => {
+    const prompt = plannerSkill.buildPrompt({
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
+      worktreeRoot: "/wt/issue-1",
     });
 
-    const agent = await boot({ cwd: "/tmp/test", provider });
-    const result = await agent.plan(TASK_FIXTURE);
-
-    expect(result.success).toBe(false);
-    expect(result.data).toBeNull();
-    expect(result.error).toBe("Planner returned empty plan");
-    expect(result.durationMs).toBeGreaterThanOrEqual(0);
+    expect(prompt).toContain("Do NOT read, write, or execute commands that access files outside this directory.");
+    expect(prompt).toContain("Do NOT reference or modify files in the main repository working tree or other worktrees.");
+    expect(prompt).toContain("All relative paths must resolve within the worktree root above.");
   });
 
-  it("returns failure when provider returns null", async () => {
-    const provider = createMockProvider({
-      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue(null),
+  it("includes both file context and worktree isolation when both are provided", () => {
+    const prompt = plannerSkill.buildPrompt({
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
+      fileContext: "# Design\nSome notes",
+      worktreeRoot: "/wt/issue-1",
     });
 
-    const agent = await boot({ cwd: "/tmp/test", provider });
-    const result = await agent.plan(TASK_FIXTURE);
-
-    expect(result.success).toBe(false);
-    expect(result.data).toBeNull();
-    expect(result.error).toBe("Planner returned empty plan");
-    expect(result.durationMs).toBeGreaterThanOrEqual(0);
+    expect(prompt).toContain("Task File Contents");
+    expect(prompt).toContain("# Design\nSome notes");
+    expect(prompt).toContain("Worktree Isolation");
+    expect(prompt).toContain("/wt/issue-1");
   });
 
-  it("catches provider exceptions and returns failure", async () => {
-    const provider = createMockProvider({
-      createSession: vi.fn<ProviderInstance["createSession"]>().mockRejectedValue(
-        new Error("Connection refused")
-      ),
+  it("places worktreeRoot in isolation section and cwd in task section independently", () => {
+    const prompt = plannerSkill.buildPrompt({
+      task: TASK_FIXTURE,
+      cwd: "/workspace/repo",
+      worktreeRoot: "/workspace/repo/.dispatch/worktrees/slug",
     });
 
-    const agent = await boot({ cwd: "/tmp/test", provider });
-    const result = await agent.plan(TASK_FIXTURE);
-
-    expect(result.success).toBe(false);
-    expect(result.data).toBeNull();
-    expect(result.error).toBe("Connection refused");
-    expect(result.durationMs).toBeGreaterThanOrEqual(0);
+    expect(prompt).toContain("**Working directory:** /workspace/repo");
+    expect(prompt).toContain("/workspace/repo/.dispatch/worktrees/slug");
+    expect(prompt).toContain("Worktree Isolation");
   });
 
-  it("catches prompt exceptions and returns failure", async () => {
-    const provider = createMockProvider({
-      prompt: vi.fn<ProviderInstance["prompt"]>().mockRejectedValue(
-        new Error("Timeout exceeded")
-      ),
+  it("does not include worktree isolation when worktreeRoot is empty string", () => {
+    const prompt = plannerSkill.buildPrompt({
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
+      worktreeRoot: "",
     });
 
-    const agent = await boot({ cwd: "/tmp/test", provider });
-    const result = await agent.plan(TASK_FIXTURE);
-
-    expect(result.success).toBe(false);
-    expect(result.data).toBeNull();
-    expect(result.error).toBe("Timeout exceeded");
-    expect(result.durationMs).toBeGreaterThanOrEqual(0);
+    expect(prompt).not.toContain("Worktree Isolation");
   });
 
-  it("handles non-Error exceptions", async () => {
-    const provider = createMockProvider({
-      createSession: vi.fn<ProviderInstance["createSession"]>().mockRejectedValue(
-        "raw string error"
-      ),
+  it("includes environment section in the prompt", () => {
+    const prompt = plannerSkill.buildPrompt({
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
     });
 
-    const agent = await boot({ cwd: "/tmp/test", provider });
-    const result = await agent.plan(TASK_FIXTURE);
-
-    expect(result.success).toBe(false);
-    expect(result.error).toBe("raw string error");
-  });
-
-  it("tracks elapsed time in milliseconds", async () => {
-    const provider = createMockProvider({
-      prompt: vi.fn<ProviderInstance["prompt"]>().mockImplementation(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 25));
-        return "plan output";
-      }),
-    });
-
-    const agent = await boot({ cwd: "/tmp/test", provider });
-    const result = await agent.plan(TASK_FIXTURE);
-
-    expect(result.durationMs).toBeGreaterThanOrEqual(20);
-    expect(result.durationMs).toBeLessThan(2000);
-  });
-
-  it("uses cwd override in prompt when provided", async () => {
-    const provider = createMockProvider({
-      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("plan output"),
-    });
-
-    const agent = await boot({ cwd: "/original", provider });
-    await agent.plan(TASK_FIXTURE, undefined, "/worktree/path");
-
-    const promptArg = vi.mocked(provider.prompt).mock.calls[0][1];
-    expect(promptArg).toContain("/worktree/path");
-    expect(promptArg).not.toContain("/original");
-  });
-
-  it("falls back to boot-time cwd when cwd override is not provided", async () => {
-    const provider = createMockProvider({
-      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("plan output"),
-    });
-
-    const agent = await boot({ cwd: "/boot-cwd", provider });
-    await agent.plan(TASK_FIXTURE);
-
-    const promptArg = vi.mocked(provider.prompt).mock.calls[0][1];
-    expect(promptArg).toContain("/boot-cwd");
-  });
-
-  it("includes worktree isolation instructions when worktreeRoot is provided", async () => {
-    const provider = createMockProvider({
-      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("plan output"),
-    });
-
-    const agent = await boot({ cwd: "/tmp/test", provider });
-    await agent.plan(TASK_FIXTURE, undefined, "/worktree/path", "/worktree/path");
-
-    const promptArg = vi.mocked(provider.prompt).mock.calls[0][1];
-    expect(promptArg).toContain("Worktree Isolation");
-    expect(promptArg).toContain("/worktree/path");
-    expect(promptArg).toContain("MUST be confined");
-  });
-
-  it("does not include worktree isolation instructions when worktreeRoot is not provided", async () => {
-    const provider = createMockProvider({
-      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("plan output"),
-    });
-
-    const agent = await boot({ cwd: "/tmp/test", provider });
-    await agent.plan(TASK_FIXTURE);
-
-    const promptArg = vi.mocked(provider.prompt).mock.calls[0][1];
-    expect(promptArg).not.toContain("Worktree Isolation");
-  });
-
-  it("includes all worktree restriction instructions in the prompt", async () => {
-    const provider = createMockProvider({
-      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("plan output"),
-    });
-
-    const agent = await boot({ cwd: "/tmp/test", provider });
-    await agent.plan(TASK_FIXTURE, undefined, "/wt/issue-1", "/wt/issue-1");
-
-    const promptArg = vi.mocked(provider.prompt).mock.calls[0][1];
-    expect(promptArg).toContain("Do NOT read, write, or execute commands that access files outside this directory.");
-    expect(promptArg).toContain("Do NOT reference or modify files in the main repository working tree or other worktrees.");
-    expect(promptArg).toContain("All relative paths must resolve within the worktree root above.");
-  });
-
-  it("includes both file context and worktree isolation when both are provided", async () => {
-    const provider = createMockProvider({
-      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("plan output"),
-    });
-
-    const agent = await boot({ cwd: "/tmp/test", provider });
-    await agent.plan(TASK_FIXTURE, "# Design\nSome notes", "/wt/issue-1", "/wt/issue-1");
-
-    const promptArg = vi.mocked(provider.prompt).mock.calls[0][1];
-    expect(promptArg).toContain("Task File Contents");
-    expect(promptArg).toContain("# Design\nSome notes");
-    expect(promptArg).toContain("Worktree Isolation");
-    expect(promptArg).toContain("/wt/issue-1");
-  });
-
-  it("places worktreeRoot in isolation section and cwd in task section independently", async () => {
-    const provider = createMockProvider({
-      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("plan output"),
-    });
-
-    const agent = await boot({ cwd: "/tmp/test", provider });
-    await agent.plan(TASK_FIXTURE, undefined, "/workspace/repo", "/workspace/repo/.dispatch/worktrees/slug");
-
-    const promptArg = vi.mocked(provider.prompt).mock.calls[0][1];
-    expect(promptArg).toContain("**Working directory:** /workspace/repo");
-    expect(promptArg).toContain("/workspace/repo/.dispatch/worktrees/slug");
-    expect(promptArg).toContain("Worktree Isolation");
-  });
-
-  it("does not include worktree isolation when worktreeRoot is empty string", async () => {
-    const provider = createMockProvider({
-      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("plan output"),
-    });
-
-    const agent = await boot({ cwd: "/tmp/test", provider });
-    await agent.plan(TASK_FIXTURE, undefined, undefined, "");
-
-    const promptArg = vi.mocked(provider.prompt).mock.calls[0][1];
-    expect(promptArg).not.toContain("Worktree Isolation");
-  });
-
-  it("includes worktree isolation with boot-time cwd when no cwd override is given", async () => {
-    const provider = createMockProvider({
-      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("plan output"),
-    });
-
-    const agent = await boot({ cwd: "/boot-dir", provider });
-    await agent.plan(TASK_FIXTURE, undefined, undefined, "/boot-dir");
-
-    const promptArg = vi.mocked(provider.prompt).mock.calls[0][1];
-    expect(promptArg).toContain("**Working directory:** /boot-dir");
-    expect(promptArg).toContain("Worktree Isolation");
-    expect(promptArg).toContain("MUST be confined");
-    expect(promptArg).toContain("/boot-dir");
-  });
-
-  it("includes environment section in the prompt", async () => {
-    const provider = createMockProvider({
-      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("plan output"),
-    });
-
-    const agent = await boot({ cwd: "/tmp/test", provider });
-    await agent.plan(TASK_FIXTURE);
-
-    const promptArg = vi.mocked(provider.prompt).mock.calls[0][1];
-    expect(promptArg).toContain("## Environment");
-    expect(promptArg).toContain("Operating System");
-    expect(promptArg).toContain("Do NOT write intermediate scripts");
+    expect(prompt).toContain("## Environment");
+    expect(prompt).toContain("Operating System");
+    expect(prompt).toContain("Do NOT write intermediate scripts");
   });
 });
 
-describe("cleanup", () => {
-  it("resolves without error", async () => {
-    const provider = createMockProvider();
-    const agent = await boot({ cwd: "/tmp", provider });
-    await expect(agent.cleanup()).resolves.toBeUndefined();
+describe("parseResult", () => {
+  it("returns PlannerData with prompt on non-empty response", () => {
+    const result = plannerSkill.parseResult("Step 1: do X", {
+      task: TASK_FIXTURE,
+      cwd: "/tmp",
+    });
+
+    expect(result).toEqual({ prompt: "Step 1: do X" });
+  });
+
+  it("throws when response is empty string", () => {
+    expect(() =>
+      plannerSkill.parseResult("", { task: TASK_FIXTURE, cwd: "/tmp" }),
+    ).toThrow("Planner returned empty plan");
+  });
+
+  it("throws when response is whitespace-only", () => {
+    expect(() =>
+      plannerSkill.parseResult("   \n  \t  ", { task: TASK_FIXTURE, cwd: "/tmp" }),
+    ).toThrow("Planner returned empty plan");
+  });
+
+  it("throws when response is null", () => {
+    expect(() =>
+      plannerSkill.parseResult(null, { task: TASK_FIXTURE, cwd: "/tmp" }),
+    ).toThrow("Planner returned empty plan");
   });
 });

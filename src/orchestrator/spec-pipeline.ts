@@ -3,12 +3,13 @@
  * coordinator thin and this pipeline independently testable.
  *
  * Handles: datasource resolution, issue fetching (tracker and file/glob
- * modes), provider/agent booting, batch spec generation, datasource sync
+ * modes), provider/skill booting, batch spec generation, datasource sync
  * (update existing issues or create new ones), and cleanup.
  */
 
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { mkdir, readFile, rename, unlink } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { glob } from "glob";
 import type { SpecOptions, SpecSummary, SpecProgressEvent } from "../spec-generator.js";
 import { isIssueNumbers, isGlobOrFilePath, resolveSource, defaultConcurrency, DEFAULT_SPEC_WARN_MIN, DEFAULT_SPEC_KILL_MIN } from "../spec-generator.js";
@@ -18,9 +19,9 @@ import { extractTitle } from "../datasources/md.js";
 import type { ProviderInstance, ProviderName } from "../providers/interface.js";
 import { PROVIDER_NAMES } from "../providers/interface.js";
 import { bootProvider, getAuthenticatedProviders } from "../providers/index.js";
-import { routeAgent } from "../providers/router.js";
-import type { SpecAgent } from "../agents/spec.js";
-import { boot as bootSpecAgent } from "../agents/spec.js";
+import { routeSkill } from "../providers/router.js";
+import { specSkill, type SpecInput } from "../skills/spec.js";
+import { dispatch, type DispatchOptions } from "../dispatcher.js";
 import { registerCleanup } from "../helpers/cleanup.js";
 import { log } from "../helpers/logger.js";
 import { FileLogger, fileLoggerStorage } from "../helpers/file-logger.js";
@@ -263,14 +264,14 @@ function previewDryRun(
   };
 }
 
-/** Boot the AI provider and spec agent, render the header banner. */
+/** Boot the AI provider and render the header banner. */
 async function bootPipeline(
   provider: ProviderName,
   serverUrl: string | undefined,
   specCwd: string,
   model: string | undefined,
   source: DatasourceName,
-): Promise<{ specAgent: SpecAgent; instance: ProviderInstance }> {
+): Promise<{ instance: ProviderInstance }> {
   const bootStart = Date.now();
   log.info(`Booting ${provider} provider...`);
   log.debug(serverUrl ? `Using server URL: ${serverUrl}` : "No --server-url, will spawn local server");
@@ -290,17 +291,14 @@ async function bootPipeline(
   console.log(chalk.dim("  ─".repeat(24)));
   console.log("");
 
-  const specAgent = await bootSpecAgent({ provider: instance, cwd: specCwd });
-
-  return { specAgent, instance };
+  return { instance };
 }
 
 /** Generate specs in parallel batches, sync to datasource, and track results. */
 async function generateSpecsBatch(
   validItems: ValidItem[],
   items: ResolvedItem[],
-  specAgent: SpecAgent,
-  instance: ProviderInstance,
+  provider: ProviderInstance,
   isTrackerMode: boolean,
   isInlineText: boolean,
   datasource: Datasource,
@@ -325,7 +323,7 @@ async function generateSpecsBatch(
   const fileDurationsMs: Record<string, number> = {};
 
   const genQueue = [...validItems];
-  let modelLoggedInBanner = !!instance.model;
+  let modelLoggedInBanner = !!provider.model;
 
   async function processItem({ id, details }: ValidItem): Promise<void> {
     const specStart = Date.now();
@@ -360,26 +358,37 @@ async function generateSpecsBatch(
       try {
         fileLoggerStorage.getStore()?.info(`Starting spec generation for ${isTrackerMode ? `#${id}` : filepath}`);
         if (!quiet) log.info(`Generating spec for ${isTrackerMode ? `#${id}` : filepath}: ${details.title}...`);
-        const generateLabel = `specAgent.generate(${isTrackerMode ? `#${id}` : filepath})`;
+        const generateLabel = `dispatch(spec, ${isTrackerMode ? `#${id}` : filepath})`;
+
+        const tmpDir = join(resolve(specCwd), ".dispatch", "tmp");
+        await mkdir(tmpDir, { recursive: true });
+        const tmpPath = join(tmpDir, `spec-${randomUUID()}.md`);
+
+        const specInput: SpecInput = {
+          issue: isTrackerMode ? details : undefined,
+          filePath: isTrackerMode ? undefined : id,
+          fileContent: isTrackerMode ? undefined : details.body,
+          cwd: specCwd,
+          outputPath: filepath,
+          tmpPath,
+        };
+
+        const dispatchOpts: DispatchOptions = {
+          promptOptions: {
+            onProgress: tuiTask ? (snapshot) => {
+              tuiTask.feedback = snapshot.text;
+              tuiUpdate?.();
+            } : undefined,
+          },
+          timebox: {
+            warnMs: specWarnMs,
+            killMs: specKillMs,
+            warnMessage: `Your spec generation time is done. You have exceeded the ${Math.round(specWarnMs / 60_000)}-minute limit. You MUST write the spec file to "${filepath}" immediately. If you do not comply within ${Math.round(specKillMs / 1000)} seconds, you will be terminated.`,
+          },
+        };
 
         const result = await withRetry(
-          () => withTimeout(
-            specAgent.generate({
-              issue: isTrackerMode ? details : undefined,
-              filePath: isTrackerMode ? undefined : id,
-              fileContent: isTrackerMode ? undefined : details.body,
-              cwd: specCwd,
-              outputPath: filepath,
-              timeboxWarnMs: specWarnMs,
-              timeboxKillMs: specKillMs,
-              onProgress: tuiTask ? (snapshot) => {
-                tuiTask.feedback = snapshot.text;
-                tuiUpdate?.();
-              } : undefined,
-            }),
-            specWarnMs + specKillMs,
-            generateLabel,
-          ),
+          () => dispatch(specSkill, specInput, provider, dispatchOpts),
           retries,
           { label: generateLabel },
         );
@@ -507,8 +516,8 @@ async function generateSpecsBatch(
       failed++;
     }
 
-    if (!modelLoggedInBanner && instance.model) {
-      if (!quiet) log.info(`Detected model: ${instance.model}`);
+    if (!modelLoggedInBanner && provider.model) {
+      if (!quiet) log.info(`Detected model: ${provider.model}`);
       modelLoggedInBanner = true;
     }
   }
@@ -524,16 +533,10 @@ async function generateSpecsBatch(
   return { generatedFiles, issueNumbers, dispatchIdentifiers, failed, fileDurationsMs };
 }
 
-/** Clean up spec agent and provider, logging warnings on failure. */
+/** Clean up the provider, logging warnings on failure. */
 async function cleanupPipeline(
-  specAgent: SpecAgent,
   instance: ProviderInstance,
 ): Promise<void> {
-  try {
-    await specAgent.cleanup();
-  } catch (err) {
-    log.warn(`Spec agent cleanup failed: ${log.formatErrorChain(err)}`);
-  }
   try {
     await instance.cleanup();
   } catch (err) {
@@ -651,12 +654,12 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     throw new Error("No authenticated providers available. Run 'dispatch config' to set up providers.");
   }
 
-  const specRoute = routeAgent("spec", available, forceProvider);
+  const specRoute = routeSkill("spec", available, forceProvider);
   const resolvedProvider = specRoute[0].provider;
   const resolvedModel = specRoute[0].model;
 
-  // ── Boot provider and spec agent ───────────────────────────
-  const { specAgent, instance } = await bootPipeline(resolvedProvider, serverUrl, specCwd, resolvedModel, source);
+  // ── Boot provider ──────────────────────────────────────────
+  const { instance } = await bootPipeline(resolvedProvider, serverUrl, specCwd, resolvedModel, source);
 
   // ── Start TUI ──────────────────────────────────────────────
   const verbose = log.verbose;
@@ -705,7 +708,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
   // ── Generate specs in batches ──────────────────────────────
   try {
     const results = await generateSpecsBatch(
-      validItems, items, specAgent, instance,
+      validItems, items, instance,
       isTrackerMode, isInlineText,
       datasource, fetchOpts, outputDir, specCwd,
       concurrency, retries, specWarnMs, specKillMs,
@@ -714,7 +717,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     );
 
     // ── Cleanup ────────────────────────────────────────────────
-    await cleanupPipeline(specAgent, instance);
+    await cleanupPipeline(instance);
 
     // ── Stop TUI ───────────────────────────────────────────────
     tui.state.phase = "done";

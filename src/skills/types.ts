@@ -1,10 +1,10 @@
 /**
- * Shared agent result types — provides a generic `AgentResult<T>` that all
- * agent implementations can use as their return type, ensuring consistent
+ * Shared skill result types — provides a generic `SkillResult<T>` that all
+ * skill implementations can use as their return type, ensuring consistent
  * error handling, duration tracking, and payload access across the pipeline.
  *
  * Concrete data type aliases (`PlannerData`, `ExecutorData`, `SpecData`)
- * define the domain-specific payload shape for each agent role.
+ * define the domain-specific payload shape for each skill role.
  */
 
 import type { DispatchResult } from "../dispatcher.js";
@@ -15,7 +15,7 @@ import type { DispatchResult } from "../dispatcher.js";
  * Used by orchestration code to decide on retry strategies, logging levels,
  * and user-facing messages without parsing error strings.
  */
-export type AgentErrorCode =
+export type SkillErrorCode =
   | "TIMEOUT"
   | "NO_RESPONSE"
   | "VALIDATION_FAILED"
@@ -23,14 +23,14 @@ export type AgentErrorCode =
   | "UNKNOWN";
 
 /**
- * Generic result type returned by all agents.
+ * Generic result type returned by all skills.
  *
  * Discriminated on `success` so that TypeScript automatically narrows
  * `data` to `T` (non-null) in the `success: true` branch, and to `null`
  * in the `success: false` branch — eliminating the need for non-null
  * assertions (`!`) at call sites.
  */
-export type AgentResult<T> =
+export type SkillResult<T> =
   | {
       /** Operation succeeded; payload is guaranteed non-null. */
       success: true;
@@ -51,28 +51,28 @@ export type AgentResult<T> =
       /** Human-readable error message. */
       error?: string;
       /** Machine-readable error classification. */
-      errorCode?: AgentErrorCode;
+      errorCode?: SkillErrorCode;
       /** Elapsed wall-clock time in milliseconds. */
       durationMs?: number;
     };
 
 // ---------------------------------------------------------------------------
-// Concrete data types — one per agent role
+// Concrete data types — one per skill role
 // ---------------------------------------------------------------------------
 
-/** Domain payload for the planner agent. */
+/** Domain payload for the planner skill. */
 export interface PlannerData {
-  /** The system prompt produced for the executor agent. */
+  /** The system prompt produced for the executor. */
   prompt: string;
 }
 
-/** Domain payload for the executor agent. */
+/** Domain payload for the executor skill. */
 export interface ExecutorData {
   /** The underlying dispatch result. */
   dispatchResult: DispatchResult;
 }
 
-/** Domain payload for the spec agent. */
+/** Domain payload for the spec skill. */
 export type SpecData =
   | {
       /** The cleaned spec content. */
