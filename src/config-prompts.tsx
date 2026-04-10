@@ -6,8 +6,7 @@
  * the user just needs to authenticate the providers they want to use.
  */
 
-import { select, confirm, input } from "@inquirer/prompts";
-import chalk from "chalk";
+import { select, confirm, input } from "./helpers/ink-prompts.js";
 import { log } from "./helpers/logger.js";
 import {
   loadConfig,
@@ -29,11 +28,11 @@ import { setupProviderAuth } from "./providers/auth-setup.js";
 function formatAuthStatus(status: AuthStatus): string {
   switch (status.status) {
     case "authenticated":
-      return chalk.green("authenticated");
+      return "authenticated";
     case "not-configured":
-      return chalk.red("not configured");
+      return "not configured";
     case "expired":
-      return chalk.yellow("expired");
+      return "expired";
   }
 }
 
@@ -45,7 +44,7 @@ function formatAuthStatus(status: AuthStatus): string {
  */
 export async function runInteractiveConfigWizard(configDir?: string): Promise<void> {
   console.log();
-  log.info(chalk.bold("Dispatch Setup"));
+  log.info("Dispatch Setup");
   console.log();
 
   // ── Load existing config ───────────────────────────────────
@@ -85,12 +84,10 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
 
   // Display status table
   for (const ps of providerStatuses) {
-    const tierLabel = ps.tier === "free" ? chalk.dim("(free tier)") : chalk.dim("(API key)");
+    const tierLabel = ps.tier === "free" ? "(free tier)" : "(API key)";
     const statusLabel = formatAuthStatus(ps.authStatus);
-    const indicator = ps.authStatus.status === "authenticated"
-      ? chalk.green("  ✓")
-      : chalk.red("  ✗");
-    console.log(`${indicator}  ${chalk.bold(ps.displayName.padEnd(18))} ${statusLabel}  ${tierLabel}`);
+    const indicator = ps.authStatus.status === "authenticated" ? "  ✓" : "  ✗";
+    console.log(`${indicator}  ${ps.displayName.padEnd(18)} ${statusLabel}  ${tierLabel}`);
   }
   console.log();
 
@@ -129,11 +126,9 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
 
   // Show final status
   console.log();
-  log.info(chalk.bold("Provider status:"));
+  log.info("Provider status:");
   for (const ps of providerStatuses) {
-    const indicator = ps.authStatus.status === "authenticated"
-      ? chalk.green("✓")
-      : chalk.red("✗");
+    const indicator = ps.authStatus.status === "authenticated" ? "✓" : "✗";
     console.log(`  ${indicator} ${ps.displayName}`);
   }
   console.log();
@@ -148,9 +143,7 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
   const detectedSource = await detectDatasource(process.cwd());
   const datasourceDefault: DatasourceName | "auto" = existing.source ?? "auto";
   if (detectedSource) {
-    log.info(
-      `Detected datasource ${chalk.cyan(detectedSource)} from git remote`,
-    );
+    log.info(`Detected datasource ${detectedSource} from git remote`);
   }
 
   // ── Datasource selection ───────────────────────────────────
@@ -195,7 +188,7 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
     }
 
     console.log();
-    log.info(chalk.bold("Azure DevOps settings") + chalk.dim(" (leave empty to skip):"));
+    log.info("Azure DevOps settings (leave empty to skip):");
 
     const orgInput = await input({
       message: "Organization URL:",
@@ -252,20 +245,18 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
 
   // ── Summary ────────────────────────────────────────────────
   console.log();
-  log.info(chalk.bold("Configuration summary:"));
+  log.info("Configuration summary:");
   for (const [key, value] of Object.entries(newConfig)) {
     if (value !== undefined) {
       if (key === "enabledProviders" && Array.isArray(value)) {
-        console.log(`  ${chalk.cyan(key)} = ${(value as string[]).join(", ")}`);
+        console.log(`  ${key} = ${(value as string[]).join(", ")}`);
       } else {
-        console.log(`  ${chalk.cyan(key)} = ${value}`);
+        console.log(`  ${key} = ${value}`);
       }
     }
   }
   if (selectedSource === "auto") {
-    console.log(
-      `  ${chalk.cyan("source")} = auto (detect from git remote at runtime)`,
-    );
+    console.log(`  source = auto (detect from git remote at runtime)`);
   }
   console.log();
 

@@ -9,15 +9,10 @@
  *   - OpenCode: OpenCode's own config system
  */
 
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { confirm, input, select } from "@inquirer/prompts";
-import chalk from "chalk";
+import { select } from "../helpers/ink-prompts.js";
 import { log } from "../helpers/logger.js";
 import type { ProviderName } from "./interface.js";
-import { PROVIDER_REGISTRY, type AuthStatus } from "./registry.js";
-
-const exec = promisify(execFile);
+import { PROVIDER_REGISTRY } from "./registry.js";
 
 /** Timeout for spawned auth commands. */
 const AUTH_CMD_TIMEOUT_MS = 120_000;
@@ -27,8 +22,6 @@ const AUTH_CMD_TIMEOUT_MS = 120_000;
  * Returns true if auth was successfully configured.
  */
 export async function setupProviderAuth(name: ProviderName): Promise<boolean> {
-  const meta = PROVIDER_REGISTRY[name];
-
   switch (name) {
     case "copilot":
       return setupCopilotAuth();
@@ -47,29 +40,20 @@ export async function setupProviderAuth(name: ProviderName): Promise<boolean> {
 }
 
 async function setupCopilotAuth(): Promise<boolean> {
-  log.info(chalk.bold("GitHub Copilot Authentication"));
+  log.info("GitHub Copilot Authentication");
   console.log();
 
   const method = await select({
     message: "How would you like to authenticate?",
     choices: [
-      {
-        name: "GitHub CLI (gh auth login)",
-        value: "gh-cli" as const,
-        description: "Uses the GitHub CLI's device flow — opens a browser",
-      },
-      {
-        name: "Environment variable",
-        value: "env-var" as const,
-        description: "Set GITHUB_TOKEN or GH_TOKEN manually",
-      },
+      { name: "GitHub CLI (gh auth login)", value: "gh-cli" as const, description: "Uses the GitHub CLI's device flow" },
+      { name: "Environment variable", value: "env-var" as const, description: "Set GITHUB_TOKEN or GH_TOKEN manually" },
     ],
   });
 
   if (method === "gh-cli") {
     try {
       log.info("Running 'gh auth login'...");
-      // gh auth login uses interactive terminal — spawn with inherited stdio
       const { spawn } = await import("node:child_process");
       await new Promise<void>((resolve, reject) => {
         const child = spawn("gh", ["auth", "login"], {
@@ -90,30 +74,22 @@ async function setupCopilotAuth(): Promise<boolean> {
 
   // env-var path
   log.info("Set one of these environment variables in your shell profile:");
-  log.info(`  ${chalk.cyan("GITHUB_TOKEN")}=<your token>`);
-  log.info(`  ${chalk.cyan("GH_TOKEN")}=<your token>`);
+  log.info("  GITHUB_TOKEN=<your token>");
+  log.info("  GH_TOKEN=<your token>");
   console.log();
   log.dim("After setting the variable, restart your terminal and re-run 'dispatch config'.");
   return false;
 }
 
 async function setupClaudeAuth(): Promise<boolean> {
-  log.info(chalk.bold("Claude Code Authentication"));
+  log.info("Claude Code Authentication");
   console.log();
 
   const method = await select({
     message: "How would you like to authenticate?",
     choices: [
-      {
-        name: "API key (ANTHROPIC_API_KEY)",
-        value: "api-key" as const,
-        description: "Paste your Anthropic API key",
-      },
-      {
-        name: "Claude CLI login",
-        value: "cli-login" as const,
-        description: "Run 'claude login' — opens a browser",
-      },
+      { name: "API key (ANTHROPIC_API_KEY)", value: "api-key" as const, description: "Paste your Anthropic API key" },
+      { name: "Claude CLI login", value: "cli-login" as const, description: "Run 'claude login' — opens a browser" },
     ],
   });
 
@@ -140,25 +116,25 @@ async function setupClaudeAuth(): Promise<boolean> {
 
   // API key path
   log.info("Set the following environment variable in your shell profile:");
-  log.info(`  ${chalk.cyan("ANTHROPIC_API_KEY")}=<your API key>`);
+  log.info("  ANTHROPIC_API_KEY=<your API key>");
   console.log();
   log.dim("After setting the variable, restart your terminal and re-run 'dispatch config'.");
   return false;
 }
 
 async function setupCodexAuth(): Promise<boolean> {
-  log.info(chalk.bold("OpenAI Codex Authentication"));
+  log.info("OpenAI Codex Authentication");
   console.log();
 
   log.info("Set the following environment variable in your shell profile:");
-  log.info(`  ${chalk.cyan("OPENAI_API_KEY")}=<your API key>`);
+  log.info("  OPENAI_API_KEY=<your API key>");
   console.log();
   log.dim("After setting the variable, restart your terminal and re-run 'dispatch config'.");
   return false;
 }
 
 async function setupOpencodeAuth(): Promise<boolean> {
-  log.info(chalk.bold("OpenCode Authentication"));
+  log.info("OpenCode Authentication");
   console.log();
 
   log.info("OpenCode uses its own configuration system.");

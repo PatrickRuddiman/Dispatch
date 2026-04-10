@@ -7,8 +7,7 @@
  * call sites can share the logic and tests can mock it via `vi.mock()`.
  */
 
-import { input } from "@inquirer/prompts";
-import chalk from "chalk";
+import { input } from "./ink-prompts.js";
 import { log } from "./logger.js";
 
 /** Default threshold above which confirmation is required. */
@@ -31,11 +30,11 @@ export async function confirmLargeBatch(
   if (count <= threshold) return true;
 
   log.warn(
-    `This operation will process ${chalk.bold(String(count))} specs, which exceeds the safety threshold of ${threshold}.`,
+    `This operation will process ${count} specs, which exceeds the safety threshold of ${threshold}.`,
   );
 
   const answer = await input({
-    message: `Type ${chalk.bold('"yes"')} to proceed:`,
+    message: 'Type "yes" to proceed:',
   });
 
   return answer.trim().toLowerCase() === "yes";

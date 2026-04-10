@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
-import { select, confirm, input } from "@inquirer/prompts";
+import { select, confirm, input } from "../helpers/ink-prompts.js";
 import { runInteractiveConfigWizard } from "../config-prompts.js";
 import { loadConfig, saveConfig } from "../config.js";
 import { detectDatasource, getGitRemoteUrl, parseAzDevOpsRemoteUrl } from "../datasources/index.js";
@@ -7,7 +7,7 @@ import { getProviderStatuses } from "../providers/registry.js";
 import { setupProviderAuth } from "../providers/auth-setup.js";
 import { ensureAuthReady } from "../helpers/auth.js";
 
-vi.mock("@inquirer/prompts", () => ({
+vi.mock("../helpers/ink-prompts.js", () => ({
   select: vi.fn(),
   confirm: vi.fn(),
   input: vi.fn(),
