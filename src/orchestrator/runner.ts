@@ -3,6 +3,7 @@
  */
 
 import type { DispatchResult } from "../dispatcher.js";
+import type { ProviderModelConfig } from "../config.js";
 import type { ProviderName } from "../providers/interface.js";
 import type { DatasourceName } from "../datasources/interface.js";
 import type { SpecOptions, SpecSummary } from "../spec-generator.js";
@@ -37,6 +38,8 @@ export interface OrchestrateRunOptions {
   provider?: ProviderName;
   /** Authenticated providers from config — router uses these for auto-selection. */
   enabledProviders?: ProviderName[];
+  /** Per-provider model overrides from config. */
+  providerModels?: Partial<Record<ProviderName, ProviderModelConfig>>;
   serverUrl?: string;
   source?: DatasourceName;
   org?: string;
@@ -67,6 +70,8 @@ export interface RawCliArgs {
   provider?: ProviderName;
   /** Authenticated providers from config. */
   enabledProviders?: ProviderName[];
+  /** Per-provider model overrides from config. */
+  providerModels?: Partial<Record<ProviderName, ProviderModelConfig>>;
   serverUrl?: string;
   cwd: string;
   verbose: boolean;
@@ -185,7 +190,7 @@ export async function boot(opts: { cwd: string }): Promise<OrchestratorAgent> {
       if (m.spec) {
         return this.generateSpecs({
           issues: m.spec, issueSource: m.issueSource, provider: m.provider,
-          enabledProviders: m.enabledProviders,
+          enabledProviders: m.enabledProviders, providerModels: m.providerModels,
           serverUrl: m.serverUrl, cwd: m.cwd, outputDir: m.outputDir,
           org: m.org, project: m.project, workItemType: m.workItemType, iteration: m.iteration, area: m.area, concurrency: m.concurrency,
           dryRun: m.dryRun, retries: m.retries,
@@ -227,7 +232,7 @@ export async function boot(opts: { cwd: string }): Promise<OrchestratorAgent> {
 
         return this.generateSpecs({
           issues, issueSource: m.issueSource, provider: m.provider,
-          enabledProviders: m.enabledProviders,
+          enabledProviders: m.enabledProviders, providerModels: m.providerModels,
           serverUrl: m.serverUrl, cwd: m.cwd, outputDir: m.outputDir,
           org: m.org, project: m.project, workItemType: m.workItemType, iteration: m.iteration, area: m.area, concurrency: m.concurrency,
           dryRun: m.dryRun, retries: m.retries,
@@ -240,7 +245,7 @@ export async function boot(opts: { cwd: string }): Promise<OrchestratorAgent> {
       return this.orchestrate({
         issueIds: m.issueIds, concurrency: m.concurrency ?? defaultConcurrency(),
         dryRun: m.dryRun, noPlan: m.noPlan, noBranch: m.noBranch, noWorktree: m.noWorktree,
-        provider: m.provider, enabledProviders: m.enabledProviders,
+        provider: m.provider, enabledProviders: m.enabledProviders, providerModels: m.providerModels,
         serverUrl: m.serverUrl, source: m.issueSource, org: m.org, project: m.project,
         workItemType: m.workItemType, iteration: m.iteration, area: m.area, planTimeout: m.planTimeout, planRetries: m.planRetries, retries: m.retries,
         force: m.force, feature: m.feature, username: m.username,

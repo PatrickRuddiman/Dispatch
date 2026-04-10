@@ -5,10 +5,22 @@
  * Produces `PoolEntry[]` arrays for direct consumption by ProviderPool.
  */
 
+import type { ProviderModelConfig } from "../config.js";
 import type { SkillName } from "../skills/interface.js";
 import type { ProviderName } from "./interface.js";
 import type { PoolEntry } from "./pool.js";
 import { PROVIDER_REGISTRY, type ProviderMeta } from "./registry.js";
+
+/** Resolve model for a provider, preferring config overrides over registry defaults. */
+function resolveModel(
+  meta: ProviderMeta,
+  isFast: boolean,
+  overrides?: Partial<Record<ProviderName, ProviderModelConfig>>,
+): string {
+  const override = overrides?.[meta.name];
+  if (isFast) return override?.fast ?? meta.defaultFastModel;
+  return override?.strong ?? meta.defaultStrongModel;
+}
 
 /** Skill roles that need fast/cheap models. */
 const FAST_ROLES: ReadonlySet<SkillName> = new Set(["planner", "commit"]);
@@ -30,6 +42,7 @@ export function routeSkill(
   role: SkillName,
   authenticatedProviders: ProviderName[],
   forceProvider?: ProviderName,
+  modelOverrides?: Partial<Record<ProviderName, ProviderModelConfig>>,
 ): PoolEntry[] {
   // CLI --provider override: use that provider for everything
   if (forceProvider) {
@@ -38,7 +51,7 @@ export function routeSkill(
     return [
       {
         provider: forceProvider,
-        model: isFast ? meta.defaultFastModel : meta.defaultStrongModel,
+        model: resolveModel(meta, isFast, modelOverrides),
         priority: 0,
       },
     ];
@@ -57,7 +70,7 @@ export function routeSkill(
     return [
       {
         provider: meta.name,
-        model: isFast ? meta.defaultFastModel : meta.defaultStrongModel,
+        model: resolveModel(meta, isFast, modelOverrides),
         priority: 0,
       },
     ];
@@ -86,7 +99,7 @@ export function routeSkill(
 
   return scored.map(({ meta }, i) => ({
     provider: meta.name,
-    model: isFast ? meta.defaultFastModel : meta.defaultStrongModel,
+    model: resolveModel(meta, isFast, modelOverrides),
     priority: i,
   }));
 }
@@ -99,10 +112,11 @@ export function routeSkill(
 export function routeAllSkills(
   authenticatedProviders: ProviderName[],
   forceProvider?: ProviderName,
+  modelOverrides?: Partial<Record<ProviderName, ProviderModelConfig>>,
 ): Record<"planner" | "executor" | "commit", PoolEntry[]> {
   return {
-    planner: routeSkill("planner", authenticatedProviders, forceProvider),
-    executor: routeSkill("executor", authenticatedProviders, forceProvider),
-    commit: routeSkill("commit", authenticatedProviders, forceProvider),
+    planner: routeSkill("planner", authenticatedProviders, forceProvider, modelOverrides),
+    executor: routeSkill("executor", authenticatedProviders, forceProvider, modelOverrides),
+    commit: routeSkill("commit", authenticatedProviders, forceProvider, modelOverrides),
   };
 }

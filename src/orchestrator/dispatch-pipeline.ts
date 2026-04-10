@@ -112,6 +112,7 @@ export async function runDispatchPipeline(
     feature,
     provider,
     enabledProviders,
+    providerModels,
     source,
     org,
     project,
@@ -136,7 +137,7 @@ export async function runDispatchPipeline(
   }
 
   // Route agents to providers via the smart router
-  const agentRoutes = routeAllSkills(available, provider);
+  const agentRoutes = routeAllSkills(available, provider, providerModels);
 
   /** Create a ProviderPool for an agent role using router-produced entries. */
   function createPool(entries: PoolEntry[], bootCwd: string): ProviderPool {

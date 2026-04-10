@@ -12,6 +12,12 @@ import type { ProviderName } from "./providers/interface.js";
 import type { DatasourceName } from "./datasources/interface.js";
 import { runInteractiveConfigWizard } from "./config-prompts.js";
 
+/** Per-provider model overrides. Absent roles fall back to registry defaults. */
+export interface ProviderModelConfig {
+  strong?: string;
+  fast?: string;
+}
+
 /**
  * Persistent configuration options for Dispatch.
  * All fields are optional since the config file may contain any subset.
@@ -23,6 +29,8 @@ export interface DispatchConfig {
    * The router uses this list to decide which providers to route to.
    */
   enabledProviders?: ProviderName[];
+  /** Per-provider model overrides for strong/fast roles. */
+  providerModels?: Partial<Record<ProviderName, ProviderModelConfig>>;
   source?: DatasourceName;
   planTimeout?: number;
   specTimeout?: number;
@@ -50,7 +58,7 @@ export const CONFIG_BOUNDS = {
 } as const;
 
 /** Valid configuration key names. */
-export const CONFIG_KEYS = ["enabledProviders", "source", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area", "username"] as const;
+export const CONFIG_KEYS = ["enabledProviders", "providerModels", "source", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area", "username"] as const;
 
 /** A valid configuration key name. */
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -124,6 +132,25 @@ function migrateConfig(raw: Record<string, unknown>): DispatchConfig {
     ) as ProviderName[];
   }
 
+  // Copy over providerModels (validate shape)
+  if (raw.providerModels !== undefined && typeof raw.providerModels === "object" && raw.providerModels !== null) {
+    const validated: Partial<Record<ProviderName, ProviderModelConfig>> = {};
+    for (const [providerName, modelCfg] of Object.entries(raw.providerModels as Record<string, unknown>)) {
+      if (!PROVIDER_NAMES.includes(providerName as ProviderName)) continue;
+      if (typeof modelCfg !== "object" || modelCfg === null) continue;
+      const cfg = modelCfg as Record<string, unknown>;
+      const entry: ProviderModelConfig = {};
+      if (typeof cfg.strong === "string") entry.strong = cfg.strong;
+      if (typeof cfg.fast === "string") entry.fast = cfg.fast;
+      if (entry.strong !== undefined || entry.fast !== undefined) {
+        validated[providerName as ProviderName] = entry;
+      }
+    }
+    if (Object.keys(validated).length > 0) {
+      config.providerModels = validated;
+    }
+  }
+
   // Copy over non-legacy fields
   if (raw.source !== undefined) config.source = raw.source as DatasourceName;
   if (raw.planTimeout !== undefined) config.planTimeout = raw.planTimeout as number;
@@ -163,7 +190,8 @@ export async function saveConfig(
 export function validateConfigValue(key: ConfigKey, value: string): string | null {
   switch (key) {
     case "enabledProviders":
-      // Array field — skip string-level validation.
+    case "providerModels":
+      // Complex fields — skip string-level validation.
       return null;
 
     case "source":

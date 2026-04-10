@@ -21,6 +21,7 @@
 import { cpus, freemem } from "node:os";
 import type { DatasourceName } from "./datasources/interface.js";
 import { getDatasource, detectDatasource, DATASOURCE_NAMES } from "./datasources/index.js";
+import type { ProviderModelConfig } from "./config.js";
 import type { ProviderName } from "./providers/interface.js";
 import { log } from "./helpers/logger.js";
 
@@ -63,6 +64,8 @@ export interface SpecOptions {
   provider?: ProviderName;
   /** Authenticated providers from config — router uses these for auto-selection. */
   enabledProviders?: ProviderName[];
+  /** Per-provider model overrides from config. */
+  providerModels?: Partial<Record<ProviderName, ProviderModelConfig>>;
   /** URL of a running provider server */
   serverUrl?: string;
   /** Working directory */

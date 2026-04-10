@@ -579,6 +579,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     issues,
     provider: forceProvider,
     enabledProviders,
+    providerModels,
     serverUrl,
     cwd: specCwd,
     outputDir = join(specCwd, ".dispatch", "specs"),
@@ -654,7 +655,7 @@ export async function runSpecPipeline(opts: SpecOptions): Promise<SpecSummary> {
     throw new Error("No authenticated providers available. Run 'dispatch config' to set up providers.");
   }
 
-  const specRoute = routeSkill("spec", available, forceProvider);
+  const specRoute = routeSkill("spec", available, forceProvider, providerModels);
   const resolvedProvider = specRoute[0].provider;
   const resolvedModel = specRoute[0].model;
 
