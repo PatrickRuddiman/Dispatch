@@ -204,9 +204,10 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
       const allModels = [...modelSet].sort();
 
       // Strong model selection
+      console.clear();
       const strongDefault = existingOverride?.strong ?? meta.defaultStrongModel;
       const strongChoice = await select<string | undefined>({
-        message: "Strong model (executor, spec):",
+        message: `${meta.displayName} ── Strong model (executor, spec)`,
         choices: [
           { name: `(default) ${meta.defaultStrongModel}`, value: undefined },
           ...allModels.map((m) => ({ name: m, value: m })),
@@ -215,9 +216,10 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
       });
 
       // Fast model selection
+      console.clear();
       const fastDefault = existingOverride?.fast ?? meta.defaultFastModel;
       const fastChoice = await select<string | undefined>({
-        message: "Fast model (planner, commit):",
+        message: `${meta.displayName} ── Fast model (planner, commit)`,
         choices: [
           { name: `(default) ${meta.defaultFastModel}`, value: undefined },
           ...allModels.map((m) => ({ name: m, value: m })),
