@@ -49,7 +49,7 @@ export function registerDispatchTools(server: McpServer, cwd: string): void {
           issueIds: args.issueIds,
           dryRun: false,
           provider: args.provider,
-          enabledProviders: config.enabledProviders,
+          enabledProviders: config.enabledProviders, providerModels: config.providerModels,
           source: config.source,
           org: config.org,
           project: config.project,
@@ -90,7 +90,7 @@ export function registerDispatchTools(server: McpServer, cwd: string): void {
         const result = await orchestrator.orchestrate({
           issueIds: args.issueIds,
           dryRun: true,
-          enabledProviders: config.enabledProviders,
+          enabledProviders: config.enabledProviders, providerModels: config.providerModels,
           source: config.source,
           org: config.org,
           project: config.project,

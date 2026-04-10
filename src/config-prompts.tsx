@@ -12,6 +12,7 @@ import {
   loadConfig,
   saveConfig,
   type DispatchConfig,
+  type ProviderModelConfig,
 } from "./config.js";
 import {
   DATASOURCE_NAMES,
@@ -22,8 +23,12 @@ import {
 import type { DatasourceName } from "./datasources/interface.js";
 import { ensureAuthReady } from "./helpers/auth.js";
 import type { ProviderName } from "./providers/interface.js";
-import { getProviderStatuses, type AuthStatus } from "./providers/registry.js";
+import { listProviderModels } from "./providers/index.js";
+import { getProviderStatuses, type AuthStatus, PROVIDER_REGISTRY } from "./providers/registry.js";
 import { setupProviderAuth } from "./providers/auth-setup.js";
+
+/** Timeout for fetching provider model lists (ms). */
+const MODEL_LIST_TIMEOUT_MS = 8_000;
 
 /** Format auth status with a colored indicator. */
 function formatAuthStatus(status: AuthStatus): string {
@@ -158,6 +163,83 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
   );
   console.log();
 
+  // ── Per-provider model selection (opt-in) ─────────────────
+  const providerModels: Partial<Record<ProviderName, ProviderModelConfig>> =
+    existing.providerModels ? { ...existing.providerModels } : {};
+
+  const configureModels = await confirm({
+    message: `Configure model selection for ${enabledProviders.length} provider(s)?`,
+    default: false,
+  });
+
+  if (configureModels) {
+    for (const name of enabledProviders) {
+      const meta = PROVIDER_REGISTRY[name];
+      const existingOverride = providerModels[name];
+      console.clear();
+      log.info(`${meta.displayName} models:`);
+
+      // Fetch available models with timeout
+      let models: string[];
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      try {
+        log.dim(`  Fetching available models...`);
+        models = await Promise.race([
+          listProviderModels(name),
+          new Promise<string[]>((_, reject) => {
+            timeoutId = setTimeout(() => reject(new Error("timeout")), MODEL_LIST_TIMEOUT_MS);
+          }),
+        ]);
+      } catch {
+        log.warn(`  Could not fetch model list — showing defaults only`);
+        models = [meta.defaultStrongModel, meta.defaultFastModel];
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
+      // Deduplicate and ensure defaults are in the list
+      const modelSet = new Set(models);
+      modelSet.add(meta.defaultStrongModel);
+      modelSet.add(meta.defaultFastModel);
+      const allModels = [...modelSet].sort();
+
+      // Strong model selection
+      console.clear();
+      const strongDefault = existingOverride?.strong ?? meta.defaultStrongModel;
+      const strongChoice = await select<string | undefined>({
+        message: `${meta.displayName} ── Strong model (executor, spec)`,
+        choices: [
+          { name: `(default) ${meta.defaultStrongModel}`, value: undefined },
+          ...allModels.map((m) => ({ name: m, value: m })),
+        ],
+        default: strongDefault === meta.defaultStrongModel ? undefined : strongDefault,
+      });
+
+      // Fast model selection
+      console.clear();
+      const fastDefault = existingOverride?.fast ?? meta.defaultFastModel;
+      const fastChoice = await select<string | undefined>({
+        message: `${meta.displayName} ── Fast model (planner, commit)`,
+        choices: [
+          { name: `(default) ${meta.defaultFastModel}`, value: undefined },
+          ...allModels.map((m) => ({ name: m, value: m })),
+        ],
+        default: fastDefault === meta.defaultFastModel ? undefined : fastDefault,
+      });
+
+      // Save overrides (omit if user chose default)
+      const entry: ProviderModelConfig = {};
+      if (strongChoice !== undefined) entry.strong = strongChoice;
+      if (fastChoice !== undefined) entry.fast = fastChoice;
+      if (entry.strong !== undefined || entry.fast !== undefined) {
+        providerModels[name] = entry;
+      } else {
+        delete providerModels[name];
+      }
+    }
+  }
+  console.log();
+
   // ── Auto-detect datasource from git remote ─────────────────
   const detectedSource = await detectDatasource(process.cwd());
   const datasourceDefault: DatasourceName | "auto" = existing.source ?? "auto";
@@ -256,6 +338,13 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
     source,
   };
 
+  // Save provider model overrides (or clear if empty)
+  if (Object.keys(providerModels).length > 0) {
+    newConfig.providerModels = providerModels;
+  } else {
+    delete newConfig.providerModels;
+  }
+
   if (org !== undefined) newConfig.org = org;
   if (project !== undefined) newConfig.project = project;
   if (workItemType !== undefined) newConfig.workItemType = workItemType;
@@ -269,6 +358,13 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
     if (value !== undefined) {
       if (key === "enabledProviders" && Array.isArray(value)) {
         console.log(`  ${key} = ${(value as string[]).join(", ")}`);
+      } else if (key === "providerModels" && typeof value === "object") {
+        for (const [provider, models] of Object.entries(value as Record<string, ProviderModelConfig>)) {
+          const parts: string[] = [];
+          if (models.strong) parts.push(`strong=${models.strong}`);
+          if (models.fast) parts.push(`fast=${models.fast}`);
+          if (parts.length) console.log(`  ${provider} models = ${parts.join(", ")}`);
+        }
       } else {
         console.log(`  ${key} = ${value}`);
       }

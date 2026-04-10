@@ -266,6 +266,32 @@ For local-only workflows, pass `--source md` explicitly.
 | `130` | SIGINT (Ctrl+C) |
 | `143` | SIGTERM |
 
+## E2E testing
+
+The end-to-end test builds Dispatch into a Docker container alongside the published `opencode-ai` package and runs `dispatch spec` against a minimal seed project using OpenCode's free default model (no API key required).
+
+```sh
+# From the repository root — build the image (takes ~2 minutes on first run)
+docker build -t dispatch-e2e -f e2e/Dockerfile .
+
+# Run the free-model test
+docker run --rm -e PROVIDER=opencode dispatch-e2e bash /dispatch/e2e/run-e2e.sh
+```
+
+To test with a paid provider, pass the relevant API key and override the `PROVIDER` (and optionally `MODEL`) env vars:
+
+```sh
+# Example: Anthropic Claude
+docker run --rm \
+  -e PROVIDER=claude \
+  -e MODEL=anthropic/claude-sonnet-4-5 \
+  -e ANTHROPIC_API_KEY=your-key-here \
+  dispatch-e2e \
+  bash /dispatch/e2e/run-e2e.sh
+```
+
+See `e2e/run-e2e.sh` for the full list of supported environment variables, and `.github/workflows/e2e.yml` for the CI configuration and provider expansion pattern.
+
 ## Documentation
 
 Full documentation is in the [`docs/`](docs/) directory:

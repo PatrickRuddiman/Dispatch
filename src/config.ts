@@ -12,6 +12,12 @@ import type { ProviderName } from "./providers/interface.js";
 import type { DatasourceName } from "./datasources/interface.js";
 import { runInteractiveConfigWizard } from "./config-prompts.js";
 
+/** Per-provider model overrides. Absent roles fall back to registry defaults. */
+export interface ProviderModelConfig {
+  strong?: string;
+  fast?: string;
+}
+
 /**
  * Persistent configuration options for Dispatch.
  * All fields are optional since the config file may contain any subset.
@@ -23,6 +29,8 @@ export interface DispatchConfig {
    * The router uses this list to decide which providers to route to.
    */
   enabledProviders?: ProviderName[];
+  /** Per-provider model overrides for strong/fast roles. */
+  providerModels?: Partial<Record<ProviderName, ProviderModelConfig>>;
   source?: DatasourceName;
   planTimeout?: number;
   specTimeout?: number;
@@ -50,7 +58,7 @@ export const CONFIG_BOUNDS = {
 } as const;
 
 /** Valid configuration key names. */
-export const CONFIG_KEYS = ["enabledProviders", "source", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area", "username"] as const;
+export const CONFIG_KEYS = ["enabledProviders", "providerModels", "source", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area", "username"] as const;
 
 /** A valid configuration key name. */
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -124,20 +132,41 @@ function migrateConfig(raw: Record<string, unknown>): DispatchConfig {
     ) as ProviderName[];
   }
 
-  // Copy over non-legacy fields
-  if (raw.source !== undefined) config.source = raw.source as DatasourceName;
-  if (raw.planTimeout !== undefined) config.planTimeout = raw.planTimeout as number;
-  if (raw.specTimeout !== undefined) config.specTimeout = raw.specTimeout as number;
-  if (raw.specWarnTimeout !== undefined) config.specWarnTimeout = raw.specWarnTimeout as number;
-  if (raw.specKillTimeout !== undefined) config.specKillTimeout = raw.specKillTimeout as number;
-  if (raw.concurrency !== undefined) config.concurrency = raw.concurrency as number;
-  if (raw.org !== undefined) config.org = raw.org as string;
-  if (raw.project !== undefined) config.project = raw.project as string;
-  if (raw.workItemType !== undefined) config.workItemType = raw.workItemType as string;
-  if (raw.iteration !== undefined) config.iteration = raw.iteration as string;
-  if (raw.area !== undefined) config.area = raw.area as string;
-  if (raw.username !== undefined) config.username = raw.username as string;
-  if (raw.nextIssueId !== undefined) config.nextIssueId = raw.nextIssueId as number;
+  // Copy over providerModels (validate shape)
+  if (raw.providerModels !== undefined && typeof raw.providerModels === "object" && raw.providerModels !== null) {
+    const validated: Partial<Record<ProviderName, ProviderModelConfig>> = {};
+    for (const [providerName, modelCfg] of Object.entries(raw.providerModels as Record<string, unknown>)) {
+      if (!PROVIDER_NAMES.includes(providerName as ProviderName)) continue;
+      if (typeof modelCfg !== "object" || modelCfg === null) continue;
+      const cfg = modelCfg as Record<string, unknown>;
+      const entry: ProviderModelConfig = {};
+      if (typeof cfg.strong === "string") entry.strong = cfg.strong;
+      if (typeof cfg.fast === "string") entry.fast = cfg.fast;
+      if (entry.strong !== undefined || entry.fast !== undefined) {
+        validated[providerName as ProviderName] = entry;
+      }
+    }
+    if (Object.keys(validated).length > 0) {
+      config.providerModels = validated;
+    }
+  }
+
+  // Copy over non-legacy fields with runtime type guards
+  if (typeof raw.source === "string" && DATASOURCE_NAMES.includes(raw.source as DatasourceName)) {
+    config.source = raw.source as DatasourceName;
+  }
+  if (typeof raw.planTimeout === "number") config.planTimeout = raw.planTimeout;
+  if (typeof raw.specTimeout === "number") config.specTimeout = raw.specTimeout;
+  if (typeof raw.specWarnTimeout === "number") config.specWarnTimeout = raw.specWarnTimeout;
+  if (typeof raw.specKillTimeout === "number") config.specKillTimeout = raw.specKillTimeout;
+  if (typeof raw.concurrency === "number") config.concurrency = raw.concurrency;
+  if (typeof raw.org === "string") config.org = raw.org;
+  if (typeof raw.project === "string") config.project = raw.project;
+  if (typeof raw.workItemType === "string") config.workItemType = raw.workItemType;
+  if (typeof raw.iteration === "string") config.iteration = raw.iteration;
+  if (typeof raw.area === "string") config.area = raw.area;
+  if (typeof raw.username === "string") config.username = raw.username;
+  if (typeof raw.nextIssueId === "number") config.nextIssueId = raw.nextIssueId;
 
   return config;
 }
@@ -163,7 +192,8 @@ export async function saveConfig(
 export function validateConfigValue(key: ConfigKey, value: string): string | null {
   switch (key) {
     case "enabledProviders":
-      // Array field — skip string-level validation.
+    case "providerModels":
+      // Complex fields — skip string-level validation.
       return null;
 
     case "source":

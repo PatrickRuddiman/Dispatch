@@ -9,7 +9,10 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { query, unstable_v2_createSession, type Options, type ModelInfo, type SDKSession } from "@anthropic-ai/claude-agent-sdk";
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { unstable_v2_createSession, type SDKSession } from "@anthropic-ai/claude-agent-sdk";
 import type {
   ProviderInstance,
   ProviderBootOptions,
@@ -23,33 +26,45 @@ import { withTimeout } from "../helpers/timeout.js";
 const SESSION_READY_TIMEOUT_MS = 600_000;
 
 /**
+ * Resolve an Anthropic API key from env var or Claude CLI OAuth credentials.
+ */
+async function resolveAnthropicKey(): Promise<string | null> {
+  if (process.env.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY;
+  try {
+    const credPath = join(homedir(), ".claude", ".credentials.json");
+    const raw = JSON.parse(await readFile(credPath, "utf-8"));
+    return raw?.claudeAiOauth?.accessToken ?? null;
+  } catch (err) {
+    log.debug(`resolveAnthropicKey: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
+
+/**
  * List available Claude models.
  *
- * Uses the V1 query() API to ask the SDK for supported models at runtime.
- * Falls back to a hardcoded list if the dynamic query fails.
+ * Fetches from the Anthropic /v1/models API using either ANTHROPIC_API_KEY
+ * or the Claude CLI's OAuth access token. Falls back to empty list on failure.
  */
-export async function listModels(opts?: ProviderBootOptions): Promise<string[]> {
+export async function listModels(_opts?: ProviderBootOptions): Promise<string[]> {
   try {
-    const queryOpts: Options = {
-      model: opts?.model ?? "claude-sonnet-4",
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
-    };
-    const q = query({ prompt: "", options: queryOpts });
-    try {
-      const models = await q.supportedModels();
-      return models.map((m: ModelInfo) => m.value).sort();
-    } finally {
-      q.close();
-    }
+    const apiKey = await resolveAnthropicKey();
+    if (!apiKey) return [];
+
+    const resp = await fetch("https://api.anthropic.com/v1/models?limit=100", {
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!resp.ok) return [];
+
+    const data = (await resp.json()) as { data: Array<{ id: string }> };
+    return data.data.map((m) => m.id).sort();
   } catch (err) {
-    log.debug(`Failed to list models dynamically: ${log.formatErrorChain(err)}`);
-    return [
-      "claude-haiku-3-5",
-      "claude-opus-4-6",
-      "claude-sonnet-4",
-      "claude-sonnet-4-5",
-    ];
+    log.debug(`Failed to list models: ${log.formatErrorChain(err)}`);
+    return [];
   }
 }
 

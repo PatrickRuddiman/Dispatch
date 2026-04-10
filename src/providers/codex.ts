@@ -14,6 +14,9 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type {
   ProviderInstance,
   ProviderBootOptions,
@@ -38,15 +41,61 @@ async function loadCodexSdk(): Promise<typeof import("@openai/codex-sdk")> {
 }
 
 /**
+ * Resolve an API bearer token for OpenAI.
+ *
+ * Checks OPENAI_API_KEY env var first, then reads the Codex CLI's
+ * OAuth access_token from ~/.codex/auth.json (set by `codex login`).
+ */
+async function resolveOpenAIToken(): Promise<string | null> {
+  if (process.env.OPENAI_API_KEY) return process.env.OPENAI_API_KEY;
+  try {
+    const authPath = join(homedir(), ".codex", "auth.json");
+    const raw = JSON.parse(await readFile(authPath, "utf-8"));
+    return raw?.tokens?.access_token ?? null;
+  } catch (err) {
+    log.debug(`resolveOpenAIToken: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
+
+/**
  * List available Codex models.
  *
- * The Codex SDK does not expose a model listing API, so this returns
- * a hardcoded list of known compatible model identifiers.
+ * Tries the OpenAI /v1/models endpoint first (works with API keys).
+ * Falls back to a known model list when using ChatGPT OAuth (which
+ * lacks the api.model.read scope needed for the models endpoint).
  */
 export async function listModels(_opts?: ProviderBootOptions): Promise<string[]> {
+  try {
+    const token = await resolveOpenAIToken();
+    if (!token) return [];
+
+    const resp = await fetch("https://api.openai.com/v1/models", {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(8_000),
+    });
+
+    if (resp.ok) {
+      const data = (await resp.json()) as { data: Array<{ id: string }> };
+      return data.data.map((m) => m.id).sort();
+    }
+  } catch {
+    // Fall through to known models
+  }
+
+  // ChatGPT OAuth tokens lack api.model.read scope — return known models
   return [
     "codex-mini-latest",
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4.1-nano",
+    "gpt-5.2",
+    "gpt-5.3-codex",
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "o3",
     "o3-mini",
+    "o3-pro",
     "o4-mini",
   ];
 }

@@ -80,7 +80,7 @@ export function registerRecoveryTools(server: McpServer, cwd: string): void {
         opts: {
           issueIds,
           dryRun: false,
-          enabledProviders: config.enabledProviders,
+          enabledProviders: config.enabledProviders, providerModels: config.providerModels,
           source: config.source,
           org: config.org,
           project: config.project,
@@ -151,7 +151,7 @@ export function registerRecoveryTools(server: McpServer, cwd: string): void {
         opts: {
           issueIds,
           dryRun: false,
-          enabledProviders: config.enabledProviders,
+          enabledProviders: config.enabledProviders, providerModels: config.providerModels,
           source: config.source,
           org: config.org,
           project: config.project,
