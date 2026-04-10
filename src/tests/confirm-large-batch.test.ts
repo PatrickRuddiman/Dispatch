@@ -6,7 +6,7 @@ const { mockInput } = vi.hoisted(() => ({
   mockInput: vi.fn(),
 }));
 
-vi.mock("../helpers/ink-prompts.js", () => ({
+vi.mock("@inquirer/prompts", () => ({
   input: mockInput,
 }));
 

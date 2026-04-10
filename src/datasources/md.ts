@@ -13,17 +13,7 @@ import { readFile, writeFile, readdir, mkdir, rename } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, parse as parsePath, resolve } from "node:path";
 import { promisify } from "node:util";
 import { glob } from "glob";
-
-/** Simple async mutex to serialize create() calls and prevent duplicate IDs. */
-let createLock: Promise<void> = Promise.resolve();
-function withCreateLock<T>(fn: () => Promise<T>): Promise<T> {
-  const prev = createLock;
-  let resolve: () => void;
-  createLock = new Promise<void>((r) => { resolve = r; });
-  return prev.then(fn).finally(() => resolve!());
-}
 import type { Datasource, IssueDetails, IssueFetchOptions, DispatchLifecycleOptions } from "./interface.js";
-import { deriveShortUsername } from "./index.js";
 import { slugify } from "../helpers/slugify.js";
 import { loadConfig, saveConfig } from "../config.js";
 import { log } from "../helpers/logger.js";
@@ -135,6 +125,40 @@ function toIssueDetails(filename: string, content: string, dir: string): IssueDe
   };
 }
 
+/**
+ * Derive a short username from git config.
+ * - Multi-word name: first 2 chars of first name + first 6 of last name
+ * - Single word or no name: first 8 chars of email local part
+ * - Falls back to the provided `fallback` value
+ */
+async function deriveShortUsername(cwd: string, fallback: string): Promise<string> {
+  try {
+    const raw = (await git(["config", "user.name"], cwd)).trim();
+    if (raw) {
+      const parts = raw.toLowerCase().replace(/[^a-z\s]/g, "").trim().split(/\s+/);
+      if (parts.length >= 2) {
+        return (parts[0].slice(0, 2) + parts[parts.length - 1].slice(0, 6)) || fallback;
+      }
+    }
+  } catch {
+    // fall through to email
+  }
+
+  try {
+    const raw = (await git(["config", "user.email"], cwd)).trim();
+    if (raw) {
+      const localPart = raw.split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (localPart) {
+        return localPart.slice(0, 8);
+      }
+    }
+  } catch {
+    // fall through
+  }
+
+  return fallback;
+}
+
 export const datasource: Datasource = {
   name: "md",
 
@@ -210,26 +234,24 @@ export const datasource: Datasource = {
   },
 
   async create(title: string, body: string, opts?: IssueFetchOptions): Promise<IssueDetails> {
-    return withCreateLock(async () => {
-      const cwd = opts?.cwd ?? process.cwd();
-      const configDir = join(cwd, ".dispatch");
-      const config = await loadConfig(configDir);
-      const id = config.nextIssueId ?? 1;
+    const cwd = opts?.cwd ?? process.cwd();
+    const configDir = join(cwd, ".dispatch");
+    const config = await loadConfig(configDir);
+    const id = config.nextIssueId ?? 1;
 
-      const dir = resolveDir(opts);
-      await mkdir(dir, { recursive: true });
-      const filename = `${id}-${slugify(title)}.md`;
-      const filePath = join(dir, filename);
-      await writeFile(filePath, body, "utf-8");
+    const dir = resolveDir(opts);
+    await mkdir(dir, { recursive: true });
+    const filename = `${id}-${slugify(title)}.md`;
+    const filePath = join(dir, filename);
+    await writeFile(filePath, body, "utf-8");
 
-      config.nextIssueId = id + 1;
-      await saveConfig(config, configDir);
+    config.nextIssueId = id + 1;
+    await saveConfig(config, configDir);
 
-      return {
-        ...toIssueDetails(filename, body, dir),
-        number: String(id),
-      };
-    });
+    return {
+      ...toIssueDetails(filename, body, dir),
+      number: String(id),
+    };
   },
 
   async getDefaultBranch(opts: DispatchLifecycleOptions): Promise<string> {

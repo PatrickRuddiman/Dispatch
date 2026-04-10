@@ -1,54 +1,104 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const mockCheckAuth = vi.fn();
+const { mockExecFile } = vi.hoisted(() => ({ mockExecFile: vi.fn() }));
 
-vi.mock("../providers/registry.js", () => ({
-  PROVIDER_REGISTRY: new Proxy(
-    {},
-    {
-      get: () => ({ checkAuth: mockCheckAuth }),
-    },
-  ),
-}));
+vi.mock("node:child_process", () => ({ execFile: mockExecFile }));
+vi.mock("node:util", () => ({ promisify: () => mockExecFile }));
 
-import { checkProviderAuthenticated, getProviderAuthStatus, getAuthenticatedProviders } from "../providers/detect.js";
+import { checkProviderInstalled } from "../providers/detect.js";
+
+const realPlatform = process.platform;
 
 beforeEach(() => {
-  mockCheckAuth.mockReset();
-});
-
-describe("checkProviderAuthenticated", () => {
-  it("returns true when checkAuth returns authenticated", async () => {
-    mockCheckAuth.mockResolvedValue({ status: "authenticated" });
-
-    expect(await checkProviderAuthenticated("claude")).toBe(true);
-  });
-
-  it("returns false when checkAuth returns not-configured", async () => {
-    mockCheckAuth.mockResolvedValue({ status: "not-configured", hint: "Run claude login" });
-
-    expect(await checkProviderAuthenticated("claude")).toBe(false);
+  mockExecFile.mockReset();
+  Object.defineProperty(process, "platform", {
+    value: realPlatform,
+    configurable: true,
   });
 });
 
-describe("getProviderAuthStatus", () => {
-  it("returns the full AuthStatus object", async () => {
-    const status = { status: "expired" as const, hint: "Token expired" };
-    mockCheckAuth.mockResolvedValue(status);
-
-    expect(await getProviderAuthStatus("claude")).toEqual(status);
+afterEach(() => {
+  Object.defineProperty(process, "platform", {
+    value: realPlatform,
+    configurable: true,
   });
 });
 
-describe("getAuthenticatedProviders", () => {
-  it("filters to only authenticated providers", async () => {
-    mockCheckAuth
-      .mockResolvedValueOnce({ status: "authenticated" })
-      .mockResolvedValueOnce({ status: "not-configured", hint: "missing" })
-      .mockResolvedValueOnce({ status: "authenticated" });
+describe("checkProviderInstalled", () => {
+  it("returns true when the binary is found", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "1.0.0\n" });
 
-    const result = await getAuthenticatedProviders(["claude", "copilot", "codex"]);
+    const result = await checkProviderInstalled("claude");
 
-    expect(result).toEqual(["claude", "codex"]);
+    expect(result).toBe(true);
+    expect(mockExecFile).toHaveBeenCalledWith("claude", ["--version"], {
+      shell: process.platform === "win32",
+      timeout: 5000,
+    });
+  });
+
+  it("returns false when exec rejects", async () => {
+    mockExecFile.mockRejectedValue(new Error("spawn claude ENOENT"));
+
+    const result = await checkProviderInstalled("claude");
+
+    expect(result).toBe(false);
+  });
+
+  it("passes { shell: true } in the options argument when process.platform is 'win32'", async () => {
+    Object.defineProperty(process, "platform", {
+      value: "win32",
+      configurable: true,
+    });
+    mockExecFile.mockResolvedValue({ stdout: "1.0.0\n" });
+
+    await checkProviderInstalled("claude");
+
+    expect(mockExecFile).toHaveBeenCalledWith("claude", ["--version"], { shell: true, timeout: 5000 });
+  });
+
+  it("does not pass shell: true when platform is not 'win32'", async () => {
+    Object.defineProperty(process, "platform", {
+      value: "linux",
+      configurable: true,
+    });
+    mockExecFile.mockResolvedValue({ stdout: "1.0.0\n" });
+
+    await checkProviderInstalled("copilot");
+
+    expect(mockExecFile).toHaveBeenCalledWith("copilot", ["--version"], { shell: false, timeout: 5000 });
+  });
+
+  it("passes a timeout option to execFile", async () => {
+    mockExecFile.mockResolvedValue({ stdout: "1.0.0\n" });
+
+    await checkProviderInstalled("claude");
+
+    const options = mockExecFile.mock.calls[0][2];
+    expect(options).toHaveProperty("timeout");
+    expect(options.timeout).toBeGreaterThan(0);
+  });
+
+  it("returns false when execFile rejects due to timeout", async () => {
+    const error = Object.assign(new Error("Command timed out"), {
+      killed: true,
+      signal: "SIGTERM",
+    });
+    mockExecFile.mockRejectedValue(error);
+
+    const result = await checkProviderInstalled("claude");
+
+    expect(result).toBe(false);
+  });
+
+  it("returns false when the binary times out", async () => {
+    const err = Object.assign(new Error("process timed out"), {
+      killed: true,
+    });
+    mockExecFile.mockRejectedValue(err);
+
+    const result = await checkProviderInstalled("opencode");
+
+    expect(result).toBe(false);
   });
 });

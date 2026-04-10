@@ -1,11 +1,10 @@
-# Test Fixtures & Mocks
+# Test Fixtures & Cleanup Tests
 
 This document covers the shared testing infrastructure for the dispatch project:
 the mock factory module (`src/tests/fixtures.ts`) that provides reusable test
-doubles for domain objects, the manual mock stubs under `src/__mocks__/` that
-replace SDK packages incompatible with Vitest's ESM loader, and the cleanup
-registry test file (`src/tests/cleanup.test.ts`) that validates the
-process-level shutdown safety mechanism.
+doubles for domain objects, and the cleanup registry test file
+(`src/tests/cleanup.test.ts`) that validates the process-level shutdown safety
+mechanism.
 
 ## Test file inventory
 
@@ -13,89 +12,6 @@ process-level shutdown safety mechanism.
 |-----------|-------------------|-------------|------------|----------|
 | `cleanup.test.ts` | `src/helpers/cleanup.ts` | 170 | 10 (9 active, 1 skipped) | Module mock, lifecycle |
 | `fixtures.ts` | *(shared test utility)* | 134 | N/A (not a test file) | Mock factories |
-
-**Manual mock stubs** (not test files — loaded via Vite resolve aliases):
-
-| Mock file | Replaces | Lines | Purpose |
-|-----------|----------|-------|---------|
-| `__mocks__/@github/copilot-sdk.ts` | `@github/copilot-sdk` | 40 | CJS/ESM incompatibility workaround |
-| `__mocks__/@openai/codex.ts` | `@openai/codex` | — | CJS/ESM incompatibility workaround |
-
-## Manual mock stubs
-
-### The CJS/ESM incompatibility problem
-
-Several AI SDK packages used by Dispatch's
-[provider implementations](../provider-system/overview.md) depend on
-Node.js CJS modules that cannot be resolved under Vitest's ESM module
-loader. Specifically:
-
-- `@github/copilot-sdk` depends on `vscode-jsonrpc/node`, which uses a
-  CJS `require()` call.
-- `@openai/codex` has similar CJS dependencies.
-
-When any test file transitively imports a module that touches the provider
-registry (which re-exports all providers), Vite's import analysis encounters
-these CJS `require()` calls and fails at module resolution time — even if the
-test never exercises the provider in question.
-
-### How the stubs work
-
-Manual mock stubs in `src/__mocks__/` provide minimal, no-op replacements
-for these SDK packages. The stubs export the same class names and function
-signatures as the real packages, but with empty implementations and
-`vi.fn()` mocks where applicable.
-
-**`src/__mocks__/@github/copilot-sdk.ts`** (40 lines) exports:
-
-| Export | Type | Behavior |
-|--------|------|----------|
-| `CopilotClient` | Class | Constructor accepts any options; `start()`, `stop()`, `listModels()` are no-ops; `createSession()` returns a `CopilotSession` |
-| `CopilotSession` | Class | `sendMessage()` returns an empty async iterable |
-| `AssistantMessageEvent` | Interface | Type stub with `type` and optional `message.content` |
-| `approveAll` | `vi.fn()` | Mock function for the SDK's approval callback |
-| `defineTool` | Function | Returns an empty object |
-
-These stubs satisfy Vite's static import analysis so that test files can
-import the provider registry without triggering CJS resolution failures.
-The stubs are never used for behavioral testing — provider-specific tests
-use their own inline mocks that match the real SDK's API more closely (see
-[provider tests](./provider-tests.md)).
-
-### Resolve alias mechanism
-
-The stubs are activated via Vite resolve aliases configured in
-`vitest.config.ts:6-9`:
-
-| Alias | Target |
-|-------|--------|
-| `@openai/codex` | `src/__mocks__/@openai/codex.ts` |
-| `@github/copilot-sdk` | `src/__mocks__/@github/copilot-sdk.ts` |
-
-This mechanism operates at the module resolution level — it intercepts
-every `import` of the aliased package name across the entire test suite and
-redirects it to the mock file. Unlike `vi.mock()`, which requires
-per-test-file setup, the resolve alias applies globally and transparently.
-
-This means:
-
-- **No test file needs to explicitly mock these packages.** The alias is
-  always active during `vitest run`.
-- **The real SDK packages are never loaded** during any test, even
-  transitively.
-- **Coverage excludes mock stubs.** The `vitest.config.ts` coverage
-  configuration excludes `src/__mocks__/**` from coverage measurement.
-
-### Why resolve aliases instead of `vi.mock()`
-
-| Approach | Scope | When applied | Works for transitive imports |
-|----------|-------|--------------|-----------------------------|
-| `vi.mock()` | Per test file | After module-level mock calls | No — each file must declare the mock |
-| Resolve alias | Global | At Vite module resolution | Yes — all imports are redirected |
-
-The CJS incompatibility manifests during Vite's initial import graph
-analysis, before any test code runs. `vi.mock()` runs too late to prevent
-the resolution failure. Resolve aliases intervene at the correct stage.
 
 ## The fixtures module
 
@@ -173,47 +89,9 @@ contract.
 - **Read from stdout/stderr**: Pipe or listen for `data` events on
   `child.stdout` and `child.stderr`.
 
-#### Mock child process simulation architecture
-
-```mermaid
-graph TD
-    subgraph "createMockChildProcess()"
-        EE["EventEmitter base"]
-        STDIN["PassThrough stdin"]
-        STDOUT["PassThrough stdout"]
-        STDERR["PassThrough stderr"]
-        KILL["kill: vi.fn()"]
-        SEND["send: vi.fn()"]
-        META["pid: 1234, killed: false,<br/>exitCode: null, signalCode: null"]
-    end
-
-    subgraph "Test Code"
-        EMIT["child.emit('exit', 0)"]
-        WRITE["child.stdout.write('output')"]
-        ERR["child.emit('error', err)"]
-        LISTEN["child.stdout.on('data', cb)"]
-    end
-
-    subgraph "Production Code Under Test"
-        SPAWN["expects ChildProcess from spawn/execFile"]
-        ONEXIT["listens for 'exit' / 'close'"]
-        ONERROR["listens for 'error'"]
-        READ["reads stdout/stderr streams"]
-    end
-
-    EE --> EMIT
-    EE --> ERR
-    STDOUT --> WRITE
-    STDOUT --> LISTEN
-
-    EMIT --> ONEXIT
-    ERR --> ONERROR
-    LISTEN --> READ
-    SPAWN --> META
-```
-
 The mock is consumed by test files that test code interacting with spawned
-processes, such as the provider implementations that spawn CLI servers.
+processes, such as the [fix-tests pipeline](./fix-tests-tests.md) and the
+[test runner](./fix-tests-tests.md).
 
 ### The `ExecFileMockImpl` type and `mockExecFile` helper
 
@@ -247,6 +125,8 @@ the project:
 | `planner.test.ts` | `createMockProvider`, `createMockTask` | Planning & execution |
 | `spec-pipeline.test.ts` | `createMockDatasource` | Spec generation |
 | `spec-generator.test.ts` | `createMockDatasource` | Spec generation |
+| `fix-tests-pipeline.test.ts` | `createMockProvider` | Fix-tests pipeline |
+| `test-runner.test.ts` | `createMockChildProcess` | Fix-tests pipeline |
 | `md-datasource.test.ts` | `mockExecFile` | Markdown datasource |
 
 ### Convention: fixtures vs inline mocks
@@ -309,6 +189,8 @@ graph TD
         PLT["planner.test.ts"]
         SPT["spec-pipeline.test.ts"]
         SGT["spec-generator.test.ts"]
+        FTP["fix-tests-pipeline.test.ts"]
+        TRT["test-runner.test.ts"]
         MDT["md-datasource.test.ts"]
     end
 
@@ -331,6 +213,8 @@ graph TD
     PLT --> MT
     SPT --> MD
     SGT --> MD
+    FTP --> MP
+    TRT --> MC
     MDT --> ME
 ```
 
@@ -517,6 +401,9 @@ by composing `EventEmitter` and `PassThrough` streams.
 **Which production code spawns child processes?** The mock is consumed by tests
 for code that spawns external processes:
 
+- `src/orchestrator/fix-tests-pipeline.ts` — spawns `npm test` to run the
+  project's test suite.
+- `src/test-runner.ts` — spawns test commands via `child_process.spawn`.
 - Provider implementations — spawn CLI servers (OpenCode, Copilot).
 
 **How tests simulate child process events:** Because the mock extends
@@ -562,10 +449,10 @@ reference.
   implementations (contrast with mock provider)
 - [Planner & Executor Tests](./planner-executor-tests.md) — tests that consume
   `createMockProvider` and `createMockTask`
+- [Fix-Tests Pipeline Tests](./fix-tests-tests.md) — tests that consume
+  `createMockProvider` and `createMockChildProcess`
 - [Spec Generator Tests](./spec-generator-tests.md) — tests that consume
   `createMockDatasource`
-- [Spec Pipeline Tests](./spec-pipeline-tests.md) — tests that consume
-  `createMockDatasource` for pipeline lifecycle testing
 - [Datasource Testing](../datasource-system/testing.md) — tests that consume
   `mockExecFile`
 - [Shared Integrations](../shared-types/integrations.md) — Node.js process

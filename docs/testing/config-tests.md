@@ -2,19 +2,17 @@
 
 This document covers the three test files for the configuration system:
 `src/tests/config.test.ts`, `src/tests/cli-config.test.ts`, and
-`src/tests/config-prompts.test.ts`. For CLI argument parsing tests
-(`cli.test.ts`), see the
-[CLI documentation](../cli-orchestration/cli.md#test-coverage).
+`src/tests/config-prompts.test.ts`.
 
 ## Test file inventory
 
 | Test file | Production module | Lines (test) | Test count | Category |
 |-----------|-------------------|-------------|------------|----------|
-| `config.test.ts` | `src/config.ts` | 495 | 42 | File I/O, validation, merge |
-| `cli-config.test.ts` | `src/orchestrator/cli-config.ts` | 732 | 35 | Config resolution, auto-detection |
-| `config-prompts.test.ts` | `src/config-prompts.ts` | 471 | 22 | Interactive wizard flow |
+| `config.test.ts` | `src/config.ts` | 407 | 32 | File I/O, validation, merge |
+| `cli-config.test.ts` | `src/orchestrator/cli-config.ts` | 689 | 29 | Config resolution, auto-detection |
+| `config-prompts.test.ts` | `src/config-prompts.ts` | 365 | 16 | Interactive wizard flow |
 
-**Total: 1,698 lines of test code** covering 99 tests across 3 files.
+**Total: 1,461 lines of test code** covering 77 tests across 3 files.
 
 ## config.test.ts
 
@@ -24,7 +22,7 @@ key/value validation, numeric bounds enforcement, and merge precedence logic.
 
 ### Describe blocks
 
-The test file contains **5 describe blocks** with **42 tests** total.
+The test file contains **5 describe blocks** with **32 tests** total.
 
 ### loadConfig (5 tests)
 
@@ -71,7 +69,7 @@ Tests the `getConfigPath()` function, which resolves the config file location.
 | returns path under the given directory | Custom directory override works |
 | defaults to `{CWD}/.dispatch/config.json` when no override | Default path uses `process.cwd()` |
 
-### validateConfigValue (28 tests)
+### validateConfigValue (15 tests)
 
 Tests the `validateConfigValue()` function, which returns `null` for valid
 values or an error message string for invalid ones. Tests exercise all
@@ -84,33 +82,21 @@ boundary values.
 | rejects invalid provider name | `"invalid"` returns error containing `"Invalid provider"` |
 | accepts valid source names | `"github"` and `"azdevops"` return `null` |
 | rejects invalid source name | `"jira"` returns error containing `"Invalid source"` |
+| accepts valid testTimeout (within bounds) | Min (1), 10, 1.5, max (120) all valid |
+| rejects testTimeout below minimum | `"0"` and `"-5"` rejected with `"between"` |
+| rejects testTimeout above maximum | 121 rejected with `"between"` |
+| rejects non-numeric testTimeout | `"abc"` and `""` both rejected |
+| rejects Infinity and NaN for testTimeout | Special values rejected |
 | accepts valid planTimeout (within bounds) | Min (1), 10, 1.5, max (120) all valid |
-| rejects planTimeout below minimum | `"0"` and `"-1"` rejected with `"between"` |
-| rejects planTimeout above maximum | 121 rejected with `"between"` |
-| rejects non-numeric planTimeout | `"abc"` and `""` both rejected |
+| rejects planTimeout below/above bounds | `"0"`, `"-1"`, 121 all rejected |
+| rejects non-numeric planTimeout | `"abc"` and `""` rejected |
 | rejects Infinity and NaN for planTimeout | Special values rejected |
-| accepts valid specTimeout (within bounds) | Min (1), 10, 1.5, max (120) all valid |
-| rejects specTimeout below/above bounds | `"0"`, `"-1"`, 121 all rejected |
-| rejects non-numeric specTimeout | `"abc"` and `""` rejected |
-| rejects Infinity and NaN for specTimeout | Special values rejected |
-| accepts valid specWarnTimeout (within bounds) | Min (1), 10, 1.5, max (120) all valid |
-| rejects specWarnTimeout below/above bounds | `"0"`, `"-1"`, 121 all rejected |
-| rejects non-numeric specWarnTimeout | `"abc"` and `""` rejected |
-| rejects Infinity and NaN for specWarnTimeout | Special values rejected |
-| accepts valid specKillTimeout (within bounds) | Min (1), 10, 1.5, max (120) all valid |
-| rejects specKillTimeout below/above bounds | `"0"`, `"-1"`, 121 all rejected |
-| rejects non-numeric specKillTimeout | `"abc"` and `""` rejected |
-| rejects Infinity and NaN for specKillTimeout | Special values rejected |
 | accepts valid concurrency (within bounds) | Min (1), 4, max (64) all valid |
 | rejects concurrency below/above bounds | `"0"`, `"-1"`, 65 all rejected |
 | rejects non-integer concurrency | `"1.5"`, `"abc"`, `""` rejected |
 | rejects Infinity and NaN for concurrency | Special values rejected |
 | accepts valid org, project, workItemType, iteration, area | Non-empty strings accepted |
 | rejects empty org, project, workItemType, iteration, area | `""` and whitespace-only rejected |
-| accepts valid username values | 1-20 chars, alphanumeric + hyphens |
-| rejects empty username | `""` and whitespace-only rejected |
-| rejects username exceeding 20 characters | 21 chars returns error with `"at most 20 characters"` |
-| rejects username with invalid characters | spaces, dots, underscores, slashes rejected |
 
 **Validation rules by key:**
 
@@ -119,51 +105,14 @@ boundary values.
 | `provider` | `"opencode"`, `"copilot"`, `"claude"`, `"codex"` | Must be in `PROVIDER_NAMES` |
 | `model` | Any non-empty string | Must not be empty or whitespace-only |
 | `source` | `"github"`, `"azdevops"`, `"md"` | Must be in `DATASOURCE_NAMES` |
+| `testTimeout` | 1–120 | Finite number within `CONFIG_BOUNDS` |
 | `planTimeout` | 1–120 | Finite number within `CONFIG_BOUNDS` |
-| `specTimeout` | 1–120 | Finite number within `CONFIG_BOUNDS` |
-| `specWarnTimeout` | 1–120 | Finite number within `CONFIG_BOUNDS` |
-| `specKillTimeout` | 1–120 | Finite number within `CONFIG_BOUNDS` |
 | `concurrency` | 1–64 | Integer within `CONFIG_BOUNDS` |
 | `org` | Any non-empty string | Must not be empty or whitespace-only |
 | `project` | Any non-empty string | Must not be empty or whitespace-only |
 | `workItemType` | Any non-empty string | Must not be empty or whitespace-only |
 | `iteration` | Any non-empty string | Must not be empty or whitespace-only |
 | `area` | Any non-empty string | Must not be empty or whitespace-only |
-| `username` | 1-20 chars, `[a-zA-Z0-9-]` | Alphanumeric + hyphens, at most 20 chars |
-
-### Config validation boundary matrix
-
-The following diagram shows how `validateConfigValue()` routes validation
-based on key type:
-
-```mermaid
-flowchart LR
-    INPUT["validateConfigValue(key, value)"] --> TYPE{"Key type?"}
-
-    TYPE -->|"provider"| ENUM_P{"value in<br/>PROVIDER_NAMES?"}
-    ENUM_P -->|Yes| OK["null (valid)"]
-    ENUM_P -->|No| ERR_P["'Invalid provider'"]
-
-    TYPE -->|"source"| ENUM_S{"value in<br/>DATASOURCE_NAMES?"}
-    ENUM_S -->|Yes| OK
-    ENUM_S -->|No| ERR_S["'Invalid source'"]
-
-    TYPE -->|"planTimeout<br/>specTimeout<br/>specWarnTimeout<br/>specKillTimeout"| NUM{"isFinite(n)?<br/>min <= n <= max?"}
-    NUM -->|Yes| OK
-    NUM -->|No| ERR_N["'between min and max'"]
-
-    TYPE -->|"concurrency"| INT{"isFinite(n)?<br/>Number.isInteger(n)?<br/>min <= n <= max?"}
-    INT -->|Yes| OK
-    INT -->|No| ERR_I["'integer between<br/>min and max'"]
-
-    TYPE -->|"org, project<br/>workItemType<br/>iteration, area"| STR{"non-empty<br/>after trim?"}
-    STR -->|Yes| OK
-    STR -->|No| ERR_STR["'must not be empty'"]
-
-    TYPE -->|"username"| USR{"1-20 chars?<br/>[a-zA-Z0-9-] only?"}
-    USR -->|Yes| OK
-    USR -->|No| ERR_USR["length or<br/>character error"]
-```
 
 ### merge precedence (5 tests)
 
@@ -183,7 +132,7 @@ Note that `source` maps to `issueSource` in CLI args — this is the only
 field where the config key differs from the CLI field name. The test's local
 `CONFIG_TO_CLI` mapping covers the core 3 keys; the production code's
 mapping in [`src/orchestrator/cli-config.ts:25-37`](../cli-orchestration/configuration.md)
-additionally includes `planTimeout`, `concurrency`, `org`,
+additionally includes `testTimeout`, `planTimeout`, `concurrency`, `org`,
 `project`, `workItemType`, `iteration`, and `area`.
 
 ```mermaid
@@ -209,44 +158,9 @@ Tests the config resolution layer defined in
 three-tier merge, mandatory validation, output-dir validation, datasource
 auto-detection, and mode-dependent behavior.
 
-### CLI flag parsing, config merging, and auto-detection pipeline
-
-The `resolveCliConfig()` function executes a multi-stage pipeline that the
-test suite exercises end-to-end:
-
-```mermaid
-flowchart TD
-    A["parseArgs() returns<br/>RawCliArgs + explicitFlags Set"] --> B["loadConfig() reads<br/>config.json from cwd"]
-    B --> C{"For each CONFIG_TO_CLI<br/>field"}
-    C --> D{"Field in<br/>explicitFlags?"}
-    D -->|Yes| E["Keep CLI value"]
-    D -->|No| F{"Config value<br/>exists?"}
-    F -->|Yes| G["Use config value"]
-    F -->|No| H["Keep default"]
-    E --> I{"provider set?"}
-    G --> I
-    H --> I
-    I -->|No| J["log.error + process.exit(1)"]
-    I -->|Yes| K{"outputDir set?"}
-    K -->|Yes| L{"access(outputDir,<br/>W_OK)?"}
-    L -->|ENOENT| M["log.error 'does not exist'<br/>+ process.exit(1)"]
-    L -->|EACCES| N["log.error 'not writable'<br/>+ process.exit(1)"]
-    L -->|OK| O{"issueSource resolved?"}
-    K -->|No| O
-    O -->|Yes| P["Return resolved config"]
-    O -->|No| Q{"spec or respec<br/>mode?"}
-    Q -->|Yes| R["Skip detection,<br/>source = undefined"]
-    Q -->|No| S["detectDatasource(cwd)"]
-    S --> T{"Detection result?"}
-    T -->|non-null| U["issueSource = detected<br/>log.info auto-detected"]
-    T -->|null| V["log.error 'auto-detection failed'<br/>+ remediation guidance<br/>+ process.exit(1)"]
-    U --> P
-    R --> P
-```
-
 ### Test structure
 
-The test file contains **7 describe blocks** with **35 tests** total. All
+The test file contains **5 describe blocks** with **29 tests** total. All
 tests mock `process.exit` to prevent test runner termination:
 
 ```
@@ -258,7 +172,7 @@ vi.spyOn(process, "exit").mockImplementation(
 Tests then assert with `expect(...).rejects.toThrow("process.exit called")`
 and verify error messages via `expect(log.error).toHaveBeenCalledWith(...)`.
 
-### config merging (15 tests)
+### config merging (10 tests)
 
 | Test | What it verifies |
 |------|------------------|
@@ -268,24 +182,20 @@ and verify error messages via `expect(log.error).toHaveBeenCalledWith(...)`.
 | merges source config key to issueSource CLI field | `source` → `issueSource` mapping |
 | does not overwrite explicit issueSource with config source | Explicit source preserved |
 | merges all CONFIG_TO_CLI fields from config | Full mapping works |
-| merges specTimeout from config when not explicit | Timeout merging |
-| keeps explicit CLI specTimeout over config value | Explicit timeout wins |
-| merges specWarnTimeout from config when not explicit | Warn timeout merging |
-| keeps explicit CLI specWarnTimeout over config value | Explicit warn timeout wins |
-| merges specKillTimeout from config when not explicit | Kill timeout merging |
-| keeps explicit CLI specKillTimeout over config value | Explicit kill timeout wins |
 | merges azdevops config values (org, project, workItemType, iteration, area) | All AzDevOps fields merge |
 | CLI flags take precedence over config for org, project, workItemType, iteration, area | AzDevOps CLI wins |
 | merges only the azdevops config fields that are set, leaving others undefined | Partial AzDevOps config |
 | uses config for azdevops fields not in explicitFlags and CLI for those in explicitFlags | Mixed AzDevOps precedence |
 
-### validation errors (3 tests)
+### validation errors (5 tests)
 
 | Test | What it verifies |
 |------|------------------|
 | exits when provider is not configured | Missing provider → `process.exit(1)` |
 | auto-detects datasource when source is not configured | `detectDatasource()` called |
 | exits when only provider is missing | Missing provider with no config |
+| does not require source in fix-tests mode | `fixTests` skips source check |
+| still requires provider in fix-tests mode | Provider mandatory in all modes |
 
 ### output-dir validation (4 tests)
 
@@ -296,10 +206,9 @@ and verify error messages via `expect(log.error).toHaveBeenCalledWith(...)`.
 | passes validation when output directory exists and is writable | `access()` success |
 | skips validation when outputDir is not set | `access()` not called |
 
-### datasource auto-detection (14 tests, 2 describe blocks)
+### datasource auto-detection (14 tests)
 
-The tests are split across two describe blocks that both test datasource
-auto-detection. They verify the conditional detection logic documented in
+These tests verify the conditional datasource detection logic documented in
 [datasource auto-detection](../cli-orchestration/configuration.md#datasource-auto-detection-conditional):
 
 | Test | What it verifies |
@@ -308,15 +217,14 @@ auto-detection. They verify the conditional detection logic documented in
 | exits with error when detection returns null | Fatal error on detection failure |
 | does not auto-detect when issueSource is in explicitFlags | Explicit source skips detection |
 | does not auto-detect when config source is set | Config source skips detection |
+| skips auto-detection in fix-tests mode | `fixTests` → no detection |
 | skips auto-detection in spec mode | `spec` → no detection |
 | skips auto-detection in respec mode | `respec` → no detection |
 | still auto-detects for dispatch mode | Default mode runs detection |
 | explicit --source flag still works in spec mode | Source passthrough in spec |
 | config-file source still applies in spec mode | Config source in spec |
 | detects azdevops from git remote | Azure DevOps detection |
-| uses detected source when no explicit source is set and detection succeeds | Second block — success path |
-| exits with error when no explicit source is set and detection fails | Second block — failure path |
-| includes remediation guidance when detection fails | Error message lists sources, `dispatch config`, `--source` |
+| includes remediation guidance when detection fails | Error message quality |
 | explicit --source flag overrides auto-detection | CLI wins over detection |
 | config source value overrides auto-detection | Config wins over detection |
 
@@ -327,67 +235,17 @@ auto-detection. They verify the conditional detection logic documented in
 | enables verbose logging when verbose is true | `log.verbose = true` |
 | does not enable verbose logging when verbose is false | `log.verbose = false` |
 
-### default handling (1 test)
-
-| Test | What it verifies |
-|------|------------------|
-| passes through all non-config CLI fields unchanged | `issueIds`, `dryRun`, `noPlan`, `noBranch`, `cwd`, `spec` all preserved |
-
 ## config-prompts.test.ts
 
 Tests the interactive configuration wizard defined in
 [`src/config-prompts.ts`](../cli-orchestration/configuration.md#config-wizard-flow).
 All external dependencies (`@inquirer/prompts`, `config.ts`, `datasources/index.ts`,
-`providers/index.ts`, `helpers/auth.ts`) are mocked to simulate user interactions.
-
-### Interactive config wizard state machine
-
-The wizard progresses through a sequence of interactive prompts. Tests verify
-each transition and edge case:
-
-```mermaid
-flowchart TD
-    START["runInteractiveConfigWizard()"] --> LOAD["loadConfig()"]
-    LOAD --> CHECK{"Existing config<br/>has provider?"}
-    CHECK -->|Yes| RECONF{"confirm:<br/>'Reconfigure?'"}
-    RECONF -->|No| EXIT["Return (no changes)"]
-    RECONF -->|Yes| PROVIDER
-    CHECK -->|No| PROVIDER
-
-    PROVIDER["select: 'Choose provider'<br/>with install indicators<br/>(green/red dots via chalk)"]
-    PROVIDER --> MODELS{"listProviderModels()<br/>returns models?"}
-    MODELS -->|Yes| MODEL["select: 'Choose model'<br/>(includes 'default' option)"]
-    MODELS -->|No| DS
-    MODEL --> DS
-
-    DS["select: 'Select datasource'<br/>(auto is first choice,<br/>default from existing config<br/>or 'auto')"]
-    DS --> DSCHECK{"Selected source?"}
-    DSCHECK -->|"azdevops"| AZFIELDS["input: org, project,<br/>workItemType, iteration, area<br/>(pre-filled from git remote<br/>if available)"]
-    DSCHECK -->|"auto"| AUTODETECT["detectDatasource()"]
-    DSCHECK -->|other| AUTH
-
-    AZFIELDS --> AUTH
-    AUTODETECT --> AUTH
-
-    AUTH["ensureAuthReady(source, cwd, orgUrl)"]
-    AUTH -->|Success| OVERRIDES
-    AUTH -->|Failure| WARN["console.error<br/>(wizard continues)"]
-    WARN --> OVERRIDES
-
-    OVERRIDES{"confirm:<br/>'Per-agent overrides?'"}
-    OVERRIDES -->|No| SAVE
-    OVERRIDES -->|Yes| AGENT_CONFIG["Agent-specific prompts"]
-    AGENT_CONFIG --> SAVE
-
-    SAVE{"confirm:<br/>'Save config?'"}
-    SAVE -->|Yes| WRITE["saveConfig(config, cwd)"]
-    SAVE -->|No| CANCEL["Return (no save)"]
-```
+`providers/index.ts`) are mocked to simulate user interactions.
 
 ### Test structure
 
 The test file contains **1 describe block** (`runInteractiveConfigWizard`)
-with **22 tests** total. Mock setup follows this pattern:
+with **16 tests** total. Mock setup follows this pattern:
 
 1. `vi.mock("@inquirer/prompts")` — mocks `select`, `confirm`, `input`
 2. `vi.mock("../config.js")` — mocks `loadConfig`, `saveConfig`
@@ -395,12 +253,11 @@ with **22 tests** total. Mock setup follows this pattern:
    `getGitRemoteUrl`, `parseAzDevOpsRemoteUrl`
 4. `vi.mock("../providers/index.js")` — mocks `listProviderModels`,
    `checkProviderInstalled`
-5. `vi.mock("../helpers/auth.js")` — mocks `ensureAuthReady`
 
 Each test orchestrates the wizard flow by providing mock return values for
 the prompt functions in sequence, then asserts on `saveConfig` calls.
 
-### runInteractiveConfigWizard (22 tests)
+### runInteractiveConfigWizard (16 tests)
 
 | Test | What it verifies |
 |------|------------------|
@@ -421,11 +278,6 @@ the prompt functions in sequence, then asserts on `saveConfig` calls.
 | azdevops source — pre-fills org and project from git remote | Git remote pre-fill |
 | non-azdevops source — does not prompt for azdevops fields | `input` not called |
 | provider select choices show red indicator for uninstalled providers | Red dot for uninstalled |
-| triggers auth when github datasource is selected | `ensureAuthReady("github", ...)` called |
-| triggers auth when azdevops datasource is selected with org | `ensureAuthReady("azdevops", ..., orgUrl)` called |
-| does not trigger auth for md datasource | `ensureAuthReady("md", ...)` called (no-op) |
-| continues wizard when auth fails | Auth failure does not abort wizard |
-| triggers auth for auto-detected github source when auto is selected | Auto + detected → auth for detected source |
 
 ## Testing patterns
 
@@ -511,5 +363,3 @@ pattern described in the [overview](overview.md). Each test creates a unique
 - [Shared Utilities](../shared-utilities/overview.md) -- timeout and
   slugify utilities whose configuration (`planTimeout`, `concurrency`)
   is validated by these tests
-- [Binary Detection](../provider-system/binary-detection.md) -- provider
-  binary detection logic tested alongside config wizard prompts

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Task, TaskFile } from "../parser.js";
-import type { Skill } from "../skills/interface.js";
-import type { SkillResult, PlannerData } from "../skills/types.js";
+import type { PlannerAgent } from "../agents/planner.js";
+import type { AgentResult, PlannerData } from "../agents/types.js";
 import type { ProviderInstance } from "../providers/interface.js";
 import type { Datasource, IssueDetails } from "../datasources/interface.js";
 
@@ -22,16 +22,15 @@ const { mocks, TASK_FIXTURE, TASK_FILE_FIXTURE } = vi.hoisted(() => {
     content: "# Test\n\n- [ ] Implement the feature",
   };
 
-  const mockPlan = vi.fn();
+  const mockPlan = vi.fn<PlannerAgent["plan"]>();
   const mockExecute = vi.fn();
   const mockGenerate = vi.fn();
-  const mockDispatch = vi.fn();
   const mockCreateSession = vi.fn<ProviderInstance["createSession"]>().mockResolvedValue("sess-1");
   const mockPrompt = vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("done");
   const mockCleanup = vi.fn().mockResolvedValue(undefined);
 
   return {
-    mocks: { mockPlan, mockExecute, mockGenerate, mockDispatch, mockCreateSession, mockPrompt, mockCleanup },
+    mocks: { mockPlan, mockExecute, mockGenerate, mockCreateSession, mockPrompt, mockCleanup },
     TASK_FIXTURE,
     TASK_FILE_FIXTURE,
   };
@@ -48,35 +47,30 @@ vi.mock("../providers/index.js", () => ({
     prompt: mocks.mockPrompt,
     cleanup: mocks.mockCleanup,
   } satisfies ProviderInstance),
-  getAuthenticatedProviders: vi.fn().mockResolvedValue(["opencode"]),
-  checkProviderAuthenticated: vi.fn().mockResolvedValue(true),
-  getProviderAuthStatus: vi.fn().mockResolvedValue({ status: "authenticated" }),
-  PROVIDER_NAMES: ["opencode", "copilot", "claude", "codex"],
 }));
 
-vi.mock("../providers/router.js", () => ({
-  routeAllSkills: vi.fn().mockReturnValue({
-    planner: [{ provider: "opencode", model: "claude-haiku-4", priority: 0 }],
-    executor: [{ provider: "opencode", model: "claude-sonnet-4-5", priority: 0 }],
-    commit: [{ provider: "opencode", model: "claude-haiku-4", priority: 0 }],
+vi.mock("../agents/planner.js", () => ({
+  boot: vi.fn().mockResolvedValue({
+    name: "planner",
+    plan: mocks.mockPlan,
+    cleanup: vi.fn().mockResolvedValue(undefined),
+  } satisfies PlannerAgent),
+}));
+
+vi.mock("../agents/executor.js", () => ({
+  boot: vi.fn().mockResolvedValue({
+    name: "executor",
+    execute: mocks.mockExecute,
+    cleanup: vi.fn().mockResolvedValue(undefined),
   }),
-  routeSkill: vi.fn().mockReturnValue([{ provider: "opencode", model: "claude-sonnet-4-5", priority: 0 }]),
 }));
 
-vi.mock("../skills/planner.js", () => ({
-  plannerSkill: { name: "planner", buildPrompt: vi.fn(), parseResult: vi.fn() },
-}));
-
-vi.mock("../skills/executor.js", () => ({
-  executorSkill: { name: "executor", buildPrompt: vi.fn(), parseResult: vi.fn() },
-}));
-
-vi.mock("../skills/commit.js", () => ({
-  commitSkill: { name: "commit", buildPrompt: vi.fn(), parseResult: vi.fn() },
-}));
-
-vi.mock("../dispatcher.js", () => ({
-  dispatch: mocks.mockDispatch,
+vi.mock("../agents/commit.js", () => ({
+  boot: vi.fn().mockResolvedValue({
+    name: "commit",
+    generate: mocks.mockGenerate,
+    cleanup: vi.fn().mockResolvedValue(undefined),
+  }),
 }));
 
 vi.mock("../datasources/index.js", () => ({
@@ -127,7 +121,6 @@ vi.mock("../parser.js", () => ({
   parseTaskFile: vi.fn().mockResolvedValue(TASK_FILE_FIXTURE),
   buildTaskContext: vi.fn().mockReturnValue("filtered context"),
   groupTasksByMode: vi.fn().mockImplementation((tasks: Task[]) => [tasks]),
-  markTaskComplete: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../orchestrator/datasource-helpers.js", () => ({
@@ -222,14 +215,6 @@ describe("integration: verbose file logging", () => {
     consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    // Set up dispatch mock routing
-    mocks.mockDispatch.mockImplementation(async (skill: Skill<any, any>, input: any) => {
-      if (skill.name === "planner") return mocks.mockPlan(input);
-      if (skill.name === "executor") return mocks.mockExecute(input);
-      if (skill.name === "commit") return mocks.mockGenerate(input);
-      throw new Error(`Unknown skill: ${skill.name}`);
-    });
-
     mocks.mockPlan.mockResolvedValue({
       data: { prompt: "Execute step 1" },
       success: true,
@@ -241,10 +226,11 @@ describe("integration: verbose file logging", () => {
       durationMs: 100,
     });
     mocks.mockGenerate.mockResolvedValue({
-      data: null,
+      commitMessage: "",
+      prTitle: "",
+      prDescription: "",
       success: false,
       error: "mock: not configured",
-      durationMs: 0,
     });
   });
 

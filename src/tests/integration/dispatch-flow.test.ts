@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import type { ProviderInstance } from "../../providers/interface.js";
-import type { Skill } from "../../skills/interface.js";
-import type { SkillResult, PlannerData, ExecutorData } from "../../skills/types.js";
+import type { PlannerAgent } from "../../agents/planner.js";
+import type { AgentResult, PlannerData, ExecutorData } from "../../agents/types.js";
 import type { Task } from "../../parser.js";
-// markTaskComplete is now called by the pipeline itself after dispatch returns success
+import { markTaskComplete } from "../../parser.js";
 
 // ─── Hoisted mock references ────────────────────────────────────────
 
@@ -20,10 +20,11 @@ const { mocks } = vi.hoisted(() => {
     data: { prompt: "Execute the task as described." },
     success: true,
     durationMs: 100,
-  } satisfies SkillResult<PlannerData>);
+  } satisfies AgentResult<PlannerData>);
+  const mockPlannerCleanup = vi.fn().mockResolvedValue(undefined);
 
   const mockExecute = vi.fn();
-  const mockDispatch = vi.fn();
+  const mockExecutorCleanup = vi.fn().mockResolvedValue(undefined);
 
   return {
     mocks: {
@@ -31,8 +32,9 @@ const { mocks } = vi.hoisted(() => {
       mockPrompt,
       mockProviderCleanup,
       mockPlan,
+      mockPlannerCleanup,
       mockExecute,
-      mockDispatch,
+      mockExecutorCleanup,
     },
   };
 });
@@ -47,31 +49,22 @@ vi.mock("../../providers/index.js", () => ({
     prompt: mocks.mockPrompt,
     cleanup: mocks.mockProviderCleanup,
   } satisfies ProviderInstance),
-  getAuthenticatedProviders: vi.fn().mockResolvedValue(["opencode"]),
-  checkProviderAuthenticated: vi.fn().mockResolvedValue(true),
-  getProviderAuthStatus: vi.fn().mockResolvedValue({ status: "authenticated" }),
-  PROVIDER_NAMES: ["opencode", "copilot", "claude", "codex"],
 }));
 
-vi.mock("../../providers/router.js", () => ({
-  routeAllSkills: vi.fn().mockReturnValue({
-    planner: [{ provider: "opencode", model: "claude-haiku-4", priority: 0 }],
-    executor: [{ provider: "opencode", model: "claude-sonnet-4-5", priority: 0 }],
-    commit: [{ provider: "opencode", model: "claude-haiku-4", priority: 0 }],
+vi.mock("../../agents/planner.js", () => ({
+  boot: vi.fn().mockResolvedValue({
+    name: "planner",
+    plan: mocks.mockPlan,
+    cleanup: mocks.mockPlannerCleanup,
+  } satisfies PlannerAgent),
+}));
+
+vi.mock("../../agents/executor.js", () => ({
+  boot: vi.fn().mockResolvedValue({
+    name: "executor",
+    execute: mocks.mockExecute,
+    cleanup: mocks.mockExecutorCleanup,
   }),
-  routeSkill: vi.fn().mockReturnValue([{ provider: "opencode", model: "claude-sonnet-4-5", priority: 0 }]),
-}));
-
-vi.mock("../../skills/planner.js", () => ({
-  plannerSkill: { name: "planner", buildPrompt: vi.fn(), parseResult: vi.fn() },
-}));
-
-vi.mock("../../skills/executor.js", () => ({
-  executorSkill: { name: "executor", buildPrompt: vi.fn(), parseResult: vi.fn() },
-}));
-
-vi.mock("../../dispatcher.js", () => ({
-  dispatch: mocks.mockDispatch,
 }));
 
 vi.mock("../../tui.js", () => ({
@@ -136,18 +129,12 @@ describe("integration: dispatch pipeline with md datasource", () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    // Set up dispatch mock routing
-    mocks.mockDispatch.mockImplementation(async (skill: Skill<any, any>, input: any) => {
-      if (skill.name === "planner") return mocks.mockPlan(input);
-      if (skill.name === "executor") return mocks.mockExecute(input);
-      throw new Error(`Unknown skill: ${skill.name}`);
-    });
-
     // Configure the mock executor to simulate success.
-    // In the new stateless architecture, the pipeline calls markTaskComplete
-    // after dispatch returns success, so the mock should NOT call it.
+    // It must call markTaskComplete to update the file (checking off the task),
+    // mimicking what the real executor does.
     mocks.mockExecute.mockImplementation(
-      async (input: { task: Task; cwd: string; plan: string | null }): Promise<SkillResult<ExecutorData>> => {
+      async (input: { task: Task; cwd: string; plan: string | null }): Promise<AgentResult<ExecutorData>> => {
+        await markTaskComplete(input.task);
         return {
           data: { dispatchResult: { task: input.task, success: true } },
           success: true,
@@ -200,7 +187,6 @@ describe("integration: dispatch pipeline with md datasource", () => {
         noPlan: false,
         noBranch: true,
         provider: "opencode",
-        enabledProviders: ["opencode"],
         source: "md",
         planTimeout: 1,
         planRetries: 0,
@@ -256,7 +242,6 @@ describe("integration: dispatch pipeline with md datasource", () => {
         noPlan: false,
         noBranch: true,
         provider: "opencode",
-        enabledProviders: ["opencode"],
         source: "md",
         planTimeout: 1,
         planRetries: 0,
@@ -297,7 +282,6 @@ describe("integration: dispatch pipeline with md datasource", () => {
         noPlan: true,
         noBranch: true,
         provider: "opencode",
-        enabledProviders: ["opencode"],
         source: "md",
         planTimeout: 1,
         planRetries: 0,
@@ -333,7 +317,7 @@ describe("integration: dispatch pipeline with md datasource", () => {
     Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
 
     let executeCalls = 0;
-    mocks.mockExecute.mockImplementation(async (input: { task: Task; cwd: string; plan: string | null }): Promise<SkillResult<ExecutorData>> => {
+    mocks.mockExecute.mockImplementation(async (input: { task: Task; cwd: string; plan: string | null }): Promise<AgentResult<ExecutorData>> => {
       executeCalls++;
       if (executeCalls <= 4) {
         return {
@@ -343,6 +327,7 @@ describe("integration: dispatch pipeline with md datasource", () => {
           durationMs: 50,
         };
       }
+      await markTaskComplete(input.task);
       return {
         data: { dispatchResult: { task: input.task, success: true } },
         success: true,
@@ -358,7 +343,6 @@ describe("integration: dispatch pipeline with md datasource", () => {
         noPlan: false,
         noBranch: true,
         provider: "opencode",
-        enabledProviders: ["opencode"],
         source: "md",
         planTimeout: 1,
         planRetries: 0,

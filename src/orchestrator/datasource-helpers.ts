@@ -277,8 +277,8 @@ export async function buildPrTitle(
     return commits[0];
   }
 
-  // Multiple commits — use the newest commit message with a count suffix
-  return `${commits[0]} (+${commits.length - 1} more)`;
+  // Multiple commits — use the first commit message with a count suffix
+  return `${commits[commits.length - 1]} (+${commits.length - 1} more)`;
 }
 
 /**

@@ -46,9 +46,9 @@ error conventions, and registration patterns. The framework provides:
 | [`src/agents/index.ts`](../../src/agents/index.ts) | Agent registry, `bootAgent()`, type-safe boot function exports, and re-exports |
 | [`src/agents/interface.ts`](../../src/agents/interface.ts) | `Agent` base interface, `AgentName` union, `AgentBootOptions` |
 | [`src/agents/commit.ts`](../../src/agents/commit.ts) | [Commit agent](./commit-agent.md) implementation |
-| [`src/agents/planner.ts`](../../src/agents/planner.ts) | [Planner agent](../agent-system/planner-agent.md) implementation |
-| [`src/agents/executor.ts`](../../src/agents/executor.ts) | [Executor agent](../agent-system/executor-agent.md) implementation |
-| [`src/agents/spec.ts`](../../src/agents/spec.ts) | [Spec agent](../agent-system/spec-agent.md) implementation |
+| [`src/agents/planner.ts`](../../src/agents/planner.ts) | [Planner agent](../planning-and-dispatch/planner.md) implementation |
+| [`src/agents/executor.ts`](../../src/agents/executor.ts) | [Executor agent](../planning-and-dispatch/executor.md) implementation |
+| [`src/agents/spec.ts`](../../src/agents/spec.ts) | [Spec agent](../spec-generation/spec-agent.md) implementation |
 
 ## Architecture
 
@@ -374,132 +374,16 @@ Follow these four steps (documented in `src/agents/interface.ts` and
 TypeScript's exhaustiveness checking ensures that all `switch` statements and
 `Record<AgentName, ...>` maps are updated when the union changes.
 
-## Why each agent creates a fresh session per invocation
-
-All four agents call `provider.createSession()` at the start of their main
-method rather than reusing sessions across invocations. The rationale is stated
-in `src/dispatcher.ts:2-3`:
-
-> "creates a fresh session per task to keep contexts isolated and avoid
-> context rot."
-
-**Context rot** occurs when a long-running AI session accumulates stale
-information from earlier prompts, causing the model to reference outdated
-context, conflate unrelated tasks, or exceed token limits. Fresh sessions
-ensure each task gets a clean context window with only the information it needs.
-
-The tradeoff is increased session creation overhead. In practice this is
-minimal because:
-
-- Session creation is lightweight (an RPC call or server-side state allocation).
-- The cost of context rot (incorrect code changes, hallucinated references) far
-  outweighs the marginal latency of session creation.
-
-## Temporary files and log file lifecycle
-
-### Where files accumulate
-
-| Artifact | Location | Agent | Cleanup behavior |
-|----------|----------|-------|------------------|
-| Spec temp file | `.dispatch/tmp/spec-<uuid>.md` | Spec | Deleted after post-processing (`src/agents/spec.ts:229-233`) |
-| Commit temp file | `.dispatch/tmp/commit-<uuid>.md` | Commit | **Not cleaned up** by the commit agent |
-| Per-issue log file | `.dispatch/logs/issue-<id>.log` | All (via FileLogger) | **Never cleaned up** automatically |
-
-### Is `.dispatch/` version-controlled?
-
-The project's `.gitignore` contains `.dispatch/*`, meaning the entire
-`.dispatch/` directory (including `tmp/`, `logs/`, and `worktrees/`) is
-excluded from version control. Files here accumulate locally until manually
-deleted.
-
-### Cleanup strategy
-
-There is no automated cleanup of `.dispatch/tmp/` or `.dispatch/logs/`
-across runs. The spec agent cleans up its own temp files after each
-invocation, but commit agent files and log files persist indefinitely.
-
-For CI/CD environments, consider adding a pre-job cleanup step:
-
-```bash
-rm -rf .dispatch/tmp/ .dispatch/logs/
-```
-
-For local development, periodic manual cleanup is sufficient. The UUID-based
-filenames prevent collisions, so stale files cause no functional issues — only
-disk space consumption.
-
-### Concurrent write safety
-
-Temp files use UUID-based filenames (`crypto.randomUUID()`), preventing
-collisions even when multiple agents or worktrees write concurrently. The
-`.dispatch/tmp/` directory is created with `{ recursive: true }`, making
-the `mkdir` call idempotent if another process creates it simultaneously.
-
-## Task execution modes: `(P)`, `(S)`, and `(I)` tags
-
-The spec agent instructs the AI to tag each task with a parallelism mode
-(`src/agents/spec.ts:452-458`). These tags control how the orchestrator
-schedules tasks:
-
-| Tag | Mode | Meaning |
-|-----|------|---------|
-| `(P)` | `parallel` | No dependency on prior tasks; can run concurrently with other `(P)` tasks |
-| `(S)` | `serial` | Depends on a prior task's output; acts as a barrier |
-| `(I)` | `isolated` | Must run alone after all preceding tasks complete (e.g., test/lint/build) |
-
-### How tags are parsed
-
-The parser (`src/parser.ts:40`) uses the regex `MODE_PREFIX_RE = /^\(([PSI])\)\s+/`
-to extract mode prefixes from task text. The prefix is stripped from
-`task.text` and stored in `task.mode`. Untagged tasks default to `"serial"`
-to maintain safe ordering.
-
-### How modes affect execution
-
-The `groupTasksByMode()` function (in `src/parser.ts`) partitions tasks into
-sequential groups that are each run by `runWithConcurrency()`:
-
-1. Consecutive `(P)` tasks are grouped and run concurrently.
-2. An `(S)` task acts as a barrier: all preceding tasks complete before it
-   starts, and it completes before subsequent tasks begin.
-3. An `(I)` task is a strict barrier: it runs alone after all prior tasks
-   complete.
-
-The spec prompt instructs the AI to default to `(P)` and only use `(S)` or
-`(I)` when genuine dependencies exist, maximizing throughput.
-
-## The planner bypass (`--no-plan`)
-
-The executor agent's `ExecuteInput.plan` field accepts `string | null`
-(`src/agents/executor.ts:31`). When `plan` is `null`, planning was skipped
-via the `--no-plan` CLI flag.
-
-In the dispatcher (`src/dispatcher.ts:43`), the presence or absence of a
-plan determines which prompt is built:
-
-- **With plan**: `buildPlannedPrompt()` — includes the planner's detailed
-  execution instructions. The executor is told to follow the plan precisely
-  without exploring the codebase.
-- **Without plan**: `buildPrompt()` — a generic prompt with just the task
-  text and working directory. The executor must explore the codebase on its
-  own.
-
-The planner bypass trades quality for speed. Without planning, each task
-runs in a single AI session instead of two (planner + executor), cutting
-the number of AI calls in half. This is useful for simple tasks where the
-overhead of planning is not justified.
-
 ## Component index
 
 - [Commit Agent](./commit-agent.md) — AI-driven conventional commit message,
   PR title, and PR description generation
-- [Planner Agent](./planner-agent.md) — Read-only codebase exploration to
-  produce execution plans
-- [Executor Agent](./executor-agent.md) — Task dispatch + completion marking
-- [Spec Agent](./spec-agent.md) — Codebase exploration and structured spec
-  generation
-- [Pipeline Flow](./pipeline-flow.md) — Data flow from issue input through
-  spec, planning, execution, and commit
+- [Planner Agent](../planning-and-dispatch/planner.md) — Read-only codebase
+  exploration to produce execution plans
+- [Executor Agent](../planning-and-dispatch/executor.md) — Task dispatch +
+  completion marking
+- [Spec Agent](../spec-generation/spec-agent.md) — Codebase exploration and
+  structured spec generation
 
 ## Related documentation
 
@@ -526,3 +410,6 @@ overhead of planning is not justified.
   `DispatchResult` from the executor drives issue lifecycle operations
 - [Testing Overview](../testing/overview.md) — Project-wide test suite
   including planner, executor, and provider test coverage
+- [Fix-Tests Pipeline](../cli-orchestration/fix-tests-pipeline.md) — An
+  alternative pipeline that boots providers and dispatches AI agents for
+  test repair

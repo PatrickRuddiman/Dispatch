@@ -410,8 +410,3 @@ The booted agent interface (extends `Agent`):
   engine that drives the commit agent through its generation flow
 - [File Logger](../shared-types/file-logger.md) — Per-issue file logging
   used by the commit agent for prompt and response tracing
-- [Commit Agent Tests](../testing/commit-agent-tests.md) — Unit tests for
-  the commit agent boot, prompt construction, response parsing, and error
-  handling
-- [Timeout Utility](../shared-utilities/timeout.md) — `withTimeout()`
-  wrapper used by the orchestrator when invoking the commit agent

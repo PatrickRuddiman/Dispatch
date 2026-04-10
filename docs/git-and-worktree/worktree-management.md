@@ -56,105 +56,15 @@ Examples:
 ## Creating a worktree
 
 `createWorktree(repoRoot, issueFilename, branchName, startPoint?)` creates a
-worktree and returns its absolute path. The function implements a multi-stage
-strategy that handles stale directories, existing branches, lock contention,
-and stale worktree refs — all with retry and exponential backoff.
+worktree and returns its absolute path.
 
-### Stale directory detection and reuse
+### Normal path
 
-Before attempting to create a new worktree, `createWorktree` checks whether the
-target directory already exists on disk (`existsSync`). If it does:
-
-1. **Validate registration**: Runs `git worktree list --porcelain` and checks
-   whether the path appears as a registered worktree (substring match on
-   `worktree <path>\n`).
-
-2. **Reuse if registered**: If the directory is a registered worktree, attempts
-   to reset it to a clean state:
-   - `git checkout --force <branchName>` in the worktree directory
-   - `git clean -fd` to remove untracked files
-   - If both succeed, returns the existing path immediately (fastest path).
-   - If checkout fails (wrong branch, corrupt state), falls through to
-     removal and recreation.
-
-3. **Remove stale directory**: If the directory exists but is **not** a
-   registered worktree, or if reuse failed, the directory is removed with
-   `rm -rf` (via `fs/promises.rm({ recursive: true, force: true })`) and a
-   `git worktree prune` is run (errors silenced) before proceeding to creation.
-
-### Retry loop with exponential backoff
-
-After stale directory handling, creation enters a retry loop with the following
-constants:
-
-| Parameter | Value | Purpose |
-|-----------|-------|---------|
-| `MAX_RETRIES` | `5` | Total creation attempts before giving up |
-| `BASE_DELAY_MS` | `200` | Base delay for exponential backoff |
-
-The backoff delays are: 200ms, 400ms, 800ms, 1600ms, 3200ms (formula:
-`BASE_DELAY_MS * 2^(attempt-1)`).
-
-### Creation retry flowchart
-
-```mermaid
-flowchart TD
-    Start([createWorktree called]) --> DirCheck{Directory exists<br/>on disk?}
-    DirCheck -- No --> RetryLoop
-    DirCheck -- Yes --> Porcelain["git worktree list --porcelain"]
-    Porcelain --> Registered{Path is registered<br/>worktree?}
-    Registered -- Yes --> Checkout["git checkout --force branch<br/>git clean -fd"]
-    Checkout --> CheckoutOk{Checkout<br/>succeeded?}
-    CheckoutOk -- Yes --> Reused([Return existing path])
-    CheckoutOk -- No --> RmDir["rm -rf worktreePath<br/>git worktree prune"]
-    Registered -- No --> RmDir
-    RmDir --> RetryLoop
-
-    RetryLoop["Retry loop<br/>(attempt 1..5)"] --> TryAdd["git worktree add path -b branch"]
-    TryAdd --> AddOk{Success?}
-    AddOk -- Yes --> Created([Return worktree path])
-    AddOk -- No --> ErrType{Error type?}
-
-    ErrType -- "already exists" --> TryNoBranch["git worktree add path branch<br/>(without -b)"]
-    TryNoBranch --> NoBranchOk{Success?}
-    NoBranchOk -- Yes --> Created
-    NoBranchOk -- No --> UsedCheck{"already used<br/>by worktree"?}
-    UsedCheck -- Yes --> Prune1["git worktree prune<br/>then retry add"]
-    Prune1 --> PruneOk1{Success?}
-    PruneOk1 -- Yes --> Created
-    PruneOk1 -- No --> Backoff
-
-    ErrType -- "already used<br/>by worktree" --> Prune2["git worktree prune<br/>then retry add"]
-    Prune2 --> PruneOk2{Success?}
-    PruneOk2 -- Yes --> Created
-    PruneOk2 -- No --> Backoff
-
-    ErrType -- "lock" or<br/>"already" --> Backoff["Wait BASE_DELAY * 2^(attempt-1)<br/>then next attempt"]
-    Backoff --> RetryLoop
-
-    ErrType -- Other error --> Throw([Throw immediately])
-    UsedCheck -- No --> Throw
-```
-
-### Error classification
-
-The retry loop classifies errors into three categories:
-
-| Error message contains | Classification | Action |
-|------------------------|---------------|--------|
-| `"already exists"` | Branch already exists | Retry without `-b` flag; if that fails with "already used by worktree", prune and retry |
-| `"already used by worktree"` | Stale worktree ref | `git worktree prune` then retry |
-| `"lock"` or other `"already"` | Lock contention / race | Exponential backoff and retry |
-| Anything else | Non-retryable | Throw immediately |
-
-### Normal creation path
-
-When no stale state exists, the function executes
-`git worktree add <path> -b <branchName> [startPoint]` in the repository root.
-The `-b` flag tells git to create a new branch and check it out in the
-worktree. When `startPoint` is provided, the new branch is created at that
-commit instead of `HEAD`. When omitted, the branch points to the current `HEAD`
-of the main working tree.
+Executes `git worktree add <path> -b <branchName> [startPoint]` in the
+repository root. The `-b` flag tells git to create a new branch and check it
+out in the worktree. When `startPoint` is provided, the new branch is created
+at that commit instead of `HEAD`. When omitted, the branch points to the
+current `HEAD` of the main working tree.
 
 ### Branch-exists fallback
 
@@ -164,9 +74,10 @@ If the `git worktree add -b` command fails with an error message containing
 where a previous run created the branch but the worktree was cleaned up or the
 run was interrupted before the branch was deleted.
 
-If the retry-without-`-b` also fails with `"already used by worktree"`, the
-function prunes stale worktree refs and tries one more time. If this final
-attempt also fails, the error feeds into the exponential backoff loop.
+This means the branch **must not be checked out** in another worktree when the
+fallback runs. If it is, git will reject the add with a different error
+(`"already checked out"`) and that error will propagate as an unhandled
+exception.
 
 ### What happens to the branch after removal
 
@@ -186,13 +97,10 @@ git branch -d john-doe/dispatch/123-fix-auth-bug
 ### Minimum Git version
 
 `git worktree add` has been available since Git 2.5 (July 2015).
-`git worktree remove` requires Git 2.17 (April 2018).
-`git worktree list --porcelain` requires Git 2.15 (October 2017).
-Dispatch does not check the git version at runtime. If the installed git is
-older than 2.17, the `removeWorktree` calls will fail (non-fatally, since
-removal errors are logged as warnings). If older than 2.15, the stale
-directory detection in `createWorktree` will fail and the function will fall
-through to the retry loop.
+`git worktree remove` requires Git 2.17 (April 2018). Dispatch does not check
+the git version at runtime. If the installed git is older than 2.17, the
+`removeWorktree` calls will fail (non-fatally, since removal errors are logged
+as warnings).
 
 The [prerequisite checks](../../src/helpers/prereqs.ts) verify that the `git`
 binary is available but do not assert a minimum version.
@@ -232,14 +140,9 @@ The force fallback handles this gracefully.
 
 ### Stale worktree cleanup
 
-Dispatch automatically detects and handles stale worktrees during
-`createWorktree`. If a worktree directory exists on disk but is not registered
-in `git worktree list --porcelain`, or if a registered worktree cannot be
-checked out to the desired branch, the directory is removed and recreated.
-
-For worktrees left behind by `SIGKILL` (which cannot be caught) or system
-crashes that are not detected by `createWorktree` (e.g., worktrees for
-different issue files), manual cleanup is available:
+If Dispatch is killed with `SIGKILL` (which cannot be caught) or suffers a
+system crash, worktree directories may be left on disk. These can be cleaned up
+manually:
 
 ```bash
 # List all worktrees (including stale ones)
@@ -259,20 +162,12 @@ and `SIGTERM` both trigger worktree removal. See
 
 ## Listing worktrees
 
-`listWorktrees(repoRoot)` returns the raw output of `git worktree list` (human-
-readable format). Each line has the format:
+`listWorktrees(repoRoot)` returns the raw output of `git worktree list`.
+Each line has the format:
 
 ```
 <path>  <commit-hash>  [<branch>]
 ```
-
-Note: the `createWorktree` stale-detection path uses `git worktree list
---porcelain` (machine-readable format) instead, which outputs structured
-key-value pairs for reliable path matching.
-
-Both forms are used because they serve different purposes: the human-readable
-format is adequate for diagnostics, while the porcelain format provides
-reliable substring matching for path validation.
 
 This function is intended for diagnostics. If the command fails, it returns an
 empty string and logs a warning.
@@ -343,46 +238,29 @@ to removal, including all error recovery paths:
 
 ```mermaid
 stateDiagram-v2
-    [*] --> DirCheck: createWorktree() called
-
-    DirCheck --> StaleCheck: Directory exists
-    DirCheck --> RetryLoop: Directory absent
-
-    StaleCheck --> Reused: Registered + checkout succeeds
-    StaleCheck --> RmAndCreate: Not registered or checkout fails
-
-    RmAndCreate --> RetryLoop: rm -rf + prune
-
-    RetryLoop --> TryNewBranch: git worktree add -b
+    [*] --> Creating: createWorktree() called
+    
+    Creating --> TryNewBranch: git worktree add -b
     TryNewBranch --> Active: Success
     TryNewBranch --> BranchExists: "already exists" error
-    TryNewBranch --> PruneRetry: "already used by worktree"
-    TryNewBranch --> Backoff: Lock contention
     TryNewBranch --> Failed: Other error (thrown)
-
+    
     BranchExists --> TryExistingBranch: git worktree add (no -b)
-    TryExistingBranch --> Active: Success
-    TryExistingBranch --> PruneRetry: "already used by worktree"
-    TryExistingBranch --> Failed: Other non-retryable error
-
-    PruneRetry --> Active: prune + retry succeeds
-    PruneRetry --> Backoff: prune + retry fails
-
-    Backoff --> RetryLoop: 200ms × 2^(attempt-1)
-    Backoff --> Failed: MAX_RETRIES (5) exhausted
-
-    Reused --> [*]: Fast path
-
+    TryExistingBranch --> Active: Success (checks out at branch HEAD)
+    TryExistingBranch --> Failed: Error (thrown)
+    
     Active --> Removing: removeWorktree() called
-
+    
     Removing --> TryNormalRemove: git worktree remove
     TryNormalRemove --> Pruning: Success
     TryNormalRemove --> TryForceRemove: Failure
-
-    TryForceRemove --> Pruning: --force succeeds
+    
+    TryForceRemove --> Pruning: git worktree remove --force succeeds
     TryForceRemove --> Stale: Both removals failed (log.warn)
-
-    Pruning --> Cleaned: git worktree prune
+    
+    Pruning --> Cleaned: git worktree prune succeeds
+    Pruning --> Cleaned: prune fails (log.warn, non-fatal)
+    
     Cleaned --> [*]
     Stale --> [*]: Manual cleanup required
     Failed --> [*]
@@ -390,24 +268,11 @@ stateDiagram-v2
 
 **Key observations:**
 
-- **Stale directory reuse**: When a worktree directory already exists and is
-  registered with git, the function attempts to reuse it via
-  `checkout --force` + `clean -fd`. This is the fastest path and avoids
-  unnecessary directory recreation.
-
-- **Exponential backoff**: Lock contention and race conditions between
-  concurrent worktree operations are handled with up to 5 retries using
-  exponential backoff (200ms base, doubling each attempt).
-
 - **Branch-exists fallback**: When the `-b` flag fails because the branch
   already exists, the retry uses `git worktree add <path> <branch>` which
   checks out the existing branch at **its current HEAD** — not at the commit
   where `createWorktree` was called. If the branch has been advanced by a
   previous run, the worktree will reflect those changes.
-
-- **Prune-then-retry**: When git reports a path or branch is "already used by
-  worktree" (a stale ref from a crashed process), the function prunes and
-  retries before falling back to exponential backoff.
 
 - **Non-fatal removal**: Both removal paths (normal and force) catch errors
   and log warnings rather than throwing. This ensures that a removal failure
@@ -421,23 +286,24 @@ stateDiagram-v2
 
 - [Overview](./overview.md) — Group-level summary and worktree lifecycle
   flowchart
-- [Authentication](./authentication.md) — OAuth pre-authentication that runs
-  before worktree creation in the pipeline
 - [Branch Validation](./branch-validation.md) — Validation rules applied to
   branch names before worktree creation
-- [Integrations](./integrations.md) — Git CLI, `execFile`, and `fs/promises`
+- [Integrations](./integrations.md) — Git CLI and `child_process.execFile`
   details
 - [Gitignore Helper](./gitignore-helper.md) — Keeps `.dispatch/worktrees/`
   out of version control
-- [Run State Persistence](./run-state.md) — Task status persistence that
-  complements the worktree lifecycle
 - [Testing](./testing.md) — 25 worktree tests covering creation, removal,
   naming, and feature branch generation
 - [Shared Utilities — Slugify](../shared-utilities/slugify.md) — The slug
   algorithm used by `worktreeName`
+- [Planning and Dispatch — Git](../planning-and-dispatch/git.md) — Post-task
+  git commit operations (distinct from worktree lifecycle)
+- [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) —
+  Read-modify-write patterns and concurrent file I/O concerns that parallel
+  worktree concurrency
 - [Cleanup Registry](../shared-types/cleanup.md) — Safety-net cleanup on
   signals and errors
 - [Dispatch Pipeline](../cli-orchestration/dispatch-pipeline.md) — The execution
   engine that creates and removes worktrees during parallel issue processing
-- [Worktree Lifecycle](../dispatch-pipeline/worktree-lifecycle.md) — Pipeline-level
-  worktree lifecycle with retry logic and feature branch integration
+- [Run State Persistence](./run-state.md) — Task status persistence that
+  complements the worktree lifecycle

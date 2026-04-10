@@ -54,40 +54,7 @@ server-side objects.
 ### Prompt construction
 
 The dispatcher builds one of two prompt variants depending on whether a plan
-is available (`src/dispatcher.ts:43`):
-
-```mermaid
-flowchart TD
-    DT["dispatchTask()"] --> CH{"plan provided?"}
-    CH -- "Yes" --> BP["buildPlannedPrompt()"]
-    CH -- "No" --> BS["buildPrompt()"]
-
-    subgraph "Simple Prompt (buildPrompt)"
-        BS --> S1["Role: task completer"]
-        BS --> S2["Working directory + task metadata"]
-        BS --> S3["Environment block"]
-        BS --> S4["Minimal constraints"]
-        BS --> S5["Commit instruction<br/>(conditional)"]
-        BS --> S6["Worktree isolation<br/>(if worktreeRoot)"]
-    end
-
-    subgraph "Planned Prompt (buildPlannedPrompt)"
-        BP --> P1["Role: executor agent"]
-        BP --> P2["Working directory + task metadata"]
-        BP --> P3["Environment block"]
-        BP --> P4["Full plan text<br/>(verbatim, no truncation)"]
-        BP --> P5["6 strict executor constraints"]
-        BP --> P6["Commit instruction<br/>(conditional)"]
-        BP --> P7["Worktree isolation<br/>(if worktreeRoot)"]
-    end
-
-    S1 & S2 & S3 & S4 & S5 & S6 --> SEND["instance.prompt(sessionId, prompt)"]
-    P1 & P2 & P3 & P4 & P5 & P6 & P7 --> SEND
-
-    style CH fill:#fff3e0,stroke:#FF9800
-    style BS fill:#e8f4f8,stroke:#2196F3
-    style BP fill:#f3e5f5,stroke:#9C27B0
-```
+is available (`src/dispatcher.ts:32`):
 
 #### Simple prompt (`buildPrompt`)
 
@@ -211,63 +178,6 @@ Unplanned dispatch is simpler and gives the agent more autonomy, but the agent
 has no pre-researched context. Planned dispatch is more deterministic but
 depends on plan quality and adds prompt size overhead.
 
-### Rate-limit detection
-
-After receiving a non-null response from the provider, the dispatcher scans the
-response body against four regex patterns to detect rate-limit messages that
-the AI provider may have embedded in the response text rather than signaled via
-HTTP status codes (`src/dispatcher.ts:19-24`).
-
-```mermaid
-flowchart TD
-    R["Provider response<br/>(non-null string)"] --> P1{"Pattern 1<br/>/you've hit your (rate )?limit/i"}
-    P1 -- "match" --> RL["Rate-limited<br/>success: false<br/>error: first 200 chars"]
-    P1 -- "no match" --> P2{"Pattern 2<br/>/rate limit exceeded/i"}
-    P2 -- "match" --> RL
-    P2 -- "no match" --> P3{"Pattern 3<br/>/too many requests/i"}
-    P3 -- "match" --> RL
-    P3 -- "no match" --> P4{"Pattern 4<br/>/quota exceeded/i"}
-    P4 -- "match" --> RL
-    P4 -- "no match" --> OK["Not rate-limited<br/>success: true"]
-
-    style RL fill:#ffebee,stroke:#f44336
-    style OK fill:#e8f5e9,stroke:#4CAF50
-```
-
-The four patterns are:
-
-| # | Pattern | Example match |
-|---|---------|---------------|
-| 1 | `/you[''\u2019]?ve hit your (rate )?limit/i` | "You've hit your rate limit" |
-| 2 | `/rate limit exceeded/i` | "Rate limit exceeded" |
-| 3 | `/too many requests/i` | "Too many requests" |
-| 4 | `/quota exceeded/i` | "Quota exceeded" |
-
-**Detection is response-body-based, not HTTP-status-based.** The dispatcher
-does not check HTTP status codes (e.g., 429 Too Many Requests). Instead, it
-relies on the AI provider's response text containing rate-limit language. This
-is a fragile heuristic with known limitations:
-
-- **False positives**: If the agent's legitimate response discusses rate limits
-  (e.g., "I added rate limit exceeded handling to the API controller"), the
-  dispatcher will incorrectly classify it as a rate-limit error.
-- **False negatives**: If the provider uses different phrasing not covered by
-  the four patterns (e.g., "request throttled", "capacity exceeded"), the
-  rate limit will go undetected and the response will be treated as a success.
-- **Provider-specific language**: The patterns assume English-language error
-  messages. Non-English provider responses will not be caught.
-
-When a rate limit is detected, the response is truncated to 200 characters and
-included in the error message. Both the console logger and the file logger
-record the truncated response for debugging.
-
-**Why response-body matching?** The `ProviderInstance.prompt()` interface
-returns `string | null`, abstracting away HTTP-level details. By the time the
-dispatcher sees the response, any HTTP 429 status has already been handled (or
-not) by the provider SDK layer. Some providers embed rate-limit messages in the
-response body even when the HTTP response is 200 OK, making body-level
-detection the only reliable approach at this abstraction layer.
-
 ### Success verification
 
 **How does the system verify the agent actually completed the task?**
@@ -277,13 +187,11 @@ returns `{ success: true }`, it means only that:
 
 1. `createSession()` did not throw
 2. `instance.prompt()` returned a non-null string
-3. The response did not match any [rate-limit patterns](#rate-limit-detection)
 
-The dispatcher does **not** inspect the agent's response content beyond
-rate-limit detection. It does not check whether the agent said "Task complete,"
-whether files were actually modified, or whether the changes are correct. The
-`success: true` result indicates the agent responded without a detected
-rate-limit error, not that the task was correctly implemented.
+The dispatcher does **not** inspect the agent's response content. It does not
+check whether the agent said "Task complete," whether files were actually
+modified, or whether the changes are correct. The `success: true` result
+indicates the agent responded, not that the task was correctly implemented.
 
 **Why this design?** Verifying task correctness would require understanding the
 task semantics, running tests, or diffing expected outcomes -- all of which are

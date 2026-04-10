@@ -87,7 +87,7 @@ section of the Markdown Syntax page.
   directory layout relevant to long path issues on Windows.
 - [Gitignore Helper](./git-and-worktree/gitignore-helper.md) -- `.gitignore`
   manipulation with a known duplicate-entry issue on Windows (#212).
-- [Provider Detection](./provider-system/binary-detection.md) -- Provider
+- [Provider Detection](./prereqs-and-safety/provider-detection.md) -- Provider
   binary detection with a known Windows false-negative issue (#213).
 - [CLI & Orchestration Overview](./cli-orchestration/overview.md) -- Entry point
   and pipeline that works across PowerShell, cmd, and Git Bash.

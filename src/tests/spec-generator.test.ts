@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { join, resolve } from "node:path";
 import { isIssueNumbers, isGlobOrFilePath, validateSpecStructure, extractSpecContent, resolveSource } from "../spec-generator.js";
-import { buildSpecPrompt, buildFileSpecPrompt, buildInlineTextSpecPrompt } from "../skills/spec.js";
+import { buildSpecPrompt, buildFileSpecPrompt, buildInlineTextSpecPrompt, boot } from "../agents/spec.js";
 import * as datasourcesIndex from "../datasources/index.js";
-import type { ProviderInstance } from "../providers/interface.js";
+import type { ProviderInstance, ProviderProgressSnapshot } from "../providers/interface.js";
 import type { Datasource, IssueDetails } from "../datasources/interface.js";
 import { createMockDatasource } from "./fixtures.js";
 
@@ -44,19 +44,7 @@ vi.mock("../helpers/cleanup.js", () => ({
 
 vi.mock("../providers/index.js", () => ({
   bootProvider: vi.fn(),
-  PROVIDER_NAMES: ["opencode", "copilot", "claude", "codex"],
-  getAuthenticatedProviders: vi.fn().mockResolvedValue(["opencode"]),
-  checkProviderAuthenticated: vi.fn().mockResolvedValue(true),
-  getProviderAuthStatus: vi.fn().mockResolvedValue({ status: "authenticated" }),
-}));
-
-vi.mock("../providers/router.js", () => ({
-  routeAllSkills: vi.fn().mockReturnValue({
-    planner: [{ provider: "opencode", model: "claude-haiku-4", priority: 0 }],
-    executor: [{ provider: "opencode", model: "claude-sonnet-4-5", priority: 0 }],
-    commit: [{ provider: "opencode", model: "claude-haiku-4", priority: 0 }],
-  }),
-  routeSkill: vi.fn().mockReturnValue([{ provider: "opencode", model: "claude-sonnet-4-5", priority: 0 }]),
+  PROVIDER_NAMES: ["opencode", "copilot"],
 }));
 
 vi.mock("../helpers/format.js", () => ({
@@ -562,15 +550,15 @@ describe("spec prompt builders", () => {
     expect(result).toContain(`\`${CWD}\``);
   });
 
-  it("includes the spec skill preamble", () => {
+  it("includes the spec agent preamble", () => {
     const result = buildFileSpecPrompt(FILE_PATH, CONTENT, CWD);
-    expect(result).toContain("Explore the codebase, understand");
+    expect(result).toContain("You are a **spec agent**");
   });
 
   it("includes the two-stage pipeline explanation", () => {
     const result = buildFileSpecPrompt(FILE_PATH, CONTENT, CWD);
-    expect(result).toContain("planner");
-    expect(result).toContain("coder");
+    expect(result).toContain("planner agent");
+    expect(result).toContain("coder agent");
   });
 
   it("includes all required spec sections in the template", () => {
@@ -694,7 +682,7 @@ describe("validateSpecStructure", () => {
 
     const result = validateSpecStructure(content);
     expect(result.valid).toBe(false);
-    if (!result.valid) expect(result.reason).toContain("H1 heading");
+    expect(result.reason).toContain("H1 heading");
   });
 
   it("returns invalid when ## Tasks section is missing", () => {
@@ -712,7 +700,7 @@ describe("validateSpecStructure", () => {
 
     const result = validateSpecStructure(content);
     expect(result.valid).toBe(false);
-    if (!result.valid) expect(result.reason).toContain("## Tasks");
+    expect(result.reason).toContain("## Tasks");
   });
 
   it("returns invalid when ## Tasks section has no checkboxes", () => {
@@ -726,7 +714,53 @@ describe("validateSpecStructure", () => {
 
     const result = validateSpecStructure(content);
     expect(result.valid).toBe(false);
-    if (!result.valid) expect(result.reason).toContain("no unchecked tasks");
+    expect(result.reason).toContain("no unchecked tasks");
+  });
+
+  it("returns valid when content has leading whitespace before H1", () => {
+    const content = [
+      "",
+      "  ",
+      "# My Feature (#42)",
+      "",
+      "## Tasks",
+      "",
+      "- [ ] A task",
+    ].join("\n");
+
+    const result = validateSpecStructure(content);
+    expect(result).toEqual({ valid: true });
+  });
+
+  it("returns invalid for empty content", () => {
+    const result = validateSpecStructure("");
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain("H1 heading");
+  });
+
+  it("returns invalid for conversational AI response content", () => {
+    const content = "The spec file has been written to .dispatch/specs/10-feature.md";
+
+    const result = validateSpecStructure(content);
+    expect(result.valid).toBe(false);
+  });
+
+  it("does not count checkboxes that appear before ## Tasks", () => {
+    const content = [
+      "# My Feature (#42)",
+      "",
+      "## Context",
+      "",
+      "- [ ] This checkbox is in context, not tasks",
+      "",
+      "## Tasks",
+      "",
+      "No checkboxes in the tasks section.",
+    ].join("\n");
+
+    const result = validateSpecStructure(content);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain("no unchecked tasks");
   });
 
   it("returns valid with a single checkbox in Tasks section", () => {
@@ -767,7 +801,7 @@ describe("validateSpecStructure", () => {
 
     const result = validateSpecStructure(content);
     expect(result.valid).toBe(false);
-    if (!result.valid) expect(result.reason).toContain("## Tasks");
+    expect(result.reason).toContain("## Tasks");
   });
 
   it("does not have a reason property when valid", () => {
@@ -781,7 +815,7 @@ describe("validateSpecStructure", () => {
 
     const result = validateSpecStructure(content);
     expect(result.valid).toBe(true);
-    expect("reason" in result).toBe(false);
+    expect(result.reason).toBeUndefined();
   });
 });
 
@@ -1043,6 +1077,345 @@ describe("extractSpecContent", () => {
   });
 });
 
+// ─── SpecAgent ───────────────────────────────────────────────────────
+
+describe("SpecAgent boot", () => {
+  it("throws when provider is not supplied", async () => {
+    await expect(boot({ cwd: "/tmp" })).rejects.toThrow(
+      "Spec agent requires a provider instance in boot options"
+    );
+  });
+
+  it("returns an agent with name 'spec'", async () => {
+    const provider = createMockProvider();
+    const agent = await boot({ cwd: "/tmp", provider });
+    expect(agent.name).toBe("spec");
+  });
+
+  it("returns an agent with generate and cleanup methods", async () => {
+    const provider = createMockProvider();
+    const agent = await boot({ cwd: "/tmp", provider });
+    expect(typeof agent.generate).toBe("function");
+    expect(typeof agent.cleanup).toBe("function");
+  });
+});
+
+describe("SpecAgent generate", () => {
+  beforeEach(() => {
+    vi.mocked(mkdir).mockResolvedValue(undefined);
+    vi.mocked(writeFile).mockResolvedValue(undefined);
+    vi.mocked(unlink).mockResolvedValue(undefined);
+    vi.mocked(randomUUID).mockReturnValue("test-uuid-1234" as `${string}-${string}-${string}-${string}-${string}`);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const VALID_SPEC = [
+    "# My Feature (#42)",
+    "",
+    "> Summary of the feature",
+    "",
+    "## Context",
+    "",
+    "Some context here.",
+    "",
+    "## Tasks",
+    "",
+    "- [ ] (P) First task",
+    "- [ ] (S) Second task",
+  ].join("\n");
+
+  it("generates a spec successfully with the temp file workflow", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("AI response text"),
+    });
+
+    vi.mocked(readFile).mockResolvedValue(VALID_SPEC);
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data!.valid).toBe(true);
+    expect(result.data!.content).toContain("# My Feature (#42)");
+    expect(result.data!.content).toContain("## Tasks");
+    expect(result.error).toBeUndefined();
+
+    // Verify temp dir was created
+    expect(mkdir).toHaveBeenCalledWith(
+      expect.stringContaining(join(".dispatch", "tmp")),
+      { recursive: true }
+    );
+
+    // Verify provider was called
+    expect(provider.createSession).toHaveBeenCalledOnce();
+    expect(provider.prompt).toHaveBeenCalledOnce();
+
+    // Verify temp file was read
+    expect(readFile).toHaveBeenCalledWith(
+      expect.stringContaining("spec-test-uuid-1234.md"),
+      "utf-8"
+    );
+
+    // Verify final output was written
+    expect(writeFile).toHaveBeenCalledWith(
+      resolve("/tmp/project/.dispatch/specs/42-my-feature.md"),
+      expect.any(String),
+      "utf-8"
+    );
+
+    // Verify temp file was cleaned up
+    expect(unlink).toHaveBeenCalledWith(
+      expect.stringContaining("spec-test-uuid-1234.md")
+    );
+  });
+
+  it("generates a spec from file content (file/glob mode)", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("AI response"),
+    });
+
+    vi.mocked(readFile).mockResolvedValue(VALID_SPEC);
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      filePath: "/tmp/project/drafts/feature.md",
+      fileContent: "# Feature\n\nDescription of the feature.",
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/drafts/feature.md",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data!.valid).toBe(true);
+  });
+
+  it("forwards provider progress snapshots upward", async () => {
+    const onProgress = vi.fn<(snapshot: ProviderProgressSnapshot) => void>();
+    const snapshot = { text: "Generating outline" };
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockImplementation(async (_sessionId, _prompt, options) => {
+        options?.onProgress?.(snapshot);
+        return "AI response";
+      }),
+    });
+
+    vi.mocked(readFile).mockResolvedValue(VALID_SPEC);
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+      onProgress,
+    });
+
+    expect(result.success).toBe(true);
+    expect(onProgress).toHaveBeenCalledWith(snapshot);
+    expect(provider.prompt).toHaveBeenCalledWith(
+      "session-1",
+      expect.any(String),
+      expect.objectContaining({ onProgress }),
+    );
+  });
+
+  it("returns failure when AI returns null response", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue(null),
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("AI agent returned no response");
+    expect(result.data).toBeNull();
+  });
+
+  it("returns failure when neither issue nor filePath+fileContent is provided", async () => {
+    const provider = createMockProvider();
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/output.md",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Either issue, inlineText, or filePath+fileContent must be provided");
+    expect(result.data).toBeNull();
+  });
+
+  it("returns failure when the AI does not write the temp file", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("Some response"),
+    });
+
+    vi.mocked(readFile).mockRejectedValue(new Error("ENOENT: no such file"));
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Spec agent did not write the file");
+    expect(result.error).toContain("Some response");
+    expect(result.data).toBeNull();
+  });
+
+  it("returns failure when provider.createSession throws", async () => {
+    const provider = createMockProvider({
+      createSession: vi.fn().mockRejectedValue(new Error("Connection refused")),
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Connection refused");
+    expect(result.data).toBeNull();
+  });
+
+  it("returns failure when provider.prompt throws", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn().mockRejectedValue(new Error("Model overloaded")),
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Model overloaded");
+    expect(result.data).toBeNull();
+  });
+
+  it("cleans up temp file on successful generation", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("AI response"),
+    });
+
+    vi.mocked(readFile).mockResolvedValue(VALID_SPEC);
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+    });
+
+    expect(unlink).toHaveBeenCalledWith(
+      expect.stringContaining("spec-test-uuid-1234.md")
+    );
+  });
+
+  it("does not throw when temp file cleanup fails", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("AI response"),
+    });
+
+    vi.mocked(readFile).mockResolvedValue(VALID_SPEC);
+    vi.mocked(unlink).mockRejectedValue(new Error("ENOENT"));
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+    });
+
+    // Should still succeed despite cleanup failure
+    expect(result.success).toBe(true);
+    expect(result.data!.valid).toBe(true);
+  });
+
+  it("reports validation warnings for structurally invalid specs", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("AI response"),
+    });
+
+    const invalidSpec = "# My Feature\n\nNo tasks section here.";
+    vi.mocked(readFile).mockResolvedValue(invalidSpec);
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+    });
+
+    // Generation succeeds but validation reports invalid
+    expect(result.success).toBe(true);
+    expect(result.data!.valid).toBe(false);
+    expect(result.data!.validationReason).toBeDefined();
+  });
+
+  it("uses unique temp file paths per generation via randomUUID", async () => {
+    const provider = createMockProvider({
+      prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("AI response"),
+    });
+
+    vi.mocked(readFile).mockResolvedValue(VALID_SPEC);
+
+    // Override the default mock to return unique UUIDs sequentially
+    vi.mocked(randomUUID)
+      .mockReturnValueOnce("uuid-first" as `${string}-${string}-${string}-${string}-${string}`)
+      .mockReturnValueOnce("uuid-second" as `${string}-${string}-${string}-${string}-${string}`);
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+
+    await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-first.md",
+    });
+
+    await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-second.md",
+    });
+
+    const readCalls = vi.mocked(readFile).mock.calls;
+    expect(readCalls[0][0]).toContain("spec-uuid-first.md");
+    expect(readCalls[1][0]).toContain("spec-uuid-second.md");
+  });
+
+  it("handles non-Error exceptions gracefully", async () => {
+    const provider = createMockProvider({
+      createSession: vi.fn().mockRejectedValue("raw string error"),
+    });
+
+    const agent = await boot({ cwd: "/tmp/project", provider });
+    const result = await agent.generate({
+      issue: ISSUE_FIXTURE,
+      cwd: "/tmp/project",
+      outputPath: "/tmp/project/.dispatch/specs/42-my-feature.md",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("raw string error");
+  });
+});
+
 // ─── spec output formatting (runSpecPipeline log output) ─────────────
 
 describe("spec output formatting", () => {
@@ -1072,7 +1445,7 @@ describe("spec output formatting", () => {
     vi.mocked(readFile).mockResolvedValue(VALID_SPEC);
     vi.mocked(randomUUID).mockReturnValue("test-uuid-1234" as `${string}-${string}-${string}-${string}-${string}`);
 
-    // bootProvider returns a mock provider whose prompt triggers the spec skill
+    // bootProvider returns a mock provider whose prompt triggers the spec agent
     // to write valid content
     vi.mocked(bootProvider).mockResolvedValue({
       name: "mock",
@@ -1367,7 +1740,7 @@ describe("inline text pipeline", () => {
     expect(result.files[0]).toContain("99-my-feature.md");
   });
 
-  it("passes inline text as fileContent to spec skill", async () => {
+  it("passes inline text as fileContent to spec agent", async () => {
     const mockDs = createMockDatasource("md");
     vi.spyOn(datasourcesIndex, "getDatasource").mockReturnValue(mockDs);
     vi.spyOn(datasourcesIndex, "detectDatasource").mockResolvedValue(null);
@@ -1391,8 +1764,8 @@ describe("inline text pipeline", () => {
       concurrency: 10,
     });
 
-    // The spec skill's prompt should contain the inline text
-    // Since the skill is called via provider.prompt, check that the prompt
+    // The spec agent's prompt should contain the inline text
+    // Since the agent is called via provider.prompt, check that the prompt
     // was called and the session was created
     expect(mockProvider.createSession).toHaveBeenCalled();
     expect(mockProvider.prompt).toHaveBeenCalled();

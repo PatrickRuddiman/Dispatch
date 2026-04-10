@@ -22,16 +22,10 @@ Dispatch needs a single coherent entry point that:
 
 | File | Purpose |
 |------|---------|
-| [`src/cli.ts`](cli.md) | Commander.js argument parser, `main()` entry point, config/mcp subcommand routing, exit code logic |
+| [`src/cli.ts`](cli.md) | Commander.js argument parser, `main()` entry point, config subcommand routing, exit code logic |
 | [`src/config.ts`](configuration.md) | Persistent config data layer: file I/O (`{CWD}/.dispatch/config.json`), validation, `handleConfigCommand()` |
-| [`src/config-prompts.ts`](configuration.md#config-wizard-flow) | Interactive configuration wizard: provider/model/datasource prompts, per-agent overrides |
-| [`src/constants.ts`](authentication.md#constants-reference) | OAuth client IDs and Azure AD tenant/scope constants for authentication |
-| [`src/helpers/auth.ts`](authentication.md) | GitHub OAuth device flow and Azure AD device-code flow, token caching at `~/.dispatch/auth.json` |
 | [`src/orchestrator/cli-config.ts`](configuration.md#three-tier-configuration-precedence) | Config resolution: three-tier merge of CLI flags, config file, and hardcoded defaults |
-| [`src/orchestrator/runner.ts`](orchestrator.md) | Pipeline router: dispatch and spec modes |
-| [`src/mcp/index.ts`](mcp-subcommand.md) | MCP server entry point: transport setup (stdio/HTTP) and session management |
-| [`src/mcp/server.ts`](mcp-subcommand.md#registered-tools) | MCP tool registration: 16 tools across 5 groups (spec, dispatch, monitor, recovery, config) |
-| [`src/mcp/dispatch-worker.ts`](mcp-subcommand.md#pipeline-execution) | Forked worker process for running dispatch pipelines from MCP tool invocations |
+| [`src/orchestrator/runner.ts`](orchestrator.md) | Pipeline router: dispatch, spec, and fix-tests modes |
 | [`src/tui.ts`](tui.md) | Real-time terminal dashboard with spinner, progress bar, and task list |
 | [`src/logger.ts`](../shared-types/logger.md) | Minimal structured logger with chalk formatting for non-TUI contexts |
 
@@ -39,15 +33,13 @@ Dispatch needs a single coherent entry point that:
 
 ```mermaid
 flowchart TD
-    A["cli.ts<br/>config, mcp, or parseArgs()"] -->|"config"| A2["config.ts<br/>handleConfigCommand()"]
-    A -->|"mcp"| A3["mcp/index.ts<br/>MCP server"]
-    A3 -->|"stdio"| A3a["StdioServerTransport"]
-    A3 -->|"http"| A3b["StreamableHTTPServerTransport<br/>port 9110"]
+    A["cli.ts<br/>config subcommand or parseArgs()"] -->|"config"| A2["config.ts<br/>handleConfigCommand()"]
     A -->|"RawCliArgs + explicitFlags"| B["runner.ts<br/>OrchestratorAgent"]
     B --> B2["runFromCli(args)"]
     B2 --> B3["cli-config.ts<br/>resolveCliConfig(args)"]
     B3 -->|"merged args"| C{"Mode?"}
     C -->|"--spec / --respec"| C2["Spec pipeline"]
+    C -->|"--fix-tests"| C3["Fix-tests pipeline"]
     C -->|"default"| D{"dryRun?"}
     D -->|Yes| E["dryRunMode()<br/>logger output"]
     D -->|No| F["createTui()"]
@@ -106,19 +98,16 @@ dispatch 14 --provider copilot
 dispatch --dry-run
 dispatch 14 --no-plan
 dispatch --cwd /path/to/project
-dispatch 14 --model gpt-4o
 
 # Spec generation
 dispatch --spec 42,43,44
 dispatch --spec "drafts/*.md" --source github
 
+# Fix failing tests
+dispatch --fix-tests
+
 # Config management (interactive wizard)
 dispatch config
-
-# MCP server (for AI agent integration)
-dispatch mcp                        # stdio transport (default)
-dispatch mcp --transport http       # HTTP transport on port 9110
-dispatch mcp --port 8080            # HTTP on custom port
 ```
 
 ## Related documentation
@@ -126,18 +115,16 @@ dispatch mcp --port 8080            # HTTP on custom port
 - [CLI argument parser](cli.md) -- command-line interface details and edge cases
 - [Configuration](configuration.md) -- persistent config file, three-tier
   precedence, `dispatch config` interactive wizard
-- [Authentication](authentication.md) -- GitHub OAuth and Azure AD device-code
-  flows, token storage at `~/.dispatch/auth.json`
-- [MCP Subcommand](mcp-subcommand.md) -- MCP server architecture, tool
-  registration, stdio/HTTP transports
 - [Orchestrator pipeline](orchestrator.md) -- concurrency, error handling, and
   pipeline phases
 - [Dispatch pipeline](dispatch-pipeline.md) -- the core execution engine for
   AI-driven task dispatch, worktree isolation, and commit agent integration
+- [Fix-tests pipeline](fix-tests-pipeline.md) -- the `--fix-tests` pipeline
+  for automated test failure resolution
 - [Terminal UI](tui.md) -- rendering, state machines, and TTY compatibility
 - [Logger](../shared-types/logger.md) -- structured logging for non-interactive contexts
-- [Integrations](integrations.md) -- Commander.js, chalk, glob, tsup, MCP SDK,
-  auth packages, Node.js process, and fs/promises config I/O details
+- [Integrations](integrations.md) -- chalk, glob, tsup, Node.js process,
+  and fs/promises config I/O details
 - [Spec Generation](../spec-generation/overview.md) -- the spec pipeline invoked
   by `--spec` mode
 - [Datasource System](../datasource-system/overview.md) -- datasource detection

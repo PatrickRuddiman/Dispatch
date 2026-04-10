@@ -4,20 +4,6 @@
 
 import chalk from "chalk";
 
-/** Shared color palette for terminal UI elements (hex values for chalk/Ink). */
-export const PALETTE = {
-  brand: "#58A6FF",
-  subtitle: "#484F58",
-  chrome: "#30363D",
-  text: "#C9D1D9",
-  muted: "#484F58",
-  success: "#56D364",
-  error: "#F85149",
-  warn: "#D29922",
-  accent: "#79C0FF",
-  planning: "#D2A8FF",
-} as const;
-
 /**
  * Format a duration in milliseconds into a human-readable string.
  *

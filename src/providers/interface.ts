@@ -8,10 +8,7 @@
  * through this contract.
  */
 
-export const PROVIDER_NAMES = ["opencode", "copilot", "claude", "codex"] as const;
-
-/** Valid provider backend names. */
-export type ProviderName = typeof PROVIDER_NAMES[number];
+export type ProviderName = "opencode" | "copilot" | "claude" | "codex";
 
 export interface ProviderProgressSnapshot {
   text: string;

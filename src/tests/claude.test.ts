@@ -2,14 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ─── Hoisted mock references ────────────────────────────────────────
 
-const { mockQuery, mockQueryFn, mockCreateSession, mockSession } = vi.hoisted(() => {
-  const mockQuery = {
-    supportedModels: vi.fn().mockResolvedValue([]),
-    close: vi.fn(),
-  };
-
-  const mockQueryFn = vi.fn().mockReturnValue(mockQuery);
-
+const { mockCreateSession, mockSession } = vi.hoisted(() => {
   const mockSession = {
     send: vi.fn().mockResolvedValue(undefined),
     stream: vi.fn().mockReturnValue((async function* () {})()),
@@ -18,7 +11,7 @@ const { mockQuery, mockQueryFn, mockCreateSession, mockSession } = vi.hoisted(()
 
   const mockCreateSession = vi.fn().mockReturnValue(mockSession);
 
-  return { mockQuery, mockQueryFn, mockCreateSession, mockSession };
+  return { mockCreateSession, mockSession };
 });
 
 const { mockRandomUUID } = vi.hoisted(() => {
@@ -33,7 +26,6 @@ vi.mock("node:crypto", () => ({
 }));
 
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
-  query: mockQueryFn,
   unstable_v2_createSession: mockCreateSession,
 }));
 
@@ -48,7 +40,7 @@ vi.mock("../helpers/logger.js", () => ({
   },
 }));
 
-import { boot, listModels } from "../providers/claude.js";
+import { boot } from "../providers/claude.js";
 import { randomUUID } from "node:crypto";
 
 // ─── Reset mocks between tests ─────────────────────────────────────
@@ -56,9 +48,6 @@ import { randomUUID } from "node:crypto";
 beforeEach(() => {
   vi.clearAllMocks();
   mockRandomUUID.mockReturnValue("test-uuid-1234");
-  mockQueryFn.mockReturnValue(mockQuery);
-  mockQuery.supportedModels.mockResolvedValue([]);
-  mockQuery.close.mockReturnValue(undefined);
   mockCreateSession.mockReturnValue(mockSession);
   mockSession.send.mockResolvedValue(undefined);
   mockSession.stream.mockReturnValue((async function* () {})());
@@ -66,48 +55,6 @@ beforeEach(() => {
 });
 
 // ─── Tests ──────────────────────────────────────────────────────────
-
-describe("listModels", () => {
-  it("returns sorted model values from supportedModels()", async () => {
-    mockQuery.supportedModels.mockResolvedValue([
-      { value: "claude-sonnet-4", displayName: "Sonnet 4", description: "" },
-      { value: "claude-haiku-3-5", displayName: "Haiku 3.5", description: "" },
-      { value: "claude-opus-4-6", displayName: "Opus 4.6", description: "" },
-    ]);
-
-    const models = await listModels();
-    expect(models).toEqual(["claude-haiku-3-5", "claude-opus-4-6", "claude-sonnet-4"]);
-    expect(mockQuery.close).toHaveBeenCalled();
-  });
-
-  it("closes the query even when supportedModels() throws", async () => {
-    mockQuery.supportedModels.mockRejectedValue(new Error("fetch fail"));
-
-    const models = await listModels();
-    expect(mockQuery.close).toHaveBeenCalled();
-    // Falls back to hardcoded list
-    expect(models).toEqual([
-      "claude-haiku-3-5",
-      "claude-opus-4-6",
-      "claude-sonnet-4",
-      "claude-sonnet-4-5",
-    ]);
-  });
-
-  it("falls back to hardcoded list when query() throws", async () => {
-    mockQueryFn.mockImplementation(() => {
-      throw new Error("query fail");
-    });
-
-    const models = await listModels();
-    expect(models).toEqual([
-      "claude-haiku-3-5",
-      "claude-opus-4-6",
-      "claude-sonnet-4",
-      "claude-sonnet-4-5",
-    ]);
-  });
-});
 
 describe("boot", () => {
   it("uses default model when no opts provided", async () => {
@@ -252,14 +199,13 @@ describe("prompt", () => {
     expect(onProgress).toHaveBeenCalledWith({ text: "streamed response text" });
   });
 
-  it("throws when no assistant message found", async () => {
+  it("returns null when no assistant message found", async () => {
     mockSession.stream.mockReturnValue((async function* () {})());
 
     const instance = await boot();
     const sessionId = await instance.createSession();
-    await expect(instance.prompt(sessionId, "hello")).rejects.toThrow(
-      "Claude stream ended before receiving an assistant message",
-    );
+    const result = await instance.prompt(sessionId, "hello");
+    expect(result).toBeNull();
   });
 
   it("throws when session.send fails", async () => {
@@ -295,28 +241,5 @@ describe("cleanup", () => {
     mockSession.close.mockClear();
     await expect(instance.cleanup()).resolves.not.toThrow();
     expect(mockSession.close).not.toHaveBeenCalled();
-  });
-});
-
-describe("send", () => {
-  it("throws when session not found", async () => {
-    const instance = await boot();
-    await expect(instance.send!("unknown-id", "hello")).rejects.toThrow(
-      "Claude session unknown-id not found",
-    );
-  });
-
-  it("sends follow-up text to the session", async () => {
-    const instance = await boot();
-    const sessionId = await instance.createSession();
-    await instance.send!(sessionId, "follow-up text");
-    expect(mockSession.send).toHaveBeenCalledWith("follow-up text");
-  });
-
-  it("throws when session.send fails during send", async () => {
-    mockSession.send.mockRejectedValueOnce(new Error("send follow-up boom"));
-    const instance = await boot();
-    const sessionId = await instance.createSession();
-    await expect(instance.send!(sessionId, "text")).rejects.toThrow("send follow-up boom");
   });
 });

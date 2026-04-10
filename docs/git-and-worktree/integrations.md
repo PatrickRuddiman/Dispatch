@@ -1,444 +1,283 @@
 # Integrations Reference
 
-This document covers all external dependencies used by the git-and-worktree
-helper group. The group integrates with seven external systems: the **GitHub
-REST API** via Octokit, the **Azure Identity SDK**, the **Azure DevOps Node
-API**, **SQLite** via better-sqlite3, **Zod** for schema validation, the
-**Git CLI** for worktree and checkout operations, and the **`open`** package
-for cross-platform browser launching.
-
-## GitHub REST API (Octokit)
-
-- **Packages:** `@octokit/rest`, `@octokit/auth-oauth-device`
-- **Used in:** `src/helpers/auth.ts:12-13`
-- **Official docs:**
-    - [@octokit/rest](https://github.com/octokit/rest.js)
-    - [@octokit/auth-oauth-device](https://github.com/octokit/auth-oauth-device.js)
-    - [GitHub OAuth device flow](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#device-flow)
-
-### How it is used
-
-The authentication module uses two Octokit packages:
-
-| Package | Function | Purpose |
-|---------|----------|---------|
-| `@octokit/auth-oauth-device` | `createOAuthDeviceAuth()` | Initiates the OAuth device-code flow, polls GitHub for token completion |
-| `@octokit/rest` | `new Octokit({ auth })` | Creates an authenticated REST API client using the obtained token |
-
-`createOAuthDeviceAuth` is configured with:
-
-- `clientId`: The public OAuth App ID (`Ov23liUMP1Oyg811IF58`)
-- `clientType`: `"oauth-app"` (not a GitHub App)
-- `scopes`: `["repo"]` for full repository access
-- `onVerification`: Callback that displays the device code and opens the
-  verification URL in the browser
-
-The library handles the polling loop internally — it calls GitHub's token
-endpoint at the interval specified in the device-code response until the user
-completes authentication or the code expires.
-
-### Token format
-
-GitHub OAuth tokens obtained via the device flow use the `gho_` prefix format
-(OAuth user-to-server tokens). These tokens do not expire by default unless
-the OAuth App has token expiration enabled. The cached token remains valid
-until manually revoked.
-
-### Error conditions
-
-| Condition | Behavior |
-|-----------|----------|
-| User denies authorization | `createOAuthDeviceAuth` rejects with an error |
-| Device code expires (15 min default) | `createOAuthDeviceAuth` rejects with `slow_down` or `expired_token` |
-| Invalid client ID | `createOAuthDeviceAuth` rejects immediately |
-| Network failure during polling | `createOAuthDeviceAuth` rejects after exhausting retries |
-
-The auth module does not wrap these errors — they propagate to the pipeline
-startup, which will terminate the run.
-
-## Azure Identity SDK
-
-- **Package:** `@azure/identity`
-- **Class used:** `DeviceCodeCredential`
-- **Used in:** `src/helpers/auth.ts:14`
-- **Official docs:**
-  [DeviceCodeCredential](https://learn.microsoft.com/en-us/javascript/api/@azure/identity/devicecodecredential)
-
-### How it is used
-
-`getAzureConnection` creates a `DeviceCodeCredential` instance with:
-
-- `tenantId`: `"organizations"` — restricts authentication to work/school
-  (Entra ID) accounts. Personal Microsoft accounts are explicitly excluded
-  because Azure DevOps does not support them for API access.
-- `clientId`: `150a3098-01dd-4126-8b10-5e7f77492e5c` — the public Azure AD
-  application registration
-- `userPromptCallback`: Receives `DeviceCodeInfo` containing the message and
-  verification URI. The callback prepends a warning about work/school account
-  requirements and routes the message through the auth prompt handler.
-
-After constructing the credential, the module calls:
-
-```
-credential.getToken("499b84ac-1321-427f-aa17-267ca6975798/.default")
-```
-
-This blocks until the user completes authentication. The returned
-`AccessToken` object contains:
-
-- `token`: The bearer token string
-- `expiresOnTimestamp`: Unix timestamp (milliseconds) when the token expires
-
-### Token expiry management
-
-Azure tokens have a finite lifetime (typically 1 hour). The auth module caches
-the `expiresAt` timestamp and checks it before reuse:
-
-```
-expiresAt - Date.now() > EXPIRY_BUFFER_MS  // EXPIRY_BUFFER_MS = 5 * 60 * 1000
-```
-
-If the token will expire within 5 minutes, a fresh device-code flow is
-triggered. This prevents mid-pipeline authentication failures.
-
-## Azure DevOps Node API
-
-- **Package:** `azure-devops-node-api`
-- **Used in:** `src/helpers/auth.ts:15`
-- **Official docs:**
-  [azure-devops-node-api](https://github.com/microsoft/azure-devops-node-api)
-
-### How it is used
-
-The auth module uses two exports from this package:
-
-| Export | Purpose |
-|--------|---------|
-| `WebApi` | The API client constructor. Takes an org URL and an auth handler. |
-| `getBearerHandler` | Creates an `IRequestHandler` that attaches a bearer token to each request. |
-
-Usage pattern:
-
-```
-new azdev.WebApi(orgUrl, azdev.getBearerHandler(token))
-```
-
-The `WebApi` instance is returned to the caller (datasource) which uses it
-to access Azure DevOps APIs for work items, pull requests, and other resources.
-The auth module itself does not call any Azure DevOps API endpoints — it only
-constructs the authenticated client.
-
-### Org URL format
-
-The `orgUrl` parameter follows the format `https://dev.azure.com/{organization}`
-and is extracted from the git remote URL by `parseAzDevOpsRemoteUrl` in
-`src/datasources/index.ts`.
-
-## SQLite via better-sqlite3
-
-- **Package:** `better-sqlite3`
-- **Used in:** `src/mcp/state/database.ts` (database layer),
-  `src/helpers/run-state.ts` (consumer)
-- **Official docs:**
-  [better-sqlite3 API](https://github.com/WiseLibs/better-sqlite3/blob/master/docs/api.md)
-
-### Database configuration
-
-The database is a singleton managed by `openDatabase(cwd)` in
-`src/mcp/state/database.ts`. It is stored at `{cwd}/.dispatch/dispatch.db`
-and configured with three pragmas:
-
-| Pragma | Value | Purpose |
-|--------|-------|---------|
-| `journal_mode` | `WAL` | Write-ahead logging enables concurrent reads during writes |
-| `synchronous` | `NORMAL` | Balances durability with performance (fsync on checkpoint, not every commit) |
-| `foreign_keys` | `ON` | Enforces the FK from `run_state_tasks.run_id` to `run_state.run_id` |
-
-### API surface used
-
-| API | Used by | Purpose |
-|-----|---------|---------|
-| `db.exec(sql)` | `ensureRunStateTable` | Execute multi-statement DDL for table creation |
-| `db.prepare(sql)` | `loadRunState`, `saveRunState`, `migrateFromJson` | Create prepared statements for parameterized queries |
-| `stmt.get(params)` | `loadRunState`, `migrateFromJson` | Fetch a single row |
-| `stmt.all(params)` | `loadRunState` | Fetch all matching rows |
-| `stmt.run(params)` | `saveRunState` | Execute an INSERT/UPDATE |
-| `db.transaction(fn)` | `saveRunState` | Wrap multiple writes in an atomic transaction |
-
-### Synchronous API
-
-`better-sqlite3` uses a synchronous API — all database operations block the
-Node.js event loop. This is by design: the library uses N-API bindings to
-SQLite's C library and avoids the complexity of async wrappers. For the small
-datasets used by run-state (typically < 100 tasks per run), the blocking time
-is negligible.
-
-The `run-state.ts` module wraps database access in `async` functions only
-because it also performs filesystem I/O (migration) and uses a dynamic
-`import()` for lazy loading.
-
-### Lazy import pattern
-
-The run-state module uses a dynamic import to obtain the database:
-
-```typescript
-async function getDb(cwd: string) {
-    const { openDatabase } = await import("../mcp/state/database.js");
-    return openDatabase(cwd);
-}
-```
-
-This avoids circular dependency issues at module initialization time. The
-`database.ts` module may transitively import modules that depend on
-`run-state.ts`, so eager import would cause a circular reference.
-
-### Transaction semantics
-
-`saveRunState` wraps all writes in a `db.transaction()` call. In
-`better-sqlite3`, this translates to `BEGIN IMMEDIATE` / `COMMIT` statements.
-If any operation within the transaction throws, the entire transaction is
-rolled back automatically. This guarantees that a partial write (e.g., run
-record written but task records not) never persists to disk.
-
-## Zod
-
-- **Package:** `zod`
-- **Used in:** `src/helpers/run-state.ts:20`
-- **Official docs:** [zod.dev](https://zod.dev/)
-
-### How it is used
-
-Zod provides runtime schema validation at two boundaries:
-
-1. **JSON migration boundary**: When reading the legacy
-   `.dispatch/run-state.json` file, `RunStateSchema.safeParse(JSON.parse(raw))`
-   validates the entire structure before importing into SQLite. If `safeParse`
-   returns `{ success: false }`, the migration is skipped silently — no
-   exception is thrown.
-
-2. **SQLite query boundary**: When loading task rows from SQLite,
-   `RunStateTaskStatusSchema.safeParse(t.status)` validates each status value
-   against the known enum. If an unrecognized status string is found (e.g.,
-   from database corruption or schema evolution), the status falls back to
-   `"pending"` rather than crashing.
-
-### Schemas defined
-
-| Schema | Type | Fields |
-|--------|------|--------|
-| `RunStateTaskStatusSchema` | `z.enum` | `["pending", "running", "success", "failed"]` |
-| `RunStateTaskSchema` | `z.object` | `{ id, status, branch? }` |
-| `RunStateSchema` | `z.object` | `{ runId, preRunSha, tasks[] }` |
-
-Both the `RunState` and `RunStateTask` TypeScript types are derived from
-these schemas using `z.infer<>`, making the Zod schemas the single source
-of truth for the data shape.
-
-### Why safeParse instead of parse
-
-`safeParse` returns a discriminated union `{ success: true, data } | { success:
-false, error }` instead of throwing on validation failure. This is deliberate:
-
-- Migration should be non-disruptive. A malformed legacy file should not crash
-  the pipeline — it should be silently skipped.
-- Status validation at query time should degrade gracefully. An unknown status
-  is treated as `"pending"` (causing re-execution) rather than crashing.
+This document covers the external dependencies used by the git-and-worktree
+helper group: the **Git CLI** for worktree operations, **Node.js
+`child_process.execFile`** for subprocess management, **Node.js `fs/promises`**
+for state persistence and `.gitignore` manipulation, **Node.js
+`crypto.randomUUID`** for branch name generation, and **Vitest** for testing.
 
 ## Git CLI
 
 - **Binary:** `git` (resolved from `$PATH`)
 - **Used in:** `src/helpers/worktree.ts`
 - **Minimum version:** Git 2.17 (for `git worktree remove`; `add` available
-  since 2.5; `list --porcelain` since 2.15)
+  since 2.5)
 - **Official docs:** [git-scm.com/docs/git-worktree](https://git-scm.com/docs/git-worktree)
 
 ### Commands used
 
 | Command | Function | Purpose |
 |---------|----------|---------|
-| `git worktree add <path> -b <branch> [startPoint]` | `createWorktree` | Create a worktree with a new branch |
+| `git worktree add <path> -b <branch>` | `createWorktree` | Create a worktree with a new branch |
 | `git worktree add <path> <branch>` | `createWorktree` (fallback) | Create a worktree on an existing branch |
-| `git worktree list --porcelain` | `createWorktree` | Check if a path is a registered worktree |
-| `git worktree list` | `listWorktrees` | List all worktrees for diagnostics |
 | `git worktree remove <path>` | `removeWorktree` | Remove a clean worktree |
 | `git worktree remove --force <path>` | `removeWorktree` (fallback) | Remove a dirty worktree |
-| `git worktree prune` | `createWorktree`, `removeWorktree` | Clean up stale admin files |
-| `git checkout --force <branch>` | `createWorktree` (reuse path) | Reset worktree to desired branch |
-| `git clean -fd` | `createWorktree` (reuse path) | Remove untracked files from worktree |
+| `git worktree prune` | `removeWorktree` | Clean up stale admin files |
+| `git worktree list` | `listWorktrees` | List all worktrees for diagnostics |
 
-All commands are executed with `cwd` set to the appropriate directory — the
-repository root for worktree management commands, or the worktree path for
-`checkout` and `clean`.
-
-### Shell option (Windows)
-
-The internal `git()` helper passes `{ shell: process.platform === "win32" }`
-to `execFile`. On Windows, this spawns the git command through `cmd.exe`,
-which is necessary because git may be installed as a `.cmd` or `.bat` script
-rather than a direct executable. On other platforms, `shell` is `false` and
-`execFile` invokes git directly.
+All commands are executed with `cwd` set to the repository root. This ensures
+that git resolves the repository correctly regardless of the caller's working
+directory.
 
 ### Error messages parsed
 
-The worktree module inspects several error message strings:
-
-| Substring | Used by | Purpose |
-|-----------|---------|---------|
-| `"already exists"` | `createWorktree` | Branch already exists — retry without `-b` |
-| `"already used by worktree"` | `createWorktree` | Stale worktree ref — prune and retry |
-| `"lock"` | `createWorktree` | Lock contention — exponential backoff |
-| `"already"` (generic) | `createWorktree` | Catch-all retryable condition |
-
-All checks use `String.includes` — substring matches, not exact comparisons.
-This is robust across git versions because the core message text has been
-stable since these features were introduced.
+The worktree module inspects one error message string: `"already exists"`. This
+is the message git outputs when `git worktree add -b <branch>` fails because
+the branch already exists. The check uses `String.includes` — it is a substring
+match, not an exact comparison. This is robust across git versions because the
+core message text has been stable since `git worktree add` was introduced.
 
 ### Git's internal locking
 
 When multiple worktree operations run concurrently (as happens with
 `Promise.all` in the dispatch pipeline), git uses lock files in
-`$GIT_DIR/worktrees/` and `$GIT_DIR/refs/` to serialize access to shared
-state. The exponential backoff in `createWorktree` specifically handles lock
-contention errors that arise from this concurrent access pattern.
+`$GIT_DIR/worktrees/` and `$GIT_DIR/refs/` to serialize access to shared state.
+This means:
+
+- Two concurrent `git worktree add` calls with different branch names are safe.
+- Two concurrent calls creating the **same** branch would race, but Dispatch
+  guarantees unique branch names per issue.
+- `git worktree prune` may briefly block if another worktree operation holds
+  a lock.
 
 ### What happens if git is not installed
 
-The [prerequisite checks](../prereqs-and-safety/prereqs.md) verify that the
-`git` binary is on `$PATH` before the pipeline starts. If git is missing, the
+The [prerequisite checks](../prereqs-and-safety/integrations.md#git-cli) verify that the `git`
+binary is on `$PATH` before the pipeline starts. If git is missing, the
 pipeline exits early with an error message. The worktree module itself does not
 check for git availability — it relies on the prereq check.
+
+If the prereq check is bypassed (e.g., in tests), `execFile("git", ...)`
+throws an `ENOENT` error, which propagates as an unhandled rejection from
+`createWorktree`.
+
+If the current working directory is not a git repository, `git worktree add`
+fails with `fatal: not a git repository`. This error propagates from
+`createWorktree` as a thrown exception. The prerequisite checks validate that
+the cwd is a git repository by running `git rev-parse --git-dir` during
+startup.
 
 ## Node.js child_process (execFile)
 
 - **Module:** `node:child_process` (built-in)
 - **Function used:** `execFile` (via `util.promisify`)
-- **Used in:** `src/helpers/worktree.ts:10,18`
-- **Official docs:**
-  [nodejs.org/api/child_process.html#child_processexecfilefile-args-options-callback](https://nodejs.org/api/child_process.html#child_processexecfilefile-args-options-callback)
+- **Used in:** `src/helpers/worktree.ts:10,15`
+- **Official docs:** [nodejs.org/api/child_process.html#child_processexecfilefile-args-options-callback](https://nodejs.org/api/child_process.html#child_processexecfilefile-args-options-callback)
 
 ### Why execFile instead of exec
 
-The worktree module uses `execFile` rather than `exec`:
+The worktree module uses `execFile` rather than `exec`. The key differences:
 
 | Aspect | `execFile` | `exec` |
 |--------|-----------|--------|
-| Shell invocation | No shell spawned (except on Windows, see above) | Runs command in a shell |
+| Shell invocation | No shell spawned | Runs command in a shell |
 | Argument injection | Arguments passed as array — no injection risk | Command string is shell-interpreted |
 | Performance | Slightly faster (no shell overhead) | Slightly slower |
+| Quoting | Not needed — arguments are passed directly to the process | Shell quoting rules apply |
 
-`execFile` is the correct choice because git arguments (paths, branch names)
-may contain characters that require shell escaping. `execFile` avoids this by
-passing arguments as an array. Combined with
-[branch validation](./branch-validation.md), this provides defense-in-depth
-against command injection.
+`execFile` is the correct choice here because:
+
+- Git arguments (paths, branch names) may contain characters that require shell
+  escaping. `execFile` avoids this by passing arguments as an array.
+- There is no need for shell features (pipes, globbing, redirects).
+- The security posture is better: no risk of shell injection via crafted branch
+  names or paths.
 
 ### Promisification
 
-The module uses `util.promisify(execFile)` to convert the callback-based API
-into a promise-based function. The promisified version resolves with
-`{ stdout, stderr }` on exit code 0 and rejects with an `Error` (including
-`stdout`, `stderr`, `code`, and `killed` properties) on non-zero exit.
+The module uses `util.promisify(execFile)` to convert the callback-based
+`execFile` into a promise-based function. The promisified version:
 
-## open (browser launcher)
+- Resolves with `{ stdout, stderr }` on exit code 0.
+- Rejects with an `Error` that has `stdout`, `stderr`, `code`, and `killed`
+  properties on non-zero exit.
 
-- **Package:** `open`
-- **Used in:** `src/helpers/auth.ts:16`
-- **Official docs:** [sindresorhus/open](https://github.com/sindresorhus/open)
+The worktree module's internal `git()` helper extracts `stdout` from the
+resolved value and returns it. Stderr is ignored on success. On failure, the
+full error object (including stderr) is available to catch blocks.
 
-### How it is used
+### Buffer limits
 
-Both `getGithubOctokit` and `getAzureConnection` call
-`open(verificationUri).catch(() => {})` to launch the device-code verification
-URL in the user's default browser.
+`execFile` buffers the entire stdout and stderr in memory. The default
+`maxBuffer` is 1 MiB (1024 * 1024 bytes). If a git command produces more
+output than this, the promise rejects with `ERR_CHILD_PROCESS_STDIO_MAXBUFFER`.
 
-### Cross-platform behavior
+For the commands used by the worktree module, this limit is not a concern:
 
-The `open` package delegates to platform-specific commands:
+- `git worktree add` and `remove` produce minimal output.
+- `git worktree list` output scales with the number of worktrees. At ~100
+  bytes per worktree, over 10,000 worktrees would be needed to exceed 1 MiB.
+- `git worktree prune` produces no output on success.
 
-| Platform | Command |
-|----------|---------|
-| Linux | `xdg-open` |
-| macOS | `open` |
-| Windows | `start` |
+### Environment inheritance
 
-### Error suppression
+`execFile` inherits the parent process's environment by default. This means
+git configuration from `$HOME/.gitconfig`, `$GIT_DIR/config`, and environment
+variables like `GIT_AUTHOR_NAME` and `GIT_COMMITTER_EMAIL` are all available
+to the spawned git process.
 
-The `.catch(() => {})` on every `open()` call silences errors in headless
-environments (CI servers, SSH sessions, containers) where no browser or
-display server is available. In these cases, the user must manually copy the
-verification URL from the terminal output and open it on another device.
+The `cwd` option is passed explicitly to ensure git operates in the correct
+repository. No other `execFile` options are set — the child process inherits
+the parent's `PATH`, `HOME`, and other environment variables.
 
 ## Node.js fs/promises
 
 - **Module:** `node:fs/promises` (built-in)
-- **Functions used:** `readFile`, `writeFile`, `mkdir`, `chmod`, `rm`
-- **Used in:** `src/helpers/auth.ts:8`, `src/helpers/gitignore.ts:5`,
-  `src/helpers/run-state.ts:18`, `src/helpers/worktree.ts:14`
+- **Functions used:** `readFile`, `writeFile`, `rename`, `mkdir`
+- **Used in:** `src/helpers/run-state.ts:1`, `src/helpers/gitignore.ts:5`
+- **Official docs:** [nodejs.org/api/fs.html#promises-api](https://nodejs.org/api/fs.html#promises-api)
 
 ### Usage by module
 
 | Module | Functions | Purpose |
 |--------|-----------|---------|
-| `auth.ts` | `readFile`, `writeFile`, `mkdir`, `chmod` | Load/save auth cache at `~/.dispatch/auth.json` |
+| `run-state.ts` | `readFile`, `writeFile`, `rename`, `mkdir` | Load/save state file with atomic writes |
 | `gitignore.ts` | `readFile`, `writeFile` | Read and append `.gitignore` entries |
-| `run-state.ts` | `readFile`, `mkdir` | Read legacy JSON for migration; ensure `.dispatch/` dir |
-| `worktree.ts` | `rm` | Remove stale worktree directories |
 
-### Node.js crypto.randomUUID
+### Atomic writes in run-state
+
+`saveRunState` uses the write-to-temp-then-rename pattern:
+
+1. `mkdir(dir, { recursive: true })` — Ensure `.dispatch/` exists.
+2. `writeFile(tmp, data, "utf-8")` — Write to `run-state.json.tmp`.
+3. `rename(tmp, target)` — Atomically replace `run-state.json`.
+
+The `rename` system call is atomic on POSIX — it replaces the target file in a
+single filesystem operation. If the process crashes between steps 2 and 3, the
+`.tmp` file is left on disk but the original state file is intact. On the next
+`loadRunState` call, the stale `.tmp` file is ignored (it is never read).
+
+See [Shared Types — Integrations](../shared-types/integrations.md#data-loss-during-writefile)
+for a broader discussion of `writeFile` atomicity concerns.
+
+### Non-atomic writes in gitignore
+
+`ensureGitignoreEntry` uses `writeFile` directly (without the temp-then-rename
+pattern). This means a crash during the write could leave a truncated
+`.gitignore`. The risk is acceptable because:
+
+- `.gitignore` is under version control and can be recovered with
+  `git checkout`.
+- The operation is a single small write (the full file contents).
+- The function is non-fatal by design — a corrupted `.gitignore` does not
+  affect task execution.
+
+See [Gitignore Helper — Race condition analysis](./gitignore-helper.md#race-condition-analysis)
+for concurrency considerations.
+
+### Error handling patterns
+
+Both modules follow the same convention: catch errors broadly and either return
+a default value or log a warning.
+
+| Module | Read error behavior | Write error behavior |
+|--------|-------------------|---------------------|
+| `run-state.ts` | Returns `null` (treat as no state) | Propagates (unhandled) |
+| `gitignore.ts` | Treats as empty file | Logs warning, returns normally |
+
+The asymmetry in `run-state.ts` is intentional: a read failure is recoverable
+(re-execute all tasks), but a write failure means state may be lost and should
+surface as an error rather than being silently swallowed.
+
+## Node.js crypto.randomUUID
 
 - **Module:** `node:crypto` (built-in)
 - **Function used:** `randomUUID()`
-- **Used in:** `src/helpers/worktree.ts:12`
+- **Used in:** `src/helpers/worktree.ts:12` (imported), `src/helpers/worktree.ts:144`
+  (called in `generateFeatureBranchName`)
+- **Official docs:**
+  [nodejs.org/api/crypto.html#cryptorandomuuidoptions](https://nodejs.org/api/crypto.html#cryptorandomuuidoptions)
 
-`generateFeatureBranchName()` uses the first 8-character hex segment (32 bits)
-of a UUID v4 for branch names like `dispatch/feature-a1b2c3d4`. See
-[Worktree Management — UUID entropy](./worktree-management.md#uuid-entropy-considerations)
-for collision analysis.
+### How it is used
+
+`generateFeatureBranchName()` calls `randomUUID()` and extracts the first
+8-character hex segment (before the first hyphen) to produce branch names like
+`dispatch/feature-a1b2c3d4`.
+
+### Entropy and collisions
+
+Only 8 hex characters (32 bits) of the full 128-bit UUID are used. The birthday
+bound for 32-bit values is approximately 65,000 — meaning collisions become
+likely after generating ~65,000 feature branches. Since Dispatch branches are
+ephemeral and cleaned up regularly, the active set is typically well under 100,
+making collisions negligible in practice.
+
+### Runtime requirements
+
+`crypto.randomUUID()` was added in Node.js 19.0.0 as a stable API (it was
+available behind a flag since Node.js 14.17.0 via the Web Crypto API). The
+project's minimum Node.js version requirement covers this. No polyfill is
+needed.
 
 ## Vitest (test framework)
 
 - **Module:** `vitest`
-- **Used in:** All test files in this group:
+- **Used in:** All three test files in this group:
     - `src/tests/branch-validation.test.ts`
     - `src/tests/gitignore.test.ts`
     - `src/tests/worktree.test.ts`
 - **Official docs:** [vitest.dev](https://vitest.dev/)
 
-See [Testing](./testing.md) for detailed coverage of test mocking strategy and
-what each test file verifies.
+### How it is used
 
-## Integration summary
+All tests import `describe`, `it`, `expect`, `vi`, `beforeEach`, and
+`afterEach` from Vitest. The test files use Vitest's mocking APIs:
 
-| Integration | Package(s) | Module(s) | Transport |
-|-------------|-----------|-----------|-----------|
-| GitHub REST API | `@octokit/rest`, `@octokit/auth-oauth-device` | `auth.ts` | HTTPS (OAuth device flow + REST) |
-| Azure Identity | `@azure/identity` | `auth.ts` | HTTPS (Entra ID device-code flow) |
-| Azure DevOps API | `azure-devops-node-api` | `auth.ts` | HTTPS (bearer token REST) |
-| SQLite | `better-sqlite3` | `run-state.ts` via `database.ts` | Local file (WAL mode) |
-| Zod | `zod` | `run-state.ts` | In-process (schema validation) |
-| Git CLI | `git` binary | `worktree.ts` | Child process (`execFile`) |
-| Browser launcher | `open` | `auth.ts` | Platform-specific command |
+| API | Purpose |
+|-----|---------|
+| `vi.hoisted()` | Define mock implementations above imports (hoisted by Vitest) |
+| `vi.mock()` | Replace modules at the module level |
+| `vi.mocked()` | Type-safe access to mocked functions |
+| `vi.fn()` | Create mock functions |
+| `mockReset()` | Clear call history and implementation between tests |
+| `vi.restoreAllMocks()` | Restore original implementations after each test |
+
+### Running the tests
+
+```bash
+# Run all git-and-worktree tests
+npx vitest run tests/branch-validation.test.ts tests/gitignore.test.ts tests/worktree.test.ts
+
+# Run a single test file
+npx vitest run tests/worktree.test.ts
+
+# Run in watch mode for development
+npx vitest tests/worktree.test.ts
+```
+
+See [Testing](./testing.md) for detailed coverage of what each test file
+verifies and the mocking strategy used.
 
 ## Related documentation
 
 - [Overview](./overview.md) — Group-level summary
-- [Authentication](./authentication.md) — OAuth flows using Octokit, Azure
-  Identity, and Azure DevOps Node API
-- [Run State Persistence](./run-state.md) — SQLite schema and Zod validation
-  details
-- [Worktree Management](./worktree-management.md) — Git CLI command
-  orchestration and retry logic
-- [Branch Validation](./branch-validation.md) — Branch name validation that
-  provides defense-in-depth with `execFile`'s array-based argument passing
-- [Gitignore Helper](./gitignore-helper.md) — `fs/promises` usage for
-  `.gitignore` manipulation
+- [Branch Validation](./branch-validation.md) — Branch name validation rules
+  and security properties; works with `execFile`'s array-based argument passing
+  to provide defense-in-depth against command injection
+- [Worktree Management](./worktree-management.md) — How the Git CLI commands
+  are orchestrated
+- [Run State Persistence](./run-state.md) — The atomic write strategy in detail
+- [Gitignore Helper](./gitignore-helper.md) — Error handling and race
+  conditions
 - [Testing](./testing.md) — Test coverage and mocking strategy for all
   integrations documented here
-- [MCP Server — State Management](../mcp-server/state-management.md) — The
-  MCP state database shared with run-state
-- [Datasource System](../datasource-system/overview.md) — Consumers of the
-  authenticated clients created by `auth.ts`
-- [Prerequisites — Prereqs](../prereqs-and-safety/prereqs.md) — Git CLI
-  availability validation
-- [Helpers & Utilities Tests](../testing/helpers-utilities-tests.md) — Tests
-  covering shared helper functions used by these integrations
+- [Shared Types — Integrations](../shared-types/integrations.md) — `fs/promises`
+  patterns used across the broader codebase
+- [Planning and Dispatch — Integrations](../planning-and-dispatch/integrations.md) —
+  Git integration for commit operations (distinct from worktree management)
+- [Dispatch Pipeline](../cli-orchestration/dispatch-pipeline.md) -- The
+  execution engine that creates, uses, and removes worktrees through Git CLI
+  commands documented here
+- [Prerequisites — External Integrations](../prereqs-and-safety/integrations.md) —
+  How the prerequisite checker validates Git CLI availability before the
+  pipeline starts (the `git --version` detection pattern)

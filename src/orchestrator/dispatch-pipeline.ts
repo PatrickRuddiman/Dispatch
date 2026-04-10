@@ -1,7 +1,7 @@
 /**
  * Dispatch pipeline — the core execution pipeline that discovers tasks,
- * optionally plans them via the planner, executes them via the
- * executor, syncs completion state back to the datasource, and
+ * optionally plans them via the planner agent, executes them via the
+ * executor agent, syncs completion state back to the datasource, and
  * cleans up resources.
  */
 
@@ -10,26 +10,22 @@ import { promisify } from "node:util";
 import { readFile } from "node:fs/promises";
 import { glob } from "glob";
 import { parseTaskFile, buildTaskContext, groupTasksByMode, type TaskFile, type Task } from "../parser.js";
-import { dispatch, type DispatchResult } from "../dispatcher.js";
-import { plannerSkill } from "../skills/planner.js";
-import type { SkillResult, PlannerData, ExecutorData } from "../skills/types.js";
-import { executorSkill } from "../skills/executor.js";
-import { commitSkill, type CommitOutput } from "../skills/commit.js";
-import { markTaskComplete } from "../parser.js";
+import type { DispatchResult } from "../dispatcher.js";
+import { boot as bootPlanner, type PlannerAgent } from "../agents/planner.js";
+import type { AgentResult, PlannerData, ExecutorData } from "../agents/types.js";
+import { boot as bootExecutor, type ExecutorAgent } from "../agents/executor.js";
+import { boot as bootCommit, type CommitAgent } from "../agents/commit.js";
 import { log } from "../helpers/logger.js";
 import { registerCleanup } from "../helpers/cleanup.js";
 import { createWorktree, removeWorktree, worktreeName, generateFeatureBranchName } from "../helpers/worktree.js";
 import { isValidBranchName } from "../helpers/branch-validation.js";
 import { createTui, type TuiState } from "../tui.js";
-import type { ProviderName } from "../providers/interface.js";
-import { ProviderPool, type PoolEntry } from "../providers/pool.js";
-import { routeAllSkills } from "../providers/router.js";
-import { getAuthenticatedProviders } from "../providers/index.js";
-import { PROVIDER_NAMES } from "../providers/interface.js";
+import type { ProviderName, ProviderInstance } from "../providers/interface.js";
+import { bootProvider } from "../providers/index.js";
 import { getDatasource } from "../datasources/index.js";
 import type { DatasourceName, DispatchLifecycleOptions, IssueDetails, IssueFetchOptions } from "../datasources/interface.js";
 import { ensureAuthReady, setAuthPromptHandler } from "../helpers/auth.js";
-import type { OrchestrateRunOptions, DispatchSummary, DispatchProgressEvent } from "./runner.js";
+import type { OrchestrateRunOptions, DispatchSummary } from "./runner.js";
 import {
   fetchItemsById,
   writeItemsToTempDir,
@@ -49,7 +45,6 @@ import { extractTitle } from "../datasources/md.js";
 import chalk from "chalk";
 import { elapsed, renderHeaderLines } from "../helpers/format.js";
 import { FileLogger, fileLoggerStorage } from "../helpers/file-logger.js";
-import { buildTaskId } from "../helpers/run-state.js";
 
 const exec = promisify(execFile);
 
@@ -110,8 +105,8 @@ export async function runDispatchPipeline(
     noBranch: noBranchOpt,
     noWorktree,
     feature,
-    provider,
-    enabledProviders,
+    provider = "opencode",
+    model,
     source,
     org,
     project,
@@ -122,26 +117,8 @@ export async function runDispatchPipeline(
     planRetries,
     retries,
     username: usernameOverride,
-    progressCallback,
   } = opts;
   let noBranch = noBranchOpt;
-
-  // Determine authenticated providers for routing
-  const available = enabledProviders?.length
-    ? enabledProviders
-    : await getAuthenticatedProviders(PROVIDER_NAMES);
-
-  if (available.length === 0) {
-    throw new Error("No authenticated providers available. Run 'dispatch config' to set up providers.");
-  }
-
-  // Route agents to providers via the smart router
-  const agentRoutes = routeAllSkills(available, provider);
-
-  /** Create a ProviderPool for an agent role using router-produced entries. */
-  function createPool(entries: PoolEntry[], bootCwd: string): ProviderPool {
-    return new ProviderPool({ entries, bootOpts: { url: serverUrl, cwd: bootCwd } });
-  }
 
   // Planning timeout/retry defaults
   const resolvedRetries = retries ?? DEFAULT_RETRY_COUNT;
@@ -169,8 +146,7 @@ export async function runDispatchPipeline(
 
   if (verbose) {
     // Print inline header banner (same pattern as spec pipeline)
-    const primaryProvider = agentRoutes.executor[0]?.provider;
-    const headerLines = renderHeaderLines({ provider: primaryProvider, source });
+    const headerLines = renderHeaderLines({ provider, source });
     console.log("");
     for (const line of headerLines) console.log(line);
     console.log(chalk.dim("  ─".repeat(24)));
@@ -183,7 +159,7 @@ export async function runDispatchPipeline(
       phase: "discovering",
       startTime: Date.now(),
       filesFound: 0,
-      provider: primaryProvider,
+      provider,
       source,
     };
     tui = {
@@ -194,7 +170,7 @@ export async function runDispatchPipeline(
     };
   } else {
     tui = createTui();
-    tui.state.provider = agentRoutes.executor[0]?.provider;
+    tui.state.provider = provider;
     tui.state.source = source;
 
     // Route auth device-code prompts into the TUI notification banner
@@ -312,41 +288,29 @@ export async function runDispatchPipeline(
     if (verbose && serverUrl) log.debug(`Server URL: ${serverUrl}`);
 
     // When using worktrees, providers are booted per-worktree inside
-    // processIssueFile. Otherwise, boot a single shared provider pool.
-    let plannerPool: ProviderPool | null = null;
-    let executorPool: ProviderPool | undefined;
-    let commitPool: ProviderPool | undefined;
-    const sharedPools: ProviderPool[] = [];
+    // processIssueFile. Otherwise, boot a single shared provider.
+    let instance: ProviderInstance | undefined;
+    let planner: PlannerAgent | null = null;
+    let executor: ExecutorAgent | undefined;
+    let commitAgent: CommitAgent | undefined;
 
     if (!useWorktrees) {
-      // Create per-agent pools with failover support
-      const sharedExecutorPool = createPool(agentRoutes.executor, cwd);
-      const sharedPlannerPool = createPool(agentRoutes.planner, cwd);
-      const sharedCommitPool = createPool(agentRoutes.commit, cwd);
-      sharedPools.push(sharedExecutorPool, sharedPlannerPool, sharedCommitPool);
-      for (const pool of sharedPools) registerCleanup(() => pool.cleanup());
-
-      // Populate TUI model display from executor pool's primary entry
-      if (sharedExecutorPool.model) {
-        tui.state.model = sharedExecutorPool.model;
+      instance = await bootProvider(provider, { url: serverUrl, cwd, model });
+      registerCleanup(() => instance!.cleanup());
+      if (instance.model) {
+        tui.state.model = instance.model;
       }
-      if (verbose) {
-        const fmtRoute = (entries: PoolEntry[]) => entries.map((e) => `${e.provider}${e.model ? ` (${e.model})` : ""}`).join(" > ");
-        log.debug(`Executor route: ${fmtRoute(agentRoutes.executor)}`);
-        log.debug(`Planner route: ${fmtRoute(agentRoutes.planner)}`);
-        log.debug(`Commit route: ${fmtRoute(agentRoutes.commit)}`);
-      }
+      if (verbose && instance.model) log.debug(`Model: ${instance.model}`);
 
-      // ── 4. Assign pools (stateless skills — no booting needed) ──
-      plannerPool = noPlan ? null : sharedPlannerPool;
-      executorPool = sharedExecutorPool;
-      commitPool = sharedCommitPool;
+      // ── 4. Boot planner agent (unless --no-plan) ────────────────
+      planner = noPlan ? null : await bootPlanner({ provider: instance, cwd });
+      executor = await bootExecutor({ provider: instance, cwd });
+      commitAgent = await bootCommit({ provider: instance, cwd });
     }
 
     // ── 5. Dispatch tasks ───────────────────────────────────────
     tui.state.phase = "dispatching";
     if (verbose) log.info(`Dispatching ${allTasks.length} task(s)...`);
-    progressCallback?.({ type: "phase_change", phase: "dispatching", message: `Dispatching ${allTasks.length} task(s)` });
     const results: DispatchResult[] = [];
     let halted = false;
 
@@ -489,34 +453,27 @@ export async function runDispatchPipeline(
         const issueLifecycleOpts: DispatchLifecycleOptions = { cwd: issueCwd, username: usernameOverride };
 
         fileLogger?.phase("Provider/agent boot");
-        let localPlannerPool: ProviderPool | null;
-        let localExecutorPool: ProviderPool;
-        let localCommitPool: ProviderPool;
+        let localInstance: ProviderInstance;
+        let localPlanner: PlannerAgent | null;
+        let localExecutor: ExecutorAgent;
+        let localCommitAgent: CommitAgent;
 
         if (useWorktrees) {
-          // Create per-agent pools for this worktree
-          const wtExecutorPool = createPool(agentRoutes.executor, issueCwd);
-          const wtPlannerPool = createPool(agentRoutes.planner, issueCwd);
-          const wtCommitPool = createPool(agentRoutes.commit, issueCwd);
-          registerCleanup(() => wtExecutorPool.cleanup());
-          registerCleanup(() => wtPlannerPool.cleanup());
-          registerCleanup(() => wtCommitPool.cleanup());
-
-          if (!tui.state.model && wtExecutorPool.model) {
-            tui.state.model = wtExecutorPool.model;
+          localInstance = await bootProvider(provider, { url: serverUrl, cwd: issueCwd, model });
+          registerCleanup(() => localInstance.cleanup());
+          if (localInstance.model && !tui.state.model) {
+            tui.state.model = localInstance.model;
           }
-          if (verbose) {
-            log.debug(`Worktree executor route: ${agentRoutes.executor.map((e) => e.provider).join(" > ")}`);
-          }
-
-          localPlannerPool = noPlan ? null : wtPlannerPool;
-          localExecutorPool = wtExecutorPool;
-          localCommitPool = wtCommitPool;
-          fileLogger?.info(`Provider pools booted: executor=${agentRoutes.executor[0]?.provider}, planner=${agentRoutes.planner[0]?.provider}, commit=${agentRoutes.commit[0]?.provider}`);
+          if (verbose && localInstance.model) log.debug(`Model: ${localInstance.model}`);
+          localPlanner = noPlan ? null : await bootPlanner({ provider: localInstance, cwd: issueCwd });
+          localExecutor = await bootExecutor({ provider: localInstance, cwd: issueCwd });
+          localCommitAgent = await bootCommit({ provider: localInstance, cwd: issueCwd });
+          fileLogger?.info(`Provider booted: ${localInstance.model ?? provider}`);
         } else {
-          localPlannerPool = plannerPool;
-          localExecutorPool = executorPool!;
-          localCommitPool = commitPool!;
+          localInstance = instance!;
+          localPlanner = planner;
+          localExecutor = executor!;
+          localCommitAgent = commitAgent!;
         }
 
         const issueResults: DispatchResult[] = [];
@@ -555,32 +512,19 @@ export async function runDispatchPipeline(
           tuiTask.elapsed = startTime;
           tuiTask.error = undefined;
 
-          const emitProgress = (type: "task_start" | "task_done" | "task_failed", extra?: { phase?: string; error?: string }) => {
-            if (!progressCallback) return;
-            const taskId = buildTaskId(task);
-            const taskText = task.text;
-            if (type === "task_start") {
-              progressCallback({ type, taskId, taskText, phase: extra?.phase, file: task.file, line: task.line });
-            } else if (type === "task_done") {
-              progressCallback({ type, taskId, taskText });
-            } else {
-              progressCallback({ type, taskId, taskText, error: extra?.error ?? "unknown error" });
-            }
-          };
-
-          if (localPlannerPool) {
+          if (localPlanner) {
             tuiTask.status = "planning";
             fileLogger?.phase(`Planning task: ${task.text}`);
             if (verbose) log.info(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: planning — "${task.text}"`);
             const rawContent = fileContentMap.get(task.file);
             const fileContext = rawContent ? buildTaskContext(rawContent, task) : undefined;
 
-            let planResult: SkillResult<PlannerData> | undefined;
+            let planResult: AgentResult<PlannerData> | undefined;
 
             for (let attempt = 1; attempt <= maxPlanAttempts; attempt++) {
               try {
                 planResult = await withTimeout(
-                  dispatch(plannerSkill, { task, cwd: issueCwd, fileContext, worktreeRoot }, localPlannerPool!),
+                  localPlanner.plan(task, fileContext, issueCwd, worktreeRoot),
                   planTimeoutMs,
                   "planner.plan()",
                 );
@@ -630,15 +574,14 @@ export async function runDispatchPipeline(
           tuiTask.status = "running";
           fileLogger?.phase(`Executing task: ${task.text}`);
           if (verbose) log.info(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: executing — "${task.text}"`);
-           emitProgress("task_start", { phase: "executing" });
           const execResult = await withRetry(
             async () => {
-              const result = await dispatch(executorSkill, {
+              const result = await localExecutor.execute({
                 task,
                 cwd: issueCwd,
                 plan: plan ?? null,
                 worktreeRoot,
-              }, localExecutorPool);
+              });
               if (!result.success) {
                 throw new Error(result.error ?? "Execution failed");
               }
@@ -646,7 +589,7 @@ export async function runDispatchPipeline(
             },
             resolvedRetries,
             { label: `executor "${task.text}"` },
-          ).catch((err): SkillResult<ExecutorData> => ({
+          ).catch((err): AgentResult<ExecutorData> => ({
             data: null,
             success: false,
             error: log.extractMessage(err),
@@ -658,13 +601,11 @@ export async function runDispatchPipeline(
             fileLogger?.error(`Execution failed: ${error}`);
             tuiTask.elapsed = Date.now() - startTime;
             pauseTask(task, error);
-            emitProgress("task_failed", { error });
             if (verbose) log.error(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: paused — "${task.text}" (${elapsed(tuiTask.elapsed)})${error ? `: ${error}` : ""}`);
             return { kind: "paused", error };
           }
 
           fileLogger?.info(`Execution completed successfully (${Date.now() - startTime}ms)`);
-          await markTaskComplete(task);
           try {
             const parsed = parseIssueFilename(task.file);
             const updatedContent = await readFile(task.file, "utf-8");
@@ -687,7 +628,6 @@ export async function runDispatchPipeline(
           tuiTask.status = "done";
           tuiTask.error = undefined;
           tuiTask.elapsed = Date.now() - startTime;
-          emitProgress("task_done");
           if (verbose) log.success(`Task #${tui.state.tasks.indexOf(tuiTask) + 1}: done — "${task.text}" (${elapsed(tuiTask.elapsed)})`);
           return { kind: "success", result: execResult.data.dispatchResult };
         };
@@ -761,7 +701,9 @@ export async function runDispatchPipeline(
             }
           }
 
-          // TUI model is populated at pool creation time
+          if (!tui.state.model && localInstance.model) {
+            tui.state.model = localInstance.model;
+          }
 
           if (stopAfterIssue) break;
         }
@@ -780,23 +722,23 @@ export async function runDispatchPipeline(
           }
 
           fileLogger?.phase("Commit generation");
-          let commitSkillResult: SkillResult<CommitOutput> | undefined;
+          let commitAgentResult: import("../agents/commit.js").CommitResult | undefined;
           if (!noBranch && branchName && defaultBranch && details && datasource.supportsGit()) {
             try {
               const branchDiff = await getBranchDiff(defaultBranch, issueCwd);
               if (branchDiff) {
-                const result = await dispatch(commitSkill, {
+                const result = await localCommitAgent.generate({
                   branchDiff,
                   issue: details,
                   taskResults: issueResults,
                   cwd: issueCwd,
                   worktreeRoot,
-                }, localCommitPool);
+                });
                 if (result.success) {
-                  commitSkillResult = result;
+                  commitAgentResult = result;
                   fileLogger?.info(`Commit message generated for issue #${details.number}`);
                   try {
-                    await squashBranchCommits(defaultBranch, result.data.commitMessage, issueCwd);
+                    await squashBranchCommits(defaultBranch, result.commitMessage, issueCwd);
                     log.debug(`Rewrote commit message for issue #${details.number}`);
                     fileLogger?.info(`Rewrote commit history for issue #${details.number}`);
                   } catch (err) {
@@ -869,8 +811,8 @@ export async function runDispatchPipeline(
 
               if (datasource.supportsGit()) {
                 try {
-                  const prTitle = (commitSkillResult?.success && commitSkillResult.data.prTitle) || await buildPrTitle(details.title, defaultBranch, issueLifecycleOpts.cwd);
-                  const prBody = (commitSkillResult?.success && commitSkillResult.data.prDescription) || await buildPrBody(
+                  const prTitle = commitAgentResult?.prTitle || await buildPrTitle(details.title, defaultBranch, issueLifecycleOpts.cwd);
+                  const prBody = commitAgentResult?.prDescription || await buildPrBody(
                     details,
                     fileTasks,
                     issueResults,
@@ -915,7 +857,11 @@ export async function runDispatchPipeline(
         }
 
         fileLogger?.phase("Resource cleanup");
-        // Stateless skills have no cleanup — pool cleanup is handled via registerCleanup()
+        if (useWorktrees) {
+          await localExecutor.cleanup();
+          await localPlanner?.cleanup();
+          await localInstance.cleanup();
+        }
 
         return { halted: stopAfterIssue };
       };
@@ -1004,7 +950,12 @@ export async function runDispatchPipeline(
     }
 
     // ── 6. Cleanup ──────────────────────────────────────────────
-    // Stateless skills have no cleanup. Pool cleanup is handled via registerCleanup() above.
+    // Per-worktree resources are cleaned up inside processIssueFile.
+    // Shared resources (when !useWorktrees) are cleaned up here.
+    await commitAgent?.cleanup();
+    await executor?.cleanup();
+    await planner?.cleanup();
+    await instance?.cleanup();
 
     const completed = results.filter((result) => result.success).length;
     const failed = results.filter((result) => !result.success).length;

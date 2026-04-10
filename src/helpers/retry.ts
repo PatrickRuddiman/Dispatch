@@ -15,8 +15,6 @@ export const DEFAULT_RETRY_COUNT = 3;
 export interface RetryOptions {
   /** Label for log messages identifying the operation being retried. */
   label?: string;
-  /** Base delay in milliseconds for exponential backoff (default: 500). */
-  baseDelayMs?: number;
 }
 
 /**
@@ -39,7 +37,6 @@ export async function withRetry<T>(
 ): Promise<T> {
   const maxAttempts = maxRetries + 1;
   const label = options?.label;
-  const baseDelay = options?.baseDelayMs ?? 500;
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -52,11 +49,7 @@ export async function withRetry<T>(
         log.warn(
           `Attempt ${attempt}/${maxAttempts} failed${suffix}: ${log.extractMessage(err)}`,
         );
-        // Exponential backoff with jitter: baseDelay * 2^(attempt-1) + random jitter
-        const delay = baseDelay * Math.pow(2, attempt - 1);
-        const jitter = Math.floor(Math.random() * baseDelay);
-        log.debug(`Retrying${suffix} in ${delay + jitter}ms (attempt ${attempt + 1}/${maxAttempts})`);
-        await new Promise((resolve) => setTimeout(resolve, delay + jitter));
+        log.debug(`Retrying${suffix} (attempt ${attempt + 1}/${maxAttempts})`);
       }
     }
   }

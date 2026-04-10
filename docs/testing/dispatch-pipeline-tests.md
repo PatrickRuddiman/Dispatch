@@ -8,13 +8,12 @@ integration test suite.
 
 | Test file | Production module | Lines (test) | Test count | Category |
 |-----------|-------------------|-------------|------------|----------|
-| `dispatch-pipeline.test.ts` | `src/orchestrator/dispatch-pipeline.ts` | 2,713 | ~95 | Module mocks, pipeline lifecycle |
+| `dispatch-pipeline.test.ts` | `src/orchestrator/dispatch-pipeline.ts` | ~1,930 | 70+ | Module mocks, pipeline lifecycle |
 | `integration/dispatch-flow.test.ts` | `src/orchestrator/dispatch-pipeline.ts` | ~290 | 3 | Real md datasource, git repo |
 
-**Total: ~3,003 lines of test code** covering the dispatch pipeline's
+**Total: ~2,220 lines of test code** covering the dispatch pipeline's
 execution lifecycle, retry mechanics, worktree mode, feature branch workflow,
-commit agent integration, glob expansion, auth handler cleanup, Windows
-compatibility, and edge cases.
+commit agent integration, and edge cases.
 
 ## Unit tests (`dispatch-pipeline.test.ts`)
 
@@ -39,7 +38,7 @@ are available before module imports:
 
 ### Test suites
 
-The unit tests are organized into thirteen `describe` blocks:
+The unit tests are organized into eight `describe` blocks:
 
 #### Planning timeout and retry (10 tests)
 
@@ -61,7 +60,7 @@ Verifies the planning retry loop at `dispatch-pipeline.ts:386-415`:
   the general `retries` value
 - **Immediate failure on non-timeout** — verifies no retry for generic errors
 
-#### Verbose mode (5 tests)
+#### Verbose mode (4 tests)
 
 Verifies the verbose mode bypass at `dispatch-pipeline.ts:93-120`:
 
@@ -69,9 +68,6 @@ Verifies the verbose mode bypass at `dispatch-pipeline.ts:93-120`:
 - Phase transitions are logged inline
 - Task progress is logged inline
 - TUI is created normally when `log.verbose` is `false`
-- **Non-interactive recovery fallback** — when verbose mode exhausts retries,
-  the pipeline fails predictably without hanging; logs warnings about the
-  lack of an interactive terminal (`dispatch-pipeline.test.ts:598`)
 
 #### Dry-run mode (3 tests)
 
@@ -149,38 +145,22 @@ The largest test suite, covering worktree-parallel execution:
 - Single shared provider when `useWorktrees` is false
 - Planner and executor booted once with shared provider
 
-**Executor retry and recovery (8 tests):**
+**Executor retry and recovery (5+ tests):**
 - Retries executor on failure and succeeds on retry
 - Fails the task when all executor attempts are exhausted using the shared
   default of 3 retries (4 total attempts)
 - Exhausted retries pause the task, expose TUI recovery state with rerun selected by default, and can rerun successfully
-- **Captures recovery metadata** — before waiting for user input, the TUI state
-  contains structured recovery context including `taskIndex`, `taskText`,
-  `error`, `selectedAction: "rerun"`, and per-issue context (`issue` number/title
-  and `worktree` name) (`dispatch-pipeline.test.ts:1750`)
-- **Re-enters planning on rerun** — when the user chooses "rerun" multiple
-  times, the planner is re-invoked for each recovery cycle; after the user
-  eventually quits, the task is marked failed and recovery state is cleared
-  (`dispatch-pipeline.test.ts:1804`)
-- **Quitting recovery stops remaining work** — selecting "quit" skips
-  execution of remaining issues (e.g., issue 2 is never processed), preserves
-  the active branch/worktree context by not calling `removeWorktree`, and
-  marks the first task as failed (`dispatch-pipeline.test.ts:1844`)
+- Quitting recovery halts downstream work while preserving the active branch/worktree context
 - Non-interactive recovery fallback stops predictably without hanging
 - Respects explicit `retries` values for executor attempt count
 - Does not retry when executor succeeds on first attempt
 
-#### Error-path handling (3 tests)
+#### Error-path handling (2 tests)
 
 - Propagates error when `fetchItemsById` rejects
 - Logs warning and continues when `datasource.update()` fails
-- **Falls back to `issueDetailsByFile`** when `parseIssueFilename` returns
-  `null` (md datasource scenario) — uses the `IssueDetails.number` from the
-  `issueDetailsByFile` map instead of parsing the filename, allowing
-  non-numeric md-datasource filenames to sync correctly
-  (`dispatch-pipeline.test.ts:1951`)
 
-#### Feature branch workflow (24 tests)
+#### Feature branch workflow (18 tests)
 
 Comprehensive coverage of the feature branch flow:
 
@@ -202,73 +182,6 @@ Comprehensive coverage of the feature branch flow:
 - Continues gracefully when merge fails
 - Continues gracefully when working branch deletion fails
 - Processes issues serially in feature mode (not in parallel)
-- Uses feature branch as `defaultBranch` for per-issue branch creation
-  (`dispatch-pipeline.test.ts:2254`)
-
-**User-supplied feature branch names (5 tests, lines 2267–2354):**
-
-These tests verify the user-supplied feature name path, where the `feature`
-option is a string rather than `true`:
-
-- **`dispatch/` prefix** — a user-supplied string (e.g., `"my-cool-feature"`)
-  is prefixed with `dispatch/` and `generateFeatureBranchName` is not called
-- **Path separator preservation** — if the name already contains a `/` (e.g.,
-  `"feature/auth-refactor"`), it is used as-is without adding the `dispatch/`
-  prefix
-- **"Already exists" reuse** — when `createAndSwitchBranch` rejects with an
-  "already exists" error, the pipeline falls back to `switchBranch` instead
-  of failing
-- **Invalid branch name validation** — when `isValidBranchName` returns
-  `false`, the pipeline returns early with all tasks failed and logs an error
-  about the invalid name
-- **Name threading** — the user-supplied name (with `dispatch/` prefix) is
-  threaded through `pushBranch`, `createPullRequest`, and `createWorktree`
-  start point
-
-#### md-datasource sync fallback (1 test)
-
-Verifies the datasource sync path when `parseIssueFilename` returns `null`,
-which occurs with md-datasource files that use non-numeric filenames (e.g.,
-`task-complete-md.md` instead of `42-feature.md`). The test sets up a mock
-issue with a filename-based `number` field and confirms that
-`datasource.update()` is called with the original filename as the issue ID
-and the `IssueDetails.title` as the title (`dispatch-pipeline.test.ts:2357`).
-
-#### Glob expansion in dispatch pipeline (7 tests)
-
-Verifies the `resolveGlobItems` code path used when `source` is `"md"` and
-`issueIds` contain glob patterns. This suite uses **fake timers**
-(`vi.useFakeTimers()`) because the planning timeout mechanism requires timer
-advancement (`dispatch-pipeline.test.ts:2427`):
-
-| Test | What is verified |
-|------|------------------|
-| Uses `resolveGlobItems` for glob patterns | `glob()` called with pattern + `cwd`; `fetchItemsById` not called |
-| Multiple matched files | Two glob matches → `result.total === 2` |
-| Empty glob result | No matches → empty summary + `log.warn("No files matched")` |
-| Falls back to `fetchItemsById` for plain numbers | `issueIds: ["42"]` → `glob` not called, `fetchItemsById` called |
-| Non-md source skips glob | `source: "github"` with glob-like ID → `glob` not called |
-| Glob in dry-run mode | `dryRunMode()` with glob pattern → resolves via glob, `skipped === total` |
-| Relative path as glob input | `"./my-specs/task.md"` → resolved via `glob` with correct `cwd` |
-
-#### Auth prompt handler cleanup (2 tests)
-
-Verifies that `setAuthPromptHandler(null)` is called in both the error and
-success paths of the pipeline, ensuring the auth prompt handler is always
-cleaned up (`dispatch-pipeline.test.ts:2627`):
-
-- **Error path** — when `fetchItemsById` throws, the handler is still nulled
-  out before the error propagates
-- **Normal completion** — after a successful pipeline run, the handler is
-  nulled out
-
-#### Git rev-parse shell option for Windows compatibility (1 test)
-
-Verifies that the `execFile` call for `git rev-parse --git-dir` passes the
-`shell` option set to `process.platform === "win32"`, ensuring Windows
-compatibility where `git` may need to be invoked through a shell
-(`dispatch-pipeline.test.ts:2665`). The test inspects the `execFile` mock
-calls to find the `rev-parse` invocation and asserts on its options object.
 
 ## Integration tests (`integration/dispatch-flow.test.ts`)
 
@@ -376,4 +289,3 @@ expect(mergeCalls[0][1]).toContain("--no-ff");
   md datasource used in integration tests
 - [Provider Tests](provider-tests.md) — complementary provider-level tests
 - [Spec Generator Tests](spec-generator-tests.md) — spec pipeline tests
-- [Spec Pipeline Tests](spec-pipeline-tests.md) — spec pipeline lifecycle tests

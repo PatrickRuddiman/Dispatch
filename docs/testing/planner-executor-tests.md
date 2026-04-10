@@ -301,9 +301,9 @@ documentation for related fake timer and pure-function testing patterns.
 - [Testing Overview](./overview.md) — Project-wide test strategy and coverage
 - [Provider Tests](./provider-tests.md) — Similar mock patterns for provider
   backends
-- [Executor Agent](../agent-system/executor-agent.md) — Production behavior
+- [Executor Agent](../planning-and-dispatch/executor.md) — Production behavior
   of the executor
-- [Planner Agent](../agent-system/planner-agent.md) — Production behavior
+- [Planner Agent](../planning-and-dispatch/planner.md) — Production behavior
   of the planner
 - [Dispatcher](../planning-and-dispatch/dispatcher.md) — The `dispatchTask`
   function mocked by executor tests
@@ -320,10 +320,3 @@ documentation for related fake timer and pure-function testing patterns.
 - [Git & Worktree Testing](../git-and-worktree/testing.md) — Related test
   suite that exercises worktree creation/removal, relevant to worktree
   isolation passthrough tests
-- [Concurrency Utility](../shared-utilities/concurrency.md) —
-  `runWithConcurrency()` model used for parallel execution in the pipeline
-  tested here
-- [Timeout Utility](../shared-utilities/timeout.md) — `withTimeout()` wrapper
-  used for plan generation deadlines
-- [Configuration](../cli-orchestration/configuration.md) — `planTimeout`,
-  `planRetries`, and `concurrency` settings exercised by these tests
