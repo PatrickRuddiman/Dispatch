@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { RequestError } from "@octokit/request-error";
 
 const SHELL = process.platform === "win32";
 
@@ -35,9 +36,10 @@ vi.mock("../datasources/index.js", async (importOriginal) => {
   };
 });
 
-import { datasource, getCommitMessages } from "../datasources/github.js";
+import { datasource, getCommitMessages, ownerRepoCache } from "../datasources/github.js";
 
 beforeEach(() => {
+  ownerRepoCache.clear();
   mockExecFile.mockReset();
   mockOctokit.rest.issues.listForRepo.mockReset();
   mockOctokit.rest.issues.get.mockReset();
@@ -438,10 +440,11 @@ describe("github datasource — createPullRequest", () => {
 
   it("returns existing PR URL when already exists", async () => {
     mockExecFile.mockResolvedValue({ stdout: "refs/remotes/origin/main\n" });
-    const error = Object.assign(
-      new Error("Validation Failed"),
-      { status: 422, response: { data: { errors: [{ message: "A pull request already exists" }] } } },
-    );
+    // Use a real RequestError so instanceof checks in the datasource pass correctly.
+    const error = new RequestError("Validation Failed", 422, {
+      response: { url: "https://api.github.com/repos/o/r/pulls", status: 422, headers: {}, data: {} },
+      request: { method: "POST", url: "https://api.github.com/repos/o/r/pulls", headers: {} },
+    });
     mockOctokit.rest.pulls.create.mockRejectedValue(error);
     mockOctokit.rest.pulls.list.mockResolvedValue({
       data: [{ html_url: "https://github.com/o/r/pull/5" }],

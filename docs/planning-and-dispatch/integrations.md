@@ -353,8 +353,8 @@ levels, and `--verbose` behavior.
 
 - [Pipeline Overview](./overview.md) -- How integrations fit into the pipeline
 - [Dispatcher](./dispatcher.md) -- Provider interaction during execution
-- [Planner Agent](./planner.md) -- Provider interaction during planning
-- [Executor Agent](./executor.md) -- Dispatch + task completion coordination
+- [Planner Agent](../agent-system/planner-agent.md) -- Provider interaction during planning
+- [Executor Agent](../agent-system/executor-agent.md) -- Dispatch + task completion coordination
 - [Agent Types](./agent-types.md) -- `AgentResult`, `AgentErrorCode`, and
   concrete data types
 - [Git Operations](./git.md) -- Detailed git behavior and concurrency concerns
@@ -384,3 +384,7 @@ levels, and `--verbose` behavior.
   lifecycle, and `AgentResult<T>` types consumed by these integrations
 - [Testing Overview](../testing/overview.md) -- Project-wide test suite
   including planner and executor integration test coverage
+- [Concurrency Utility](../shared-utilities/concurrency.md) --
+  `runWithConcurrency()` sliding-window model referenced in the dispatch loop
+- [Commit Agent](../agent-system/commit-agent.md) -- Handles post-execution
+  commit creation using the git patterns documented above

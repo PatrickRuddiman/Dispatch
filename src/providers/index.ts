@@ -8,6 +8,7 @@
  */
 
 import type { ProviderName, ProviderInstance, ProviderBootOptions } from "./interface.js";
+import { PROVIDER_NAMES } from "./interface.js";
 import { boot as bootOpencode, listModels as listOpencodeModels } from "./opencode.js";
 import { boot as bootCopilot, listModels as listCopilotModels } from "./copilot.js";
 import { boot as bootClaude, listModels as listClaudeModels } from "./claude.js";
@@ -31,9 +32,9 @@ const LIST_MODELS: Record<ProviderName, ListModelsFn> = {
 };
 
 /**
- * All registered provider names — useful for CLI help text and validation.
+ * All registered provider names — re-exported from the canonical definition in interface.ts.
  */
-export const PROVIDER_NAMES = Object.keys(PROVIDERS) as ProviderName[];
+export { PROVIDER_NAMES } from "./interface.js";
 
 /**
  * Boot a provider by name.
@@ -76,4 +77,4 @@ export async function listProviderModels(
 }
 
 export type { ProviderName, ProviderInstance, ProviderBootOptions } from "./interface.js";
-export { PROVIDER_BINARIES, checkProviderInstalled } from "./detect.js";
+export { checkProviderAuthenticated, getProviderAuthStatus, getAuthenticatedProviders } from "./detect.js";

@@ -10,6 +10,8 @@ guards, custom error types, and startup prerequisite validation.
 | [`src/helpers/slugify.ts`](../../src/helpers/slugify.ts) | Convert arbitrary text into URL/filesystem-safe identifiers |
 | [`src/helpers/timeout.ts`](../../src/helpers/timeout.ts) | Wrap any promise with a configurable deadline and labeled error |
 | [`src/helpers/concurrency.ts`](../../src/helpers/concurrency.ts) | Sliding-window concurrent execution with configurable parallelism and early-stop signal |
+| [`src/helpers/retry.ts`](../../src/helpers/retry.ts) | Generic retry wrapper with labeled logging for transient failure resilience |
+| [`src/helpers/environment.ts`](../../src/helpers/environment.ts) | OS detection and prompt block generation for agent system prompts |
 | [`src/helpers/errors.ts`](../../src/helpers/errors.ts) | Custom `UnsupportedOperationError` for datasource operations that are structurally unsupported |
 | [`src/helpers/guards.ts`](../../src/helpers/guards.ts) | Runtime `hasProperty` type guard for safely narrowing `unknown` values |
 | [`src/helpers/prereqs.ts`](../../src/helpers/prereqs.ts) | Startup prerequisite checker validating git, Node.js, and datasource-specific CLIs |
@@ -35,6 +37,17 @@ need small, well-tested building blocks:
   new tasks as soon as active ones complete, up to a configurable concurrency
   limit. An optional `shouldStop()` callback enables early termination. Used by
   both the dispatch and spec pipelines for parallel task processing.
+- **withRetry** retries an async function on failure up to a configurable
+  number of times with labeled logging. There is intentionally no backoff
+  delay between attempts — retries are immediate because pipeline-level
+  timeouts already bound total duration. Used by the
+  [dispatch pipeline](../cli-orchestration/dispatch-pipeline.md) and
+  [spec pipeline](../spec-generation/overview.md) to add resilience to
+  AI provider calls.
+- **formatEnvironmentPrompt** detects the host OS via `process.platform` and
+  produces a markdown block injected into every agent system prompt. This
+  ensures agents generate platform-appropriate commands (e.g., bash on Linux,
+  PowerShell on Windows) and avoid writing unnecessary intermediate scripts.
 - **UnsupportedOperationError** lets datasource implementations signal that
   an interface method is structurally unsupported (e.g., the markdown
   datasource cannot create git branches). See [Errors](./errors.md).
@@ -52,9 +65,11 @@ graph TD
     subgraph "Shared Utilities"
         Slugify["slugify.ts"]
         Timeout["timeout.ts"]
+        Retry["retry.ts"]
         Errors["errors.ts"]
         Guards["guards.ts"]
         Concurrency["concurrency.ts"]
+        Environment["environment.ts"]
     end
 
     subgraph "Datasources"
@@ -73,6 +88,13 @@ graph TD
         DH["datasource-helpers.ts"]
     end
 
+    subgraph "Agents"
+        PL["agents/planner.ts"]
+        CM["agents/commit.ts"]
+        SC["agents/spec.ts"]
+        DS["dispatcher.ts"]
+    end
+
     GH -- "slugify(title, 50)" --> Slugify
     AZ -- "slugify(title, 50)" --> Slugify
     MD -- "slugify(title, 50)<br/>slugify(title)" --> Slugify
@@ -80,9 +102,15 @@ graph TD
     DH -- "slugify(title, 60)" --> Slugify
     DP -- "withTimeout(promise, ms, label)" --> Timeout
     DP -- "runWithConcurrency(tasks, limit)" --> Concurrency
+    DP -- "withRetry(fn, retries, opts)" --> Retry
     SP -- "runWithConcurrency(items, limit)" --> Concurrency
+    SP -- "withRetry(fn, retries, opts)" --> Retry
     MD -- "throws UnsupportedOperationError" --> Errors
     OC -- "hasProperty(value, key)" --> Guards
+    DS -- "getEnvironmentBlock()" --> Environment
+    PL -- "formatEnvironmentPrompt()" --> Environment
+    CM -- "formatEnvironmentPrompt()" --> Environment
+    SC -- "formatEnvironmentPrompt()" --> Environment
 ```
 
 ## Two maxLength conventions
@@ -135,6 +163,12 @@ immediately available to all consumers.
   behavior, truncation edge cases, and cross-codebase usage
 - [Timeout](./timeout.md) -- Promise deadline enforcement, TimeoutError,
   retry strategy, memory considerations, and configuration
+- [Concurrency](./concurrency.md) -- Sliding-window parallel execution,
+  shouldStop early termination, and composition with retry and timeout
+- [Retry](./retry.md) -- Generic retry wrapper with labeled logging, no
+  backoff by design, and integration with the resilience stack
+- [Environment](./environment.md) -- OS detection via `process.platform`,
+  prompt block formatting, and agent system prompt injection
 - [Errors](./errors.md) -- `UnsupportedOperationError` custom error class
   for datasource operations that are structurally unsupported
 - [Guards](./guards.md) -- `hasProperty` runtime type guard for safe
@@ -161,7 +195,7 @@ immediately available to all consumers.
   `slugify` is used for temp file naming in `writeItemsToTempDir()`
 - [Spec Generation](../spec-generation/overview.md) -- How spec pipelines use
   `slugify` for spec filenames
-- [Planner Agent](../planning-and-dispatch/planner.md) -- The planning phase
+- [Planner Agent](../agent-system/planner-agent.md) -- The planning phase
   that is subject to `withTimeout` deadline enforcement
 - [Testing Overview](../testing/overview.md) -- Project-wide test suite
   including slugify and timeout test coverage
@@ -174,3 +208,7 @@ immediately available to all consumers.
 - [Architecture overview](../architecture.md) -- System-wide context
 - [Testing Overview](../testing/overview.md) -- Project-wide test suite
   including slugify, timeout, and guard utility test coverage
+- [Troubleshooting](../dispatch-pipeline/troubleshooting.md) -- Common
+  pipeline issues where timeout and concurrency behavior is relevant
+- [Commit Agent](../agent-system/commit-agent.md) -- Uses `slugify` for
+  branch naming via the datasource helpers

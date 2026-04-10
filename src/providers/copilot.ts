@@ -50,7 +50,11 @@ export async function listModels(opts?: ProviderBootOptions): Promise<string[]> 
     const models = await client.listModels();
     return models.map((m) => m.id).sort();
   } finally {
-    await client.stop().catch(() => {});
+    // Intentional fire-and-forget teardown: errors stopping a temporary
+    // list-models client are not actionable, but log them for debugging.
+    await client.stop().catch((err) => {
+      log.debug(`Failed to stop Copilot list-models client: ${log.formatErrorChain(err)}`);
+    });
   }
 }
 
@@ -140,7 +144,8 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
         log.debug("Async prompt accepted, waiting for session to become idle...");
         reporter.emit("Waiting for Copilot response");
 
-        // ── 2. Wait for session.idle or session.error ─────────────
+        // ── 2. Stream progress and wait for idle or error ─────────
+        let unsubDelta: (() => void) | undefined;
         await withTimeout(
           new Promise<void>((resolve, reject) => {
             unsubIdle = session.on("session.idle", () => {
@@ -150,11 +155,18 @@ export async function boot(opts?: ProviderBootOptions): Promise<ProviderInstance
             unsubErr = session.on("session.error", (event) => {
               reject(new Error(`Copilot session error: ${event.data.message}`));
             });
+
+            unsubDelta = session.on("assistant.message_delta", (event) => {
+              if (event.data.deltaContent) {
+                reporter.emit(event.data.deltaContent);
+              }
+            });
           }),
           SESSION_READY_TIMEOUT_MS,
           "copilot session ready",
         );
 
+        unsubDelta?.();
         log.debug("Session went idle, fetching result...");
         reporter.emit("Finalizing response");
 

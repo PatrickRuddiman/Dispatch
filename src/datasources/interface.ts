@@ -77,8 +77,10 @@ export interface DispatchLifecycleOptions {
   username?: string;
 }
 
+export const DATASOURCE_NAMES = ["github", "azdevops", "md"] as const;
+
 /** Valid datasource backend names. */
-export type DatasourceName = "github" | "azdevops" | "md";
+export type DatasourceName = typeof DATASOURCE_NAMES[number];
 
 /**
  * Interface that all datasource implementations must satisfy.

@@ -34,15 +34,15 @@ C4Context
     title Dispatch — System Topology
 
     Person(dev, "Developer", "Runs dispatch CLI")
+    Person(aiClient, "AI Agent Client", "Invokes dispatch via MCP")
 
     System_Boundary(dispatch, "Dispatch CLI") {
         Container(cli, "CLI Entry Point", "src/cli.ts", "Argument parsing, signal handlers, config routing")
         Container(config, "Configuration", "src/config.ts, config-prompts.ts, orchestrator/cli-config.ts", "Persistent config ({CWD}/.dispatch/config.json), interactive wizard, three-tier merge")
-        Container(runner, "Orchestrator Runner", "src/orchestrator/runner.ts", "Pipeline router: dispatch, spec, fix-tests modes")
+        Container(runner, "Orchestrator Runner", "src/orchestrator/runner.ts", "Pipeline router: dispatch, spec modes")
 
         Container(spec_pipe, "Spec Pipeline", "src/orchestrator/spec-pipeline.ts", "Issue-to-spec generation with batch concurrency")
         Container(dispatch_pipe, "Dispatch Pipeline", "src/orchestrator/dispatch-pipeline.ts", "Task planning, execution, git lifecycle, PR creation")
-        Container(fix_pipe, "Fix-Tests Pipeline", "src/orchestrator/fix-tests-pipeline.ts", "Detect and auto-fix failing tests via AI")
 
         Container(ds_layer, "Datasource Layer", "src/datasources/", "Unified CRUD + git lifecycle across backends")
         Container(prov_layer, "Provider Layer", "src/providers/", "AI runtime abstraction: boot, session, prompt, cleanup")
@@ -51,22 +51,27 @@ C4Context
         Container(parser, "Task Parser", "src/parser.ts", "Markdown checkbox extraction, context filtering, completion marking")
         Container(specgen, "Spec Generator", "src/spec-generator.ts", "Input classification, post-processing, validation")
         Container(tui, "Terminal UI", "src/tui.ts", "Real-time progress dashboard with spinner and task list")
+        Container(mcp, "MCP Server", "src/mcp/", "Model Context Protocol server: 16 tools, stdio/HTTP transports, forked worker execution")
         Container(shared, "Shared Utilities", "src/helpers/cleanup.ts, logger.ts, format.ts, slugify.ts, timeout.ts", "Cleanup registry, logging, formatting, slugification, timeout")
     }
 
-    System_Ext(github, "GitHub", "Issues, PRs via gh CLI")
-    System_Ext(azdevops, "Azure DevOps", "Work items, PRs via az CLI")
+    System_Ext(github, "GitHub", "Issues, PRs via @octokit/rest SDK")
+    System_Ext(azdevops, "Azure DevOps", "Work items, PRs via azure-devops-node-api SDK")
     System_Ext(localfs, "Local Filesystem", ".dispatch/specs/ markdown files")
     System_Ext(git, "Git CLI", "Branch, commit, push operations")
     System_Ext(opencode, "OpenCode", "AI agent runtime via @opencode-ai/sdk")
     System_Ext(copilot, "GitHub Copilot", "AI agent runtime via @github/copilot-sdk")
+    System_Ext(claude, "Claude", "AI agent runtime via @anthropic-ai/claude-agent-sdk")
+    System_Ext(codex, "Codex", "AI agent runtime via @openai/codex")
 
     Rel(dev, cli, "invokes")
+    Rel(aiClient, mcp, "MCP tool calls")
     Rel(cli, config, "config subcommand")
     Rel(cli, runner, "delegates pipeline execution")
+    Rel(cli, mcp, "mcp subcommand")
+    Rel(mcp, runner, "fork + IPC")
     Rel(runner, spec_pipe, "--spec")
     Rel(runner, dispatch_pipe, "default mode")
-    Rel(runner, fix_pipe, "--fix-tests (dynamic import)")
     Rel(spec_pipe, ds_layer, "fetch, update, create")
     Rel(spec_pipe, prov_layer, "boot, session, prompt")
     Rel(spec_pipe, agent_layer, "spec agent")
@@ -75,13 +80,14 @@ C4Context
     Rel(dispatch_pipe, agent_layer, "planner + executor agents")
     Rel(dispatch_pipe, parser, "parse, mark complete, group by mode")
     Rel(dispatch_pipe, tui, "real-time progress")
-    Rel(fix_pipe, prov_layer, "boot, session, prompt")
-    Rel(ds_layer, github, "gh CLI")
-    Rel(ds_layer, azdevops, "az CLI")
+    Rel(ds_layer, github, "@octokit/rest SDK")
+    Rel(ds_layer, azdevops, "azure-devops-node-api SDK")
     Rel(ds_layer, localfs, "fs/promises")
     Rel(ds_layer, git, "git commands")
     Rel(prov_layer, opencode, "@opencode-ai/sdk")
     Rel(prov_layer, copilot, "@github/copilot-sdk")
+    Rel(prov_layer, claude, "@anthropic-ai/claude-agent-sdk")
+    Rel(prov_layer, codex, "@openai/codex")
 ```
 
 ## Pipeline modes
@@ -94,7 +100,6 @@ enforced by the orchestrator, not the argument parser.
 |------|---------|---------|-------------|
 | **Spec generation** | `--spec` | Convert issues into structured markdown specs | [Spec generation](spec-generation/overview.md) |
 | **Dispatch** | Default (no mode flag) | Plan and execute tasks, commit, push, open PRs | [Planning & dispatch](planning-and-dispatch/overview.md) |
-| **Fix tests** | `--fix-tests` | Detect failing tests and prompt AI to fix them | [Fix-tests pipeline](cli-orchestration/fix-tests-pipeline.md) |
 
 The three-stage end-to-end workflow connects these modes:
 
@@ -110,7 +115,7 @@ flowchart LR
 | Stage | Command | Agent | Output |
 |-------|---------|-------|--------|
 | 1. Spec | `dispatch --spec 42,43` | [Spec agent](spec-generation/overview.md) | Structured markdown specs with `- [ ]` tasks |
-| 2. Plan | `dispatch 42` | [Planner agent](planning-and-dispatch/planner.md) | Detailed execution plan per task |
+| 2. Plan | `dispatch 42` | [Planner agent](agent-system/planner-agent.md) | Detailed execution plan per task |
 | 3. Execute | (same command) | [Executor agent](planning-and-dispatch/dispatcher.md) | Code changes + conventional commits + PRs |
 
 Stages 2 and 3 run within the same `dispatch` invocation. Stage 1 is a separate
@@ -132,7 +137,6 @@ flowchart TD
     E --> F{"Mode?"}
     F -->|"--spec"| G["Spec pipeline"]
     F -->|"default"| H["Dispatch pipeline"]
-    F -->|"--fix-tests"| I["Fix-tests pipeline"]
 ```
 
 The `explicitFlags` set tracks which CLI arguments were user-provided versus
@@ -228,17 +232,17 @@ compile-time string literal union keys, and a boot/get function:
 
 ### Datasource layer
 
-The [datasource interface](datasource-system/overview.md) defines a fourteen-method
-contract covering five CRUD operations (`list`, `fetch`, `update`, `close`,
-`create`), one identity method (`getUsername`), one capability query
-(`supportsGit`), and seven git lifecycle operations (`getDefaultBranch`,
+The [datasource interface](datasource-system/overview.md) defines a fifteen-method
+contract covering five CRUD operations (`list`, `fetch`, `create`, `update`,
+`close`), two identity/capability methods (`getUsername`, `supportsGit`), and
+eight git lifecycle operations (`getDefaultBranch`, `getCurrentBranch`,
 `buildBranchName`, `createAndSwitchBranch`, `switchBranch`, `pushBranch`,
 `commitAllChanges`, `createPullRequest`).
 
 | Datasource | Backend | Auth method | Detail page |
 |------------|---------|-------------|-------------|
-| `github` | `gh` CLI | `gh auth login` / `GH_TOKEN` | [GitHub datasource](datasource-system/github-datasource.md) |
-| `azdevops` | `az` CLI + azure-devops extension | `az login` / PAT | [Azure DevOps datasource](datasource-system/azdevops-datasource.md) |
+| `github` | `@octokit/rest` SDK | OAuth device-code flow (`@octokit/auth-oauth-device`) | [GitHub datasource](datasource-system/github-datasource.md) |
+| `azdevops` | `azure-devops-node-api` SDK | `DeviceCodeCredential` (`@azure/identity`) | [Azure DevOps datasource](datasource-system/azdevops-datasource.md) |
 | `md` | Local filesystem (`fs/promises`) | None | [Markdown datasource](datasource-system/markdown-datasource.md) |
 
 Auto-detection from `git remote get-url origin` matches `github.com`,
@@ -262,8 +266,8 @@ agent runtimes behind a session-based lifecycle: `boot` → `createSession` →
 |----------|-----|-------------|-------------|
 | `opencode` | `@opencode-ai/sdk` | Async (fire-and-forget + SSE events) | [OpenCode backend](provider-system/opencode-backend.md) |
 | `copilot` | `@github/copilot-sdk` | Async (event-based `send` + idle/error listeners) | [Copilot backend](provider-system/copilot-backend.md) |
-| `claude` | Claude CLI | CLI-based agent interaction | [Provider overview](provider-system/overview.md) |
-| `codex` | Codex CLI / `@openai/codex` | CLI-based agent loop | [Provider overview](provider-system/overview.md) |
+| `claude` | `@anthropic-ai/claude-agent-sdk` | SDK-based agent interaction | [Claude backend](provider-implementations/claude-backend.md) |
+| `codex` | `@openai/codex` | SDK-based agent loop | [Codex backend](provider-implementations/codex-backend.md) |
 
 Each task gets an isolated session to prevent context leakage between tasks.
 Providers manage their own server lifecycle (spawning or connecting to external
@@ -278,7 +282,7 @@ pipeline:
 | Agent | Purpose | Key behavior | Detail page |
 |-------|---------|-------------|-------------|
 | **Spec** | Explore codebase, generate strategic specs | Writes to `.dispatch/tmp/` via AI, reads back, post-processes | [Spec generation](spec-generation/overview.md) |
-| **Planner** | Read-only exploration, produce execution plan | Read-only enforcement via prompt instructions (not tool restrictions) | [Planner](planning-and-dispatch/planner.md) |
+| **Planner** | Read-only exploration, produce execution plan | Read-only enforcement via prompt instructions (not tool restrictions) | [Planner](agent-system/planner-agent.md) |
 | **Executor** | Follow plan, make code changes | Gets plan context from planner output | [Dispatcher](planning-and-dispatch/dispatcher.md) |
 | **Commit** | Analyze branch diff, generate commit message and PR metadata | Conventional Commits format, writes to `.dispatch/tmp/` | [Commit agent](agent-system/commit-agent.md) |
 
@@ -293,8 +297,8 @@ external CLI tools and SDKs:
 
 | Backend | Auth mechanism | Managed by |
 |---------|---------------|------------|
-| GitHub datasource | `gh auth login`, `GH_TOKEN`, `GITHUB_TOKEN` env vars | [gh CLI](https://cli.github.com/manual/gh_auth_login) |
-| Azure DevOps datasource | `az login`, PAT via `az devops login` | [az CLI](https://learn.microsoft.com/en-us/cli/azure/authenticate-azure-cli) |
+| GitHub datasource | OAuth device-code flow via `@octokit/auth-oauth-device`, cached at `~/.dispatch/auth.json` (mode 0o600) | [Authentication](cli-orchestration/authentication.md) |
+| Azure DevOps datasource | `DeviceCodeCredential` via `@azure/identity`, cached at `~/.dispatch/auth.json` | [Authentication](cli-orchestration/authentication.md) |
 | OpenCode provider | Server-level config; no credentials passed by dispatch | [OpenCode SDK](provider-system/opencode-backend.md) |
 | Copilot provider | `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`, or logged-in `gh` CLI user | [Copilot SDK](provider-system/copilot-backend.md) |
 
@@ -373,7 +377,7 @@ Dispatch provides three output channels with no external monitoring integration:
   files at `.dispatch/logs/issue-{id}.log`, scoped via Node.js
   `AsyncLocalStorage`. When verbose mode is active, every `log.*` call mirrors
   its output (with ANSI codes stripped) into the current file logger context.
-  Each pipeline (`dispatch`, `spec`, `fix-tests`) creates its own
+  Each pipeline (`dispatch`, `spec`) creates its own
   `AsyncLocalStorage.run()` scope per issue.
 
 The dual-channel logging architecture means a single `log.info()` call performs
@@ -488,21 +492,19 @@ validates tool availability at startup before any pipeline logic runs:
 |------|--------------|------------------|-------------|
 | `git` | Always | `git --version` | `checkPrereqs()` reports failure → `process.exit(1)` |
 | Node.js >= 20.12.0 | Always | Semver comparison | `checkPrereqs()` reports failure → `process.exit(1)` |
-| `gh` | GitHub datasource | `gh --version` (conditional) | `checkPrereqs()` reports failure → `process.exit(1)` |
-| `az` + `azure-devops` extension | Azure DevOps | `az --version` (conditional) | `checkPrereqs()` reports failure → `process.exit(1)` |
 | OpenCode CLI or server | `--provider opencode` | None (detected in config wizard only) | `bootProvider()` throws |
 | Copilot CLI | `--provider copilot` | None (detected in config wizard only) | `client.start()` throws |
 | Claude CLI | `--provider claude` | None (detected in config wizard only) | Boot fails |
 | Codex CLI | `--provider codex` | None (detected in config wizard only) | Boot fails |
 
 Provider binary availability is probed separately by
-[`checkProviderInstalled()`](prereqs-and-safety/provider-detection.md) during
+[`checkProviderInstalled()`](provider-system/binary-detection.md) during
 the interactive configuration wizard (`dispatch config`), where green/red dots
 indicate installation status. However, provider pre-flight checks do **not** run
 during pipeline execution — a missing provider binary causes a boot-time failure.
 
-Subprocess `execFile` calls generally have no timeout. The fix-tests pipeline
-and `getBranchDiff` helper use a 10 MB `maxBuffer`; exceeding it kills the
+Subprocess `execFile` calls generally have no timeout. The
+`getBranchDiff` helper uses a 10 MB `maxBuffer`; exceeding it kills the
 child process. See [datasource integrations](datasource-system/integrations.md)
 and [prerequisites & safety](prereqs-and-safety/overview.md).
 
@@ -514,6 +516,7 @@ directory at the project root contains all Dispatch-managed artifacts:
 | Location | Purpose | Lifecycle |
 |----------|---------|-----------|
 | `{CWD}/.dispatch/config.json` | Project-local persistent configuration | Manual via `dispatch config` or by deleting the file |
+| `.dispatch/dispatch.db` | SQLite database for MCP server state and run state | Created on first MCP use; persists across runs |
 | `.dispatch/specs/` | Generated spec files; markdown datasource storage | Managed by datasource lifecycle |
 | `.dispatch/specs/archive/` | Closed specs (markdown datasource) | Manual recovery via file move |
 | `.dispatch/worktrees/` | Git worktrees for per-issue isolation | Created/removed per dispatch; gitignored automatically |
@@ -521,6 +524,7 @@ directory at the project root contains all Dispatch-managed artifacts:
 | `.dispatch/tmp/` | Temp spec/commit files during AI generation (UUID-named) | Cleaned per-spec; may accumulate on crash |
 | `.dispatch/run-state.json` | Per-run task status persistence | Written atomically (temp-then-rename); future resume support |
 | `/tmp/dispatch-*` | Temp directories for datasource-fetched issues | Cleaned on completion; orphaned on crash |
+| `~/.dispatch/auth.json` | Cached OAuth tokens (mode 0o600) | Written by device-code auth flow; no expiration management |
 
 The `.dispatch/worktrees/` entry is automatically added to `.gitignore` at the
 start of every orchestrator run via
@@ -567,12 +571,11 @@ public types.
 
 ### Subprocess execution via `execFile`
 
-Datasources (`gh`, `az`, `git`), providers (binary detection), and the
-fix-tests pipeline all execute external processes via Node.js `child_process.execFile`
-wrapped with `util.promisify`. On Windows, `shell: true` is required for
-`.cmd`/`.bat` wrappers. Most calls have no timeout; the `maxBuffer` default
-is 1 MB (Node.js) except where explicitly raised (10 MB for `getBranchDiff`
-and test output capture). See
+Git operations and provider binary detection execute external processes via
+Node.js `child_process.execFile` wrapped with `util.promisify`. On Windows,
+`shell: true` is required for `.cmd`/`.bat` wrappers. Most calls have no
+timeout; the `maxBuffer` default is 1 MB (Node.js) except where explicitly
+raised (10 MB for `getBranchDiff` and test output capture). See
 [datasource integrations](datasource-system/integrations.md).
 
 ### Cleanup registry pattern
@@ -610,20 +613,21 @@ where each concurrent issue writes to its own log file.
 
 ## Key design decisions
 
-### CLI tools over REST APIs
+### SDK-based datasources with CLI-free authentication
 
-The GitHub and Azure DevOps datasources shell out to `gh` and `az` CLIs rather
-than using REST client libraries. This reuses the user's existing
-authentication, adds zero dependencies, and simplifies the implementation at
-the cost of a runtime dependency on external binaries being installed. See
-[datasource overview](datasource-system/overview.md#why-it-exists).
+The GitHub and Azure DevOps datasources use platform SDKs (`@octokit/rest`,
+`azure-devops-node-api`) with OAuth device-code flows rather than shelling out
+to CLI tools. This provides better programmatic control, type-safe API access,
+and eliminates the runtime dependency on `gh` and `az` CLI binaries for data
+operations. Git operations still shell out to `git` via `child_process.execFile`.
+See [datasource overview](datasource-system/overview.md#why-it-exists).
 
 ### Two-phase planner-then-executor
 
 The optional planning phase uses a read-only AI session to explore the codebase
 before the executor acts, producing higher-quality results. Read-only
 enforcement is prompt-based (not tool-restricted) — a deliberate trade-off for
-simplicity. See [planner agent](planning-and-dispatch/planner.md).
+simplicity. See [planner agent](agent-system/planner-agent.md).
 
 ### Spec generation stays high-level
 
@@ -668,6 +672,56 @@ override hardcoded defaults. An interactive wizard (`dispatch config`) guides
 first-time setup with sequential prompts (provider, model, datasource). See
 [configuration](cli-orchestration/configuration.md).
 
+### MCP server
+
+Dispatch exposes its full orchestration capability to external AI agents via a
+[Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server,
+invoked with `dispatch mcp`. The server supports two transport modes: stdio
+(default, for local tool integration) and HTTP (for remote/multi-client use on
+port 9110).
+
+```mermaid
+flowchart TD
+    AI["External AI Agent<br/>(e.g. Claude, Copilot)"] -->|"MCP tool call"| MCP["MCP Server<br/>src/mcp/server.ts"]
+    MCP -->|"stdio"| STDIO["StdioServerTransport"]
+    MCP -->|"http"| HTTP["StreamableHTTPServerTransport<br/>port 9110"]
+    MCP --> TOOLS["16 Registered Tools"]
+    TOOLS --> SPEC_T["Spec tools<br/>generate, list, get"]
+    TOOLS --> DISP_T["Dispatch tools<br/>run, status"]
+    TOOLS --> MON_T["Monitor tools<br/>progress, logs"]
+    TOOLS --> REC_T["Recovery tools<br/>retry, cancel"]
+    TOOLS --> CONF_T["Config tools<br/>get, set"]
+    DISP_T -->|"fork"| WORKER["dispatch-worker.ts<br/>Child process via IPC"]
+    WORKER --> PIPELINE["Dispatch/Spec Pipeline"]
+```
+
+Pipeline execution from MCP tool invocations runs in a **forked child process**
+(`src/mcp/dispatch-worker.ts`) with an IPC message protocol, isolating pipeline
+state from the MCP server process. State persistence uses a shared SQLite
+database (`.dispatch/dispatch.db`) with separate table domains for MCP server
+state (runs, tasks, spec_runs) and orchestrator resume state
+(run_state, run_state_tasks).
+
+See [MCP server overview](mcp-server/overview.md),
+[MCP tools](mcp-tools/overview.md), and
+[state management](mcp-server/state-management.md).
+
+### Provider failover pool
+
+The `ProviderPool` class wraps multiple AI providers behind the standard
+`ProviderInstance` interface, providing transparent failover when a provider
+is rate-limited. The pool uses lazy boot (providers are started on first use),
+session-to-provider remapping (so sessions survive failover), and 60-second
+cooldown timers after throttle detection.
+
+The `isThrottleError()` heuristic in `src/providers/errors.ts` classifies
+error messages from all four provider SDKs to trigger failover. This pairs with
+`withRetry()` as a safety net — retry handles transient errors within a single
+provider while the pool handles provider-level exhaustion.
+
+See [pool and failover](provider-system/pool-and-failover.md) and
+[error classification](provider-system/error-classification.md).
+
 ## Infrastructure
 
 ### Runtime requirements
@@ -676,9 +730,7 @@ first-time setup with sequential prompts (provider, model, datasource). See
 |-------------|---------|---------|
 | Node.js | >= 20.12.0 | Runtime (ESM-only, `"type": "module"`) |
 | Git | Any | Auto-detection, conventional commits, branch lifecycle |
-| `gh` CLI | Any | GitHub datasource (required only if using GitHub) |
-| `az` CLI + azure-devops extension | Any | Azure DevOps datasource (required only if using AzDevOps) |
-| OpenCode or Copilot runtime | Varies | AI agent backend (at least one required) |
+| OpenCode, Copilot, Claude, or Codex runtime | Varies | AI agent backend (at least one required) |
 
 For Windows-specific setup, prerequisites, and known limitations, see the
 [Windows guide](windows.md).
@@ -688,10 +740,20 @@ For Windows-specific setup, prerequisites, and known limitations, see the
 | Package | Purpose |
 |---------|---------|
 | `@opencode-ai/sdk` | OpenCode AI agent SDK |
-| `@github/copilot-sdk` | GitHub Copilot agent SDK |
+| `@github/copilot-sdk` | GitHub Copilot agent SDK (devDependency, optional-loaded) |
+| `@anthropic-ai/claude-agent-sdk` | Claude AI agent SDK |
+| `@openai/codex` | Codex AI agent SDK |
+| `@octokit/rest` | GitHub REST API client (datasource) |
+| `@octokit/auth-oauth-device` | GitHub OAuth device-code flow |
+| `@azure/identity` | Azure AD authentication (DeviceCodeCredential) |
+| `azure-devops-node-api` | Azure DevOps REST API client (datasource) |
+| `@modelcontextprotocol/sdk` | MCP server framework |
+| `better-sqlite3` | SQLite database for MCP state and run state |
+| `commander` | CLI argument parsing |
 | `@inquirer/prompts` | Interactive configuration wizard |
 | `chalk` | Terminal color styling (ESM-only) |
 | `glob` | File pattern matching |
+| `zod` | Schema validation (MCP tool inputs) |
 
 ### Build and test
 
@@ -705,7 +767,7 @@ The project uses [Vitest](https://vitest.dev/) v4 with ~8,174 lines of test
 code across 20+ test files covering configuration, task parsing, formatting,
 spec generation, slugification, timeout, all four provider backends, the
 planner/executor agents, orchestrator routing, the dispatch pipeline (including
-integration tests), the fix-tests pipeline, the test runner, branch validation,
+integration tests), branch validation,
 gitignore management, worktree management, datasource helpers, and the cleanup
 registry. Tests use real filesystem I/O (temp directories via `mkdtemp()`)
 rather than mocks for file operations, Vitest `vi.mock()` for module-level
@@ -729,6 +791,10 @@ guidance and removal safety assessment.
 - [Agent system](agent-system/overview.md) — Registry, types, boot lifecycle,
   and extensibility guide
   - [Commit agent](agent-system/commit-agent.md)
+  - [Planner agent](agent-system/planner-agent.md)
+  - [Executor agent](agent-system/executor-agent.md)
+  - [Spec agent](agent-system/spec-agent.md)
+  - [Pipeline flow](agent-system/pipeline-flow.md)
 
 ### Core pipelines
 
@@ -736,23 +802,59 @@ guidance and removal safety assessment.
   parsing, pipeline routing, TUI
   - [CLI reference](cli-orchestration/cli.md)
   - [Configuration](cli-orchestration/configuration.md)
+  - [Authentication](cli-orchestration/authentication.md)
   - [Orchestrator](cli-orchestration/orchestrator.md)
   - [Dispatch pipeline](cli-orchestration/dispatch-pipeline.md)
-  - [Fix-tests pipeline](cli-orchestration/fix-tests-pipeline.md)
+  - [MCP subcommand](cli-orchestration/mcp-subcommand.md)
   - [Terminal UI](cli-orchestration/tui.md)
   - [Integrations](cli-orchestration/integrations.md)
 - [Spec generation](spec-generation/overview.md) — Issue-to-spec pipeline
-  - [Spec agent](spec-generation/spec-agent.md)
+  - [Spec agent](agent-system/spec-agent.md)
   - [Integrations](spec-generation/integrations.md)
 - [Planning & dispatch](planning-and-dispatch/overview.md) — Task execution
   engine
-  - [Planner agent](planning-and-dispatch/planner.md)
-  - [Executor agent](planning-and-dispatch/executor.md)
+  - [Planner agent](agent-system/planner-agent.md)
+  - [Executor agent](agent-system/executor-agent.md)
   - [Dispatcher](planning-and-dispatch/dispatcher.md)
   - [Agent types](planning-and-dispatch/agent-types.md)
   - [Git operations](planning-and-dispatch/git.md)
   - [Task context & lifecycle](planning-and-dispatch/task-context-and-lifecycle.md)
   - [Integrations](planning-and-dispatch/integrations.md)
+
+### MCP server & tools
+
+- [MCP server](mcp-server/overview.md) — MCP server architecture, transports,
+  and session management
+  - [Server transports](mcp-server/server-transports.md)
+  - [State management](mcp-server/state-management.md)
+  - [Dispatch worker](mcp-server/dispatch-worker.md)
+  - [Operations guide](mcp-server/operations-guide.md)
+- [MCP tools](mcp-tools/overview.md) — 16 registered tools across 5 groups
+  - [Spec tools](mcp-tools/spec-tools.md)
+  - [Dispatch tools](mcp-tools/dispatch-tools.md)
+  - [Monitor tools](mcp-tools/monitor-tools.md)
+  - [Recovery tools](mcp-tools/recovery-tools.md)
+  - [Config tools](mcp-tools/config-tools.md)
+  - [Config resolution](mcp-tools/config-resolution.md)
+  - [Fork-run IPC](mcp-tools/fork-run-ipc.md)
+
+### Dispatch pipeline (detailed)
+
+- [Dispatch pipeline](dispatch-pipeline/pipeline-lifecycle.md) — Full pipeline
+  lifecycle and phase details
+  - [Worktree lifecycle](dispatch-pipeline/worktree-lifecycle.md)
+  - [Commit & PR generation](dispatch-pipeline/commit-and-pr-generation.md)
+  - [Feature branch mode](dispatch-pipeline/feature-branch-mode.md)
+  - [Task recovery](dispatch-pipeline/task-recovery.md)
+  - [Troubleshooting](dispatch-pipeline/troubleshooting.md)
+  - [Integrations](dispatch-pipeline/integrations.md)
+
+### Orchestrator internals
+
+- [Orchestrator](orchestrator/overview.md) — Runner coordination and pipeline
+  routing internals
+  - [Spec pipeline](orchestrator/spec-pipeline.md)
+  - [Integrations](orchestrator/integrations.md)
 
 ### Extensible backends
 
@@ -769,6 +871,16 @@ guidance and removal safety assessment.
   - [OpenCode backend](provider-system/opencode-backend.md)
   - [Copilot backend](provider-system/copilot-backend.md)
   - [Adding a provider](provider-system/adding-a-provider.md)
+  - [Pool and failover](provider-system/pool-and-failover.md)
+  - [Error classification](provider-system/error-classification.md)
+  - [Binary detection](provider-system/binary-detection.md)
+  - [Progress reporting](provider-system/progress-reporting.md)
+  - [Integrations](provider-system/integrations.md)
+- [Provider implementations](provider-implementations/overview.md) — Detailed
+  implementation docs for provider backends
+  - [Claude backend](provider-implementations/claude-backend.md)
+  - [Codex backend](provider-implementations/codex-backend.md)
+  - [Authentication & security](provider-implementations/authentication-and-security.md)
 
 ### Data layer
 
@@ -791,11 +903,14 @@ guidance and removal safety assessment.
   - [Provider interface](shared-types/provider.md)
   - [Integrations](shared-types/integrations.md)
 - [Shared utilities](shared-utilities/overview.md) — Slugify, timeout, errors,
-  guards
+  guards, concurrency, retry
+  - [Concurrency](shared-utilities/concurrency.md)
+  - [Retry](shared-utilities/retry.md)
   - [Slugify](shared-utilities/slugify.md)
   - [Timeout](shared-utilities/timeout.md)
   - [Errors](shared-utilities/errors.md)
   - [Guards](shared-utilities/guards.md)
+  - [Environment](shared-utilities/environment.md)
   - [Testing](shared-utilities/testing.md)
 
 ### Git & worktree management
@@ -806,6 +921,7 @@ guidance and removal safety assessment.
   - [Worktree management](git-and-worktree/worktree-management.md)
   - [Gitignore helper](git-and-worktree/gitignore-helper.md)
   - [Run state](git-and-worktree/run-state.md)
+  - [Authentication](git-and-worktree/authentication.md)
   - [Integrations](git-and-worktree/integrations.md)
   - [Testing](git-and-worktree/testing.md)
 
@@ -815,7 +931,7 @@ guidance and removal safety assessment.
   validation, batch confirmation, provider detection
   - [Prerequisite checker](prereqs-and-safety/prereqs.md)
   - [Batch confirmation](prereqs-and-safety/confirm-large-batch.md)
-  - [Provider detection](prereqs-and-safety/provider-detection.md)
+  - [Provider detection](provider-system/binary-detection.md)
   - [Integrations](prereqs-and-safety/integrations.md)
 
 ### Testing
@@ -826,18 +942,38 @@ guidance and removal safety assessment.
   - [Format tests](testing/format-tests.md)
   - [Parser tests](testing/parser-tests.md)
   - [Spec generator tests](testing/spec-generator-tests.md)
+  - [Spec agent tests](testing/spec-agent-tests.md)
+  - [Spec pipeline tests](testing/spec-pipeline-tests.md)
   - [Provider tests](testing/provider-tests.md)
   - [Planner & executor tests](testing/planner-executor-tests.md)
+  - [Commit agent tests](testing/commit-agent-tests.md)
   - [Runner tests](testing/runner-tests.md)
   - [Dispatch pipeline tests](testing/dispatch-pipeline-tests.md)
-  - [Fix-tests tests](testing/fix-tests-tests.md)
+  - [Datasource tests](testing/datasource-tests.md)
+  - [Datasource helpers tests](testing/datasource-helpers-tests.md)
+  - [Datasource URL parsing tests](testing/datasource-url-parsing-tests.md)
+  - [GitHub datasource tests](testing/github-datasource-tests.md)
+  - [Azure DevOps datasource tests](testing/azdevops-datasource-tests.md)
+  - [Markdown datasource tests](testing/md-datasource-tests.md)
+  - [Auth tests](testing/auth-tests.md)
+  - [Database tests](testing/database-tests.md)
+  - [MCP state tests](testing/mcp-state-tests.md)
+  - [MCP tools tests](testing/mcp-tools-tests.md)
+  - [Concurrency tests](testing/concurrency-tests.md)
+  - [Run state tests](testing/run-state-tests.md)
+  - [Worktree tests](testing/worktree-tests.md)
+  - [TUI tests](testing/tui-tests.md)
+  - [Manager tests](testing/manager-tests.md)
+  - [Helpers & utilities tests](testing/helpers-utilities-tests.md)
+  - [Environment, errors & prereqs tests](testing/environment-errors-prereqs-tests.md)
+  - [Integration & E2E tests](testing/tests-integration-e2e.md)
   - [Test fixtures](testing/test-fixtures.md)
 
 ### Deprecated
 
 - [Deprecated compatibility layer](deprecated-compat/overview.md) —
   `IssueFetcher` shims delegating to datasource system
-- [Issue fetching (legacy)](issue-fetching/overview.md) — Superseded by the
+- [Issue fetching (legacy)](deprecated-compat/overview.md) — Superseded by the
   datasource system
   - [GitHub fetcher](issue-fetching/github-fetcher.md) (deprecated)
   - [Azure DevOps fetcher](issue-fetching/azdevops-fetcher.md) (deprecated)

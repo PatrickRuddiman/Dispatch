@@ -13,7 +13,8 @@ import { slugify } from "../helpers/slugify.js";
 import { log } from "../helpers/logger.js";
 import { InvalidBranchNameError, isValidBranchName } from "../helpers/branch-validation.js";
 import { getGithubOctokit } from "../helpers/auth.js";
-import { getGitRemoteUrl, parseGitHubRemoteUrl } from "./index.js";
+import { getGitRemoteUrl, parseGitHubRemoteUrl, deriveShortUsername } from "./index.js";
+import { RequestError } from "@octokit/request-error";
 
 export { InvalidBranchNameError } from "../helpers/branch-validation.js";
 
@@ -32,8 +33,14 @@ function redactUrl(url: string): string {
   return url.replace(/\/\/[^@/]+@/, "//***@");
 }
 
-/** Resolve the GitHub owner and repo from the git remote URL. */
+/** Cache for getOwnerRepo results, keyed by cwd. Exported for testing only. */
+export const ownerRepoCache = new Map<string, { owner: string; repo: string }>();
+
+/** Resolve the GitHub owner and repo from the git remote URL (cached per cwd). */
 async function getOwnerRepo(cwd: string): Promise<{ owner: string; repo: string }> {
+  const cached = ownerRepoCache.get(cwd);
+  if (cached) return cached;
+
   const remoteUrl = await getGitRemoteUrl(cwd);
   if (!remoteUrl) {
     throw new Error("Could not determine git remote URL. Is this a git repository with an origin remote?");
@@ -42,6 +49,7 @@ async function getOwnerRepo(cwd: string): Promise<{ owner: string; repo: string 
   if (!parsed) {
     throw new Error(`Could not parse GitHub owner/repo from remote URL: ${redactUrl(remoteUrl)}`);
   }
+  ownerRepoCache.set(cwd, parsed);
   return parsed;
 }
 
@@ -55,40 +63,6 @@ async function getOwnerRepo(cwd: string): Promise<{ owner: string; repo: string 
  */
 function buildBranchName(issueNumber: string, _title: string, username: string = "unknown"): string {
   return `${username}/dispatch/issue-${issueNumber}`;
-}
-
-/**
- * Derive a short username from git config.
- * - Multi-word name: first 2 chars of first name + first 6 of last name
- * - Single word or no name: first 8 chars of email local part
- * - Falls back to the provided `fallback` value
- */
-async function deriveShortUsername(cwd: string, fallback: string): Promise<string> {
-  try {
-    const raw = (await git(["config", "user.name"], cwd)).trim();
-    if (raw) {
-      const parts = raw.toLowerCase().replace(/[^a-z\s]/g, "").trim().split(/\s+/);
-      if (parts.length >= 2) {
-        return (parts[0].slice(0, 2) + parts[parts.length - 1].slice(0, 6)) || fallback;
-      }
-    }
-  } catch {
-    // fall through to email
-  }
-
-  try {
-    const raw = (await git(["config", "user.email"], cwd)).trim();
-    if (raw) {
-      const localPart = raw.split("@")[0].toLowerCase().replace(/[^a-z0-9]/g, "");
-      if (localPart) {
-        return localPart.slice(0, 8);
-      }
-    }
-  } catch {
-    // fall through
-  }
-
-  return fallback;
 }
 
 /**
@@ -352,11 +326,7 @@ export const datasource: Datasource = {
       // If a PR already exists for this branch, retrieve its URL.
       // Octokit throws a RequestError with status 422 for validation
       // failures, including "A pull request already exists".
-      const isValidationError =
-        typeof err === "object" &&
-        err !== null &&
-        "status" in err &&
-        (err as { status: number }).status === 422;
+      const isValidationError = err instanceof RequestError && err.status === 422;
 
       if (isValidationError) {
         const { data: prs } = await octokit.rest.pulls.list({

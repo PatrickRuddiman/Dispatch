@@ -23,7 +23,7 @@ import { handleConfigCommand, CONFIG_BOUNDS } from "./config.js";
 export const MAX_CONCURRENCY = CONFIG_BOUNDS.concurrency.max;
 
 export const HELP = `
-  dispatch — AI agent orchestration CLI
+  dispatch — AI task orchestration CLI
 
   Usage:
     dispatch [issue-id...]           Dispatch specific issues (or all open issues if none given)
@@ -33,23 +33,20 @@ export const HELP = `
     dispatch --respec <ids>          Regenerate specs for specific issues
     dispatch --respec <glob>         Regenerate specs matching a glob pattern
     dispatch --spec "description"    Generate a spec from an inline text description
-    dispatch --fix-tests [issue-id...]  Run tests and fix failures via AI agent (optionally on specific issue branches)
-
   Options:
     --dry-run              List tasks without dispatching (also works with --spec)
-    --no-plan              Skip the planner agent, dispatch directly
+    --no-plan              Skip the planner, dispatch directly
     --no-branch            Skip branch creation, push, and PR lifecycle
     --no-worktree          Skip git worktree isolation for parallel issues
     --feature [name]       Group issues into a single feature branch and PR
     --force                Ignore prior run state and re-run all tasks
     --concurrency <n>      Max parallel dispatches (default: min(cpus, freeMB/500), max: ${MAX_CONCURRENCY})
-    --provider <name>      Agent backend: ${PROVIDER_NAMES.join(", ")} (default: opencode)
+    --provider <name>      Force a specific provider: ${PROVIDER_NAMES.join(", ")} (auto-selected by default)
     --source <name>        Issue source: ${DATASOURCE_NAMES.join(", ")} (optional; auto-detected from git remote)
     --server-url <url>     URL of a running provider server
     --plan-timeout <min>   Planning timeout in minutes (default: 30)
-    --retries <n>          Retry attempts for all agents (default: 3)
+    --retries <n>          Retry attempts for all skills (default: 3)
     --plan-retries <n>     Retry attempts after planning timeout (overrides --retries for planner)
-    --test-timeout <min>   Test timeout in minutes (default: 5)
     --cwd <dir>            Working directory (default: cwd)
 
   Spec options:
@@ -74,6 +71,10 @@ export const HELP = `
 
   Config:
     dispatch config                     Launch interactive configuration wizard
+    dispatch config --cwd <dir>         Configure a specific project directory
+
+    Additional settings available via config file (.dispatch/config.json):
+      workItemType, iteration, area (Azure DevOps filters), username (branch prefix)
 
   Examples:
     dispatch 14
@@ -83,22 +84,19 @@ export const HELP = `
     dispatch 14 --dry-run
     dispatch 14 --provider copilot
     dispatch --spec 42,43,44
-    dispatch --spec 42,43 --source github --provider copilot
+    dispatch --spec 42,43 --source github
     dispatch --spec 100,200 --source azdevops --org https://dev.azure.com/myorg --project MyProject
     dispatch --spec "drafts/*.md"
     dispatch --spec "drafts/*.md" --source github
-    dispatch --spec "./my-feature.md" --provider copilot
+    dispatch --spec "./my-feature.md"
     dispatch --respec
     dispatch --respec 42,43,44
     dispatch --respec "specs/*.md"
     dispatch --spec "add dark mode toggle to settings page"
-    dispatch --spec "feature A should do x" --provider copilot
+    dispatch --spec "feature A should do x"
     dispatch --feature
     dispatch --feature my-feature
-    dispatch --fix-tests
-    dispatch --fix-tests 14
-    dispatch --fix-tests 14 15 16
-    dispatch --fix-tests 14,15,16
+    dispatch 14 15 16 --feature my-feature
     dispatch config
 `.trimStart();
 
@@ -129,7 +127,6 @@ export const CLI_OPTIONS_MAP: Record<string, string> = {
   verbose: "verbose",
   spec: "spec",
   respec: "respec",
-  fixTests: "fixTests",
   feature: "feature",
   source: "issueSource",
   provider: "provider",
@@ -141,7 +138,6 @@ export const CLI_OPTIONS_MAP: Record<string, string> = {
   specKillTimeout: "specKillTimeout",
   retries: "retries",
   planRetries: "planRetries",
-  testTimeout: "testTimeout",
   cwd: "cwd",
   org: "org",
   project: "project",
@@ -162,21 +158,20 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
     .option("-h, --help", "Show help")
     .option("-v, --version", "Show version")
     .option("--dry-run", "List tasks without dispatching")
-    .option("--no-plan", "Skip the planner agent")
+    .option("--no-plan", "Skip the planner")
     .option("--no-branch", "Skip branch creation")
     .option("--no-worktree", "Skip git worktree isolation")
     .option("--feature [name]", "Group issues into a single feature branch")
     .option("--force", "Ignore prior run state")
     .option("--verbose", "Show detailed debug output")
-    .option("--fix-tests", "Run tests and fix failures (optionally pass issue IDs to target specific branches)")
     .option("--spec <values...>", "Spec mode: issue numbers, glob, or text")
     .option("--respec [values...]", "Regenerate specs")
     .addOption(
-      new Option("--provider <name>", "Agent backend").choices(PROVIDER_NAMES),
+      new Option("--provider <name>", "Force a specific provider (auto-selected by default)").choices(PROVIDER_NAMES),
     )
     .addOption(
       new Option("--source <name>", "Issue source").choices(
-        DATASOURCE_NAMES as string[],
+        [...DATASOURCE_NAMES],
       ),
     )
     .option(
@@ -259,15 +254,6 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
         return n;
       },
     )
-    .option(
-      "--test-timeout <min>",
-      "Test timeout in minutes",
-      (val: string): number => {
-        const n = parseFloat(val);
-        if (isNaN(n) || n <= 0) throw new CommanderError(1, "commander.invalidArgument", "--test-timeout must be a positive number (minutes)");
-        return n;
-      },
-    )
     .option("--cwd <dir>", "Working directory", (val: string) => resolve(val))
     .option("--output-dir <dir>", "Output directory", (val: string) => resolve(val))
     .option("--org <url>", "Azure DevOps organization URL")
@@ -294,7 +280,7 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
     noBranch: !opts.branch,
     noWorktree: !opts.worktree,
     force: opts.force ?? false,
-    provider: opts.provider ?? "opencode",
+    provider: opts.provider,
     cwd: opts.cwd ?? process.cwd(),
     help: opts.help ?? false,
     version: opts.version ?? false,
@@ -312,7 +298,6 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
       args.respec = opts.respec.length === 1 ? opts.respec[0] : opts.respec;
     }
   }
-  if (opts.fixTests) args.fixTests = true;
   if (opts.feature) args.feature = opts.feature;
   if (opts.source !== undefined) args.issueSource = opts.source;
   if (opts.concurrency !== undefined) args.concurrency = opts.concurrency;
@@ -323,7 +308,6 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
   if (opts.specKillTimeout !== undefined) args.specKillTimeout = opts.specKillTimeout;
   if (opts.retries !== undefined) args.retries = opts.retries;
   if (opts.planRetries !== undefined) args.planRetries = opts.planRetries;
-  if (opts.testTimeout !== undefined) args.testTimeout = opts.testTimeout;
   if (opts.org !== undefined) args.org = opts.org;
   if (opts.project !== undefined) args.project = opts.project;
   if (opts.outputDir !== undefined) args.outputDir = opts.outputDir;
@@ -368,6 +352,44 @@ async function main() {
     process.exit(0);
   }
 
+  // ── MCP subcommand ─────────────────────────────────────────
+  if (rawArgv[0] === "mcp") {
+    const mcpProgram = new Command("dispatch-mcp")
+      .exitOverride()
+      .configureOutput({ writeOut: () => {}, writeErr: () => {} })
+      .helpOption(false)
+      .allowUnknownOption(true)
+      .allowExcessArguments(true)
+      .option("--http", "Use HTTP transport instead of stdio (for remote/multi-client use)")
+      .option("--port <number>", "Port to listen on (HTTP mode only)", (v: string) => parseInt(v, 10), 9110)
+      .option("--host <host>", "Host to bind to (HTTP mode only)", "127.0.0.1")
+      .option("--cwd <dir>", "Working directory", (v: string) => resolve(v));
+
+    try {
+      mcpProgram.parse(rawArgv.slice(1), { from: "user" });
+    } catch (err) {
+      if (err instanceof CommanderError) {
+        log.error(err.message);
+        process.exit(1);
+      }
+      throw err;
+    }
+
+    const mcpOpts = mcpProgram.opts<{ http?: boolean; port: number; host: string; cwd?: string }>();
+    const cwd = mcpOpts.cwd ?? process.cwd();
+
+    if (mcpOpts.http) {
+      const { startMcpServer } = await import("./mcp/index.js");
+      await startMcpServer({ port: mcpOpts.port, host: mcpOpts.host, cwd });
+    } else {
+      const { startStdioMcpServer } = await import("./mcp/index.js");
+      await startStdioMcpServer({ cwd });
+    }
+    // startMcpServer / startStdioMcpServer install signal handlers and keep
+    // the event loop alive; we only reach here if something calls process.exit().
+    return;
+  }
+
   const [args, explicitFlags] = parseArgs(rawArgv);
 
   // Enable verbose logging before anything else
@@ -402,8 +424,7 @@ async function main() {
   const summary = await orchestrator.runFromCli({ ...rawArgs, explicitFlags });
 
   // Determine exit code from summary
-  const failed = "failed" in summary ? summary.failed : ("success" in summary && !summary.success ? 1 : 0);
-  process.exit(failed > 0 ? 1 : 0);
+  process.exit(summary.failed > 0 ? 1 : 0);
 }
 
 main().catch(async (err) => {

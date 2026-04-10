@@ -244,10 +244,10 @@ as passed to [`parseTaskContent`](./api-reference.md#parsetaskcontent) (`src/par
    `buildTaskContext` to produce a filtered view (`src/orchestrator.ts:125-126`)
 4. The planner receives only this filtered context, not the raw `content` field
 
-The [planner](../planning-and-dispatch/planner.md) never sees `TaskFile.content` directly -- it always goes through
+The [planner](../agent-system/planner-agent.md) never sees `TaskFile.content` directly -- it always goes through
 [`buildTaskContext`](./api-reference.md#buildtaskcontext) first. This is a deliberate design: the filtered context
 strips sibling unchecked tasks so the planner focuses on a single unit of work.
-See [Planner — File Context Filtering](../planning-and-dispatch/planner.md#file-context-filtering) for how
+See [Planner — File Context Filtering](../agent-system/planner-agent.md#file-context-filtering) for how
 this context is incorporated into the planner prompt.
 
 ## Why buildTaskContext strips sibling tasks
@@ -255,7 +255,7 @@ this context is incorporated into the planner prompt.
 The `buildTaskContext` function (`src/parser.ts:36-60`) removes all unchecked
 task lines except the one being planned. This design serves several purposes:
 
-1. **Focus**: The [planner](../planning-and-dispatch/planner.md) agent should implement one task at a time. Showing
+1. **Focus**: The [planner](../agent-system/planner-agent.md) agent should implement one task at a time. Showing
    sibling tasks risks the planner attempting to address multiple tasks or
    making incorrect assumptions about task ordering.
 
@@ -264,11 +264,11 @@ task lines except the one being planned. This design serves several purposes:
    implementation guidance without the noise of unrelated work items.
 
 3. **Agent isolation**: Each task is dispatched to an independent agent session
-   via the [dispatcher](../planning-and-dispatch/dispatcher.md).
+   via the [dispatcher](../agent-system/executor-agent.md).
    The planner's context should match the scope of work for that session.
 
 Looking at `src/planner.ts:72-85`, the filtered context is embedded in the
-[planner prompt](../planning-and-dispatch/planner.md#planner-prompt-structure) as a "Task File Contents" section, where the planner is
+[planner prompt](../agent-system/planner-agent.md#planner-prompt-structure) as a "Task File Contents" section, where the planner is
 instructed to review non-task prose for implementation details.
 
 ## Type sharing across modules
@@ -312,9 +312,9 @@ modules that only need the types.
   the pipeline perspective on parsing, filtering, and mutation
 - [Shared Parser Types](../shared-types/parser.md) -- summary of exported types
   and functions
-- [Dispatcher](../planning-and-dispatch/dispatcher.md) -- concurrent task
+- [Dispatcher](../agent-system/executor-agent.md) -- concurrent task
   dispatch that interacts with the concurrency model
-- [Planner](../planning-and-dispatch/planner.md) -- plan generation that
+- [Planner](../agent-system/planner-agent.md) -- plan generation that
   consumes `buildTaskContext` output
 - [CLI Reference](../cli-orchestration/cli.md) -- `--concurrency` flag that
   controls parallel execution
@@ -332,3 +332,10 @@ modules that only need the types.
   (62 tests) covering the parsing and mutation functions described here
 - [Testing Overview](../testing/overview.md) -- Project-wide test framework
   and coverage map
+- [Concurrency Utility](../shared-utilities/concurrency.md) --
+  `runWithConcurrency()` sliding-window implementation used by the dispatch
+  pipeline
+- [Cleanup Registry](../shared-types/cleanup.md) -- Process-level cleanup
+  that runs when concurrent tasks fail or signals interrupt execution
+- [Troubleshooting](../dispatch-pipeline/troubleshooting.md) -- Common
+  concurrency-related failure scenarios and diagnostic steps

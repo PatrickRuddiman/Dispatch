@@ -48,10 +48,11 @@ function createRawCliArgs(overrides?: Partial<RawCliArgs>): RawCliArgs {
     noBranch: false,
     noWorktree: false,
     force: false,
-    provider: "copilot",
+    provider: undefined,
+    enabledProviders: ["copilot"],
     cwd: "/tmp/test-cwd",
     verbose: false,
-    explicitFlags: new Set(["provider", "issueSource"]),
+    explicitFlags: new Set(["enabledProviders", "issueSource"]),
     issueSource: "md",
     ...overrides,
   };
@@ -77,15 +78,14 @@ describe("resolveCliConfig()", () => {
       const args = createRawCliArgs();
       const result = await resolveCliConfig(args);
 
-      expect(result.provider).toBe("copilot");
+      expect(result.enabledProviders).toEqual(["copilot"]);
       expect(result.issueSource).toBe("md");
       expect(result.cwd).toBe("/tmp/test-cwd");
     });
 
     it("merges config defaults for fields not in explicitFlags", async () => {
       vi.mocked(loadConfig).mockResolvedValue({
-        provider: "opencode",
-        model: "anthropic/claude-sonnet-4",
+        enabledProviders: ["opencode"],
         source: "github",
       });
 
@@ -94,28 +94,24 @@ describe("resolveCliConfig()", () => {
       });
       const result = await resolveCliConfig(args);
 
-      expect(result.provider).toBe("opencode");
-      expect(result.model).toBe("anthropic/claude-sonnet-4");
+      expect(result.enabledProviders).toEqual(["opencode"]);
       expect(result.issueSource).toBe("github");
     });
 
     it("CLI flags take precedence over config values when in explicitFlags", async () => {
       vi.mocked(loadConfig).mockResolvedValue({
-        provider: "opencode",
-        model: "anthropic/claude-sonnet-4",
+        enabledProviders: ["opencode"],
         source: "github",
       });
 
       const args = createRawCliArgs({
-        explicitFlags: new Set(["provider", "model", "issueSource"]),
-        provider: "copilot",
-        model: "custom-model",
+        explicitFlags: new Set(["enabledProviders", "issueSource"]),
+        enabledProviders: ["copilot"],
         issueSource: "md",
       });
       const result = await resolveCliConfig(args);
 
-      expect(result.provider).toBe("copilot");
-      expect(result.model).toBe("custom-model");
+      expect(result.enabledProviders).toEqual(["copilot"]);
       expect(result.issueSource).toBe("md");
     });
 
@@ -123,7 +119,7 @@ describe("resolveCliConfig()", () => {
       vi.mocked(loadConfig).mockResolvedValue({ source: "github" });
 
       const args = createRawCliArgs({
-        explicitFlags: new Set(["provider"]),
+        explicitFlags: new Set(["enabledProviders"]),
       });
       const result = await resolveCliConfig(args);
 
@@ -134,7 +130,7 @@ describe("resolveCliConfig()", () => {
       vi.mocked(loadConfig).mockResolvedValue({ source: "github" });
 
       const args = createRawCliArgs({
-        explicitFlags: new Set(["provider", "issueSource"]),
+        explicitFlags: new Set(["enabledProviders", "issueSource"]),
         issueSource: "md",
       });
       const result = await resolveCliConfig(args);
@@ -144,8 +140,7 @@ describe("resolveCliConfig()", () => {
 
     it("merges all CONFIG_TO_CLI fields from config", async () => {
       vi.mocked(loadConfig).mockResolvedValue({
-        provider: "opencode",
-        model: "anthropic/claude-sonnet-4",
+        enabledProviders: ["opencode"],
         source: "azdevops",
         specTimeout: 12,
       });
@@ -155,20 +150,19 @@ describe("resolveCliConfig()", () => {
       });
       const result = await resolveCliConfig(args);
 
-      expect(result.provider).toBe("opencode");
-      expect(result.model).toBe("anthropic/claude-sonnet-4");
+      expect(result.enabledProviders).toEqual(["opencode"]);
       expect(result.issueSource).toBe("azdevops");
       expect(result.specTimeout).toBe(12);
     });
 
     it("merges specTimeout from config when not explicit", async () => {
       vi.mocked(loadConfig).mockResolvedValue({
-        provider: "copilot",
+        enabledProviders: ["copilot"],
         specTimeout: 9,
       });
 
       const args = createRawCliArgs({
-        explicitFlags: new Set(["provider", "issueSource"]),
+        explicitFlags: new Set(["enabledProviders", "issueSource"]),
       });
       const result = await resolveCliConfig(args);
 
@@ -177,7 +171,7 @@ describe("resolveCliConfig()", () => {
 
     it("keeps explicit CLI specTimeout over config value", async () => {
       vi.mocked(loadConfig).mockResolvedValue({
-        provider: "copilot",
+        enabledProviders: ["copilot"],
         specTimeout: 9,
       });
 
@@ -192,12 +186,12 @@ describe("resolveCliConfig()", () => {
 
     it("merges specWarnTimeout from config when not explicit", async () => {
       vi.mocked(loadConfig).mockResolvedValue({
-        provider: "copilot",
+        enabledProviders: ["copilot"],
         specWarnTimeout: 8,
       });
 
       const args = createRawCliArgs({
-        explicitFlags: new Set(["provider", "issueSource"]),
+        explicitFlags: new Set(["enabledProviders", "issueSource"]),
       });
       const result = await resolveCliConfig(args);
 
@@ -206,7 +200,7 @@ describe("resolveCliConfig()", () => {
 
     it("keeps explicit CLI specWarnTimeout over config value", async () => {
       vi.mocked(loadConfig).mockResolvedValue({
-        provider: "copilot",
+        enabledProviders: ["copilot"],
         specWarnTimeout: 8,
       });
 
@@ -221,12 +215,12 @@ describe("resolveCliConfig()", () => {
 
     it("merges specKillTimeout from config when not explicit", async () => {
       vi.mocked(loadConfig).mockResolvedValue({
-        provider: "copilot",
+        enabledProviders: ["copilot"],
         specKillTimeout: 5,
       });
 
       const args = createRawCliArgs({
-        explicitFlags: new Set(["provider", "issueSource"]),
+        explicitFlags: new Set(["enabledProviders", "issueSource"]),
       });
       const result = await resolveCliConfig(args);
 
@@ -235,7 +229,7 @@ describe("resolveCliConfig()", () => {
 
     it("keeps explicit CLI specKillTimeout over config value", async () => {
       vi.mocked(loadConfig).mockResolvedValue({
-        provider: "copilot",
+        enabledProviders: ["copilot"],
         specKillTimeout: 5,
       });
 
@@ -250,7 +244,7 @@ describe("resolveCliConfig()", () => {
 
     it("merges azdevops config values (org, project, workItemType, iteration, area) when not in explicitFlags", async () => {
       vi.mocked(loadConfig).mockResolvedValue({
-        provider: "copilot",
+        enabledProviders: ["copilot"],
         source: "azdevops",
         org: "my-org",
         project: "my-project",
@@ -273,7 +267,7 @@ describe("resolveCliConfig()", () => {
 
     it("CLI flags take precedence over config for org, project, workItemType, iteration, area", async () => {
       vi.mocked(loadConfig).mockResolvedValue({
-        provider: "copilot",
+        enabledProviders: ["copilot"],
         source: "azdevops",
         org: "config-org",
         project: "config-project",
@@ -302,7 +296,7 @@ describe("resolveCliConfig()", () => {
 
     it("merges only the azdevops config fields that are set, leaving others undefined", async () => {
       vi.mocked(loadConfig).mockResolvedValue({
-        provider: "copilot",
+        enabledProviders: ["copilot"],
         source: "azdevops",
         org: "my-org",
         project: "my-project",
@@ -322,7 +316,7 @@ describe("resolveCliConfig()", () => {
 
     it("uses config for azdevops fields not in explicitFlags and CLI for those in explicitFlags", async () => {
       vi.mocked(loadConfig).mockResolvedValue({
-        provider: "copilot",
+        enabledProviders: ["copilot"],
         source: "azdevops",
         org: "config-org",
         project: "config-project",
@@ -344,29 +338,57 @@ describe("resolveCliConfig()", () => {
     });
   });
 
-  describe("validation errors", () => {
-    it("exits when provider is not configured", async () => {
+  describe("validation warnings", () => {
+    it("warns when neither provider nor enabledProviders is configured", async () => {
       const args = createRawCliArgs({
         explicitFlags: new Set(["issueSource"]),
         issueSource: "md",
-        provider: undefined as never,
+        provider: undefined,
+        enabledProviders: undefined,
       });
 
-      await expect(resolveCliConfig(args)).rejects.toThrow(
-        "process.exit called",
+      const result = await resolveCliConfig(args);
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.stringContaining("No providers configured"),
       );
-      expect(log.error).toHaveBeenCalledWith(
-        expect.stringContaining("provider"),
+      expect(process.exit).not.toHaveBeenCalled();
+      expect(result.issueSource).toBe("md");
+    });
+
+    it("does not warn when provider is set via CLI flag", async () => {
+      const args = createRawCliArgs({
+        explicitFlags: new Set(["provider", "issueSource"]),
+        provider: "copilot",
+        enabledProviders: undefined,
+        issueSource: "md",
+      });
+
+      await resolveCliConfig(args);
+      expect(log.warn).not.toHaveBeenCalledWith(
+        expect.stringContaining("No providers configured"),
+      );
+    });
+
+    it("does not warn when enabledProviders is set", async () => {
+      const args = createRawCliArgs({
+        explicitFlags: new Set(["issueSource"]),
+        issueSource: "md",
+        enabledProviders: ["copilot"],
+      });
+
+      await resolveCliConfig(args);
+      expect(log.warn).not.toHaveBeenCalledWith(
+        expect.stringContaining("No providers configured"),
       );
     });
 
     it("auto-detects datasource when source is not configured", async () => {
-      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+      vi.mocked(loadConfig).mockResolvedValue({ enabledProviders: ["copilot"] });
       vi.mocked(detectDatasource).mockResolvedValue("github");
 
       const args = createRawCliArgs({
         explicitFlags: new Set(),
-        provider: undefined as never,
+        provider: undefined,
         issueSource: undefined,
       });
 
@@ -375,52 +397,6 @@ describe("resolveCliConfig()", () => {
       expect(detectDatasource).toHaveBeenCalledWith(args.cwd);
       expect(log.info).toHaveBeenCalledWith(
         expect.stringContaining("Auto-detected datasource from git remote: github"),
-      );
-    });
-
-    it("exits when only provider is missing (source is auto-detected)", async () => {
-      const args = createRawCliArgs({
-        explicitFlags: new Set(),
-        provider: undefined as never,
-        issueSource: undefined,
-      });
-
-      await expect(resolveCliConfig(args)).rejects.toThrow(
-        "process.exit called",
-      );
-      expect(log.error).toHaveBeenCalledWith(
-        expect.stringContaining("provider"),
-      );
-    });
-
-    it("does not require source in fix-tests mode", async () => {
-      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
-
-      const args = createRawCliArgs({
-        explicitFlags: new Set(),
-        provider: undefined as never,
-        issueSource: undefined,
-        fixTests: true,
-      });
-
-      const result = await resolveCliConfig(args);
-      expect(process.exit).not.toHaveBeenCalled();
-      expect(result.provider).toBe("copilot");
-    });
-
-    it("still requires provider in fix-tests mode", async () => {
-      const args = createRawCliArgs({
-        explicitFlags: new Set(),
-        provider: undefined as never,
-        issueSource: undefined,
-        fixTests: true,
-      });
-
-      await expect(resolveCliConfig(args)).rejects.toThrow(
-        "process.exit called",
-      );
-      expect(log.error).toHaveBeenCalledWith(
-        expect.stringContaining("provider"),
       );
     });
   });
@@ -479,12 +455,12 @@ describe("resolveCliConfig()", () => {
 
   describe("datasource auto-detection", () => {
     it("uses detected datasource when source is not explicitly set", async () => {
-      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+      vi.mocked(loadConfig).mockResolvedValue({ enabledProviders: ["copilot"] });
       vi.mocked(detectDatasource).mockResolvedValue("github");
 
       const args = createRawCliArgs({
         explicitFlags: new Set(),
-        provider: undefined as never,
+        provider: undefined,
         issueSource: undefined,
       });
 
@@ -497,12 +473,12 @@ describe("resolveCliConfig()", () => {
     });
 
     it("exits with error when detection returns null", async () => {
-      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+      vi.mocked(loadConfig).mockResolvedValue({ enabledProviders: ["copilot"] });
       vi.mocked(detectDatasource).mockResolvedValue(null);
 
       const args = createRawCliArgs({
         explicitFlags: new Set(),
-        provider: undefined as never,
+        provider: undefined,
         issueSource: undefined,
       });
 
@@ -515,11 +491,11 @@ describe("resolveCliConfig()", () => {
     });
 
     it("does not auto-detect when issueSource is in explicitFlags", async () => {
-      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+      vi.mocked(loadConfig).mockResolvedValue({ enabledProviders: ["copilot"] });
 
       const args = createRawCliArgs({
-        explicitFlags: new Set(["provider", "issueSource"]),
-        provider: undefined as never,
+        explicitFlags: new Set(["enabledProviders", "issueSource"]),
+        provider: undefined,
         issueSource: "azdevops",
       });
 
@@ -529,127 +505,25 @@ describe("resolveCliConfig()", () => {
     });
 
     it("does not auto-detect when config source is set", async () => {
-      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot", source: "github" });
+      vi.mocked(loadConfig).mockResolvedValue({ enabledProviders: ["copilot"], source: "github" });
 
       const args = createRawCliArgs({
         explicitFlags: new Set(),
-        provider: undefined as never,
+        provider: undefined,
         issueSource: undefined,
       });
 
       const result = await resolveCliConfig(args);
       expect(result.issueSource).toBe("github");
       expect(detectDatasource).not.toHaveBeenCalled();
-    });
-
-    it("skips auto-detection in fix-tests mode", async () => {
-      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
-
-      const args = createRawCliArgs({
-        explicitFlags: new Set(),
-        provider: undefined as never,
-        issueSource: undefined,
-        fixTests: true,
-      });
-
-      const result = await resolveCliConfig(args);
-      expect(detectDatasource).not.toHaveBeenCalled();
-      expect(result.issueSource).toBeUndefined();
-    });
-
-    it("auto-detects datasource in fix-tests mode with issue IDs", async () => {
-      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
-      vi.mocked(detectDatasource).mockResolvedValue("github");
-
-      const args = createRawCliArgs({
-        explicitFlags: new Set(),
-        provider: undefined as never,
-        issueSource: undefined,
-        fixTests: true,
-        issueIds: ["14"],
-      });
-
-      const result = await resolveCliConfig(args);
-      expect(detectDatasource).toHaveBeenCalledWith("/tmp/test-cwd");
-      expect(result.issueSource).toBe("github");
-    });
-
-    it("exits with error in fix-tests mode with issue IDs when detection fails", async () => {
-      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
-      vi.mocked(detectDatasource).mockResolvedValue(null);
-
-      const args = createRawCliArgs({
-        explicitFlags: new Set(),
-        provider: undefined as never,
-        issueSource: undefined,
-        fixTests: true,
-        issueIds: ["14"],
-      });
-
-      await expect(resolveCliConfig(args)).rejects.toThrow(
-        "process.exit called",
-      );
-      expect(detectDatasource).toHaveBeenCalledWith("/tmp/test-cwd");
-      expect(log.error).toHaveBeenCalledWith(
-        expect.stringContaining("auto-detection failed"),
-      );
-    });
-
-    it("uses explicit source in fix-tests mode with issue IDs", async () => {
-      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
-
-      const args = createRawCliArgs({
-        explicitFlags: new Set(["issueSource"]),
-        provider: undefined as never,
-        issueSource: "azdevops",
-        fixTests: true,
-        issueIds: ["14"],
-      });
-
-      const result = await resolveCliConfig(args);
-      expect(detectDatasource).not.toHaveBeenCalled();
-      expect(result.issueSource).toBe("azdevops");
-    });
-
-    it("uses config source in fix-tests mode with issue IDs", async () => {
-      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot", source: "github" });
-
-      const args = createRawCliArgs({
-        explicitFlags: new Set(),
-        provider: undefined as never,
-        issueSource: undefined,
-        fixTests: true,
-        issueIds: ["14"],
-      });
-
-      const result = await resolveCliConfig(args);
-      expect(detectDatasource).not.toHaveBeenCalled();
-      expect(result.issueSource).toBe("github");
-    });
-
-    it("auto-detects datasource in fix-tests mode with multiple issue IDs", async () => {
-      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
-      vi.mocked(detectDatasource).mockResolvedValue("github");
-
-      const args = createRawCliArgs({
-        explicitFlags: new Set(),
-        provider: undefined as never,
-        issueSource: undefined,
-        fixTests: true,
-        issueIds: ["14", "15", "16"],
-      });
-
-      const result = await resolveCliConfig(args);
-      expect(detectDatasource).toHaveBeenCalledWith("/tmp/test-cwd");
-      expect(result.issueSource).toBe("github");
     });
 
     it("skips auto-detection in spec mode", async () => {
-      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+      vi.mocked(loadConfig).mockResolvedValue({ enabledProviders: ["copilot"] });
 
       const args = createRawCliArgs({
         explicitFlags: new Set(),
-        provider: undefined as never,
+        provider: undefined,
         issueSource: undefined,
         spec: "drafts/*.md",
       });
@@ -660,11 +534,11 @@ describe("resolveCliConfig()", () => {
     });
 
     it("skips auto-detection in respec mode", async () => {
-      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+      vi.mocked(loadConfig).mockResolvedValue({ enabledProviders: ["copilot"] });
 
       const args = createRawCliArgs({
         explicitFlags: new Set(),
-        provider: undefined as never,
+        provider: undefined,
         issueSource: undefined,
         respec: "1,2",
       });
@@ -675,12 +549,12 @@ describe("resolveCliConfig()", () => {
     });
 
     it("still auto-detects for dispatch mode (no spec/respec)", async () => {
-      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+      vi.mocked(loadConfig).mockResolvedValue({ enabledProviders: ["copilot"] });
       vi.mocked(detectDatasource).mockResolvedValue("github");
 
       const args = createRawCliArgs({
         explicitFlags: new Set(),
-        provider: undefined as never,
+        provider: undefined,
         issueSource: undefined,
       });
 
@@ -690,10 +564,10 @@ describe("resolveCliConfig()", () => {
     });
 
     it("explicit --source flag still works in spec mode", async () => {
-      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+      vi.mocked(loadConfig).mockResolvedValue({ enabledProviders: ["copilot"] });
 
       const args = createRawCliArgs({
-        explicitFlags: new Set(["provider", "issueSource"]),
+        explicitFlags: new Set(["enabledProviders", "issueSource"]),
         issueSource: "github",
         spec: "1,2",
       });
@@ -704,11 +578,11 @@ describe("resolveCliConfig()", () => {
     });
 
     it("config-file source still applies in spec mode", async () => {
-      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot", source: "azdevops" });
+      vi.mocked(loadConfig).mockResolvedValue({ enabledProviders: ["copilot"], source: "azdevops" });
 
       const args = createRawCliArgs({
         explicitFlags: new Set(),
-        provider: undefined as never,
+        provider: undefined,
         issueSource: undefined,
         spec: "drafts/*.md",
       });
@@ -719,12 +593,12 @@ describe("resolveCliConfig()", () => {
     });
 
     it("detects azdevops from git remote", async () => {
-      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+      vi.mocked(loadConfig).mockResolvedValue({ enabledProviders: ["copilot"] });
       vi.mocked(detectDatasource).mockResolvedValue("azdevops");
 
       const args = createRawCliArgs({
         explicitFlags: new Set(),
-        provider: undefined as never,
+        provider: undefined,
         issueSource: undefined,
       });
 
@@ -738,11 +612,11 @@ describe("resolveCliConfig()", () => {
 
   describe("datasource auto-detection", () => {
     it("uses detected source when no explicit source is set and detection succeeds", async () => {
-      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+      vi.mocked(loadConfig).mockResolvedValue({ enabledProviders: ["copilot"] });
       vi.mocked(detectDatasource).mockResolvedValue("github");
 
       const args = createRawCliArgs({
-        explicitFlags: new Set(["provider"]),
+        explicitFlags: new Set(["enabledProviders"]),
         issueSource: undefined,
       });
       const result = await resolveCliConfig(args);
@@ -752,11 +626,11 @@ describe("resolveCliConfig()", () => {
     });
 
     it("exits with error when no explicit source is set and detection fails", async () => {
-      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+      vi.mocked(loadConfig).mockResolvedValue({ enabledProviders: ["copilot"] });
       vi.mocked(detectDatasource).mockResolvedValue(null);
 
       const args = createRawCliArgs({
-        explicitFlags: new Set(["provider"]),
+        explicitFlags: new Set(["enabledProviders"]),
         issueSource: undefined,
       });
 
@@ -770,11 +644,11 @@ describe("resolveCliConfig()", () => {
     });
 
     it("includes remediation guidance when detection fails", async () => {
-      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+      vi.mocked(loadConfig).mockResolvedValue({ enabledProviders: ["copilot"] });
       vi.mocked(detectDatasource).mockResolvedValue(null);
 
       const args = createRawCliArgs({
-        explicitFlags: new Set(["provider"]),
+        explicitFlags: new Set(["enabledProviders"]),
         issueSource: undefined,
       });
 
@@ -793,11 +667,11 @@ describe("resolveCliConfig()", () => {
     });
 
     it("explicit --source flag overrides auto-detection", async () => {
-      vi.mocked(loadConfig).mockResolvedValue({ provider: "copilot" });
+      vi.mocked(loadConfig).mockResolvedValue({ enabledProviders: ["copilot"] });
       vi.mocked(detectDatasource).mockResolvedValue("github");
 
       const args = createRawCliArgs({
-        explicitFlags: new Set(["provider", "issueSource"]),
+        explicitFlags: new Set(["enabledProviders", "issueSource"]),
         issueSource: "azdevops",
       });
       const result = await resolveCliConfig(args);
@@ -808,7 +682,7 @@ describe("resolveCliConfig()", () => {
 
     it("config source value overrides auto-detection", async () => {
       vi.mocked(loadConfig).mockResolvedValue({
-        provider: "copilot",
+        enabledProviders: ["copilot"],
         source: "azdevops",
       });
       vi.mocked(detectDatasource).mockResolvedValue("github");

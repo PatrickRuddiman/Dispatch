@@ -259,6 +259,44 @@ sequenceDiagram
     Pipeline-->>CLI: SpecSummary
 ```
 
+### Pipeline orchestration stages
+
+The `runSpecPipeline()` function in `spec-pipeline.ts` is decomposed into
+sequential stages, each implemented as a dedicated helper function. The
+following diagram shows the stage flow and early-exit points:
+
+```mermaid
+flowchart TD
+    START["runSpecPipeline(opts)"] --> RESOLVE["resolveDatasource()<br/>Resolve source + create datasource"]
+    RESOLVE -->|"null"| EXIT1["Return empty summary<br/>(source detection failed)"]
+    RESOLVE -->|"resolved"| AUTH["ensureAuthReady()<br/>Pre-authenticate tracker"]
+
+    AUTH --> MODE{"Determine input mode"}
+    MODE -->|"isIssueNumbers()"| FETCH["fetchTrackerItems()<br/>Fetch issues via datasource"]
+    MODE -->|"isGlobOrFilePath()"| FILES["resolveFileItems()<br/>Read files via glob"]
+    MODE -->|"else"| INLINE["buildInlineTextItem()<br/>Wrap text as IssueDetails"]
+
+    FETCH -->|"empty"| EXIT2["Return empty summary<br/>(no items fetched)"]
+    FETCH -->|"items"| FILTER
+    FILES -->|"null"| EXIT3["Return empty summary<br/>(no files found)"]
+    FILES -->|"items"| FILTER
+    INLINE --> FILTER
+
+    FILTER["filterValidItems()<br/>Remove items with fetch errors"] -->|"null"| EXIT4["Return failed summary"]
+    FILTER -->|"valid items"| DRY{"dryRun?"}
+
+    DRY -->|"yes"| EXIT5["previewDryRun()<br/>Show preview, return"]
+    DRY -->|"no"| CONFIRM["confirmLargeBatch()<br/>(if > 100 items)"]
+
+    CONFIRM -->|"declined"| EXIT6["Return empty summary"]
+    CONFIRM -->|"confirmed"| BOOT["bootPipeline()<br/>Boot provider + spec agent"]
+
+    BOOT --> BATCH["generateSpecsBatch()<br/>runWithConcurrency loop"]
+    BATCH --> CLEANUP["cleanupPipeline()<br/>Agent + provider cleanup"]
+    CLEANUP --> SUMMARY["logSummary()<br/>Print results"]
+    SUMMARY --> DONE["Return SpecSummary"]
+```
+
 ## Two-stage pipeline: spec agent, planner agent, coder agent
 
 The spec generator is the first stage of a three-stage pipeline that converts
@@ -428,25 +466,84 @@ Each spec generation is wrapped in `withRetry()` (`src/helpers/retry.ts`) with
 - Retry attempts are logged with a `[specAgent.generate(...)]` label for
   diagnostics.
 
-### Spec-generation timeout
+### Spec-generation timeout (two-phase timebox)
 
-Each generation attempt is wrapped in [`withTimeout()`](../shared-utilities/timeout.md)
-before `withRetry()` runs. The timeout surface is:
+Each spec generation uses a **two-phase timebox** mechanism implemented
+directly in `src/agents/spec.ts:131-187`. The mechanism provides a warn-then-kill
+pattern that gives the AI agent a chance to finish before being terminated:
+
+```mermaid
+sequenceDiagram
+    participant Pipeline as spec-pipeline.ts
+    participant Agent as agents/spec.ts
+    participant Provider as AI Provider
+    participant Timer as Timebox Timers
+
+    Pipeline->>Agent: generate(item, outputPath, cwd)
+    Agent->>Provider: createSession()
+    Agent->>Agent: Build prompt
+    Agent->>Timer: Start warn timer (warnMs, default 10min)
+    Agent->>Provider: prompt(sessionId, specPrompt)
+
+    alt AI completes before warn timer
+        Provider-->>Agent: response text
+        Agent->>Timer: Clear all timers (settled = true)
+        Agent->>Agent: Post-process & write
+        Agent-->>Pipeline: SpecResult { success: true }
+    else Warn timer fires
+        Timer->>Agent: Warn callback fires
+        Note over Agent: Check settled flag — skip if already done
+        alt Provider supports send()
+            Agent->>Provider: send(sessionId, "wrap up" message)
+        else Provider lacks send()
+            Agent->>Agent: Log warning (cannot deliver nudge)
+        end
+        Agent->>Timer: Start kill timer (killMs, default 10min)
+        alt AI completes during kill window
+            Provider-->>Agent: response text
+            Agent->>Timer: Clear kill timer (settled = true)
+            Agent->>Agent: Post-process & write
+            Agent-->>Pipeline: SpecResult { success: true }
+        else Kill timer fires
+            Timer->>Agent: Kill callback fires
+            Note over Agent: Check settled flag — skip if already done
+            Agent->>Agent: settled = true, reject with TimeoutError
+            Agent-->>Pipeline: TimeoutError (total: warnMs + killMs)
+        end
+    end
+```
 
 | Setting | CLI flag | Config key | Default |
 |---------|----------|------------|---------|
-| Spec timeout | `--spec-timeout` | `specTimeout` | 10 minutes |
-| Spec warn-phase timeout | `--spec-warn-timeout` | `specWarnTimeout` | 10 minutes |
-| Spec kill-phase timeout | `--spec-kill-timeout` | `specKillTimeout` | 10 minutes |
+| Warn-phase timeout | `--spec-warn-timeout` | `specWarnTimeout` | 10 minutes |
+| Kill-phase timeout | `--spec-kill-timeout` | `specKillTimeout` | 10 minutes |
+| **Total max duration** | *(computed)* | *(computed)* | **20 minutes** |
 
-When both warn and kill timeouts are configured, spec generation uses a **two-phase timebox**: the warn-phase timer fires first and sends a time-warning nudge to the running agent via the provider's optional `send()` method; the kill-phase timer fires later and aborts the attempt with a `TimeoutError`. This gives the agent a chance to wrap up before being forcibly terminated.
+**Key implementation details:**
 
-Implementation details in `src/orchestrator/spec-pipeline.ts`:
+- **`settled` flag** (`spec.ts:136`): A boolean flag prevents double resolution.
+  Both the warn/kill timer callbacks and the `provider.prompt()` resolution
+  check this flag before acting. Once any path sets `settled = true`, all
+  other paths become no-ops.
+- **Timer cleanup** (`spec.ts:140-143`): A `cleanup()` inner function clears
+  both timers when any resolution path completes.
+- **`provider.send()`** (`spec.ts:155-161`): The warn message is delivered
+  via the provider's optional `send()` method. If the provider does not
+  support `send()`, a warning is logged and the kill timer still proceeds.
+  The `send()` call is fire-and-forget with a `.catch()` handler.
+- **TimeoutError** (`spec.ts:168`): The kill timer rejects with
+  `new TimeoutError(warnMs + killMs, "spec timebox")`, reporting the total
+  elapsed time budget.
 
-- The pipeline computes `specTimeoutMs = (specTimeout ?? DEFAULT_SPEC_TIMEOUT_MIN) * 60_000` once at startup.
-- Each item attempt is labeled as `specAgent.generate(#<id>)` in tracker mode or
-  `specAgent.generate(<filepath>)` in file/inline mode.
-- The orchestration order is `withRetry(() => withTimeout(specAgent.generate(...), specTimeoutMs, label), retries, { label })`.
+The two-phase timebox is separate from (and nested within) the pipeline's
+`withRetry()` wrapper. The retry-timebox nesting order is:
+
+```
+withRetry(() => generate(item, ...), retries, { label })
+```
+
+Where `generate()` internally creates the Promise with the two-phase timebox.
+Each retry attempt gets its own fresh timebox.
 
 That ordering gives spec generation its resilience model:
 
@@ -553,21 +650,135 @@ validation produces `valid: false` in the result but `success: true`. The
 spec file is still written. This design choice avoids discarding otherwise
 useful AI output due to minor formatting issues.
 
-## Datasource sync
+## Datasource sync-back state machine
 
-After all specs are generated, the pipeline syncs results with the datasource:
+After each spec is generated successfully, the pipeline syncs the result back
+to the datasource. The sync behavior varies by input mode and datasource type,
+forming a four-path state machine implemented at
+`src/orchestrator/spec-pipeline.ts:422-463`:
 
-### Tracker mode sync
+```mermaid
+stateDiagram-v2
+    [*] --> CheckMode
 
-- **Non-md datasource** (GitHub, Azure DevOps): Updates existing tracker
-  issues with spec content, then deletes the local spec file.
-- **Md datasource**: Keeps the local file in place.
+    state CheckMode <<choice>>
+    CheckMode --> TrackerSync : isTrackerMode
 
-### File mode sync
+    state FileSync <<choice>>
+    CheckMode --> FileSync : file/glob mode
 
-- **Non-md datasource**: Creates new tracker issues from the generated specs,
-  then deletes the local spec files.
-- **Md datasource**: Keeps files in-place (no sync needed).
+    state TrackerSync {
+        [*] --> UpdateIssue : datasource.update(id, title, content)
+        UpdateIssue --> DeleteLocal : unlink(filepath)
+        DeleteLocal --> [*]
+    }
+
+    state MdDatasourceCheck <<choice>>
+    FileSync --> MdDatasourceCheck
+
+    MdDatasourceCheck --> MdWithMatch : datasource.name === "md"\n&& parseIssueFilename() matches
+    MdDatasourceCheck --> MdNewFile : datasource.name === "md"\n&& parseIssueFilename() returns null
+    MdDatasourceCheck --> NonMdCreate : datasource.name !== "md"
+
+    state MdWithMatch {
+        [*] --> UpdateInPlace : datasource.update(parsed.issueId, title, content)
+        UpdateInPlace --> [*]
+    }
+
+    state MdNewFile {
+        [*] --> CreateSpec : datasource.create(title, content)
+        CreateSpec --> DeleteOriginal : unlink(filepath)
+        DeleteOriginal --> UpdateTracking : filepath = created.url
+        UpdateTracking --> [*]
+    }
+
+    state NonMdCreate {
+        [*] --> CreateIssue : datasource.create(title, content)
+        CreateIssue --> DeleteSpecFile : unlink(filepath)
+        DeleteSpecFile --> [*]
+    }
+```
+
+### Sync path details
+
+| # | Condition | Actions | Outcome |
+|---|-----------|---------|---------|
+| 1 | Tracker mode (any datasource) | `datasource.update()` then `unlink()` | Issue updated in-place; local file deleted |
+| 2 | File mode + md datasource + filename matches `parseIssueFilename()` | `datasource.update()` | File updated in-place at existing path |
+| 3 | File mode + md datasource + filename does NOT match | `datasource.create()` then `unlink()` then update filepath tracking | New spec created, old file deleted, `fileDurationsMs` map updated |
+| 4 | File mode + non-md datasource | `datasource.create()` then `unlink()` | New tracker issue created, local file deleted |
+
+**Inline text mode** does not perform datasource sync — there is no tracker
+origin to sync back to. The generated spec file remains at its output path.
+
+### Sync error handling
+
+All datasource sync operations are wrapped in a `try/catch` at
+`spec-pipeline.ts:464-467`. If a sync operation fails:
+
+- The error is logged as a warning (not an error).
+- The spec is still counted as successfully generated.
+- The local file is NOT deleted (the `unlink()` call is inside the try block).
+- Other items continue processing normally.
+
+This means a temporary datasource API outage does not lose generated content
+— the spec files remain on disk for manual sync later.
+
+### `parseIssueFilename()` role in md sync
+
+In file mode with the md datasource, the pipeline uses `parseIssueFilename()`
+(from `src/orchestrator/datasource-helpers.ts`) to determine whether the
+generated file's name matches the pattern of an existing spec (e.g.,
+`42-some-slug.md`). If it matches, the existing spec is updated in-place.
+If not, a new spec is created and the original file is deleted.
+
+## Authentication
+
+The pipeline pre-authenticates before batch processing begins by calling
+`ensureAuthReady(source, cwd, org)` at `spec-pipeline.ts:604`. This ensures
+device-code prompts appear while stdout is still free (before the TUI or
+batch output takes over).
+
+### How `ensureAuthReady()` works
+
+The function (`src/helpers/auth.ts:177-205`) checks the datasource type and
+pre-authenticates accordingly:
+
+- **GitHub** (`source === "github"`): Calls `getGithubOctokit()`, which loads
+  cached tokens from `~/.dispatch/auth.json` or triggers the OAuth device-code
+  flow via `@octokit/auth-oauth-device`.
+- **Azure DevOps** (`source === "azdevops"`): Derives the org URL from the git
+  remote (or uses the explicit `--org` flag), then calls `getAzureConnection()`,
+  which loads cached tokens or triggers the Azure device-code flow via
+  `@azure/identity` `DeviceCodeCredential`.
+- **Md** (`source === "md"`): No authentication needed — returns immediately.
+
+### Token caching
+
+Tokens are cached at `~/.dispatch/auth.json` with file permissions `0o600`
+(owner read/write only, on non-Windows platforms). The cache stores:
+
+- **GitHub**: `{ token: string }` — no expiry tracking; OAuth tokens persist
+  until revoked.
+- **Azure**: `{ token: string, expiresAt: string }` — expiry tracked with a
+  5-minute buffer (`EXPIRY_BUFFER_MS = 300000`). Tokens are refreshed when
+  within 5 minutes of expiry.
+
+### When authentication is skipped
+
+Pre-authentication is skipped (with a warning) when:
+
+- No git remote is found (cannot determine the platform-specific URL).
+- The remote URL does not match the expected platform pattern (e.g., GitHub
+  source but remote points to Azure DevOps).
+- The datasource is `"md"` (no tracker authentication needed).
+
+For file/glob and inline text modes with an md datasource (the default
+fallback), authentication is never triggered because no tracker interaction
+is needed.
+
+See [Integrations & Troubleshooting](./integrations.md#authentication-ensureauthready)
+for troubleshooting authentication failures.
 
 ## Spec file output
 

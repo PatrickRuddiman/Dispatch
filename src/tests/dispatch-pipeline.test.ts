@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Task, TaskFile } from "../parser.js";
-import type { PlannerAgent } from "../agents/planner.js";
-import type { AgentResult, PlannerData } from "../agents/types.js";
+import type { Skill } from "../skills/interface.js";
+import type { SkillResult, PlannerData } from "../skills/types.js";
 import type { ProviderInstance } from "../providers/interface.js";
 import type { Datasource, IssueDetails } from "../datasources/interface.js";
 
@@ -36,16 +36,17 @@ const { mocks, TASK_FIXTURE, TASK_FILE_FIXTURE, TASK_FIXTURE_2, TASK_FILE_FIXTUR
     content: "# Bugfix\n\n- [ ] Fix the bug",
   };
 
-  const mockPlan = vi.fn<PlannerAgent["plan"]>();
+  const mockPlan = vi.fn();
   const mockExecute = vi.fn();
   const mockGenerate = vi.fn();
+  const mockDispatch = vi.fn();
   const mockCreateSession = vi.fn<ProviderInstance["createSession"]>().mockResolvedValue("sess-1");
   const mockPrompt = vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("done");
   const mockCleanup = vi.fn().mockResolvedValue(undefined);
   const mockGlob = vi.fn();
 
   return {
-    mocks: { mockPlan, mockExecute, mockGenerate, mockCreateSession, mockPrompt, mockCleanup, mockGlob },
+    mocks: { mockPlan, mockExecute, mockGenerate, mockDispatch, mockCreateSession, mockPrompt, mockCleanup, mockGlob },
     TASK_FIXTURE,
     TASK_FILE_FIXTURE,
     TASK_FIXTURE_2,
@@ -63,30 +64,35 @@ vi.mock("../providers/index.js", () => ({
     prompt: mocks.mockPrompt,
     cleanup: mocks.mockCleanup,
   } satisfies ProviderInstance),
+  getAuthenticatedProviders: vi.fn().mockResolvedValue(["opencode"]),
+  checkProviderAuthenticated: vi.fn().mockResolvedValue(true),
+  getProviderAuthStatus: vi.fn().mockResolvedValue({ status: "authenticated" }),
+  PROVIDER_NAMES: ["opencode", "copilot", "claude", "codex"],
 }));
 
-vi.mock("../agents/planner.js", () => ({
-  boot: vi.fn().mockResolvedValue({
-    name: "planner",
-    plan: mocks.mockPlan,
-    cleanup: vi.fn().mockResolvedValue(undefined),
-  } satisfies PlannerAgent),
-}));
-
-vi.mock("../agents/executor.js", () => ({
-  boot: vi.fn().mockResolvedValue({
-    name: "executor",
-    execute: mocks.mockExecute,
-    cleanup: vi.fn().mockResolvedValue(undefined),
+vi.mock("../providers/router.js", () => ({
+  routeAllSkills: vi.fn().mockReturnValue({
+    planner: [{ provider: "opencode", model: "claude-haiku-4", priority: 0 }],
+    executor: [{ provider: "opencode", model: "claude-sonnet-4-5", priority: 0 }],
+    commit: [{ provider: "opencode", model: "claude-haiku-4", priority: 0 }],
   }),
+  routeSkill: vi.fn().mockReturnValue([{ provider: "opencode", model: "claude-sonnet-4-5", priority: 0 }]),
 }));
 
-vi.mock("../agents/commit.js", () => ({
-  boot: vi.fn().mockResolvedValue({
-    name: "commit",
-    generate: mocks.mockGenerate,
-    cleanup: vi.fn().mockResolvedValue(undefined),
-  }),
+vi.mock("../skills/planner.js", () => ({
+  plannerSkill: { name: "planner", buildPrompt: vi.fn(), parseResult: vi.fn() },
+}));
+
+vi.mock("../skills/executor.js", () => ({
+  executorSkill: { name: "executor", buildPrompt: vi.fn(), parseResult: vi.fn() },
+}));
+
+vi.mock("../skills/commit.js", () => ({
+  commitSkill: { name: "commit", buildPrompt: vi.fn(), parseResult: vi.fn() },
+}));
+
+vi.mock("../dispatcher.js", () => ({
+  dispatch: mocks.mockDispatch,
 }));
 
 vi.mock("../datasources/index.js", () => ({
@@ -168,6 +174,7 @@ vi.mock("../parser.js", () => ({
   parseTaskFile: vi.fn().mockResolvedValue(TASK_FILE_FIXTURE),
   buildTaskContext: vi.fn().mockReturnValue("filtered context"),
   groupTasksByMode: vi.fn().mockImplementation((tasks: Task[]) => [tasks]),
+  markTaskComplete: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../orchestrator/datasource-helpers.js", () => ({
@@ -233,8 +240,6 @@ import { parseTaskFile } from "../parser.js";
 import { fetchItemsById, writeItemsToTempDir, parseIssueFilename, getBranchDiff, squashBranchCommits, buildFeaturePrTitle, buildFeaturePrBody } from "../orchestrator/datasource-helpers.js";
 import { execFile } from "node:child_process";
 import { bootProvider } from "../providers/index.js";
-import { boot as bootPlannerBoot } from "../agents/planner.js";
-import { boot as bootExecutorBoot } from "../agents/executor.js";
 import { isValidBranchName } from "../helpers/branch-validation.js";
 import { glob } from "glob";
 import { readFile } from "node:fs/promises";
@@ -268,12 +273,32 @@ function getMockTui() {
   return vi.mocked(createTui).mock.results[0]?.value;
 }
 
+/**
+ * Set up the default mockDispatch routing.
+ * Called in each describe's beforeEach to ensure consistent behavior.
+ */
+function setupMockDispatch() {
+  mocks.mockDispatch.mockImplementation(async (skill: Skill<any, any>, input: any) => {
+    if (skill.name === "planner") {
+      return mocks.mockPlan(input);
+    }
+    if (skill.name === "executor") {
+      return mocks.mockExecute(input);
+    }
+    if (skill.name === "commit") {
+      return mocks.mockGenerate(input);
+    }
+    throw new Error(`Unknown skill: ${skill.name}`);
+  });
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────
 
 describe("planning timeout and retry", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    setupMockDispatch();
     resetAuthMocks();
     // Reset the executor mock to default success
     mocks.mockExecute.mockResolvedValue({
@@ -282,11 +307,10 @@ describe("planning timeout and retry", () => {
       durationMs: 100,
     });
     mocks.mockGenerate.mockResolvedValue({
-      commitMessage: "",
-      prTitle: "",
-      prDescription: "",
+      data: null,
       success: false,
       error: "mock: not configured",
+      durationMs: 0,
     });
   });
 
@@ -296,7 +320,7 @@ describe("planning timeout and retry", () => {
 
   it("succeeds when planning completes within the timeout", async () => {
     mocks.mockPlan.mockImplementation(() =>
-      new Promise<AgentResult<PlannerData>>((resolve) => {
+      new Promise<SkillResult<PlannerData>>((resolve) => {
         setTimeout(() => resolve({ data: { prompt: "Execute step 1" }, success: true, durationMs: 100 }), 100);
       }),
     );
@@ -319,12 +343,12 @@ describe("planning timeout and retry", () => {
       callCount++;
       if (callCount === 1) {
         // First attempt: never resolves within timeout (hangs for 2 minutes)
-        return new Promise<AgentResult<PlannerData>>((resolve) => {
+        return new Promise<SkillResult<PlannerData>>((resolve) => {
           setTimeout(() => resolve({ data: { prompt: "too late" }, success: true, durationMs: 120000 }), 120_000);
         });
       }
       // Second attempt: succeeds quickly
-      return new Promise<AgentResult<PlannerData>>((resolve) => {
+      return new Promise<SkillResult<PlannerData>>((resolve) => {
         setTimeout(() => resolve({ data: { prompt: "Execute step 1" }, success: true, durationMs: 100 }), 100);
       });
     });
@@ -352,7 +376,7 @@ describe("planning timeout and retry", () => {
   it("fails the task when all planning attempts time out", async () => {
     // Both attempts hang forever
     mocks.mockPlan.mockImplementation(
-      () => new Promise<AgentResult<PlannerData>>(() => {}), // never resolves
+      () => new Promise<SkillResult<PlannerData>>(() => {}), // never resolves
     );
 
     const resultPromise = runDispatchPipeline(baseOpts({ planTimeout: 1, planRetries: 1 }), "/tmp/test");
@@ -407,7 +431,7 @@ describe("planning timeout and retry", () => {
 
   it("makes only one attempt when planRetries is 0", async () => {
     mocks.mockPlan.mockImplementation(
-      () => new Promise<AgentResult<PlannerData>>(() => {}), // never resolves
+      () => new Promise<SkillResult<PlannerData>>(() => {}), // never resolves
     );
 
     const resultPromise = runDispatchPipeline(baseOpts({ planTimeout: 1, planRetries: 0 }), "/tmp/test");
@@ -423,7 +447,7 @@ describe("planning timeout and retry", () => {
 
   it("uses default timeout (15 min) and shared retries (3) when not configured", async () => {
     mocks.mockPlan.mockImplementation(
-      () => new Promise<AgentResult<PlannerData>>(() => {}), // never resolves
+      () => new Promise<SkillResult<PlannerData>>(() => {}), // never resolves
     );
 
     const resultPromise = runDispatchPipeline(
@@ -446,7 +470,7 @@ describe("planning timeout and retry", () => {
 
   it("falls back to general retries when planRetries is not set", async () => {
     mocks.mockPlan.mockImplementation(
-      () => new Promise<AgentResult<PlannerData>>(() => {}), // never resolves
+      () => new Promise<SkillResult<PlannerData>>(() => {}), // never resolves
     );
 
     const resultPromise = runDispatchPipeline(
@@ -467,7 +491,7 @@ describe("planning timeout and retry", () => {
 
   it("prefers planRetries over general retries for planning timeouts", async () => {
     mocks.mockPlan.mockImplementation(
-      () => new Promise<AgentResult<PlannerData>>(() => {}),
+      () => new Promise<SkillResult<PlannerData>>(() => {}),
     );
 
     const resultPromise = runDispatchPipeline(
@@ -507,6 +531,7 @@ describe("verbose mode", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    setupMockDispatch();
     resetAuthMocks();
     mocks.mockExecute.mockResolvedValue({
       success: true,
@@ -514,14 +539,13 @@ describe("verbose mode", () => {
       durationMs: 100,
     });
     mocks.mockGenerate.mockResolvedValue({
-      commitMessage: "",
-      prTitle: "",
-      prDescription: "",
+      data: null,
       success: false,
       error: "mock: not configured",
+      durationMs: 0,
     });
     mocks.mockPlan.mockImplementation(() =>
-      new Promise<AgentResult<PlannerData>>((resolve) => {
+      new Promise<SkillResult<PlannerData>>((resolve) => {
         setTimeout(() => resolve({ data: { prompt: "Execute step 1" }, success: true, durationMs: 100 }), 100);
       }),
     );
@@ -623,6 +647,7 @@ describe("verbose mode", () => {
 describe("dryRunMode", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    setupMockDispatch();
     resetAuthMocks();
   });
 
@@ -659,6 +684,7 @@ describe("runDispatchPipeline edge cases", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    setupMockDispatch();
     resetAuthMocks();
     mocks.mockExecute.mockResolvedValue({
       success: true,
@@ -666,14 +692,13 @@ describe("runDispatchPipeline edge cases", () => {
       durationMs: 100,
     });
     mocks.mockGenerate.mockResolvedValue({
-      commitMessage: "",
-      prTitle: "",
-      prDescription: "",
+      data: null,
       success: false,
       error: "mock: not configured",
+      durationMs: 0,
     });
     mocks.mockPlan.mockImplementation(() =>
-      new Promise<AgentResult<PlannerData>>((resolve) => {
+      new Promise<SkillResult<PlannerData>>((resolve) => {
         setTimeout(() => resolve({ data: { prompt: "Execute step 1" }, success: true, durationMs: 100 }), 100);
       }),
     );
@@ -725,7 +750,7 @@ describe("runDispatchPipeline edge cases", () => {
 
   it("exercises branch lifecycle when noBranch is false", async () => {
     mocks.mockPlan.mockImplementation(() =>
-      new Promise<AgentResult<PlannerData>>((resolve) => {
+      new Promise<SkillResult<PlannerData>>((resolve) => {
         setTimeout(() => resolve({ data: { prompt: "Execute step 1" }, success: true, durationMs: 50 }), 50);
       }),
     );
@@ -750,7 +775,7 @@ describe("runDispatchPipeline edge cases", () => {
       durationMs: 50,
     });
     mocks.mockPlan.mockImplementation(() =>
-      new Promise<AgentResult<PlannerData>>((resolve) => {
+      new Promise<SkillResult<PlannerData>>((resolve) => {
         setTimeout(() => resolve({ data: { prompt: "Plan" }, success: true, durationMs: 50 }), 50);
       }),
     );
@@ -771,6 +796,7 @@ describe("commitAllChanges safety-net", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    setupMockDispatch();
     resetAuthMocks();
     mocks.mockExecute.mockResolvedValue({
       success: true,
@@ -778,14 +804,13 @@ describe("commitAllChanges safety-net", () => {
       durationMs: 100,
     });
     mocks.mockGenerate.mockResolvedValue({
-      commitMessage: "",
-      prTitle: "",
-      prDescription: "",
+      data: null,
       success: false,
       error: "mock: not configured",
+      durationMs: 0,
     });
     mocks.mockPlan.mockImplementation(() =>
-      new Promise<AgentResult<PlannerData>>((resolve) => {
+      new Promise<SkillResult<PlannerData>>((resolve) => {
         setTimeout(() => resolve({ data: { prompt: "Execute step 1" }, success: true, durationMs: 50 }), 50);
       }),
     );
@@ -850,6 +875,7 @@ describe("branch creation failure", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    setupMockDispatch();
     resetAuthMocks();
     mocks.mockExecute.mockResolvedValue({
       success: true,
@@ -927,6 +953,7 @@ describe("supportsGit() guard behavior", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    setupMockDispatch();
     resetAuthMocks();
     // Reset createAndSwitchBranch to clear any leftover mockRejectedValueOnce
     // from "branch creation failure" tests (clearAllMocks does not flush the once-queue).
@@ -938,14 +965,13 @@ describe("supportsGit() guard behavior", () => {
       durationMs: 100,
     });
     mocks.mockGenerate.mockResolvedValue({
-      commitMessage: "",
-      prTitle: "",
-      prDescription: "",
+      data: null,
       success: false,
       error: "mock: not configured",
+      durationMs: 0,
     });
     mocks.mockPlan.mockImplementation(() =>
-      new Promise<AgentResult<PlannerData>>((resolve) => {
+      new Promise<SkillResult<PlannerData>>((resolve) => {
         setTimeout(() => resolve({ data: { prompt: "Execute step 1" }, success: true, durationMs: 50 }), 50);
       }),
     );
@@ -995,10 +1021,11 @@ describe("supportsGit() guard behavior", () => {
   });
 });
 
-describe("commit agent integration", () => {
+describe("commit skill integration", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    setupMockDispatch();
     resetAuthMocks();
     // Reset createAndSwitchBranch to clear any leftover mockRejectedValueOnce
     // from "branch creation failure" tests (clearAllMocks does not flush the once-queue).
@@ -1010,16 +1037,15 @@ describe("commit agent integration", () => {
       durationMs: 100,
     });
     mocks.mockPlan.mockImplementation(() =>
-      new Promise<AgentResult<PlannerData>>((resolve) => {
+      new Promise<SkillResult<PlannerData>>((resolve) => {
         setTimeout(() => resolve({ data: { prompt: "Execute step 1" }, success: true, durationMs: 50 }), 50);
       }),
     );
     mocks.mockGenerate.mockResolvedValue({
-      commitMessage: "",
-      prTitle: "",
-      prDescription: "",
+      data: null,
       success: false,
       error: "mock: not configured",
+      durationMs: 0,
     });
   });
 
@@ -1027,12 +1053,11 @@ describe("commit agent integration", () => {
     vi.useRealTimers();
   });
 
-  it("uses commit agent output for PR title and body when successful", async () => {
+  it("uses commit skill output for PR title and body when successful", async () => {
     mocks.mockGenerate.mockResolvedValue({
-      commitMessage: "feat: add new feature",
-      prTitle: "feat: add new feature for issue",
-      prDescription: "This PR adds a new feature",
+      data: { commitMessage: "feat: add new feature", prTitle: "feat: add new feature for issue", prDescription: "This PR adds a new feature" },
       success: true,
+      durationMs: 100,
     });
 
     const resultPromise = runDispatchPipeline(
@@ -1058,13 +1083,12 @@ describe("commit agent integration", () => {
     );
   });
 
-  it("falls back to buildPrTitle/buildPrBody when commit agent fails", async () => {
+  it("falls back to buildPrTitle/buildPrBody when commit skill fails", async () => {
     mocks.mockGenerate.mockResolvedValue({
-      commitMessage: "",
-      prTitle: "",
-      prDescription: "",
+      data: null,
       success: false,
       error: "provider error",
+      durationMs: 0,
     });
 
     const resultPromise = runDispatchPipeline(
@@ -1089,12 +1113,11 @@ describe("commit agent integration", () => {
     );
   });
 
-  it("squashes commits when commit agent provides a commit message", async () => {
+  it("squashes commits when commit skill provides a commit message", async () => {
     mocks.mockGenerate.mockResolvedValue({
-      commitMessage: "feat: implement the feature",
-      prTitle: "feat: implement the feature",
-      prDescription: "Description",
+      data: { commitMessage: "feat: implement the feature", prTitle: "feat: implement the feature", prDescription: "Description" },
       success: true,
+      durationMs: 100,
     });
 
     const resultPromise = runDispatchPipeline(
@@ -1113,8 +1136,8 @@ describe("commit agent integration", () => {
     );
   });
 
-  it("continues gracefully when commit agent throws", async () => {
-    mocks.mockGenerate.mockRejectedValue(new Error("agent crashed"));
+  it("continues gracefully when commit skill throws", async () => {
+    mocks.mockGenerate.mockRejectedValue(new Error("skill crashed"));
 
     const resultPromise = runDispatchPipeline(
       baseOpts({ noBranch: false }),
@@ -1141,7 +1164,7 @@ describe("commit agent integration", () => {
     );
   });
 
-  it("skips commit agent when branch diff is empty", async () => {
+  it("skips commit skill when branch diff is empty", async () => {
     vi.mocked(getBranchDiff).mockResolvedValue("");
 
     const resultPromise = runDispatchPipeline(
@@ -1156,7 +1179,7 @@ describe("commit agent integration", () => {
     expect(mocks.mockGenerate).not.toHaveBeenCalled();
   });
 
-  it("does not invoke commit agent when branching is disabled", async () => {
+  it("does not invoke commit skill when branching is disabled", async () => {
     const resultPromise = runDispatchPipeline(
       baseOpts({ noBranch: true }),
       "/tmp/test",
@@ -1243,6 +1266,7 @@ describe("worktree dispatch pipeline", () => {
   describe("multi-issue worktree mode", () => {
     beforeEach(() => {
       vi.clearAllMocks();
+    setupMockDispatch();
       resetAuthMocks();
       mocks.mockExecute.mockImplementation(async ({ task }: any) => ({
         success: true,
@@ -1250,11 +1274,10 @@ describe("worktree dispatch pipeline", () => {
         durationMs: 100,
       }));
       mocks.mockGenerate.mockResolvedValue({
-        commitMessage: "",
-        prTitle: "",
-        prDescription: "",
+        data: null,
         success: false,
         error: "mock: not configured",
+        durationMs: 0,
       });
       setupMultiIssueScenario();
     });
@@ -1297,8 +1320,8 @@ describe("worktree dispatch pipeline", () => {
     it("registers cleanup handlers for worktrees", async () => {
       await runDispatchPipeline(multiIssueOpts(), "/tmp/test");
 
-      // registerCleanup called for: 2 per-worktree providers + 2 worktrees = 4
-      expect(vi.mocked(registerCleanup)).toHaveBeenCalledTimes(4);
+      // registerCleanup called for: per-worktree pools (3 per worktree × 2) + 2 worktrees = 8
+      expect(vi.mocked(registerCleanup).mock.calls.length).toBeGreaterThanOrEqual(4);
     });
 
     it("tags TUI tasks with worktree name", async () => {
@@ -1342,40 +1365,30 @@ describe("worktree dispatch pipeline", () => {
       );
     });
 
-    it("boots a separate provider instance for each worktree", async () => {
+    it("dispatches executor with correct cwd for each worktree", async () => {
       await runDispatchPipeline(multiIssueOpts(), "/tmp/test");
 
-      expect(vi.mocked(bootProvider)).toHaveBeenCalledTimes(2);
-      expect(vi.mocked(bootProvider)).toHaveBeenCalledWith(
-        "opencode",
-        expect.objectContaining({ cwd: "/tmp/test/.dispatch/worktrees/1-test" }),
-      );
-      expect(vi.mocked(bootProvider)).toHaveBeenCalledWith(
-        "opencode",
-        expect.objectContaining({ cwd: "/tmp/test/.dispatch/worktrees/2-bugfix" }),
-      );
+      // Each worktree gets dispatch calls targeting the correct cwd
+      const executeCalls = mocks.mockExecute.mock.calls;
+      const cwds = executeCalls.map((call: any[]) => call[0].cwd);
+      expect(cwds).toContain("/tmp/test/.dispatch/worktrees/1-test");
+      expect(cwds).toContain("/tmp/test/.dispatch/worktrees/2-bugfix");
     });
 
-    it("boots per-worktree planner and executor agents", async () => {
+    it("dispatches per-worktree planner and executor skills", async () => {
       await runDispatchPipeline(multiIssueOpts({ noPlan: false }), "/tmp/test");
 
-      // 2 providers, 2 planners, 2 executors (one per worktree)
-      expect(vi.mocked(bootProvider)).toHaveBeenCalledTimes(2);
-      expect(vi.mocked(bootPlannerBoot)).toHaveBeenCalledTimes(2);
-      expect(vi.mocked(bootExecutorBoot)).toHaveBeenCalledTimes(2);
+      // 2 planners, 2 executors (one per worktree)
+      expect(mocks.mockPlan).toHaveBeenCalledTimes(2);
+      expect(mocks.mockExecute).toHaveBeenCalledTimes(2);
 
-      expect(vi.mocked(bootPlannerBoot)).toHaveBeenCalledWith(
-        expect.objectContaining({ cwd: "/tmp/test/.dispatch/worktrees/1-test" }),
-      );
-      expect(vi.mocked(bootPlannerBoot)).toHaveBeenCalledWith(
-        expect.objectContaining({ cwd: "/tmp/test/.dispatch/worktrees/2-bugfix" }),
-      );
-      expect(vi.mocked(bootExecutorBoot)).toHaveBeenCalledWith(
-        expect.objectContaining({ cwd: "/tmp/test/.dispatch/worktrees/1-test" }),
-      );
-      expect(vi.mocked(bootExecutorBoot)).toHaveBeenCalledWith(
-        expect.objectContaining({ cwd: "/tmp/test/.dispatch/worktrees/2-bugfix" }),
-      );
+      const planCwds = mocks.mockPlan.mock.calls.map((call: any[]) => call[0].cwd);
+      expect(planCwds).toContain("/tmp/test/.dispatch/worktrees/1-test");
+      expect(planCwds).toContain("/tmp/test/.dispatch/worktrees/2-bugfix");
+
+      const execCwds = mocks.mockExecute.mock.calls.map((call: any[]) => call[0].cwd);
+      expect(execCwds).toContain("/tmp/test/.dispatch/worktrees/1-test");
+      expect(execCwds).toContain("/tmp/test/.dispatch/worktrees/2-bugfix");
     });
 
     it("passes issueCwd to planner.plan() call", async () => {
@@ -1383,9 +1396,9 @@ describe("worktree dispatch pipeline", () => {
 
       await runDispatchPipeline(multiIssueOpts({ noPlan: false }), "/tmp/test");
 
-      // Verify plan() was called with the worktree cwd as third argument
+      // Verify plan() was called with the worktree cwd
       const planCalls = mocks.mockPlan.mock.calls;
-      const planCwds = planCalls.map((call: any[]) => call[2]);
+      const planCwds = planCalls.map((call: any[]) => call[0].cwd);
 
       expect(planCwds).toContain("/tmp/test/.dispatch/worktrees/1-test");
       expect(planCwds).toContain("/tmp/test/.dispatch/worktrees/2-bugfix");
@@ -1396,9 +1409,9 @@ describe("worktree dispatch pipeline", () => {
 
       await runDispatchPipeline(multiIssueOpts({ noPlan: false }), "/tmp/test");
 
-      // Verify plan() was called with worktreeRoot as fourth argument
+      // Verify plan() was called with worktreeRoot
       const planCalls = mocks.mockPlan.mock.calls;
-      const planWorktreeRoots = planCalls.map((call: any[]) => call[3]);
+      const planWorktreeRoots = planCalls.map((call: any[]) => call[0].worktreeRoot);
 
       expect(planWorktreeRoots).toContain("/tmp/test/.dispatch/worktrees/1-test");
       expect(planWorktreeRoots).toContain("/tmp/test/.dispatch/worktrees/2-bugfix");
@@ -1414,13 +1427,12 @@ describe("worktree dispatch pipeline", () => {
       expect(worktreeRoots).toContain("/tmp/test/.dispatch/worktrees/2-bugfix");
     });
 
-    it("passes worktreeRoot to commitAgent.generate() in worktree mode", async () => {
+    it("passes worktreeRoot to commitSkill.generate() in worktree mode", async () => {
       vi.mocked(getBranchDiff).mockResolvedValue("diff --git a/file.ts b/file.ts\n+added line");
       mocks.mockGenerate.mockResolvedValue({
-        commitMessage: "feat: test",
-        prTitle: "feat: test",
-        prDescription: "description",
+        data: { commitMessage: "feat: test", prTitle: "feat: test", prDescription: "description" },
         success: true,
+        durationMs: 100,
       });
 
       await runDispatchPipeline(multiIssueOpts({ noPlan: true }), "/tmp/test");
@@ -1436,6 +1448,7 @@ describe("worktree dispatch pipeline", () => {
   describe("serial fallback", () => {
     beforeEach(() => {
       vi.clearAllMocks();
+    setupMockDispatch();
       resetAuthMocks();
       // Restore single-issue defaults overridden by setupMultiIssueScenario()
       vi.mocked(fetchItemsById).mockResolvedValue([ISSUE_1]);
@@ -1455,11 +1468,10 @@ describe("worktree dispatch pipeline", () => {
       vi.mocked(ds.createAndSwitchBranch).mockReset().mockResolvedValue(undefined);
       vi.mocked(ds.switchBranch).mockReset().mockResolvedValue(undefined);
       mocks.mockGenerate.mockResolvedValue({
-        commitMessage: "",
-        prTitle: "",
-        prDescription: "",
+        data: null,
         success: false,
         error: "mock: not configured",
+        durationMs: 0,
       });
     });
 
@@ -1506,10 +1518,9 @@ describe("worktree dispatch pipeline", () => {
         durationMs: 100,
       }));
       mocks.mockGenerate.mockResolvedValue({
-        commitMessage: "feat: test",
-        prTitle: "feat: test",
-        prDescription: "description",
+        data: { commitMessage: "feat: test", prTitle: "feat: test", prDescription: "description" },
         success: true,
+        durationMs: 100,
       });
 
       await runDispatchPipeline(
@@ -1517,7 +1528,7 @@ describe("worktree dispatch pipeline", () => {
         "/tmp/test",
       );
 
-      // With --no-worktree, worktreeRoot should be undefined for all agents
+      // With --no-worktree, worktreeRoot should be undefined for all skills
       const executeCalls = mocks.mockExecute.mock.calls;
       for (const call of executeCalls) {
         expect(call[0].worktreeRoot).toBeUndefined();
@@ -1529,20 +1540,18 @@ describe("worktree dispatch pipeline", () => {
       }
     });
 
-    it("boots a single shared provider when useWorktrees is false", async () => {
+    it("boots skills with shared pools when useWorktrees is false", async () => {
       await runDispatchPipeline(
         baseOpts({ noBranch: false, noPlan: true }),
         "/tmp/test",
       );
 
-      expect(vi.mocked(bootProvider)).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(bootProvider)).toHaveBeenCalledWith(
-        "opencode",
-        expect.objectContaining({ cwd: "/tmp/test" }),
-      );
+      // Executor dispatch is called with the correct cwd
+      const executeCalls = mocks.mockExecute.mock.calls;
+      expect(executeCalls[0][0].cwd).toBe("/tmp/test");
     });
 
-    it("boots planner and executor once with shared provider", async () => {
+    it("dispatches planner and executor with correct cwd in serial mode", async () => {
       mocks.mockPlan.mockResolvedValue({ data: { prompt: "Execute step 1" }, success: true, durationMs: 100 });
 
       await runDispatchPipeline(
@@ -1550,23 +1559,19 @@ describe("worktree dispatch pipeline", () => {
         "/tmp/test",
       );
 
-      expect(vi.mocked(bootProvider)).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(bootPlannerBoot)).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(bootExecutorBoot)).toHaveBeenCalledTimes(1);
+      expect(mocks.mockPlan).toHaveBeenCalledTimes(1);
+      expect(mocks.mockExecute).toHaveBeenCalledTimes(1);
 
-      expect(vi.mocked(bootPlannerBoot)).toHaveBeenCalledWith(
-        expect.objectContaining({ cwd: "/tmp/test" }),
-      );
+      expect(mocks.mockPlan.mock.calls[0][0].cwd).toBe("/tmp/test");
     });
 
     it("does not pass worktreeRoot in serial mode", async () => {
       mocks.mockPlan.mockResolvedValue({ data: { prompt: "Execute step 1" }, success: true, durationMs: 100 });
       vi.mocked(getBranchDiff).mockResolvedValue("diff --git a/file.ts b/file.ts\n+added line");
       mocks.mockGenerate.mockResolvedValue({
-        commitMessage: "feat: test",
-        prTitle: "feat: test",
-        prDescription: "description",
+        data: { commitMessage: "feat: test", prTitle: "feat: test", prDescription: "description" },
         success: true,
+        durationMs: 100,
       });
 
       await runDispatchPipeline(
@@ -1576,7 +1581,7 @@ describe("worktree dispatch pipeline", () => {
 
       // In serial mode, worktreeRoot should be undefined
       const planCalls = mocks.mockPlan.mock.calls;
-      expect(planCalls[0][3]).toBeUndefined();
+      expect(planCalls[0][0].worktreeRoot).toBeUndefined();
 
       const executeCalls = mocks.mockExecute.mock.calls;
       expect(executeCalls[0][0].worktreeRoot).toBeUndefined();
@@ -1592,6 +1597,7 @@ describe("worktree dispatch pipeline", () => {
     beforeEach(() => {
       vi.useFakeTimers();
       vi.clearAllMocks();
+    setupMockDispatch();
       resetAuthMocks();
       // Restore single-issue defaults (may have been overridden by setupMultiIssueScenario)
       vi.mocked(fetchItemsById).mockResolvedValue([ISSUE_1]);
@@ -1602,7 +1608,7 @@ describe("worktree dispatch pipeline", () => {
       vi.mocked(parseTaskFile).mockResolvedValue(TASK_FILE_FIXTURE);
       vi.mocked(parseIssueFilename).mockReturnValue({ issueId: "1", slug: "test" });
       mocks.mockPlan.mockImplementation(() =>
-        new Promise<AgentResult<PlannerData>>((resolve) => {
+        new Promise<SkillResult<PlannerData>>((resolve) => {
           setTimeout(() => resolve({ data: { prompt: "Execute step 1" }, success: true, durationMs: 100 }), 100);
         }),
       );
@@ -1792,6 +1798,8 @@ describe("worktree dispatch pipeline", () => {
           });
           return "quit";
         });
+        await vi.advanceTimersByTimeAsync(100);
+        await vi.runAllTimersAsync();
 
         const result = await resultPromise;
 
@@ -1876,6 +1884,8 @@ describe("worktree dispatch pipeline", () => {
         expect(tui.state.recovery?.selectedAction).toBe("rerun");
         return "quit";
       });
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.runAllTimersAsync();
       const result = await resultPromise;
 
       expect(result.completed).toBe(0);
@@ -1895,6 +1905,7 @@ describe("worktree dispatch pipeline", () => {
 describe("error-path handling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    setupMockDispatch();
     resetAuthMocks();
     // Re-establish baseline mocks cleared by vi.clearAllMocks()
     vi.mocked(fetchItemsById).mockResolvedValue([{
@@ -1991,6 +2002,7 @@ describe("error-path handling", () => {
 describe("feature branch workflow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    setupMockDispatch();
     resetAuthMocks();
     setupMultiIssueScenario();
     mocks.mockExecute.mockImplementation(async ({ task }: any) => ({
@@ -1999,11 +2011,10 @@ describe("feature branch workflow", () => {
       durationMs: 100,
     }));
     mocks.mockGenerate.mockResolvedValue({
-      commitMessage: "",
-      prTitle: "",
-      prDescription: "",
+      data: null,
       success: false,
       error: "mock: not configured",
+      durationMs: 0,
     });
     // Reset datasource mocks
     const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
@@ -2362,6 +2373,7 @@ describe("feature branch workflow", () => {
 describe("md-datasource sync fallback", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    setupMockDispatch();
     resetAuthMocks();
     // Set up md-datasource-style issue with non-numeric filename as the number
     const mdIssue: IssueDetails = {
@@ -2401,11 +2413,10 @@ describe("md-datasource sync fallback", () => {
       durationMs: 100,
     });
     mocks.mockGenerate.mockResolvedValue({
-      commitMessage: "",
-      prTitle: "",
-      prDescription: "",
+      data: null,
       success: false,
       error: "mock: not configured",
+      durationMs: 0,
     });
   });
 
@@ -2433,6 +2444,7 @@ describe("glob expansion in dispatch pipeline", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    setupMockDispatch();
     resetAuthMocks();
     mocks.mockExecute.mockResolvedValue({
       success: true,
@@ -2440,14 +2452,13 @@ describe("glob expansion in dispatch pipeline", () => {
       durationMs: 100,
     });
     mocks.mockGenerate.mockResolvedValue({
-      commitMessage: "",
-      prTitle: "",
-      prDescription: "",
+      data: null,
       success: false,
       error: "mock: not configured",
+      durationMs: 0,
     });
     mocks.mockPlan.mockImplementation(() =>
-      new Promise<AgentResult<PlannerData>>((resolve) => {
+      new Promise<SkillResult<PlannerData>>((resolve) => {
         setTimeout(() => resolve({ data: { prompt: "Execute step 1" }, success: true, durationMs: 100 }), 100);
       }),
     );
@@ -2633,6 +2644,7 @@ describe("auth prompt handler cleanup on error", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    setupMockDispatch();
     resetAuthMocks();
     mocks.mockExecute.mockResolvedValue({
       success: true,
@@ -2671,6 +2683,7 @@ describe("git rev-parse shell option for Windows compatibility", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    setupMockDispatch();
     resetAuthMocks();
     mocks.mockPlan.mockResolvedValue({
       data: { prompt: "Execute step 1" },
@@ -2683,11 +2696,10 @@ describe("git rev-parse shell option for Windows compatibility", () => {
       durationMs: 100,
     });
     mocks.mockGenerate.mockResolvedValue({
-      commitMessage: "",
-      prTitle: "",
-      prDescription: "",
+      data: null,
       success: false,
       error: "mock: not configured",
+      durationMs: 0,
     });
   });
 

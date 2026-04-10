@@ -5,9 +5,10 @@ const SHELL = process.platform === "win32";
 
 // ─── Mock setup ────────────────────────────────────────────────────────────────
 
-const { mockExecFile, mockExistsSync } = vi.hoisted(() => ({
+const { mockExecFile, mockExistsSync, mockRm } = vi.hoisted(() => ({
   mockExecFile: vi.fn(),
   mockExistsSync: vi.fn(),
+  mockRm: vi.fn(),
 }));
 
 vi.mock("node:child_process", () => ({
@@ -16,6 +17,10 @@ vi.mock("node:child_process", () => ({
 
 vi.mock("node:fs", () => ({
   existsSync: mockExistsSync,
+}));
+
+vi.mock("node:fs/promises", () => ({
+  rm: mockRm,
 }));
 
 vi.mock("node:util", () => ({
@@ -49,7 +54,9 @@ import {
 beforeEach(() => {
   mockExecFile.mockReset();
   mockExistsSync.mockReset();
+  mockRm.mockReset();
   mockExistsSync.mockReturnValue(false);
+  mockRm.mockResolvedValue(undefined);
   vi.mocked(log.warn).mockClear();
   vi.mocked(log.debug).mockClear();
 });
@@ -139,18 +146,98 @@ describe("createWorktree", () => {
     expect(result).toBe(join("/repo", ".dispatch", "worktrees", "issue-42"));
   });
 
-  it("reuses an existing worktree instead of recreating it", async () => {
+  it("validates and reuses a registered worktree on correct branch", async () => {
     const worktreePath = join("/repo", ".dispatch", "worktrees", "issue-42");
     mockExistsSync.mockReturnValue(true);
 
+    mockExecFile
+      .mockResolvedValueOnce({ stdout: `worktree ${worktreePath}\nHEAD abc123\nbranch refs/heads/user/dispatch/42-my-feature\n` }) // worktree list --porcelain
+      .mockResolvedValueOnce({ stdout: "" }) // checkout --force
+      .mockResolvedValueOnce({ stdout: "" }); // clean -fd
+
     const result = await createWorktree("/repo", "42-my-feature.md", "user/dispatch/42-my-feature");
 
-    // No git commands should be called — just returns the existing path
-    expect(mockExecFile).not.toHaveBeenCalled();
-    expect(log.debug).toHaveBeenCalledWith(
-      `Reusing existing worktree at ${worktreePath}`,
-    );
+    expect(mockExecFile).toHaveBeenCalledTimes(3);
+    expect(mockExecFile).toHaveBeenNthCalledWith(1, "git", ["worktree", "list", "--porcelain"], { cwd: "/repo", shell: SHELL });
+    expect(mockExecFile).toHaveBeenNthCalledWith(2, "git", ["checkout", "--force", "user/dispatch/42-my-feature"], { cwd: worktreePath, shell: SHELL });
+    expect(mockExecFile).toHaveBeenNthCalledWith(3, "git", ["clean", "-fd"], { cwd: worktreePath, shell: SHELL });
+    expect(log.debug).toHaveBeenCalledWith(`Reusing validated worktree at ${worktreePath}`);
     expect(result).toBe(worktreePath);
+  });
+
+  it("removes stale directory (not registered) and recreates worktree", async () => {
+    const worktreePath = join("/repo", ".dispatch", "worktrees", "issue-42");
+    mockExistsSync.mockReturnValue(true);
+
+    mockExecFile
+      .mockResolvedValueOnce({ stdout: "worktree /some/other/path\nHEAD abc123\n" }) // list does NOT include worktreePath
+      .mockResolvedValueOnce({ stdout: "" }) // worktree prune (from cleanup)
+      .mockResolvedValueOnce({ stdout: "" }); // worktree add -b
+
+    const result = await createWorktree("/repo", "42-my-feature.md", "user/dispatch/42-my-feature");
+
+    expect(mockRm).toHaveBeenCalledWith(worktreePath, { recursive: true, force: true });
+    expect(log.debug).toHaveBeenCalledWith(`Directory exists but not a registered worktree: ${worktreePath}`);
+    expect(result).toBe(worktreePath);
+  });
+
+  it("removes registered worktree when checkout fails and recreates", async () => {
+    const worktreePath = join("/repo", ".dispatch", "worktrees", "issue-42");
+    mockExistsSync.mockReturnValue(true);
+
+    mockExecFile
+      .mockResolvedValueOnce({ stdout: `worktree ${worktreePath}\nHEAD abc123\n` }) // list includes path
+      .mockRejectedValueOnce(new Error("error: pathspec 'wrong-branch' did not match")) // checkout --force fails
+      .mockResolvedValueOnce({ stdout: "" }) // worktree prune (from cleanup)
+      .mockResolvedValueOnce({ stdout: "" }); // worktree add -b
+
+    const result = await createWorktree("/repo", "42-my-feature.md", "user/dispatch/42-my-feature");
+
+    expect(mockRm).toHaveBeenCalledWith(worktreePath, { recursive: true, force: true });
+    expect(log.debug).toHaveBeenCalledWith(`Worktree checkout failed, removing and recreating: ${worktreePath}`);
+    expect(result).toBe(worktreePath);
+  });
+
+  it("retries on lock contention with exponential backoff", async () => {
+    mockExistsSync.mockReturnValue(false);
+
+    mockExecFile
+      .mockRejectedValueOnce(new Error("fatal: Unable to create '.git/worktrees/issue-42/lock': File exists"))
+      .mockRejectedValueOnce(new Error("fatal: Unable to create '.git/worktrees/issue-42/lock': File exists"))
+      .mockResolvedValueOnce({ stdout: "" }); // succeeds on 3rd attempt
+
+    const result = await createWorktree("/repo", "42-my-feature.md", "user/dispatch/42-my-feature");
+
+    expect(mockExecFile).toHaveBeenCalledTimes(3);
+    expect(log.debug).toHaveBeenCalledWith(expect.stringContaining("attempt 1/5 failed"));
+    expect(log.debug).toHaveBeenCalledWith(expect.stringContaining("attempt 2/5 failed"));
+    expect(result).toBe(join("/repo", ".dispatch", "worktrees", "issue-42"));
+  });
+
+  it("throws immediately on non-retryable errors", async () => {
+    mockExistsSync.mockReturnValue(false);
+    mockExecFile.mockRejectedValueOnce(new Error("fatal: not a git repository"));
+
+    await expect(
+      createWorktree("/repo", "42-my-feature.md", "user/dispatch/42-my-feature"),
+    ).rejects.toThrow("not a git repository");
+
+    expect(mockExecFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws last error after max retries exhausted", async () => {
+    mockExistsSync.mockReturnValue(false);
+
+    const lockError = new Error("fatal: Unable to create lock");
+    for (let i = 0; i < 5; i++) {
+      mockExecFile.mockRejectedValueOnce(lockError);
+    }
+
+    await expect(
+      createWorktree("/repo", "42-my-feature.md", "user/dispatch/42-my-feature"),
+    ).rejects.toThrow("lock");
+
+    expect(mockExecFile).toHaveBeenCalledTimes(5);
   });
 
   it("retries without -b when branch already exists and directory does not", async () => {
@@ -246,6 +333,43 @@ describe("createWorktree", () => {
     expect(log.debug).toHaveBeenCalledWith(
       expect.stringContaining("existing branch"),
     );
+  });
+
+  it("passes startPoint to git worktree add when provided", async () => {
+    mockExecFile.mockResolvedValueOnce({ stdout: "" });
+
+    await createWorktree("/repo", "42-my-feature.md", "dispatch/42-my-feature", "origin/main");
+
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "git",
+      ["worktree", "add", join("/repo", ".dispatch", "worktrees", "issue-42"), "-b", "dispatch/42-my-feature", "origin/main"],
+      { cwd: "/repo", shell: SHELL },
+    );
+  });
+
+  it("prunes and retries when retry also hits 'already used by worktree'", async () => {
+    const worktreePath = join("/repo", ".dispatch", "worktrees", "issue-42");
+
+    mockExecFile
+      .mockRejectedValueOnce(new Error("fatal: a branch named 'x' already exists"))
+      .mockRejectedValueOnce(new Error("is already used by worktree"))
+      .mockResolvedValueOnce({ stdout: "" })  // prune
+      .mockResolvedValueOnce({ stdout: "" }); // final add
+
+    const result = await createWorktree("/repo", "42-my-feature.md", "dispatch/42-my-feature");
+
+    expect(result).toBe(worktreePath);
+    expect(mockExecFile).toHaveBeenCalledTimes(4);
+  });
+
+  it("throws when retry fails with non-worktree-conflict error", async () => {
+    mockExecFile
+      .mockRejectedValueOnce(new Error("fatal: a branch named 'x' already exists"))
+      .mockRejectedValueOnce(new Error("some unexpected error"));
+
+    await expect(
+      createWorktree("/repo", "42-my-feature.md", "dispatch/42-my-feature"),
+    ).rejects.toThrow("some unexpected error");
   });
 });
 

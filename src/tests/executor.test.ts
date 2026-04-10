@@ -1,30 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import type { Task } from "../parser.js";
-import type { ProviderInstance } from "../providers/interface.js";
-import type { DispatchResult } from "../dispatcher.js";
-
-vi.mock("../dispatcher.js", () => ({
-  dispatchTask: vi.fn(),
-}));
-
-vi.mock("../parser.js", () => ({
-  markTaskComplete: vi.fn(),
-}));
-
-import { dispatchTask } from "../dispatcher.js";
-import { markTaskComplete } from "../parser.js";
-import { boot } from "../agents/executor.js";
-
-function createMockProvider(overrides?: Partial<ProviderInstance>): ProviderInstance {
-  return {
-    name: "mock",
-    model: "mock-model",
-    createSession: vi.fn<ProviderInstance["createSession"]>().mockResolvedValue("session-1"),
-    prompt: vi.fn<ProviderInstance["prompt"]>().mockResolvedValue("done"),
-    cleanup: vi.fn<ProviderInstance["cleanup"]>().mockResolvedValue(undefined),
-    ...overrides,
-  };
-}
+import { executorSkill } from "../skills/executor.js";
 
 const TASK_FIXTURE: Task = {
   index: 0,
@@ -34,223 +10,208 @@ const TASK_FIXTURE: Task = {
   file: "/tmp/test/42-feature.md",
 };
 
-describe("boot", () => {
-  it("throws when provider is not supplied", async () => {
-    await expect(boot({ cwd: "/tmp" })).rejects.toThrow(
-      "Executor agent requires a provider instance in boot options"
-    );
+describe("executorSkill", () => {
+  it("has name 'executor'", () => {
+    expect(executorSkill.name).toBe("executor");
   });
 
-  it("returns an agent with name 'executor'", async () => {
-    const provider = createMockProvider();
-    const agent = await boot({ cwd: "/tmp", provider });
-    expect(agent.name).toBe("executor");
-  });
-
-  it("returns an agent with execute and cleanup methods", async () => {
-    const provider = createMockProvider();
-    const agent = await boot({ cwd: "/tmp", provider });
-    expect(typeof agent.execute).toBe("function");
-    expect(typeof agent.cleanup).toBe("function");
+  it("has buildPrompt and parseResult functions", () => {
+    expect(typeof executorSkill.buildPrompt).toBe("function");
+    expect(typeof executorSkill.parseResult).toBe("function");
   });
 });
 
-describe("execute", () => {
-  beforeEach(() => {
-    vi.resetAllMocks();
-  });
-
-  it("calls dispatchTask and markTaskComplete on success", async () => {
-    const provider = createMockProvider();
-    const mockDispatch = vi.mocked(dispatchTask);
-    const mockMarkComplete = vi.mocked(markTaskComplete);
-
-    const dispatchResult: DispatchResult = {
-      task: TASK_FIXTURE,
-      success: true,
-    };
-    mockDispatch.mockResolvedValue(dispatchResult);
-    mockMarkComplete.mockResolvedValue(undefined);
-
-    const agent = await boot({ cwd: "/tmp/test", provider });
-    const result = await agent.execute({
-      task: TASK_FIXTURE,
-      cwd: "/tmp/test",
-      plan: "Step 1: do X\nStep 2: do Y",
-    });
-
-    expect(result.success).toBe(true);
-    expect(result.data?.dispatchResult).toBe(dispatchResult);
-    expect(result.error).toBeUndefined();
-    expect(result.durationMs).toBeGreaterThanOrEqual(0);
-
-    // dispatchTask called with provider, task, cwd, and plan string
-    expect(mockDispatch).toHaveBeenCalledOnce();
-    expect(mockDispatch).toHaveBeenCalledWith(
-      provider,
-      TASK_FIXTURE,
-      "/tmp/test",
-      "Step 1: do X\nStep 2: do Y",
-      undefined,
-    );
-
-    // markTaskComplete called on success
-    expect(mockMarkComplete).toHaveBeenCalledOnce();
-    expect(mockMarkComplete).toHaveBeenCalledWith(TASK_FIXTURE);
-  });
-
-  it("surfaces dispatch failure without calling markTaskComplete", async () => {
-    const provider = createMockProvider();
-    const mockDispatch = vi.mocked(dispatchTask);
-    const mockMarkComplete = vi.mocked(markTaskComplete);
-
-    const dispatchResult: DispatchResult = {
-      task: TASK_FIXTURE,
-      success: false,
-      error: "No response from agent",
-    };
-    mockDispatch.mockResolvedValue(dispatchResult);
-
-    const agent = await boot({ cwd: "/tmp/test", provider });
-    const result = await agent.execute({
-      task: TASK_FIXTURE,
-      cwd: "/tmp/test",
-      plan: "Some plan",
-    });
-
-    expect(result.success).toBe(false);
-    expect(result.error).toBe("No response from agent");
-    expect(result.data).toBeNull();
-    expect(result.durationMs).toBeGreaterThanOrEqual(0);
-
-    // markTaskComplete should NOT be called when dispatch fails
-    expect(mockMarkComplete).not.toHaveBeenCalled();
-  });
-
-  it("catches dispatchTask exceptions and returns a failure result", async () => {
-    const provider = createMockProvider();
-    const mockDispatch = vi.mocked(dispatchTask);
-    const mockMarkComplete = vi.mocked(markTaskComplete);
-
-    mockDispatch.mockRejectedValue(new Error("Session creation failed"));
-
-    const agent = await boot({ cwd: "/tmp/test", provider });
-    const result = await agent.execute({
-      task: TASK_FIXTURE,
-      cwd: "/tmp/test",
-      plan: "Some plan",
-    });
-
-    expect(result.success).toBe(false);
-    expect(result.error).toBe("Session creation failed");
-    expect(result.data).toBeNull();
-    expect(result.durationMs).toBeGreaterThanOrEqual(0);
-
-    expect(mockMarkComplete).not.toHaveBeenCalled();
-  });
-
-  it("passes undefined to dispatchTask when plan is null (non-planned path)", async () => {
-    const provider = createMockProvider();
-    const mockDispatch = vi.mocked(dispatchTask);
-    const mockMarkComplete = vi.mocked(markTaskComplete);
-
-    const dispatchResult: DispatchResult = {
-      task: TASK_FIXTURE,
-      success: true,
-    };
-    mockDispatch.mockResolvedValue(dispatchResult);
-    mockMarkComplete.mockResolvedValue(undefined);
-
-    const agent = await boot({ cwd: "/tmp/test", provider });
-    const result = await agent.execute({
+describe("buildPrompt", () => {
+  it("builds a generic prompt when plan is null", () => {
+    const prompt = executorSkill.buildPrompt({
       task: TASK_FIXTURE,
       cwd: "/tmp/test",
       plan: null,
     });
 
-    expect(result.success).toBe(true);
-
-    // When plan is null, dispatchTask should receive `undefined` as the 4th arg
-    // This triggers the generic (non-planned) prompt path in the dispatcher
-    expect(mockDispatch).toHaveBeenCalledOnce();
-    expect(mockDispatch).toHaveBeenCalledWith(
-      provider,
-      TASK_FIXTURE,
-      "/tmp/test",
-      undefined,
-      undefined,
-    );
-
-    expect(mockMarkComplete).toHaveBeenCalledOnce();
+    expect(prompt).toContain("Implement the widget");
+    expect(prompt).toContain("/tmp/test");
+    expect(prompt).toContain("/tmp/test/42-feature.md");
+    expect(prompt).toContain("line 3");
+    expect(prompt).not.toContain("Execution Plan");
   });
 
-  it("handles non-Error exceptions from dispatchTask", async () => {
-    const provider = createMockProvider();
-    const mockDispatch = vi.mocked(dispatchTask);
+  it("builds a planned prompt when plan is provided", () => {
+    const prompt = executorSkill.buildPrompt({
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
+      plan: "Step 1: do X",
+    });
 
-    mockDispatch.mockRejectedValue("raw string error");
+    expect(prompt).toContain("Execution Plan");
+    expect(prompt).toContain("Step 1: do X");
+  });
 
-    const agent = await boot({ cwd: "/tmp/test", provider });
-    const result = await agent.execute({
+  it("includes commit instruction when task text mentions commit", () => {
+    const commitTask: Task = {
+      ...TASK_FIXTURE,
+      text: "Fix bug. Commit with message: fix: resolve bug",
+    };
+
+    const prompt = executorSkill.buildPrompt({
+      task: commitTask,
+      cwd: "/tmp/test",
+      plan: null,
+    });
+
+    expect(prompt).toContain("stage all changes and create a conventional commit");
+  });
+
+  it("excludes commit instruction when task text does not mention commit", () => {
+    const prompt = executorSkill.buildPrompt({
       task: TASK_FIXTURE,
       cwd: "/tmp/test",
       plan: null,
     });
 
-    expect(result.success).toBe(false);
-    expect(result.error).toBe("raw string error");
+    expect(prompt).toContain("Do NOT commit changes");
   });
 
-  it("tracks elapsed time in milliseconds", async () => {
-    const provider = createMockProvider();
-    const mockDispatch = vi.mocked(dispatchTask);
-    const mockMarkComplete = vi.mocked(markTaskComplete);
-
-    // Add a small delay to ensure durationMs > 0
-    mockDispatch.mockImplementation(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-      return { task: TASK_FIXTURE, success: true };
-    });
-    mockMarkComplete.mockResolvedValue(undefined);
-
-    const agent = await boot({ cwd: "/tmp/test", provider });
-    const result = await agent.execute({
+  it("includes worktree isolation instructions when worktreeRoot is provided", () => {
+    const prompt = executorSkill.buildPrompt({
       task: TASK_FIXTURE,
       cwd: "/tmp/test",
-      plan: "plan",
+      plan: null,
+      worktreeRoot: "/tmp/worktree",
     });
 
-    expect(result.durationMs).toBeGreaterThanOrEqual(20);
-    expect(result.durationMs).toBeLessThan(2000);
+    expect(prompt).toContain("Worktree isolation");
+    expect(prompt).toContain("/tmp/worktree");
+    expect(prompt).toContain("MUST NOT read, write, or execute commands that access files outside");
   });
 
-  it("passes worktreeRoot to dispatchTask when provided in input", async () => {
-    const provider = createMockProvider();
-    const mockDispatch = vi.mocked(dispatchTask);
-    const mockMarkComplete = vi.mocked(markTaskComplete);
-
-    const dispatchResult: DispatchResult = {
+  it("excludes worktree isolation instructions when worktreeRoot is not provided", () => {
+    const prompt = executorSkill.buildPrompt({
       task: TASK_FIXTURE,
-      success: true,
-    };
-    mockDispatch.mockResolvedValue(dispatchResult);
-    mockMarkComplete.mockResolvedValue(undefined);
+      cwd: "/tmp/test",
+      plan: null,
+    });
 
-    const agent = await boot({ cwd: "/tmp/test", provider });
-    const result = await agent.execute({
+    expect(prompt).not.toContain("Worktree isolation");
+  });
+
+  it("includes worktree isolation in planned prompt when worktreeRoot is provided", () => {
+    const prompt = executorSkill.buildPrompt({
       task: TASK_FIXTURE,
       cwd: "/tmp/test",
       plan: "Step 1: do X",
       worktreeRoot: "/tmp/worktree",
     });
 
-    expect(result.success).toBe(true);
-    expect(mockDispatch).toHaveBeenCalledWith(
-      provider,
-      TASK_FIXTURE,
-      "/tmp/test",
-      "Step 1: do X",
-      "/tmp/worktree",
+    expect(prompt).toContain("Execution Plan");
+    expect(prompt).toContain("Step 1: do X");
+    expect(prompt).toContain("Worktree isolation");
+    expect(prompt).toContain("/tmp/worktree");
+  });
+
+  it("includes environment section in prompt (no plan)", () => {
+    const prompt = executorSkill.buildPrompt({
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
+      plan: null,
+    });
+
+    expect(prompt).toContain("## Environment");
+    expect(prompt).toContain("Operating System");
+    expect(prompt).toContain("Do NOT write intermediate scripts");
+  });
+
+  it("includes environment section in planned prompt", () => {
+    const prompt = executorSkill.buildPrompt({
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
+      plan: "Step 1: do X",
+    });
+
+    expect(prompt).toContain("## Environment");
+    expect(prompt).toContain("Operating System");
+    expect(prompt).toContain("Do NOT write intermediate scripts");
+  });
+});
+
+describe("parseResult", () => {
+  it("returns ExecutorData on valid response", () => {
+    const result = executorSkill.parseResult("Task complete.", {
+      task: TASK_FIXTURE,
+      cwd: "/tmp/test",
+      plan: null,
+    });
+
+    expect(result).toEqual({
+      dispatchResult: { task: TASK_FIXTURE, success: true },
+    });
+  });
+
+  it("throws when response is null", () => {
+    expect(() =>
+      executorSkill.parseResult(null, {
+        task: TASK_FIXTURE,
+        cwd: "/tmp/test",
+        plan: null,
+      }),
+    ).toThrow("No response");
+  });
+
+  it("throws on 'You've hit your limit' rate-limit response", () => {
+    expect(() =>
+      executorSkill.parseResult("You've hit your limit \u00b7 resets 6pm (UTC)", {
+        task: TASK_FIXTURE,
+        cwd: "/tmp/test",
+        plan: null,
+      }),
+    ).toThrow(/Rate limit/);
+  });
+
+  it("throws on 'rate limit exceeded' response", () => {
+    expect(() =>
+      executorSkill.parseResult("rate limit exceeded, please try again later", {
+        task: TASK_FIXTURE,
+        cwd: "/tmp/test",
+        plan: null,
+      }),
+    ).toThrow(/Rate limit/);
+  });
+
+  it("throws on 'Too many requests' response", () => {
+    expect(() =>
+      executorSkill.parseResult("Too many requests", {
+        task: TASK_FIXTURE,
+        cwd: "/tmp/test",
+        plan: null,
+      }),
+    ).toThrow(/Rate limit/);
+  });
+
+  it("throws on 'quota exceeded' response", () => {
+    expect(() =>
+      executorSkill.parseResult("Your quota exceeded for today", {
+        task: TASK_FIXTURE,
+        cwd: "/tmp/test",
+        plan: null,
+      }),
+    ).toThrow(/Rate limit/);
+  });
+
+  it("does not throw on normal task output", async () => {
+    const result = await executorSkill.parseResult(
+      "Task complete. I've implemented the changes as requested.",
+      { task: TASK_FIXTURE, cwd: "/tmp/test", plan: null },
     );
+
+    expect(result.dispatchResult.success).toBe(true);
+  });
+
+  it("does not false-positive on 'limit' in normal task output", async () => {
+    const result = await executorSkill.parseResult(
+      "I've implemented the rate limiting feature as requested. Task complete.",
+      { task: TASK_FIXTURE, cwd: "/tmp/test", plan: null },
+    );
+
+    expect(result.dispatchResult.success).toBe(true);
   });
 });

@@ -184,18 +184,18 @@ describe("log methods", () => {
     expect(written).toContain("═".repeat(40));
   });
 
-  it("agentEvent writes with AGENT level", () => {
+  it("skillEvent writes with SKILL level", () => {
     const logger = new FileLogger("42", FAKE_CWD);
-    logger.agentEvent("executor", "started", "issue 42");
+    logger.skillEvent("executor", "started", "issue 42");
     const written = mockAppendFileSync.mock.calls[0][1] as string;
-    expect(written).toContain("[AGENT] [executor] started: issue 42");
+    expect(written).toContain("[SKILL] [executor] started: issue 42");
   });
 
-  it("agentEvent omits detail when not provided", () => {
+  it("skillEvent omits detail when not provided", () => {
     const logger = new FileLogger("42", FAKE_CWD);
-    logger.agentEvent("executor", "finished");
+    logger.skillEvent("executor", "finished");
     const written = mockAppendFileSync.mock.calls[0][1] as string;
-    expect(written).toContain("[AGENT] [executor] finished");
+    expect(written).toContain("[SKILL] [executor] finished");
     expect(written).not.toMatch(/\[AGENT\] \[executor\] finished:/);
   });
 });
@@ -239,7 +239,7 @@ describe("plain text output", () => {
     logger.prompt("label", "content");
     logger.response("label", "content");
     logger.phase("phase");
-    logger.agentEvent("agent", "event", "detail");
+    logger.skillEvent("skill", "event", "detail");
 
     for (const call of mockAppendFileSync.mock.calls) {
       const written = call[1] as string;

@@ -23,7 +23,8 @@ export async function ensureGitignoreEntry(repoRoot: string, entry: string): Pro
   try {
     contents = await readFile(gitignorePath, "utf8");
   } catch (err: unknown) {
-    if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+    // "code" in err is a runtime guard that proves the property exists
+    if (err instanceof Error && "code" in err && (err as { code?: unknown }).code === "ENOENT") {
       // File doesn't exist — will be created below
     } else {
       log.warn(`Could not read .gitignore: ${String(err)}`);
