@@ -6,8 +6,10 @@
  * the user just needs to authenticate the providers they want to use.
  */
 
+import chalk from "chalk";
 import { select, confirm, input, multiSelect } from "./helpers/ink-prompts.js";
 import { log } from "./helpers/logger.js";
+import { PALETTE } from "./helpers/format.js";
 import {
   loadConfig,
   saveConfig,
@@ -204,9 +206,13 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
       const allModels = [...modelSet].sort();
 
       // Strong model selection
+      console.clear();
+      console.log();
+      console.log(chalk.hex(PALETTE.brand).bold("  ⚡ Dispatch — Model Configuration"));
+      console.log();
       const strongDefault = existingOverride?.strong ?? meta.defaultStrongModel;
       const strongChoice = await select<string | undefined>({
-        message: "Strong model (executor, spec):",
+        message: `${meta.displayName} ── Strong model (executor, spec)`,
         choices: [
           { name: `(default) ${meta.defaultStrongModel}`, value: undefined },
           ...allModels.map((m) => ({ name: m, value: m })),
@@ -215,9 +221,13 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
       });
 
       // Fast model selection
+      console.clear();
+      console.log();
+      console.log(chalk.hex(PALETTE.brand).bold("  ⚡ Dispatch — Model Configuration"));
+      console.log();
       const fastDefault = existingOverride?.fast ?? meta.defaultFastModel;
       const fastChoice = await select<string | undefined>({
-        message: "Fast model (planner, commit):",
+        message: `${meta.displayName} ── Fast model (planner, commit)`,
         choices: [
           { name: `(default) ${meta.defaultFastModel}`, value: undefined },
           ...allModels.map((m) => ({ name: m, value: m })),

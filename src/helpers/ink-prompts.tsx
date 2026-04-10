@@ -19,6 +19,8 @@ export function select<T>(opts: {
   message: string;
   choices: Array<{ name: string; value: T; description?: string }>;
   default?: T;
+  /** Max visible items before scrolling. Defaults to terminal height - 4. */
+  limit?: number;
 }): Promise<T> {
   return new Promise((resolve) => {
     function SelectPrompt() {
@@ -27,16 +29,17 @@ export function select<T>(opts: {
       const initialIndex = opts.default !== undefined
         ? opts.choices.findIndex((c) => c.value === opts.default)
         : 0;
+      const visibleLimit = opts.limit ?? Math.max(5, (process.stdout.rows ?? 24) - 4);
 
       return (
         <Box flexDirection="column">
           <Box>
-            <Text color={PALETTE.accent} bold>? </Text>
-            <Text>{opts.message}</Text>
+            <Text color={PALETTE.accent} bold>{opts.message}</Text>
           </Box>
           <SelectInput
             items={items}
             initialIndex={Math.max(0, initialIndex)}
+            limit={visibleLimit}
             onSelect={(item) => {
               resolve(item.value as T);
               exit();
