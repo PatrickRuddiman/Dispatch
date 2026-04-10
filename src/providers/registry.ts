@@ -50,15 +50,21 @@ async function checkCopilotAuth(): Promise<AuthStatus> {
   ) {
     return { status: "authenticated" };
   }
-  // Fall back to gh CLI auth status
+  // Fall back to copilot CLI auth status, then gh CLI
   try {
-    await exec("gh", ["auth", "status"], { timeout: AUTH_PROBE_TIMEOUT_MS });
+    await exec("copilot", ["auth", "status"], { timeout: AUTH_PROBE_TIMEOUT_MS });
     return { status: "authenticated" };
   } catch {
-    return {
-      status: "not-configured",
-      hint: "Set GH_TOKEN or GITHUB_TOKEN, or run 'gh auth login'",
-    };
+    // Try gh CLI as a secondary fallback
+    try {
+      await exec("gh", ["auth", "status"], { timeout: AUTH_PROBE_TIMEOUT_MS });
+      return { status: "authenticated" };
+    } catch {
+      return {
+        status: "not-configured",
+        hint: "Run 'copilot login' or set GITHUB_TOKEN",
+      };
+    }
   }
 }
 
@@ -73,7 +79,7 @@ async function checkClaudeAuth(): Promise<AuthStatus> {
   } catch {
     return {
       status: "not-configured",
-      hint: "Set ANTHROPIC_API_KEY or run 'claude login'",
+      hint: "Run 'claude auth login' or set ANTHROPIC_API_KEY",
     };
   }
 }
@@ -82,21 +88,36 @@ async function checkCodexAuth(): Promise<AuthStatus> {
   if (process.env.OPENAI_API_KEY) {
     return { status: "authenticated" };
   }
-  return {
-    status: "not-configured",
-    hint: "Set OPENAI_API_KEY environment variable",
-  };
-}
-
-async function checkOpencodeAuth(): Promise<AuthStatus> {
-  // OpenCode uses its own config system — check if the binary exists and is configured
+  // Try codex CLI auth check
   try {
-    await exec("opencode", ["--version"], { timeout: AUTH_PROBE_TIMEOUT_MS });
+    await exec("codex", ["auth", "status"], { timeout: AUTH_PROBE_TIMEOUT_MS });
     return { status: "authenticated" };
   } catch {
     return {
       status: "not-configured",
-      hint: "Install and configure OpenCode (https://opencode.ai)",
+      hint: "Run 'codex login --device-auth' or set OPENAI_API_KEY",
+    };
+  }
+}
+
+async function checkOpencodeAuth(): Promise<AuthStatus> {
+  // Check if the binary exists
+  try {
+    await exec("opencode", ["--version"], { timeout: AUTH_PROBE_TIMEOUT_MS });
+  } catch {
+    return {
+      status: "not-configured",
+      hint: "Install OpenCode (https://opencode.ai)",
+    };
+  }
+  // Try opencode CLI auth check
+  try {
+    await exec("opencode", ["auth", "status"], { timeout: AUTH_PROBE_TIMEOUT_MS });
+    return { status: "authenticated" };
+  } catch {
+    return {
+      status: "not-configured",
+      hint: "Run 'opencode auth login' or set provider API keys",
     };
   }
 }

@@ -21,6 +21,7 @@ import {
 } from "./datasources/index.js";
 import type { DatasourceName } from "./datasources/interface.js";
 import { ensureAuthReady } from "./helpers/auth.js";
+import type { ProviderName } from "./providers/interface.js";
 import { getProviderStatuses, type AuthStatus } from "./providers/registry.js";
 import { setupProviderAuth } from "./providers/auth-setup.js";
 
@@ -91,34 +92,52 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
   }
   console.log();
 
-  // ── Auth setup for unauthenticated providers ──────────────
-  const unauthenticated = providerStatuses.filter(
-    (ps) => ps.authStatus.status !== "authenticated",
-  );
+  // ── Provider selection ─────────────────────────────────────
+  log.info("Select which providers you want to enable:");
+  console.log();
 
-  if (unauthenticated.length > 0) {
-    for (const ps of unauthenticated) {
-      const wantSetup = await confirm({
-        message: `Set up authentication for ${ps.displayName}?`,
-        default: false,
-      });
+  const selectedProviders: ProviderName[] = [];
+  for (const ps of providerStatuses) {
+    const isAuth = ps.authStatus.status === "authenticated";
+    const suffix = !isAuth ? " (not yet authenticated)" : "";
+    const enable = await confirm({
+      message: `Enable ${ps.displayName}?${suffix}`,
+      default: isAuth,
+    });
+    if (enable) selectedProviders.push(ps.name);
+  }
 
-      if (wantSetup) {
-        console.log();
-        await setupProviderAuth(ps.name);
-        console.log();
-      }
+  if (selectedProviders.length === 0) {
+    log.error("At least one provider must be enabled to use Dispatch.");
+    log.dim("Re-run 'dispatch config' to enable providers.");
+    return;
+  }
+
+  // ── Auth setup for selected-but-unauthenticated providers ──
+  const needsAuth = selectedProviders.filter((name) => {
+    const ps = providerStatuses.find((p) => p.name === name);
+    return ps && ps.authStatus.status !== "authenticated";
+  });
+
+  if (needsAuth.length > 0) {
+    console.log();
+    for (const name of needsAuth) {
+      console.log();
+      await setupProviderAuth(name);
+      console.log();
     }
 
     // Re-check status after setup
     providerStatuses = await getProviderStatuses();
   }
 
-  const authenticatedProviders = providerStatuses
-    .filter((ps) => ps.authStatus.status === "authenticated")
-    .map((ps) => ps.name);
+  // Final enabled list = selected providers that are now authenticated
+  const enabledProviders = selectedProviders.filter((name) => {
+    const ps = providerStatuses.find((p) => p.name === name);
+    return ps && ps.authStatus.status === "authenticated";
+  });
 
-  if (authenticatedProviders.length === 0) {
+  if (enabledProviders.length === 0) {
     log.error("At least one provider must be authenticated to use Dispatch.");
     log.dim("Re-run 'dispatch config' after setting up provider credentials.");
     return;
@@ -128,13 +147,14 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
   console.log();
   log.info("Provider status:");
   for (const ps of providerStatuses) {
-    const indicator = ps.authStatus.status === "authenticated" ? "✓" : "✗";
+    const isEnabled = enabledProviders.includes(ps.name);
+    const indicator = isEnabled ? "✓" : "✗";
     console.log(`  ${indicator} ${ps.displayName}`);
   }
   console.log();
 
   log.info(
-    `${authenticatedProviders.length} provider(s) ready. ` +
+    `${enabledProviders.length} provider(s) enabled. ` +
     `Dispatch will automatically route tasks to the best available provider.`,
   );
   console.log();
@@ -233,7 +253,7 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
   const existingConfig = await loadConfig(configDir);
   const newConfig: DispatchConfig = {
     ...existingConfig,
-    enabledProviders: authenticatedProviders,
+    enabledProviders,
     source,
   };
 

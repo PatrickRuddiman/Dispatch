@@ -113,7 +113,12 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
     vi.mocked(select).mockResolvedValueOnce("github"); // datasource
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(true)   // enable copilot
+      .mockResolvedValueOnce(true)   // enable claude
+      .mockResolvedValueOnce(true)   // enable codex
+      .mockResolvedValueOnce(true)   // enable opencode
+      .mockResolvedValueOnce(true);  // save
     await runInteractiveConfigWizard();
     expect(saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -146,8 +151,12 @@ describe("runInteractiveConfigWizard", () => {
     });
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
     vi.mocked(confirm)
-      .mockResolvedValueOnce(true)  // reconfigure
-      .mockResolvedValueOnce(true); // save
+      .mockResolvedValueOnce(true)   // reconfigure
+      .mockResolvedValueOnce(true)   // enable copilot
+      .mockResolvedValueOnce(true)   // enable claude
+      .mockResolvedValueOnce(true)   // enable codex
+      .mockResolvedValueOnce(true)   // enable opencode
+      .mockResolvedValueOnce(true);  // save
     vi.mocked(select).mockResolvedValueOnce("md"); // datasource
     await runInteractiveConfigWizard();
     expect(saveConfig).toHaveBeenCalledWith(
@@ -162,46 +171,51 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
     vi.mocked(select).mockResolvedValueOnce("github"); // datasource
-    vi.mocked(confirm).mockResolvedValueOnce(false); // save — declined
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(true)   // enable copilot
+      .mockResolvedValueOnce(true)   // enable claude
+      .mockResolvedValueOnce(true)   // enable codex
+      .mockResolvedValueOnce(true)   // enable opencode
+      .mockResolvedValueOnce(false); // save — declined
     await runInteractiveConfigWizard();
     expect(saveConfig).not.toHaveBeenCalled();
   });
 
   // ─── Provider auth setup ─────────────────────────────────────────
 
-  it("prompts to set up auth for unauthenticated providers", async () => {
-    const statuses = defaultProviderStatuses();
-    vi.mocked(getProviderStatuses)
-      .mockResolvedValueOnce(statuses)       // initial check
-      .mockResolvedValueOnce(statuses);      // re-check after setup
+  it("does not run auth setup for providers the user declines to enable", async () => {
+    const statuses = defaultProviderStatuses(); // only copilot authenticated
+    vi.mocked(getProviderStatuses).mockResolvedValue(statuses);
     vi.mocked(confirm)
-      .mockResolvedValueOnce(false)  // set up Claude auth — decline
-      .mockResolvedValueOnce(false)  // set up Codex auth — decline
-      .mockResolvedValueOnce(false)  // set up OpenCode auth — decline
+      .mockResolvedValueOnce(true)   // enable copilot (authenticated)
+      .mockResolvedValueOnce(false)  // decline claude
+      .mockResolvedValueOnce(false)  // decline codex
+      .mockResolvedValueOnce(false)  // decline opencode
       .mockResolvedValueOnce(true);  // save
     vi.mocked(select).mockResolvedValueOnce("github"); // datasource
     await runInteractiveConfigWizard();
     expect(confirm).toHaveBeenCalledWith(
-      expect.objectContaining({ message: "Set up authentication for Claude Code?" }),
+      expect.objectContaining({ message: "Enable Claude Code? (not yet authenticated)" }),
     );
     expect(confirm).toHaveBeenCalledWith(
-      expect.objectContaining({ message: "Set up authentication for OpenAI Codex?" }),
+      expect.objectContaining({ message: "Enable OpenAI Codex? (not yet authenticated)" }),
     );
     expect(confirm).toHaveBeenCalledWith(
-      expect.objectContaining({ message: "Set up authentication for OpenCode?" }),
+      expect.objectContaining({ message: "Enable OpenCode? (not yet authenticated)" }),
     );
     expect(setupProviderAuth).not.toHaveBeenCalled();
   });
 
-  it("calls setupProviderAuth when user accepts auth setup", async () => {
-    const statuses = defaultProviderStatuses();
+  it("runs auth setup automatically for selected unauthenticated providers", async () => {
+    const statuses = defaultProviderStatuses(); // only copilot authenticated
     vi.mocked(getProviderStatuses)
       .mockResolvedValueOnce(statuses)                   // initial check
       .mockResolvedValueOnce(allAuthenticatedStatuses()); // re-check after setup
     vi.mocked(confirm)
-      .mockResolvedValueOnce(true)   // set up Claude auth — accept
-      .mockResolvedValueOnce(false)  // set up Codex auth — decline
-      .mockResolvedValueOnce(false)  // set up OpenCode auth — decline
+      .mockResolvedValueOnce(true)   // enable copilot
+      .mockResolvedValueOnce(true)   // enable claude (not auth → triggers setup)
+      .mockResolvedValueOnce(false)  // decline codex
+      .mockResolvedValueOnce(false)  // decline opencode
       .mockResolvedValueOnce(true);  // save
     vi.mocked(select).mockResolvedValueOnce("github"); // datasource
     await runInteractiveConfigWizard();
@@ -209,41 +223,57 @@ describe("runInteractiveConfigWizard", () => {
     expect(setupProviderAuth).not.toHaveBeenCalledWith("codex");
   });
 
-  it("exits early when no providers are authenticated", async () => {
+  it("exits early when user selects no providers", async () => {
     const noAuth = [
       providerStatus("copilot", "GitHub Copilot", "not-configured"),
       providerStatus("claude", "Claude Code", "not-configured"),
       providerStatus("codex", "OpenAI Codex", "not-configured"),
       providerStatus("opencode", "OpenCode", "not-configured"),
     ];
-    vi.mocked(getProviderStatuses)
-      .mockResolvedValueOnce(noAuth)  // initial
-      .mockResolvedValueOnce(noAuth); // re-check
+    vi.mocked(getProviderStatuses).mockResolvedValue(noAuth);
     vi.mocked(confirm)
-      .mockResolvedValueOnce(false)  // Claude auth — decline
-      .mockResolvedValueOnce(false)  // Codex auth — decline
-      .mockResolvedValueOnce(false)  // OpenCode auth — decline
-      .mockResolvedValueOnce(false); // Copilot auth — decline
+      .mockResolvedValueOnce(false)  // decline copilot
+      .mockResolvedValueOnce(false)  // decline claude
+      .mockResolvedValueOnce(false)  // decline codex
+      .mockResolvedValueOnce(false); // decline opencode
     await runInteractiveConfigWizard();
     expect(select).not.toHaveBeenCalled();
     expect(saveConfig).not.toHaveBeenCalled();
   });
 
-  it("saves only authenticated providers in enabledProviders", async () => {
+  it("saves only selected and authenticated providers in enabledProviders", async () => {
     const statuses = defaultProviderStatuses(); // only copilot authenticated
-    vi.mocked(getProviderStatuses)
-      .mockResolvedValueOnce(statuses)
-      .mockResolvedValueOnce(statuses);
+    vi.mocked(getProviderStatuses).mockResolvedValue(statuses);
     vi.mocked(confirm)
-      .mockResolvedValueOnce(false)  // Claude auth — decline
-      .mockResolvedValueOnce(false)  // Codex auth — decline
-      .mockResolvedValueOnce(false)  // OpenCode auth — decline
+      .mockResolvedValueOnce(true)   // enable copilot (authenticated)
+      .mockResolvedValueOnce(false)  // decline claude
+      .mockResolvedValueOnce(false)  // decline codex
+      .mockResolvedValueOnce(false)  // decline opencode
       .mockResolvedValueOnce(true);  // save
     vi.mocked(select).mockResolvedValueOnce("github"); // datasource
     await runInteractiveConfigWizard();
     expect(saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
         enabledProviders: ["copilot"],
+      }),
+      undefined,
+    );
+  });
+
+  it("user deselects an authenticated provider — excluded from enabledProviders", async () => {
+    vi.mocked(loadConfig).mockResolvedValue({});
+    vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(true)   // enable copilot
+      .mockResolvedValueOnce(false)  // decline claude
+      .mockResolvedValueOnce(true)   // enable codex
+      .mockResolvedValueOnce(true)   // enable opencode
+      .mockResolvedValueOnce(true);  // save
+    vi.mocked(select).mockResolvedValueOnce("github"); // datasource
+    await runInteractiveConfigWizard();
+    expect(saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        enabledProviders: ["copilot", "codex", "opencode"],
       }),
       undefined,
     );
@@ -256,7 +286,12 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
     vi.mocked(select).mockResolvedValueOnce("github"); // datasource
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(true)   // enable copilot
+      .mockResolvedValueOnce(true)   // enable claude
+      .mockResolvedValueOnce(true)   // enable codex
+      .mockResolvedValueOnce(true)   // enable opencode
+      .mockResolvedValueOnce(true);  // save
     await runInteractiveConfigWizard();
     expect(select).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -271,8 +306,12 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(loadConfig).mockResolvedValue({ source: "azdevops" });
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
     vi.mocked(confirm)
-      .mockResolvedValueOnce(true)  // reconfigure
-      .mockResolvedValueOnce(true); // save
+      .mockResolvedValueOnce(true)   // reconfigure
+      .mockResolvedValueOnce(true)   // enable copilot
+      .mockResolvedValueOnce(true)   // enable claude
+      .mockResolvedValueOnce(true)   // enable codex
+      .mockResolvedValueOnce(true)   // enable opencode
+      .mockResolvedValueOnce(true);  // save
     vi.mocked(select).mockResolvedValueOnce("azdevops"); // datasource
     await runInteractiveConfigWizard();
     expect(select).toHaveBeenCalledWith(
@@ -288,7 +327,12 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
     vi.mocked(select).mockResolvedValueOnce("md"); // datasource
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(true)   // enable copilot
+      .mockResolvedValueOnce(true)   // enable claude
+      .mockResolvedValueOnce(true)   // enable codex
+      .mockResolvedValueOnce(true)   // enable opencode
+      .mockResolvedValueOnce(true);  // save
     await runInteractiveConfigWizard();
     expect(select).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -302,7 +346,12 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
     vi.mocked(select).mockResolvedValueOnce("auto"); // datasource
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(true)   // enable copilot
+      .mockResolvedValueOnce(true)   // enable claude
+      .mockResolvedValueOnce(true)   // enable codex
+      .mockResolvedValueOnce(true)   // enable opencode
+      .mockResolvedValueOnce(true);  // save
     await runInteractiveConfigWizard();
     const savedConfig = vi.mocked(saveConfig).mock.calls[0][0];
     expect(savedConfig.source).toBeUndefined();
@@ -313,7 +362,12 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
     vi.mocked(select).mockResolvedValueOnce("github"); // datasource
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(true)   // enable copilot
+      .mockResolvedValueOnce(true)   // enable claude
+      .mockResolvedValueOnce(true)   // enable codex
+      .mockResolvedValueOnce(true)   // enable opencode
+      .mockResolvedValueOnce(true);  // save
     await runInteractiveConfigWizard();
     const datasourceCall = vi.mocked(select).mock.calls[0][0];
     expect(datasourceCall.choices[0]).toMatchObject({ name: "auto", value: "auto" });
@@ -331,7 +385,12 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("User Story")                    // workItemType
       .mockResolvedValueOnce("@CurrentIteration")             // iteration
       .mockResolvedValueOnce("MyProject\\Team A");            // area
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(true)   // enable copilot
+      .mockResolvedValueOnce(true)   // enable claude
+      .mockResolvedValueOnce(true)   // enable codex
+      .mockResolvedValueOnce(true)   // enable opencode
+      .mockResolvedValueOnce(true);  // save
     await runInteractiveConfigWizard();
     expect(saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -357,7 +416,12 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("")   // workItemType — skip
       .mockResolvedValueOnce("")   // iteration — skip
       .mockResolvedValueOnce("");  // area — skip
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(true)   // enable copilot
+      .mockResolvedValueOnce(true)   // enable claude
+      .mockResolvedValueOnce(true)   // enable codex
+      .mockResolvedValueOnce(true)   // enable opencode
+      .mockResolvedValueOnce(true);  // save
     await runInteractiveConfigWizard();
     const savedConfig = vi.mocked(saveConfig).mock.calls[0][0];
     expect(savedConfig.org).toBeUndefined();
@@ -382,7 +446,12 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("")                               // workItemType — skip
       .mockResolvedValueOnce("")                               // iteration — skip
       .mockResolvedValueOnce("");                              // area — skip
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(true)   // enable copilot
+      .mockResolvedValueOnce(true)   // enable claude
+      .mockResolvedValueOnce(true)   // enable codex
+      .mockResolvedValueOnce(true)   // enable opencode
+      .mockResolvedValueOnce(true);  // save
     await runInteractiveConfigWizard();
     expect(input).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -402,7 +471,12 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
     vi.mocked(select).mockResolvedValueOnce("github"); // datasource
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(true)   // enable copilot
+      .mockResolvedValueOnce(true)   // enable claude
+      .mockResolvedValueOnce(true)   // enable codex
+      .mockResolvedValueOnce(true)   // enable opencode
+      .mockResolvedValueOnce(true);  // save
     await runInteractiveConfigWizard();
     expect(input).not.toHaveBeenCalled();
     const savedConfig = vi.mocked(saveConfig).mock.calls[0][0];
@@ -416,7 +490,12 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
     vi.mocked(select).mockResolvedValueOnce("github"); // datasource
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(true)   // enable copilot
+      .mockResolvedValueOnce(true)   // enable claude
+      .mockResolvedValueOnce(true)   // enable codex
+      .mockResolvedValueOnce(true)   // enable opencode
+      .mockResolvedValueOnce(true);  // save
     await runInteractiveConfigWizard();
     expect(ensureAuthReady).toHaveBeenCalledWith("github", process.cwd(), undefined);
   });
@@ -431,7 +510,12 @@ describe("runInteractiveConfigWizard", () => {
       .mockResolvedValueOnce("")                               // workItemType
       .mockResolvedValueOnce("")                               // iteration
       .mockResolvedValueOnce("");                              // area
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(true)   // enable copilot
+      .mockResolvedValueOnce(true)   // enable claude
+      .mockResolvedValueOnce(true)   // enable codex
+      .mockResolvedValueOnce(true)   // enable opencode
+      .mockResolvedValueOnce(true);  // save
     await runInteractiveConfigWizard();
     expect(ensureAuthReady).toHaveBeenCalledWith("azdevops", process.cwd(), "https://dev.azure.com/myorg");
   });
@@ -440,7 +524,12 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
     vi.mocked(select).mockResolvedValueOnce("md"); // datasource
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(true)   // enable copilot
+      .mockResolvedValueOnce(true)   // enable claude
+      .mockResolvedValueOnce(true)   // enable codex
+      .mockResolvedValueOnce(true)   // enable opencode
+      .mockResolvedValueOnce(true);  // save
     await runInteractiveConfigWizard();
     expect(ensureAuthReady).toHaveBeenCalledWith("md", process.cwd(), undefined);
   });
@@ -450,7 +539,12 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
     vi.mocked(select).mockResolvedValueOnce("github"); // datasource
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(true)   // enable copilot
+      .mockResolvedValueOnce(true)   // enable claude
+      .mockResolvedValueOnce(true)   // enable codex
+      .mockResolvedValueOnce(true)   // enable opencode
+      .mockResolvedValueOnce(true);  // save
     await runInteractiveConfigWizard();
     expect(saveConfig).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -466,7 +560,12 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
     vi.mocked(select).mockResolvedValueOnce("auto"); // auto selected, but detected as github
-    vi.mocked(confirm).mockResolvedValueOnce(true); // save
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(true)   // enable copilot
+      .mockResolvedValueOnce(true)   // enable claude
+      .mockResolvedValueOnce(true)   // enable codex
+      .mockResolvedValueOnce(true)   // enable opencode
+      .mockResolvedValueOnce(true);  // save
     await runInteractiveConfigWizard();
     expect(ensureAuthReady).toHaveBeenCalledWith("github", process.cwd(), undefined);
   });

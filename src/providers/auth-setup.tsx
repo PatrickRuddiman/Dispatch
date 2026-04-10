@@ -2,11 +2,9 @@
  * Interactive auth setup per provider — walks users through configuring
  * credentials for each AI provider during `dispatch config`.
  *
- * Each provider has a different auth mechanism:
- *   - Copilot: GitHub token (env var or gh CLI login)
- *   - Claude: Anthropic API key or `claude login`
- *   - Codex: OpenAI API key
- *   - OpenCode: OpenCode's own config system
+ * Every provider offers two standardized auth methods:
+ *   - OAuth / CLI login (device flow or browser-based)
+ *   - API key / environment variable
  */
 
 import { select } from "../helpers/ink-prompts.js";
@@ -46,28 +44,28 @@ async function setupCopilotAuth(): Promise<boolean> {
   const method = await select({
     message: "How would you like to authenticate?",
     choices: [
-      { name: "GitHub CLI (gh auth login)", value: "gh-cli" as const, description: "Uses the GitHub CLI's device flow" },
-      { name: "Environment variable", value: "env-var" as const, description: "Set GITHUB_TOKEN or GH_TOKEN manually" },
+      { name: "Copilot CLI login", value: "cli-login" as const, description: "Run 'copilot login' — device code flow" },
+      { name: "API key (environment variable)", value: "env-var" as const, description: "Set GITHUB_TOKEN or GH_TOKEN manually" },
     ],
   });
 
-  if (method === "gh-cli") {
+  if (method === "cli-login") {
     try {
-      log.info("Running 'gh auth login'...");
+      log.info("Running 'copilot login'...");
       const { spawn } = await import("node:child_process");
       await new Promise<void>((resolve, reject) => {
-        const child = spawn("gh", ["auth", "login"], {
+        const child = spawn("copilot", ["login"], {
           stdio: "inherit",
           timeout: AUTH_CMD_TIMEOUT_MS,
         });
         child.on("close", (code) =>
-          code === 0 ? resolve() : reject(new Error(`gh auth login exited with code ${code}`)),
+          code === 0 ? resolve() : reject(new Error(`copilot login exited with code ${code}`)),
         );
         child.on("error", reject);
       });
       return await verifyAuth("copilot");
     } catch (err) {
-      log.warn(`GitHub CLI auth failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`Copilot CLI auth failed: ${err instanceof Error ? err.message : String(err)}`);
       return false;
     }
   }
@@ -88,33 +86,33 @@ async function setupClaudeAuth(): Promise<boolean> {
   const method = await select({
     message: "How would you like to authenticate?",
     choices: [
-      { name: "API key (ANTHROPIC_API_KEY)", value: "api-key" as const, description: "Paste your Anthropic API key" },
-      { name: "Claude CLI login", value: "cli-login" as const, description: "Run 'claude login' — opens a browser" },
+      { name: "Claude CLI login", value: "cli-login" as const, description: "Run 'claude auth login' — opens a browser" },
+      { name: "API key (environment variable)", value: "env-var" as const, description: "Set ANTHROPIC_API_KEY manually" },
     ],
   });
 
   if (method === "cli-login") {
     try {
-      log.info("Running 'claude login'...");
+      log.info("Running 'claude auth login'...");
       const { spawn } = await import("node:child_process");
       await new Promise<void>((resolve, reject) => {
-        const child = spawn("claude", ["login"], {
+        const child = spawn("claude", ["auth", "login"], {
           stdio: "inherit",
           timeout: AUTH_CMD_TIMEOUT_MS,
         });
         child.on("close", (code) =>
-          code === 0 ? resolve() : reject(new Error(`claude login exited with code ${code}`)),
+          code === 0 ? resolve() : reject(new Error(`claude auth login exited with code ${code}`)),
         );
         child.on("error", reject);
       });
       return await verifyAuth("claude");
     } catch (err) {
-      log.warn(`Claude login failed: ${err instanceof Error ? err.message : String(err)}`);
+      log.warn(`Claude CLI auth failed: ${err instanceof Error ? err.message : String(err)}`);
       return false;
     }
   }
 
-  // API key path
+  // env-var path
   log.info("Set the following environment variable in your shell profile:");
   log.info("  ANTHROPIC_API_KEY=<your API key>");
   console.log();
@@ -126,6 +124,36 @@ async function setupCodexAuth(): Promise<boolean> {
   log.info("OpenAI Codex Authentication");
   console.log();
 
+  const method = await select({
+    message: "How would you like to authenticate?",
+    choices: [
+      { name: "ChatGPT sign-in", value: "cli-login" as const, description: "Run 'codex login --device-auth' — device code flow" },
+      { name: "API key (environment variable)", value: "env-var" as const, description: "Set OPENAI_API_KEY manually" },
+    ],
+  });
+
+  if (method === "cli-login") {
+    try {
+      log.info("Running 'codex login --device-auth'...");
+      const { spawn } = await import("node:child_process");
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn("codex", ["login", "--device-auth"], {
+          stdio: "inherit",
+          timeout: AUTH_CMD_TIMEOUT_MS,
+        });
+        child.on("close", (code) =>
+          code === 0 ? resolve() : reject(new Error(`codex login exited with code ${code}`)),
+        );
+        child.on("error", reject);
+      });
+      return await verifyAuth("codex");
+    } catch (err) {
+      log.warn(`Codex CLI auth failed: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
+  }
+
+  // env-var path
   log.info("Set the following environment variable in your shell profile:");
   log.info("  OPENAI_API_KEY=<your API key>");
   console.log();
@@ -137,10 +165,42 @@ async function setupOpencodeAuth(): Promise<boolean> {
   log.info("OpenCode Authentication");
   console.log();
 
-  log.info("OpenCode uses its own configuration system.");
-  log.info("Run 'opencode' to set up your providers and API keys.");
+  const method = await select({
+    message: "How would you like to authenticate?",
+    choices: [
+      { name: "OpenCode CLI login", value: "cli-login" as const, description: "Run 'opencode auth login' interactively" },
+      { name: "API key (environment variable)", value: "env-var" as const, description: "Set provider API keys manually" },
+    ],
+  });
+
+  if (method === "cli-login") {
+    try {
+      log.info("Running 'opencode auth login'...");
+      const { spawn } = await import("node:child_process");
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn("opencode", ["auth", "login"], {
+          stdio: "inherit",
+          timeout: AUTH_CMD_TIMEOUT_MS,
+        });
+        child.on("close", (code) =>
+          code === 0 ? resolve() : reject(new Error(`opencode auth login exited with code ${code}`)),
+        );
+        child.on("error", reject);
+      });
+      return await verifyAuth("opencode");
+    } catch (err) {
+      log.warn(`OpenCode CLI auth failed: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
+  }
+
+  // env-var path
+  log.info("Set the relevant API key environment variable in your shell profile.");
+  log.info("For example:");
+  log.info("  ANTHROPIC_API_KEY=<your API key>");
+  log.info("  OPENAI_API_KEY=<your API key>");
   console.log();
-  log.dim("After configuring OpenCode, re-run 'dispatch config'.");
+  log.dim("After setting the variable, restart your terminal and re-run 'dispatch config'.");
   return false;
 }
 
