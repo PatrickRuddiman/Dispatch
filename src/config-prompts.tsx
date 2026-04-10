@@ -6,7 +6,7 @@
  * the user just needs to authenticate the providers they want to use.
  */
 
-import { select, confirm, input } from "./helpers/ink-prompts.js";
+import { select, confirm, input, multiSelect } from "./helpers/ink-prompts.js";
 import { log } from "./helpers/logger.js";
 import {
   loadConfig,
@@ -93,19 +93,18 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
   console.log();
 
   // ── Provider selection ─────────────────────────────────────
-  log.info("Select which providers you want to enable:");
-  console.log();
-
-  const selectedProviders: ProviderName[] = [];
-  for (const ps of providerStatuses) {
-    const isAuth = ps.authStatus.status === "authenticated";
-    const suffix = !isAuth ? " (not yet authenticated)" : "";
-    const enable = await confirm({
-      message: `Enable ${ps.displayName}?${suffix}`,
-      default: isAuth,
-    });
-    if (enable) selectedProviders.push(ps.name);
-  }
+  const selectedProviders = await multiSelect<ProviderName>({
+    message: "Select providers to enable:",
+    choices: providerStatuses.map((ps) => {
+      const isAuth = ps.authStatus.status === "authenticated";
+      return {
+        name: ps.displayName,
+        value: ps.name,
+        description: isAuth ? "authenticated" : "not yet authenticated",
+        default: isAuth,
+      };
+    }),
+  });
 
   if (selectedProviders.length === 0) {
     log.error("At least one provider must be enabled to use Dispatch.");

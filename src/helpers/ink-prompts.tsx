@@ -87,6 +87,77 @@ export function confirm(opts: {
 }
 
 /**
+ * Ink-based multi-select prompt. Returns an array of selected values.
+ * Use space to toggle, enter to confirm.
+ */
+export function multiSelect<T>(opts: {
+  message: string;
+  choices: Array<{ name: string; value: T; description?: string; default?: boolean }>;
+}): Promise<T[]> {
+  return new Promise((resolve) => {
+    function MultiSelectPrompt() {
+      const { exit } = useApp();
+      const [cursor, setCursor] = useState(0);
+      const [selected, setSelected] = useState<Set<number>>(() => {
+        const initial = new Set<number>();
+        opts.choices.forEach((c, i) => { if (c.default) initial.add(i); });
+        return initial;
+      });
+
+      useInput((input, key) => {
+        if (key.upArrow) {
+          setCursor((prev) => (prev > 0 ? prev - 1 : opts.choices.length - 1));
+        } else if (key.downArrow) {
+          setCursor((prev) => (prev < opts.choices.length - 1 ? prev + 1 : 0));
+        } else if (input === " ") {
+          setSelected((prev) => {
+            const next = new Set(prev);
+            if (next.has(cursor)) next.delete(cursor);
+            else next.add(cursor);
+            return next;
+          });
+        } else if (key.return) {
+          const result = opts.choices
+            .filter((_, i) => selected.has(i))
+            .map((c) => c.value);
+          resolve(result);
+          exit();
+        }
+      });
+
+      return (
+        <Box flexDirection="column">
+          <Box>
+            <Text color={PALETTE.accent} bold>? </Text>
+            <Text>{opts.message}</Text>
+            <Text color={PALETTE.muted}> (space to toggle, enter to confirm)</Text>
+          </Box>
+          {opts.choices.map((choice, i) => {
+            const isSelected = selected.has(i);
+            const isCursor = i === cursor;
+            const checkbox = isSelected ? "◉" : "◯";
+            const pointer = isCursor ? "❯" : " ";
+            return (
+              <Box key={i}>
+                <Text color={isCursor ? PALETTE.accent : undefined}>
+                  {pointer} {checkbox} {choice.name}
+                </Text>
+                {choice.description && isCursor && (
+                  <Text color={PALETTE.muted}> — {choice.description}</Text>
+                )}
+              </Box>
+            );
+          })}
+        </Box>
+      );
+    }
+
+    const instance = render(<MultiSelectPrompt />);
+    instance.waitUntilExit().catch(() => {});
+  });
+}
+
+/**
  * Ink-based text input prompt. Returns the user's text input.
  */
 export function input(opts: {
