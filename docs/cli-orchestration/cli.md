@@ -3,8 +3,8 @@
 The CLI entry point (`src/cli.ts`) uses the [Commander.js](https://github.com/tj/commander.js)
 library to parse command-line arguments, validates user input via custom option
 processors and `choices()` constraints, displays help and version information,
-handles the `config` and `mcp` subcommands, and delegates all workflow logic to
-the [orchestrator](orchestrator.md) via `bootOrchestrator` and `runFromCli`.
+handles the `config` subcommand, and delegates all workflow logic to the
+[orchestrator](orchestrator.md) via `bootOrchestrator` and `runFromCli`.
 
 ## What it does
 
@@ -15,9 +15,6 @@ the [CLI & Orchestration group](overview.md). It:
    [Configuration](configuration.md)). The config subcommand uses a separate
    Commander instance with `allowUnknownOption()` and `allowExcessArguments()`
    so it can pass through arbitrary arguments.
-1. Intercepts the `mcp` subcommand before argument parsing (see
-   [MCP Subcommand](mcp-subcommand.md)). Starts an MCP server using stdio or
-   HTTP transport.
 2. Parses `process.argv` via [Commander.js](#commanderjs-argument-parsing) into
    a typed `ParsedArgs` object along with an `explicitFlags` set derived from
    Commander's `getOptionValueSource()` API.
@@ -26,18 +23,18 @@ the [CLI & Orchestration group](overview.md). It:
 4. Handles `--help` and `--version` early-exit paths.
 5. Boots the orchestrator via `bootOrchestrator({ cwd })` and delegates to
    `orchestrator.runFromCli(args)`, which handles config resolution, mode
-   routing (dispatch, spec, respec, or feature), and pipeline
+   routing (dispatch, spec, respec, fix-tests, or feature), and pipeline
    execution.
 6. Translates the result summary into a POSIX exit code.
 
 ## Installation and distribution
 
-The `dispatch` CLI is distributed as the npm package `@pruddiman/dispatch`.
+The `dispatch` CLI is distributed as the npm package `dispatch`.
 
 ### Requirements
 
-- **Node.js >= 20.12.0** (`package.json` `engines` field). The tsup build target
-  is `node20` (`tsup.config.ts`).
+- **Node.js >= 18** (`package.json` `engines` field). The tsup build target is
+  `node18` (`tsup.config.ts`).
 - **ESM only**: The package uses `"type": "module"` in `package.json`. All
   imports use `.js` extensions for ESM compatibility.
 
@@ -45,13 +42,13 @@ The `dispatch` CLI is distributed as the npm package `@pruddiman/dispatch`.
 
 ```bash
 # Global install -- adds `dispatch` to PATH
-npm install -g @pruddiman/dispatch
+npm install -g dispatch
 
 # Run without installing
-npx @pruddiman/dispatch
+npx dispatch
 
 # Local project install
-npm install --save-dev @pruddiman/dispatch
+npm install --save-dev dispatch
 npx dispatch           # runs via local node_modules/.bin
 ```
 
@@ -63,14 +60,11 @@ The `package.json` `bin` field maps the `dispatch` command to `./dist/cli.js`:
 { "bin": { "dispatch": "./dist/cli.js" } }
 ```
 
-The tsup build (`tsup.config.ts`) compiles `src/cli.ts` and
-`src/mcp/dispatch-worker.ts` to `dist/` as ESM bundles with a
-`#!/usr/bin/env node` shebang banner and a `createRequire` polyfill for
-packages that rely on `require()`. Source maps are enabled
-(`sourcemap: true`), type declarations are not emitted (`dts: false`),
-and code splitting is disabled (`splitting: false`). The
-`@github/copilot-sdk` and `vscode-jsonrpc` packages are bundled inline via
-`noExternal` to avoid ESM/CJS interop issues at runtime.
+The tsup build (`tsup.config.ts`) compiles `src/cli.ts` to `dist/cli.js` as a
+single ESM bundle with a `#!/usr/bin/env node` shebang banner. Source maps are
+enabled (`sourcemap: true`), type declarations are not emitted (`dts: false`),
+and code splitting is disabled (`splitting: false`) to produce a single output
+file.
 
 ### Published files
 
@@ -90,12 +84,6 @@ The package has runtime dependencies including:
 | `chalk` | Terminal color output (see [chalk integration](../shared-types/integrations.md#chalk)) |
 | `glob` | File pattern matching for task discovery |
 | `@inquirer/prompts` | Interactive prompts for the [configuration wizard](configuration.md#config-wizard-flow) |
-| `@octokit/auth-oauth-device` | GitHub OAuth device-flow authentication (see [Authentication](authentication.md#github-oauth-device-flow)) |
-| `@octokit/rest` | GitHub API client for issue fetching |
-| `@azure/identity` | Azure AD device-code authentication (see [Authentication](authentication.md#azure-ad-device-code-flow)) |
-| `azure-devops-node-api` | Azure DevOps API client for work item fetching |
-| `@modelcontextprotocol/sdk` | MCP server implementation (see [MCP Subcommand](mcp-subcommand.md)) |
-| `open` | Opens device-code verification URLs in the user's browser during auth |
 
 ## Why Commander.js
 
@@ -111,7 +99,7 @@ argument parsing (`src/cli.ts:13`). Commander provides:
   options use Commander's variadic syntax to collect multiple arguments
   into arrays.
 - **Custom option processing**: Numeric options (`--concurrency`, `--plan-timeout`,
-  `--spec-timeout`, `--retries`, `--plan-retries`) use Commander's custom
+  `--spec-timeout`, `--retries`, `--plan-retries`, `--test-timeout`) use Commander's custom
   processing callbacks to parse, validate, and coerce values in a single step.
 - **Negatable booleans**: `--no-plan`, `--no-branch`, and `--no-worktree` use
   Commander's built-in negatable boolean support (Commander automatically handles
@@ -150,26 +138,29 @@ them as their positive counterparts (`plan`, `branch`, `worktree`).
 |--------|------|---------|-------------|
 | `<issue-id...>` | string (positional, repeatable) | *(none -- dispatches all open issues if omitted)* | Issue IDs to dispatch (e.g., `14`, `14,15,16`, or `14 15 16`) |
 | `--dry-run` | boolean | `false` | List discovered tasks without executing (see [dry-run mode](orchestrator.md#dry-run-mode)) |
-| `--no-plan` | boolean | `false` | Skip the [planner agent](../agent-system/planner-agent.md), dispatch tasks directly (see [Planning & Dispatch overview](../planning-and-dispatch/overview.md)) |
+| `--no-plan` | boolean | `false` | Skip the [planner agent](../planning-and-dispatch/planner.md), dispatch tasks directly (see [Planning & Dispatch overview](../planning-and-dispatch/overview.md)) |
 | `--no-branch` | boolean | `false` | Skip branch creation, push, and PR lifecycle (see [the --no-branch flag](#the---no-branch-flag)) |
 | `--no-worktree` | boolean | `false` | Skip git worktree isolation for parallel issues. Tasks run in the main working directory instead of isolated worktrees. |
 | `--feature` | boolean | `false` | Group multiple issues into a single feature branch and PR instead of separate branches per issue. Cannot be combined with `--no-branch` (enforced by the orchestrator, not the parser). |
 | `--force` | boolean | `false` | Ignore prior run state and re-run all tasks, even those previously completed. |
 | `--concurrency <n>` | integer | `min(cpus, freeMB/500)` | Maximum parallel dispatches per batch. Must be between 1 and 64 (`MAX_CONCURRENCY`). See [concurrency model](orchestrator.md#concurrency-model) and [default computation](configuration.md#default-concurrency-computation). |
 | `--provider <name>` | string | `"opencode"` | AI agent backend: `opencode`, `copilot`, `claude`, or `codex`. Validated via Commander's `choices()` against `PROVIDER_NAMES`. See [Provider Abstraction](../provider-system/overview.md). |
-| `--model <model>` | string | *(provider default)* | Model override in provider-specific format. Copilot uses bare model IDs (e.g., `claude-sonnet-4-5`), OpenCode uses `provider/model` format (e.g., `anthropic/claude-sonnet-4`). This is the "strong" tier model used by executor and spec agents. |
-| `--fast-provider <name>` | string | *(falls back to --provider)* | Provider for the "fast" (cost-saving) tier used by planner and commit agents. Validated via Commander's `choices()` against `PROVIDER_NAMES`. See [Configuration — Fast vs strong tier](configuration.md#fast-vs-strong-tier-model-configuration). |
-| `--fast-model <model>` | string | *(falls back to --model)* | Model for the "fast" (cost-saving) tier, in provider-specific format. Used by planner and commit agents to reduce costs. |
 | `--server-url <url>` | string | *none* | Connect to a running provider server instead of starting one |
 | `--plan-timeout <min>` | float | `30` | Planning timeout in minutes. Must be a positive number. Parsed via `parseFloat`. |
 | `--retries <n>` | integer | `3` | Retry attempts for all agents. Must be a non-negative integer. Parsed via `parseInt`. |
 | `--plan-retries <n>` | integer | *(falls back to --retries)* | Retry attempts after planning timeout. Overrides `--retries` for the planner agent specifically. Must be a non-negative integer. |
+| `--test-timeout <min>` | float | `5` | Test timeout in minutes. Must be a positive number. Parsed via `parseFloat`. Configurable via `dispatch config`. |
 | `--cwd <dir>` | string | `process.cwd()` | Working directory for file discovery and agent execution |
 | `--verbose` | boolean | `false` | Show detailed debug output for troubleshooting |
 | `-h`, `--help` | boolean | `false` | Show usage information |
 | `-v`, `--version` | boolean | `false` | Show version string |
 
 > **Note**: `--plan-timeout` defaults to 30 minutes, and `--retries` defaults to 3 shared retries (4 total attempts). If those automatic retries are exhausted during dispatch, interactive TUI runs pause the task for rerun-or-quit recovery instead of silently continuing. Verbose or non-TTY runs will not wait for recovery input. See [Planning & Dispatch overview](../planning-and-dispatch/overview.md) and [Terminal UI](tui.md).
+
+> **Note**: The `model` setting (AI model override) is a **config-only** field.
+> It is not available as a CLI flag and must be set via `dispatch config` or
+> the `{CWD}/.dispatch/config.json` file. See
+> [Configuration — Configurable keys](configuration.md#configurable-keys).
 
 ### Spec mode options
 
@@ -193,6 +184,19 @@ required and the dispatch-specific flags (`--dry-run`, `--no-plan`,
 | `--spec-kill-timeout <min>` | float | `10` | Spec kill-phase timeout in minutes. The generation attempt is killed after this duration. Must be a positive number. |
 | `--plan-timeout <min>` | float | `30` | Planning timeout in minutes (shared with dispatch mode) |
 | `--plan-retries <n>` | integer | *(falls back to --retries)* | Retry attempts after planning timeout (shared with dispatch mode) |
+
+### Fix-tests mode options
+
+Fix-tests mode is activated by passing `--fix-tests`. It runs the project's
+test suite and uses an AI agent to fix any failures. This mode is mutually
+exclusive with `--spec` and positional issue IDs.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `--fix-tests` | boolean | `false` | Activate fix-tests mode. Cannot be combined with `--spec` or positional issue IDs. |
+| `--test-timeout <min>` | float | `5` | Test timeout in minutes (shared with dispatch mode) |
+| `--provider <name>` | string | `"opencode"` | AI agent backend (shared with dispatch mode) |
+| `--server-url <url>` | string | *none* | Connect to a running provider server (shared with dispatch mode) |
 
 #### Spec mode validation
 
@@ -229,7 +233,7 @@ After collection, the CLI normalizes the result (`src/cli.ts:211-219`):
 - **`--respec` passed as bare flag**: Commander sets the value to `true`;
   the CLI converts this to an empty array.
 
-The `--spec` and `--respec` flags are mutually exclusive.
+The `--spec`, `--respec`, and `--fix-tests` flags are mutually exclusive.
 Mutual exclusion is enforced downstream by the runner
 (`src/orchestrator/runner.ts`), which checks for multiple mode flags and
 produces an error. The parser intentionally allows all combinations.
@@ -245,12 +249,14 @@ dispatch --respec                        # respec = []    (regenerate all existi
 dispatch --respec 42                     # respec = "42"  (single issue)
 dispatch --respec 42 43 44             # respec = ["42", "43", "44"]
 dispatch --respec --verbose             # respec = []    (empty, --verbose consumed separately)
+dispatch --fix-tests                     # fix-tests mode
+dispatch --fix-tests --test-timeout 10   # fix-tests with custom timeout
 ```
 
 ## Multi-mode dispatch with deferred validation
 
-The CLI supports four mutually exclusive operational modes: default dispatch,
-`--spec`, `--respec`, and `--feature`. The parser intentionally
+The CLI supports five mutually exclusive operational modes: default dispatch,
+`--spec`, `--respec`, `--fix-tests`, and `--feature`. The parser intentionally
 does **not** enforce mutual exclusion between these modes. All combinations
 are syntactically valid at the parser level.
 
@@ -259,7 +265,7 @@ Mutual exclusion is enforced by the orchestrator
 config resolution and produces descriptive error messages. This separation
 means:
 
-- The argument-parsing layer accepts `--spec --feature` without error.
+- The argument-parsing layer accepts `--fix-tests --spec 42` without error.
 - The orchestrator rejects it with a meaningful message about incompatible modes.
 - The parser tests (`tests/cli.test.ts:100-108`, `173-199`, `248-269`)
   explicitly verify this deferred validation behavior.
@@ -375,6 +381,8 @@ The primary exit logic is at `src/cli.ts:335`:
 The exit code determination handles two result types:
 
 - **`DispatchSummary`**: Has a `failed` field. Exit code is `1` if `failed > 0`.
+- **`FixTestsSummary`**: Has a `success` boolean. Exit code is `1` if
+  `success` is `false`.
 
 There is **no distinction** between partial failure and total failure. If 9 out
 of 10 tasks succeed but 1 fails, the exit code is `1`. This follows POSIX
@@ -480,7 +488,7 @@ at `src/cli.ts:325`:
 console.log(`dispatch v${__VERSION__}`);
 ```
 
-The current package version is `1.5.0`. The `define` feature works like
+The current package version is `0.0.1`. The `define` feature works like
 esbuild's `define` -- it performs global string replacement at build time,
 so the built `dist/cli.js` file contains the literal version string with no
 runtime file reads.
@@ -549,10 +557,9 @@ boundary validation in Commander's custom processing callbacks:
 
 | Bound | Min | Max |
 |-------|-----|-----|
+| `testTimeout` | 1 | 120 |
 | `planTimeout` | 1 | 120 |
 | `specTimeout` | 1 | 120 |
-| `specWarnTimeout` | 1 | 120 |
-| `specKillTimeout` | 1 | 120 |
 | `concurrency` | 1 | 64 |
 
 The CLI exports `MAX_CONCURRENCY = CONFIG_BOUNDS.concurrency.max` (64) for
@@ -567,11 +574,7 @@ caught by the CLI's error handler, and reported via `log.error()`.
 flowchart TD
     A["process.argv.slice(2)"] --> B{"argv[0] === 'config'?"}
     B -->|Yes| C["Pre-parse --cwd via<br/>separate Commander instance<br/>handleConfigCommand(argv, configDir)<br/>process.exit(0)"]
-    B -->|No| B2{"argv[0] === 'mcp'?"}
-    B2 -->|Yes| B3{"--http flag?"}
-    B3 -->|Yes| B4["startMcpServer({ port, host, cwd })<br/>HTTP transport on port 9110"]
-    B3 -->|No| B5["startStdioMcpServer({ cwd })<br/>stdio transport"]
-    B2 -->|No| D["parseArgs(argv)<br/>Commander.js parse<br/>-> [ParsedArgs, explicitFlags]"]
+    B -->|No| D["parseArgs(argv)<br/>Commander.js parse<br/>-> [ParsedArgs, explicitFlags]"]
     D --> E{"help?"}
     E -->|Yes| F["print HELP, exit 0"]
     E -->|No| G{"version?"}
@@ -581,10 +584,12 @@ flowchart TD
     J --> K["resolveCliConfig(args)<br/>merge config + validate"]
     K --> L["checkPrereqs + ensureGitignore<br/>(see prereqs-and-safety)"]
     L --> M{"Mode?"}
+    M -->|--fix-tests| N["Fix-tests pipeline"]
     M -->|--spec / --respec| O["Spec pipeline"]
     M -->|--feature| P2["Feature dispatch pipeline"]
     M -->|default| P["Dispatch pipeline"]
-    O --> Q["Summary"]
+    N --> Q["Summary"]
+    O --> Q
     P --> Q
     P2 --> Q
     Q --> R{"failed > 0 or<br/>success === false?"}
@@ -600,70 +605,6 @@ from `src/orchestrator/runner.ts`. This returns an orchestrator instance, then
 `orchestrator.runFromCli(args)` (`src/cli.ts:332`) handles config resolution,
 prerequisite checks, mutual exclusion enforcement, and pipeline routing. See
 [Configuration](configuration.md) for full details on the resolution process.
-
-## The `dispatch mcp` subcommand
-
-The `dispatch mcp` subcommand starts an
-[MCP](https://modelcontextprotocol.io/introduction) (Model Context Protocol)
-server that exposes Dispatch's capabilities as MCP tools. This allows AI
-agents and MCP-aware clients to interact with Dispatch programmatically.
-
-The MCP subcommand is intercepted at `src/cli.ts:391` before `parseArgs()`
-runs, similar to the `config` subcommand. A separate Commander instance
-parses the MCP-specific options.
-
-### MCP options
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `--http` | boolean | `false` | Use HTTP transport instead of stdio. Enables remote or multi-client connections. |
-| `--port <number>` | integer | `9110` | Port to listen on (HTTP mode only). |
-| `--host <host>` | string | `127.0.0.1` | Host to bind to (HTTP mode only). Defaults to localhost. |
-| `--cwd <dir>` | string | `process.cwd()` | Working directory for MCP tool operations. |
-
-### Transport modes
-
-The MCP server supports two transport modes:
-
-- **stdio** (default): Communicates via standard input/output. Designed for
-  local integration where an MCP client spawns `dispatch mcp` as a child
-  process. This is the standard MCP transport for desktop tools and editors.
-
-- **HTTP** (`--http`): Listens on a TCP port for HTTP-based MCP connections.
-  Suitable for remote or multi-client scenarios. The server binds to
-  `127.0.0.1:9110` by default, restricting access to localhost. To allow
-  remote connections, set `--host 0.0.0.0` (with appropriate network
-  security).
-
-```bash
-# stdio transport (default) — for MCP client integration
-dispatch mcp
-
-# HTTP transport on default port
-dispatch mcp --http
-
-# HTTP transport on custom port
-dispatch mcp --http --port 8080
-
-# HTTP transport with remote access (use with caution)
-dispatch mcp --http --host 0.0.0.0 --port 9110
-```
-
-### MCP server lifecycle
-
-The MCP server starts and keeps the Node.js event loop alive indefinitely.
-The `startMcpServer()` and `startStdioMcpServer()` functions (dynamically
-imported from `src/mcp/index.js`) install their own signal handlers and
-manage the server lifecycle. The CLI's `main()` function returns after
-starting the server — it does not install the standard `SIGINT`/`SIGTERM`
-handlers or call `parseArgs()`.
-
-### Implementation
-
-The MCP server implementation lives in `src/mcp/`. The worker entry point
-(`src/mcp/dispatch-worker.ts`) is a separate tsup build entry, compiled
-alongside `src/cli.ts`. See [MCP Subcommand](mcp-subcommand.md) for full
-architecture and tool documentation.
 
 ## Test coverage
 
@@ -681,6 +622,8 @@ The test suite covers seven categories:
 | `--respec` parsing | 8 tests | Empty, single, multiple, glob, and flag-stop behavior |
 | `--spec` / `--respec` mutual exclusion | 3 tests | Both can be set simultaneously (deferred validation) |
 | `--respec` with other flags | 3 tests | Combinations with `--source`, `--provider`, file paths |
+| `--fix-tests` parsing | 5 tests | Boolean flag, combinations with other flags |
+| `--fix-tests` mutual exclusion | 4 tests | Can coexist with `--spec` and `--respec` at parser level |
 | `--force` and `--feature` | 9 tests | Boolean flags, combinations, mutual exclusion behavior |
 | Basic and value flags | 19 tests | All option types: booleans, strings, numbers, positionals |
 | Error cases | 14 tests | Invalid values, out-of-range, unknown flags |
@@ -726,15 +669,11 @@ npx vitest --watch tests/cli.test.ts  # Watch mode
 
 - [Configuration](configuration.md) -- persistent config file, three-tier
   precedence, `dispatch config` subcommand, and mandatory validation
-- [Authentication](authentication.md) -- GitHub and Azure device-code flows,
-  token storage, and `ensureAuthReady()` entry point
-- [MCP Subcommand](mcp-subcommand.md) -- MCP server architecture, tool
-  registration, and transport modes
 - [Orchestrator pipeline](orchestrator.md) -- what happens after the CLI
   delegates to `orchestrator.runFromCli()` in dispatch mode
 - [Spec Generation](../spec-generation/overview.md) -- the full spec generation
   pipeline invoked by `--spec` mode
-- [Issue Fetching](../deprecated-compat/overview.md) -- how issues are retrieved
+- [Issue Fetching](../issue-fetching/overview.md) -- how issues are retrieved
   from GitHub and Azure DevOps for spec generation
 - [Terminal UI](tui.md) -- real-time dashboard rendering during dispatch
 - [Integrations](integrations.md) -- Commander.js, tsup build configuration,

@@ -1,6 +1,6 @@
 {
   "name": "@pruddiman/dispatch",
-  "version": "1.5.0",
+  "version": "1.4.4",
   "description": "AI agent orchestration CLI — parse markdown task files, dispatch each unit of work to code agents (OpenCode, GitHub Copilot, etc.), and commit results with conventional commits",
   "type": "module",
   "bin": {
@@ -27,8 +27,7 @@
     "orchestration",
     "dispatch",
     "tasks",
-    "markdown",
-    "beta"
+    "markdown"
   ],
   "license": "MIT",
   "repository": {
@@ -44,33 +43,23 @@
     "node": ">=20.12.0"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.98",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.63",
     "@azure/identity": "^4.13.0",
-    "@github/copilot-sdk": "^0.2.1",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@inquirer/prompts": "^8.3.0",
     "@octokit/auth-oauth-device": "^7.1.5",
     "@octokit/rest": "^21.1.1",
-    "@openai/codex-sdk": "^0.118.0",
-    "@opencode-ai/sdk": "^1.4.2",
+    "@openai/codex": "^0.1.0",
+    "@opencode-ai/sdk": "^1.2.10",
     "azure-devops-node-api": "^14.1.0",
-    "better-sqlite3": "^12.8.0",
     "chalk": "^5.4.1",
     "commander": "^14.0.3",
     "glob": "^11.0.1",
-    "ink": "^6.0.0",
-    "ink-select-input": "^6.0.0",
-    "ink-spinner": "^5.0.0",
-    "ink-text-input": "^6.0.0",
-    "open": "^10.2.0",
-    "react": "^19.0.0",
-    "zod": "^4.3.6"
+    "open": "^10.2.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
+    "@github/copilot-sdk": "^0.1.32",
     "@types/node": "^22.13.4",
-    "@types/react": "^19.0.0",
     "@vitest/coverage-v8": "^4.0.18",
-    "ink-testing-library": "^4.0.0",
     "semantic-release": "^25.0.3",
     "tsup": "^8.4.0",
     "typescript": "^5.7.3",

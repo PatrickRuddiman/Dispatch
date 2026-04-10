@@ -690,14 +690,14 @@ describe("buildPrTitle", () => {
     );
   });
 
-  it("returns newest commit message with count suffix for multiple commits", async () => {
+  it("returns oldest commit message with count suffix for multiple commits", async () => {
     mockExecFile.mockResolvedValue({
       stdout: "fix: handle edge case\nfeat: add login page\nfeat: scaffold auth module\n",
     });
 
     const result = await buildPrTitle("Add user auth", "main", "/tmp/repo");
 
-    expect(result).toBe("fix: handle edge case (+2 more)");
+    expect(result).toBe("feat: scaffold auth module (+2 more)");
   });
 
   it("returns issue title when git log returns empty output", async () => {

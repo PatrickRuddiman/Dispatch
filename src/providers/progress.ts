@@ -16,15 +16,7 @@ export function sanitizeProgressText(raw: string, maxLength = 120): string {
   return `${text.slice(0, maxLength - 1).trimEnd()}…`;
 }
 
-/** A lightweight progress reporter that de-duplicates successive identical messages. */
-export interface ProgressReporter {
-  /** Emit a progress text snapshot, de-duplicating against the previous value. */
-  emit(raw?: string | null): void;
-  /** Reset the last-emitted value so the next identical message is re-emitted. */
-  reset(): void;
-}
-
-export function createProgressReporter(onProgress?: ProviderPromptOptions["onProgress"]): ProgressReporter {
+export function createProgressReporter(onProgress?: ProviderPromptOptions["onProgress"]) {
   let last: string | undefined;
 
   return {

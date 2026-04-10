@@ -452,7 +452,7 @@ reference.
   definition and lifecycle contract
 - [Dispatcher](../planning-and-dispatch/dispatcher.md) -- how the dispatcher
   creates sessions and sends prompts
-- [Planner](../agent-system/planner-agent.md) -- how the planner creates
+- [Planner](../planning-and-dispatch/planner.md) -- how the planner creates
   sessions for read-only exploration
 - [CLI Options](../cli-orchestration/cli.md) -- `--provider opencode` and
   `--server-url` flags
@@ -472,5 +472,3 @@ reference.
   for SSE event filtering in `isSessionEvent`
 - [Timeout Utility](../shared-utilities/timeout.md) -- deadline enforcement
   shared by planning calls and OpenCode's session-ready wait
-- [Binary Detection](./binary-detection.md) -- how the config wizard detects
-  whether the `opencode` binary is installed

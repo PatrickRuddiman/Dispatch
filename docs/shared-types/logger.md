@@ -448,5 +448,3 @@ For details on the file logger side of this integration, see the
   config wizard that uses chalk-styled indicators informed by logger output
 - [Datasource Helpers](../datasource-system/datasource-helpers.md) — How
   datasource helper functions use `log.warn()` and `log.success()`
-- [Troubleshooting](../dispatch-pipeline/troubleshooting.md) — Common issues
-  where logger output provides diagnostic clues

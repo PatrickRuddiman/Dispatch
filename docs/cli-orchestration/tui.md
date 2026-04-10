@@ -67,7 +67,7 @@ stateDiagram-v2
 
 Each task in `tui.state.tasks[]` has a `status` field that tracks its
 individual progress. The [orchestrator](orchestrator.md) updates this status as tasks move through
-the [planning](../agent-system/planner-agent.md) and [execution](../planning-and-dispatch/dispatcher.md) phases.
+the [planning](../planning-and-dispatch/planner.md) and [execution](../planning-and-dispatch/dispatcher.md) phases.
 
 ## Module-level mutable state and singleton safety
 
@@ -482,6 +482,3 @@ flowchart TD
   pipeline stages that drive TUI phase transitions
 - [Worktree Management](../git-and-worktree/worktree-management.md) -- how
   worktree names are constructed, affecting the grouped display mode
-- [TUI Tests](../testing/tui-tests.md) -- 46 unit tests covering phase
-  rendering, task status display, recovery input, worktree grouping, spec
-  mode integration, and visual row counting

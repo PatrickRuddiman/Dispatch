@@ -103,8 +103,9 @@ harm because:
   can be recovered with `git checkout`.
 
 If concurrent Dispatch execution becomes a supported use case, the function
-should use a file lock (e.g., `proper-lockfile` or `flock`) or an atomic
-write-to-temp-then-rename pattern.
+should use a file lock (e.g., `proper-lockfile` or `flock`) or the atomic
+write-to-temp-then-rename pattern used by
+[`saveRunState`](./run-state.md#atomic-write-strategy).
 
 ## When it is called
 
@@ -153,8 +154,6 @@ even on Windows.
 ## Related documentation
 
 - [Overview](./overview.md) — Group-level summary and design decisions
-- [Authentication](./authentication.md) — OAuth device-flow authentication
-  that runs during the same startup phase as this helper
 - [Branch Validation](./branch-validation.md) — Branch name validation module
 - [Worktree Management](./worktree-management.md) — The worktree module that
   creates the directories this helper keeps gitignored
@@ -162,9 +161,12 @@ even on Windows.
   and write operations
 - [Testing](./testing.md) — 8 tests covering deduplication, ENOENT handling,
   CRLF line endings, and write failures
-- [Run State](./run-state.md) — SQLite-backed persistence that complements
-  worktree lifecycle management
-- [Orchestrator Pipeline](../cli-orchestration/orchestrator.md) — Where
-  `ensureGitignoreEntry()` is called during the runner's early startup phase
-- [Configuration](../cli-orchestration/configuration.md) — `.dispatch/`
-  directory conventions and config file location
+- [Shared Types — Integrations](../shared-types/integrations.md) — Broader
+  discussion of `fs/promises` patterns including atomicity and `ENOENT`
+  handling
+- [Run State](./run-state.md) — Atomic write-to-temp-then-rename pattern
+  referenced as a potential improvement for this module
+- [Architecture & Concurrency](../task-parsing/architecture-and-concurrency.md) —
+  Read-modify-write patterns and file I/O race conditions
+- [Configuration](../cli-orchestration/configuration.md) — Persistent config
+  stored in `.dispatch/config.json` alongside the gitignored worktree directory

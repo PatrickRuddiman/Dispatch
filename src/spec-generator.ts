@@ -8,13 +8,13 @@
  *   1. Resolve the datasource (explicit or auto-detected)
  *   2. Fetch issue/file details via the datasource
  *   3. Boot the AI provider
- *   4. For each item, tell the AI the target filepath and prompt it
+ *   4. For each item, tell the AI agent the target filepath and prompt it
  *      to explore the codebase and write the spec directly to disk
  *   5. Verify the spec file was written
  *   6. Push spec content back to the datasource via update()
  *
  * The generated specs stay high-level (WHAT, WHY, HOW) because the
- * planner in the dispatch pipeline handles detailed, line-level
+ * planner agent in the dispatch pipeline handles detailed, line-level
  * implementation planning for each individual task.
  */
 
@@ -30,7 +30,7 @@ export const MB_PER_CONCURRENT_TASK = 500;
 /** Default spec-generation timeout in minutes when not specified by the user. */
 export const DEFAULT_SPEC_TIMEOUT_MIN = 10;
 
-/** Default spec-generation warn-phase duration in minutes (AI receives a "wrap up" message). */
+/** Default spec-generation warn-phase duration in minutes (agent receives a "wrap up" message). */
 export const DEFAULT_SPEC_WARN_MIN = 10;
 
 /** Default spec-generation kill-phase duration in minutes (hard termination after warn). */
@@ -47,22 +47,15 @@ export const RECOGNIZED_H2 = new Set([
   "## Key Guidelines",
 ]);
 
-/** Progress event emitted by the spec pipeline for MCP monitoring. */
-export type SpecProgressEvent =
-  | { type: "item_start";  runId?: string; itemId: string; itemTitle?: string }
-  | { type: "item_done";   runId?: string; itemId: string; itemTitle?: string }
-  | { type: "item_failed"; runId?: string; itemId: string; itemTitle?: string; error: string }
-  | { type: "log";         runId?: string; message: string };
-
 export interface SpecOptions {
   /** Comma-separated issue numbers, glob pattern(s), or "list" to use datasource.list() */
   issues: string | string[];
   /** Explicit datasource override (auto-detected if omitted) */
   issueSource?: DatasourceName;
-  /** Force a specific provider for all roles (CLI --provider override). */
-  provider?: ProviderName;
-  /** Authenticated providers from config — router uses these for auto-selection. */
-  enabledProviders?: ProviderName[];
+  /** AI agent backend */
+  provider: ProviderName;
+  /** Model override to pass to the provider (provider-specific format). */
+  model?: string;
   /** URL of a running provider server */
   serverUrl?: string;
   /** Working directory */
@@ -87,18 +80,16 @@ export interface SpecOptions {
   retries?: number;
   /** Spec generation timeout in minutes (default: 10) */
   specTimeout?: number;
-  /** Warn-phase timeout in minutes — AI receives a "wrap up" message after this duration (default: 10) */
+  /** Warn-phase timeout in minutes — agent receives a "wrap up" message after this duration (default: 10) */
   specWarnTimeout?: number;
   /** Kill-phase timeout in minutes — hard termination after the warn phase expires (default: 10) */
   specKillTimeout?: number;
-  /** Optional callback for MCP progress notifications. */
-  progressCallback?: (event: SpecProgressEvent) => void;
 }
 
 /**
  * Returns a safe default concurrency: min(cpuCount, freeMB/500), at least 1.
  *
- * Each concurrent provider process (provider runtime) is estimated to consume
+ * Each concurrent agent process (provider runtime) is estimated to consume
  * roughly 500 MB of resident memory. The formula caps parallelism at the
  * lesser of the available CPU count and the number of 500 MB slots that fit
  * in current free memory, ensuring the host is not over-committed. The
@@ -157,7 +148,7 @@ export function isGlobOrFilePath(input: string | string[]): boolean {
 }
 
 /**
- * Post-process raw spec file content written by the AI.
+ * Post-process raw spec file content written by the AI agent.
  *
  * Strips code-fence wrapping, preamble text before the first H1 heading,
  * and postamble text after the last recognized spec section.  Returns the
@@ -227,9 +218,12 @@ export function extractSpecContent(raw: string): string {
   return content;
 }
 
-export type ValidationResult =
-  | { valid: true }
-  | { valid: false; reason: string };
+export interface ValidationResult {
+  /** Whether the spec content has valid structure */
+  valid: boolean;
+  /** Human-readable reason when validation fails */
+  reason?: string;
+}
 
 /**
  * Validate that spec content has the expected structural markers.

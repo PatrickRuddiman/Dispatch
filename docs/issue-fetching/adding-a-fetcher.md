@@ -94,7 +94,7 @@ export const fetcher: IssueFetcher = {
 - **Error handling:** The main `fetch()` method should let errors propagate.
   The [spec generator](../spec-generation/overview.md) handles per-issue failures. Optional data (like comments)
   can be fetched in a try/catch that returns defaults on failure.
-- **Field mapping:** Map the tracker's native fields to [`IssueDetails`](../datasource-system/overview.md#issuedetails-interface).
+- **Field mapping:** Map the tracker's native fields to [`IssueDetails`](./overview.md#issuedetails-interface).
   Fields that have no equivalent should use sensible defaults (empty string
   for `acceptanceCriteria`, empty array for `labels`).
 - **HTML vs markdown:** Document whether the `body` field contains HTML or
@@ -172,8 +172,8 @@ After implementing the fetcher:
    [GitHub Fetcher](./github-fetcher.md) and
    [Azure DevOps Fetcher](./azdevops-fetcher.md) pages.
 2. Add the new page to the component index in
-   [Overview](../datasource-system/overview.md#component-index).
-3. Update the [architecture diagram](../datasource-system/overview.md#architecture) to include
+   [Overview](./overview.md#component-index).
+3. Update the [architecture diagram](./overview.md#architecture) to include
    the new fetcher.
 
 ## Compile-time safety
@@ -209,7 +209,7 @@ free of implementation imports at the cost of manual synchronization.
 
 ## Related documentation
 
-- [Overview](../datasource-system/overview.md) -- Architecture and the IssueDetails interface
+- [Overview](./overview.md) -- Architecture and the IssueDetails interface
 - [GitHub Fetcher](./github-fetcher.md) -- Reference implementation using
   a CLI tool
 - [Azure DevOps Fetcher](./azdevops-fetcher.md) -- Reference implementation
@@ -226,7 +226,7 @@ free of implementation imports at the cost of manual synchronization.
 - [Prerequisites — External Integrations](../prereqs-and-safety/integrations.md) --
   How CLI tools (`gh`, `az`) are detected at startup; new fetcher CLI
   dependencies should follow the same `execFile("tool", ["--version"])` pattern
-- [Provider Binary Detection](../provider-system/binary-detection.md) --
+- [Provider Binary Detection](../prereqs-and-safety/provider-detection.md) --
   Similar binary detection pattern used for AI provider tools
 - [Testing Overview](../testing/overview.md) -- Project-wide test framework;
   new fetchers should include tests following existing patterns

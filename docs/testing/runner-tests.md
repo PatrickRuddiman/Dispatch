@@ -8,11 +8,11 @@ behavior, and the `parseIssueFilename` re-export.
 
 | Test file | Production module | Lines (test) | Test count | Category |
 |-----------|-------------------|-------------|------------|----------|
-| `runner.test.ts` | `src/orchestrator/runner.ts` | 354 | 23 | Boot, routing, mutual exclusion, specTimeout, error propagation |
-| `respec-routing.test.ts` | `src/orchestrator/runner.ts` | 377 | 10 | Respec discovery, identifier formatting, large batch |
+| `runner.test.ts` | `src/orchestrator/runner.ts` | 377 | 18 | Boot, routing, mutual exclusion, error propagation |
+| `respec-routing.test.ts` | `src/orchestrator/runner.ts` | 367 | 10 | Respec discovery, identifier formatting, large batch |
 | `orchestrator.test.ts` | `src/orchestrator/runner.ts` | 305 | 8 | `parseIssueFilename` re-export, datasource sync |
 
-**Total: 1,036 lines of test code** covering 41 tests across 3 files.
+**Total: 1,049 lines of test code** covering 36 tests across 3 files.
 
 ## What these tests verify
 
@@ -21,9 +21,8 @@ routing logic, validation rules, and integration with downstream pipelines:
 
 - **`runner.test.ts`**: Boot factory shape, `orchestrate()` delegation,
   `generateSpecs()` delegation, `run()` mode routing, `runFromCli()` pipeline
-  selection, all mutual-exclusion combinations, `specTimeout` forwarding,
-  error propagation from config resolution, dispatch pipeline, and spec
-  pipeline.
+  selection, all mutual-exclusion combinations, error propagation from config
+  resolution, dispatch pipeline, and spec pipeline.
 - **`respec-routing.test.ts`**: The two respec code paths (discovery vs. direct
   delegation), identifier formatting (numeric join vs. array pass-through),
   empty discovery errors, `resolveSource` failure handling, and large batch
@@ -48,7 +47,7 @@ graph TD
     end
 
     subgraph "Test Files"
-        RT["runner.test.ts<br/>23 tests"]
+        RT["runner.test.ts<br/>18 tests"]
         RR["respec-routing.test.ts<br/>10 tests"]
         OT["orchestrator.test.ts<br/>8 tests"]
     end
@@ -57,6 +56,7 @@ graph TD
         RC["resolveCliConfig"]
         SP["runSpecPipeline"]
         DP["runDispatchPipeline"]
+        FT["runFixTestsPipeline"]
         RS["resolveSource"]
         GD["getDatasource"]
         CB["confirmLargeBatch"]
@@ -79,11 +79,12 @@ graph TD
     RT -->|mocks| RC
     RT -->|mocks| SP
     RT -->|mocks| DP
+    RT -->|mocks| FT
 ```
 
 ## runner.test.ts
 
-**File**: `src/tests/runner.test.ts` (354 lines, 23 tests)
+**File**: `src/tests/runner.test.ts` (377 lines, 18 tests)
 
 ### What is tested
 
@@ -92,8 +93,8 @@ graph TD
 | `boot()` | 1 | Returns an object with `orchestrate`, `generateSpecs`, `run`, and `runFromCli` methods |
 | `orchestrate()` | 2 | Delegates to `runDispatchPipeline` with correct args and `cwd`; returns `DispatchSummary` |
 | `generateSpecs()` | 2 | Delegates to `runSpecPipeline` with correct options; returns `SpecSummary` |
-| `run()` | 4 | Routes to spec or dispatch based on `mode` discriminator; strips `mode` before delegation |
-| `runFromCli()` | 14 | Config resolution, pipeline routing for dispatch/spec, all mutual-exclusion combinations, `specTimeout` forwarding, `defaultConcurrency` fallback, error propagation from config/dispatch/spec |
+| `run()` | 4 | Routes to spec, fix-tests, or dispatch based on `mode` discriminator; strips `mode` before delegation |
+| `runFromCli()` | 9 | Config resolution, pipeline routing for dispatch/spec/fix-tests, all mutual-exclusion combinations, `defaultConcurrency` fallback, error propagation from config/dispatch/spec |
 
 ### Mocking strategy
 
@@ -107,6 +108,7 @@ All external dependencies are mocked at module level via `vi.mock()`:
 | `datasources/index.js` | `getDatasource` returns mock |
 | `orchestrator/spec-pipeline.js` | `runSpecPipeline` returns empty summary |
 | `orchestrator/dispatch-pipeline.js` | `runDispatchPipeline` returns empty summary |
+| `orchestrator/fix-tests-pipeline.js` | `runFixTestsPipeline` returns `{ mode: "fix-tests", success: true }` |
 
 The `process.exit` is spied on and overridden to throw an error, allowing tests
 to assert that exit was triggered without actually terminating the test process.
@@ -117,25 +119,12 @@ The test file exhaustively validates every forbidden flag combination:
 
 | Test | Flags | Expected error |
 |------|-------|----------------|
+| `--spec` + `--fix-tests` | `{ spec: "1", fixTests: true }` | `"mutually exclusive"` |
+| `--respec` + `--fix-tests` | `{ respec: "1", fixTests: true }` | `"mutually exclusive"` |
+| `--fix-tests` + issue IDs | `{ fixTests: true, issueIds: ["1"] }` | `"cannot be combined with issue IDs"` |
 | `--feature` + `--no-branch` | `{ feature: true, noBranch: true }` | `"mutually exclusive"` |
 | `--feature` + `--spec` | `{ feature: true, spec: "1" }` | `"mutually exclusive"` |
-
-### `specTimeout` forwarding tests
-
-Four tests verify that the `specTimeout` option is correctly forwarded from
-`runFromCli()` to the downstream `runSpecPipeline` call, covering both
-`--spec` and `--respec` modes (`runner.test.ts:257-291`):
-
-| Test | Mode | Input | Expected |
-|------|------|-------|----------|
-| Explicit `specTimeout` in spec mode | `--spec` | `specTimeout: 7.5` | `runSpecPipeline` called with `specTimeout: 7.5` |
-| Default `specTimeout` in spec mode | `--spec` | `specTimeout: undefined` | `runSpecPipeline` called with `specTimeout: DEFAULT_SPEC_TIMEOUT_MIN` |
-| Explicit `specTimeout` in respec mode | `--respec` | `specTimeout: 7.5` | `runSpecPipeline` called with `specTimeout: 7.5` |
-| Default `specTimeout` in respec mode | `--respec` | `specTimeout: undefined` | `runSpecPipeline` called with `specTimeout: DEFAULT_SPEC_TIMEOUT_MIN` |
-
-This validates that `runFromCli` never passes `undefined` for `specTimeout` —
-it always resolves to the `DEFAULT_SPEC_TIMEOUT_MIN` constant when the user
-does not provide an explicit value.
+| `--feature` + `--fix-tests` | `{ feature: true, fixTests: true }` | `"mutually exclusive"` |
 
 ### Error propagation tests
 
@@ -150,7 +139,7 @@ wrapping or retry logic.
 
 ## respec-routing.test.ts
 
-**File**: `src/tests/respec-routing.test.ts` (377 lines, 10 tests)
+**File**: `src/tests/respec-routing.test.ts` (367 lines, 10 tests)
 
 ### What is tested
 
@@ -284,8 +273,6 @@ tools because all downstream pipeline calls are mocked.
   config resolution that the runner calls
 - [Spec Generator Tests](./spec-generator-tests.md) — tests for the spec
   pipeline invoked by the runner
-- [Spec Pipeline Tests](./spec-pipeline-tests.md) — spec pipeline lifecycle
-  tests (runSpecPipeline)
 - [Datasource Testing](../datasource-system/testing.md) — tests for the
   datasource layer consumed during respec discovery
 - [Datasource Helpers](../datasource-system/datasource-helpers.md) — the
@@ -294,5 +281,7 @@ tools because all downstream pipeline calls are mocked.
   by `runFromCli()` before mode routing
 - [Batch Confirmation](../prereqs-and-safety/confirm-large-batch.md) — the
   safety prompt tested in respec discovery
+- [Fix-Tests Tests](./fix-tests-tests.md) — tests for the fix-tests
+  pipeline, another routing target of the runner
 - [Dispatch Pipeline Tests](./dispatch-pipeline-tests.md) — tests for the
   dispatch pipeline, the primary routing target of the runner

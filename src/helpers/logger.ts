@@ -24,19 +24,14 @@ const LOG_LEVEL_SEVERITY: Record<LogLevel, number> = {
   error: 3,
 };
 
-/** Type predicate: returns true if `level` is a valid `LogLevel` key. */
-function isLogLevel(level: string): level is LogLevel {
-  return Object.hasOwn(LOG_LEVEL_SEVERITY, level);
-}
-
 /**
  * Resolve the effective log level from environment variables.
  * Priority: LOG_LEVEL > DEBUG > default ("info").
  */
 function resolveLogLevel(): LogLevel {
   const envLevel = process.env.LOG_LEVEL?.toLowerCase();
-  if (envLevel && isLogLevel(envLevel)) {
-    return envLevel;
+  if (envLevel && Object.hasOwn(LOG_LEVEL_SEVERITY, envLevel)) {
+    return envLevel as LogLevel;
   }
   if (process.env.DEBUG) {
     return "debug";

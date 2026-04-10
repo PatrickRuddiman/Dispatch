@@ -26,14 +26,8 @@ testable.
 | File | Role |
 |------|------|
 | [`src/orchestrator/dispatch-pipeline.ts`](../../src/orchestrator/dispatch-pipeline.ts) | Pipeline entry point, issue processing, feature branch workflow |
-| [`src/orchestrator/datasource-helpers.ts`](../../src/orchestrator/datasource-helpers.ts) | PR body/title generation, git diff/squash, issue fetching |
-| [`src/providers/pool.ts`](../../src/providers/pool.ts) | Provider pool with priority-based failover |
-| [`src/helpers/concurrency.ts`](../../src/helpers/concurrency.ts) | Sliding-window concurrency engine |
 | [`src/parser.ts`](../../src/parser.ts) | Task extraction, grouping, completion marking |
 | [`src/tui.ts`](../../src/tui.ts) | Terminal UI renderer and state machine |
-| [`src/helpers/timeout.ts`](../../src/helpers/timeout.ts) | Promise timeout with `TimeoutError` |
-| [`src/helpers/retry.ts`](../../src/helpers/retry.ts) | Generic retry with logging |
-| [`src/helpers/worktree.ts`](../../src/helpers/worktree.ts) | Worktree creation/removal with retry |
 | [`src/tests/dispatch-pipeline.test.ts`](../../src/tests/dispatch-pipeline.test.ts) | Unit tests (~1,930 lines, 70+ tests) |
 | [`src/tests/integration/dispatch-flow.test.ts`](../../src/tests/integration/dispatch-flow.test.ts) | Integration tests (3 tests using real md datasource) |
 
@@ -201,52 +195,6 @@ Even with worktrees, issues are not always processed in parallel:
 | Feature branch | Yes | **Sequential** via `for...of` (to avoid merge conflicts) |
 | Serial fallback | No | **Sequential** via `for...of` |
 
-### Worktree retry logic
-
-Worktree creation (`src/helpers/worktree.ts`) includes retry logic for
-transient git lock contention:
-
-- **Max retries**: 5 attempts
-- **Backoff**: Exponential starting at 200ms (200, 400, 800, 1600, 3200ms)
-- **Retryable errors**: Lock contention, "already used by worktree" (triggers
-  `git worktree prune` before retry)
-- **Non-retryable errors**: Thrown immediately (anything not lock/already related)
-
-## Provider pool and failover
-
-Each agent role (planner, executor, commit) gets its own `ProviderPool`
-instance. A pool contains a prioritized list of provider+model entries. When
-the primary provider fails, the pool automatically falls back to the next
-available entry.
-
-```mermaid
-flowchart LR
-    subgraph "Provider Pool (per agent)"
-        P0["Priority 0<br/>Primary provider"]
-        P1["Priority 1<br/>Fallback 1"]
-        P2["Priority 2<br/>Fallback 2"]
-    end
-
-    AGENT["Agent call"] --> P0
-    P0 -->|"success"| RESULT["Return result"]
-    P0 -->|"failure"| P1
-    P1 -->|"success"| RESULT
-    P1 -->|"failure"| P2
-    P2 -->|"success"| RESULT
-    P2 -->|"failure"| ERROR["Throw last error"]
-```
-
-Pool entries are constructed from the agent configs:
-
-1. The agent's own configured provider+model is priority 0.
-2. All other configured providers (from other agent roles) are added as
-   fallbacks with ascending priority.
-3. Duplicate provider+model combinations are deduplicated.
-
-When using worktrees, each worktree gets its own set of pools (booted with the
-worktree's `cwd`). When not using worktrees, pools are shared across all
-issues.
-
 ## Planning timeout and retry
 
 The pipeline wraps each `planner.plan()` call with a timeout and retry loop.
@@ -358,20 +306,6 @@ sequenceDiagram
 
 See [Concurrency model](orchestrator.md#concurrency-model) for the full
 batch-sequential dispatch algorithm and failure semantics.
-
-### Sliding-window concurrency
-
-The sliding-window concurrency model (from `src/helpers/concurrency.ts`) uses
-`runWithConcurrency()` to keep `min(concurrency, remaining)` tasks active at
-all times. When any worker completes, the next queued item is started
-immediately — unlike a batch-then-await model that waits for an entire batch
-before starting the next.
-
-#### Concurrency defaults and bounds
-
-- Default concurrency: `os.cpus().length` (clamped to a minimum of 1)
-- Config bounds: 1–64 (enforced by `CONFIG_BOUNDS.concurrency`)
-- Feature mode forces serial issue processing regardless of concurrency setting
 
 ## Datasource sync after task completion
 
@@ -498,62 +432,6 @@ After all issues are processed, the pipeline creates a single PR targeting the
 default branch. The PR title and body are built by `buildFeaturePrTitle()` and
 `buildFeaturePrBody()` which aggregate information from all successfully
 processed issues.
-
-### Feature branch naming
-
-- Explicit name: `--feature my-feature` produces `dispatch/my-feature` (or
-  uses the name verbatim if it contains `/`)
-- Auto-generated: `--feature` (boolean) produces `dispatch/feature-{8-hex}`
-  using a random UUID prefix
-
-## Interactive recovery
-
-When a task fails in the dispatch pipeline, the TUI enters a "paused" state:
-
-1. The failed task is marked with `status: "paused"` in the TUI state.
-2. Recovery metadata is set on `tui.state.recovery` (task index, error,
-   issue details, worktree path).
-3. In interactive TTY mode, the TUI calls `waitForRecoveryAction()` which
-   presents the user with options (rerun or quit).
-4. If "rerun" is selected, `runTaskLifecycle()` is called again for the same
-   task. If it fails again, recovery re-enters the loop.
-5. If "quit" is selected, the task is marked failed, `preserveContext` is set
-   (preventing worktree cleanup), and the pipeline halts — leaving the worktree
-   intact for manual debugging.
-6. In non-interactive mode (verbose or non-TTY), the task is immediately
-   marked failed and the pipeline halts.
-
-## Dry-run mode
-
-The `dryRunMode()` function (exported separately) performs discovery and parsing
-but skips all execution, provider boot, and git operations. It logs each task
-with its file location, text, and would-be branch name, then returns a summary
-with all tasks marked as "skipped".
-
-## Starting branch detection
-
-The pipeline captures the current git branch at startup via
-`datasource.getCurrentBranch()`. This "starting branch" serves as:
-
-- The base for new issue branches (in non-feature mode)
-- The PR target branch
-- The branch to return to after processing each issue
-- The base for the feature branch (in feature mode)
-
-This design means Dispatch respects the user's current branch context — if the
-user is on `release/1.4.3`, all PRs target that branch, not `main`.
-
-## MD datasource special handling
-
-When the datasource is `md` (local markdown), the pipeline includes extra
-logic:
-
-- **Git detection**: Checks for a git repository via `git rev-parse --git-dir`.
-  If no repo is found, branching is silently disabled (`noBranch = true`) so
-  the pipeline can still execute.
-- **Glob support**: When issue IDs contain glob patterns or file paths (detected
-  by `isGlobOrFilePath()`), the pipeline resolves them via `resolveGlobItems()`
-  instead of fetching by ID.
 
 ## TUI display modes
 

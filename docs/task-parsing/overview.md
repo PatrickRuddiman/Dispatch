@@ -24,7 +24,7 @@ The parser module (`src/parser.ts`) provides five core capabilities
 Dispatch uses plain markdown files as the source of truth for work items. This
 design choice means task files are human-readable, version-controllable, and
 editable with any text editor. The parser bridges the gap between this
-human-friendly format and the structured data that the [orchestrator](../cli-orchestration/orchestrator.md), [planner](../agent-system/planner-agent.md),
+human-friendly format and the structured data that the [orchestrator](../cli-orchestration/orchestrator.md), [planner](../planning-and-dispatch/planner.md),
 [dispatcher](../planning-and-dispatch/dispatcher.md), [TUI](../cli-orchestration/tui.md), and [git](../planning-and-dispatch/git.md) modules require.
 
 ### Task nesting is not semantic
@@ -157,7 +157,7 @@ for a detailed analysis.
 - [Git Worktree Helpers](../git-and-worktree/overview.md) -- worktree
   isolation model; task files are parsed and mutated within isolated worktrees
   during parallel dispatch
-- [Executor Agent](../agent-system/executor-agent.md) -- the agent that
+- [Executor Agent](../planning-and-dispatch/executor.md) -- the agent that
   calls `markTaskComplete()` after successful task dispatch
-- [Planner Agent](../agent-system/planner-agent.md) -- the agent that
+- [Planner Agent](../planning-and-dispatch/planner.md) -- the agent that
   receives filtered task context from `buildTaskContext()`

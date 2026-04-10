@@ -186,8 +186,6 @@ npx vitest run tests/branch-validation.test.ts
 ## Related documentation
 
 - [Overview](./overview.md) — Group-level summary
-- [Authentication](./authentication.md) — OAuth authentication that runs
-  before branch names are used in worktree operations
 - [Worktree Management](./worktree-management.md) — `generateFeatureBranchName`
   which produces branch names that pass validation
 - [Datasource Overview](../datasource-system/overview.md#branch-naming-convention) —
@@ -202,5 +200,7 @@ npx vitest run tests/branch-validation.test.ts
   algorithm that produces branch-safe strings
 - [Integrations](./integrations.md) — Git CLI subprocess model and `execFile`
   security properties
-- [Testing](./testing.md) — 41 branch validation tests plus auth and run-state
-  tests
+- [Shared Errors](../shared-utilities/errors.md) — Error utility patterns
+  complementing `InvalidBranchNameError`
+- [Testing Overview](../testing/overview.md) — Project-wide test suite
+  including branch validation tests

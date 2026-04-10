@@ -17,13 +17,16 @@ import { runInteractiveConfigWizard } from "./config-prompts.js";
  * All fields are optional since the config file may contain any subset.
  */
 export interface DispatchConfig {
+  provider?: ProviderName;
   /**
-   * Providers the user has authenticated and enabled.
-   * Populated by the config wizard during auth setup.
-   * The router uses this list to decide which providers to route to.
+   * Model to use when spawning agents, in provider-specific format.
+   *   - Copilot: bare model ID (e.g. "claude-sonnet-4-5")
+   *   - OpenCode: "provider/model" (e.g. "anthropic/claude-sonnet-4")
+   * When omitted the provider uses its auto-detected default.
    */
-  enabledProviders?: ProviderName[];
+  model?: string;
   source?: DatasourceName;
+  testTimeout?: number;
   planTimeout?: number;
   specTimeout?: number;
   specWarnTimeout?: number;
@@ -42,6 +45,7 @@ export interface DispatchConfig {
 
 /** Minimum and maximum bounds for numeric configuration values. */
 export const CONFIG_BOUNDS = {
+  testTimeout: { min: 1, max: 120 },
   planTimeout: { min: 1, max: 120 },
   specTimeout: { min: 1, max: 120 },
   specWarnTimeout: { min: 1, max: 120 },
@@ -50,7 +54,7 @@ export const CONFIG_BOUNDS = {
 } as const;
 
 /** Valid configuration key names. */
-export const CONFIG_KEYS = ["enabledProviders", "source", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area", "username"] as const;
+export const CONFIG_KEYS = ["provider", "model", "source", "testTimeout", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area", "username"] as const;
 
 /** A valid configuration key name. */
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -67,79 +71,16 @@ export function getConfigPath(configDir?: string): string {
 /**
  * Load the config from disk.
  * Returns `{}` if the file doesn't exist or contains invalid JSON.
- * Migrates legacy configs that used `provider`/`model`/`agents` fields.
  * Accepts an optional `configDir` override for testing.
  */
 export async function loadConfig(configDir?: string): Promise<DispatchConfig> {
   const configPath = getConfigPath(configDir);
   try {
     const raw = await readFile(configPath, "utf-8");
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return migrateConfig(parsed);
+    return JSON.parse(raw) as DispatchConfig;
   } catch {
     return {};
   }
-}
-
-/**
- * Migrate legacy config format to the new schema.
- *
- * Old configs had: provider, model, fastProvider, fastModel, agents
- * New configs have: enabledProviders
- *
- * Legacy fields are silently dropped. The provider name is extracted
- * into enabledProviders if not already set.
- */
-function migrateConfig(raw: Record<string, unknown>): DispatchConfig {
-  const config: DispatchConfig = {};
-
-  // Migrate legacy provider field into enabledProviders
-  if (!raw.enabledProviders && raw.provider) {
-    const providers = new Set<ProviderName>();
-    const legacyProvider = raw.provider as ProviderName;
-    if (PROVIDER_NAMES.includes(legacyProvider)) {
-      providers.add(legacyProvider);
-    }
-    // Also pick up fastProvider if different
-    if (raw.fastProvider) {
-      const fastProvider = raw.fastProvider as ProviderName;
-      if (PROVIDER_NAMES.includes(fastProvider)) {
-        providers.add(fastProvider);
-      }
-    }
-    // Pick up per-agent providers
-    if (raw.agents && typeof raw.agents === "object") {
-      for (const agentCfg of Object.values(raw.agents as Record<string, { provider?: string }>)) {
-        if (agentCfg?.provider && PROVIDER_NAMES.includes(agentCfg.provider as ProviderName)) {
-          providers.add(agentCfg.provider as ProviderName);
-        }
-      }
-    }
-    if (providers.size > 0) {
-      config.enabledProviders = [...providers];
-    }
-  } else if (Array.isArray(raw.enabledProviders)) {
-    config.enabledProviders = (raw.enabledProviders as string[]).filter((p) =>
-      PROVIDER_NAMES.includes(p as ProviderName),
-    ) as ProviderName[];
-  }
-
-  // Copy over non-legacy fields
-  if (raw.source !== undefined) config.source = raw.source as DatasourceName;
-  if (raw.planTimeout !== undefined) config.planTimeout = raw.planTimeout as number;
-  if (raw.specTimeout !== undefined) config.specTimeout = raw.specTimeout as number;
-  if (raw.specWarnTimeout !== undefined) config.specWarnTimeout = raw.specWarnTimeout as number;
-  if (raw.specKillTimeout !== undefined) config.specKillTimeout = raw.specKillTimeout as number;
-  if (raw.concurrency !== undefined) config.concurrency = raw.concurrency as number;
-  if (raw.org !== undefined) config.org = raw.org as string;
-  if (raw.project !== undefined) config.project = raw.project as string;
-  if (raw.workItemType !== undefined) config.workItemType = raw.workItemType as string;
-  if (raw.iteration !== undefined) config.iteration = raw.iteration as string;
-  if (raw.area !== undefined) config.area = raw.area as string;
-  if (raw.username !== undefined) config.username = raw.username as string;
-  if (raw.nextIssueId !== undefined) config.nextIssueId = raw.nextIssueId as number;
-
-  return config;
 }
 
 /**
@@ -162,8 +103,16 @@ export async function saveConfig(
  */
 export function validateConfigValue(key: ConfigKey, value: string): string | null {
   switch (key) {
-    case "enabledProviders":
-      // Array field — skip string-level validation.
+    case "provider":
+      if (!PROVIDER_NAMES.includes(value as ProviderName)) {
+        return `Invalid provider "${value}". Available: ${PROVIDER_NAMES.join(", ")}`;
+      }
+      return null;
+
+    case "model":
+      if (!value || value.trim() === "") {
+        return `Invalid model: value must not be empty`;
+      }
       return null;
 
     case "source":
@@ -171,6 +120,14 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
         return `Invalid source "${value}". Available: ${DATASOURCE_NAMES.join(", ")}`;
       }
       return null;
+
+    case "testTimeout": {
+      const num = Number(value);
+      if (!Number.isFinite(num) || num < CONFIG_BOUNDS.testTimeout.min || num > CONFIG_BOUNDS.testTimeout.max) {
+        return `Invalid testTimeout "${value}". Must be a number between ${CONFIG_BOUNDS.testTimeout.min} and ${CONFIG_BOUNDS.testTimeout.max} (minutes)`;
+      }
+      return null;
+    }
 
     case "planTimeout": {
       const num = Number(value);
@@ -235,10 +192,8 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
       return null;
     }
 
-    default: {
-      const _exhaustive: never = key;
-      return `Unknown config key "${_exhaustive}"`;
-    }
+    default:
+      return `Unknown config key "${key}"`;
   }
 }
 

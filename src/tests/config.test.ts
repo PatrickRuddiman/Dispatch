@@ -38,10 +38,10 @@ describe("loadConfig", () => {
 
   it("loads a valid config file", async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
-    const config = { enabledProviders: ["copilot"] };
+    const config = { provider: "copilot", model: "gpt-4o" };
     await writeFile(join(tmpDir, "config.json"), JSON.stringify(config), "utf-8");
     const result = await loadConfig(tmpDir);
-    expect(result).toEqual({ enabledProviders: ["copilot"] });
+    expect(result).toEqual({ provider: "copilot", model: "gpt-4o" });
   });
 
   it("returns empty object for corrupt JSON", async () => {
@@ -54,91 +54,13 @@ describe("loadConfig", () => {
   it("loads config with all fields populated", async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
     const config: DispatchConfig = {
-      enabledProviders: ["copilot"],
+      provider: "copilot",
       source: "azdevops",
+      model: "claude-sonnet-4-5",
     };
     await writeFile(join(tmpDir, "config.json"), JSON.stringify(config), "utf-8");
     const result = await loadConfig(tmpDir);
     expect(result).toEqual(config);
-  });
-});
-
-// ─── Config migration ───────────────────────────────────────────────
-
-describe("config migration", () => {
-  let tmpDir: string;
-
-  afterEach(async () => {
-    if (tmpDir) {
-      await rm(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it("migrates legacy provider field to enabledProviders", async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
-    const legacy = { provider: "copilot", model: "gpt-4o" };
-    await writeFile(join(tmpDir, "config.json"), JSON.stringify(legacy), "utf-8");
-    const result = await loadConfig(tmpDir);
-    expect(result.enabledProviders).toEqual(["copilot"]);
-    // Legacy fields should be stripped
-    expect(result).not.toHaveProperty("provider");
-    expect(result).not.toHaveProperty("model");
-  });
-
-  it("migrates legacy provider + fastProvider into enabledProviders", async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
-    const legacy = { provider: "copilot", fastProvider: "claude", model: "gpt-4o", fastModel: "haiku" };
-    await writeFile(join(tmpDir, "config.json"), JSON.stringify(legacy), "utf-8");
-    const result = await loadConfig(tmpDir);
-    expect(result.enabledProviders).toContain("copilot");
-    expect(result.enabledProviders).toContain("claude");
-    expect(result).not.toHaveProperty("provider");
-    expect(result).not.toHaveProperty("fastProvider");
-    expect(result).not.toHaveProperty("model");
-    expect(result).not.toHaveProperty("fastModel");
-  });
-
-  it("migrates legacy agents field providers into enabledProviders", async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
-    const legacy = {
-      provider: "copilot",
-      agents: {
-        planner: { provider: "claude" },
-        coder: { provider: "opencode" },
-      },
-    };
-    await writeFile(join(tmpDir, "config.json"), JSON.stringify(legacy), "utf-8");
-    const result = await loadConfig(tmpDir);
-    expect(result.enabledProviders).toContain("copilot");
-    expect(result.enabledProviders).toContain("claude");
-    expect(result.enabledProviders).toContain("opencode");
-    expect(result).not.toHaveProperty("agents");
-  });
-
-  it("deduplicates providers during migration", async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
-    const legacy = { provider: "copilot", fastProvider: "copilot" };
-    await writeFile(join(tmpDir, "config.json"), JSON.stringify(legacy), "utf-8");
-    const result = await loadConfig(tmpDir);
-    expect(result.enabledProviders).toEqual(["copilot"]);
-  });
-
-  it("does not migrate if enabledProviders is already set", async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
-    const config = { enabledProviders: ["claude"], provider: "copilot" };
-    await writeFile(join(tmpDir, "config.json"), JSON.stringify(config), "utf-8");
-    const result = await loadConfig(tmpDir);
-    expect(result.enabledProviders).toEqual(["claude"]);
-  });
-
-  it("preserves non-legacy fields during migration", async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
-    const legacy = { provider: "copilot", source: "azdevops", org: "https://dev.azure.com/myorg" };
-    await writeFile(join(tmpDir, "config.json"), JSON.stringify(legacy), "utf-8");
-    const result = await loadConfig(tmpDir);
-    expect(result.enabledProviders).toEqual(["copilot"]);
-    expect(result.source).toBe("azdevops");
-    expect(result.org).toBe("https://dev.azure.com/myorg");
   });
 });
 
@@ -156,8 +78,9 @@ describe("saveConfig", () => {
   it("saves config and round-trips correctly", async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
     const config: DispatchConfig = {
-      enabledProviders: ["copilot"],
+      provider: "copilot",
       source: "github",
+      model: "gpt-4o",
     };
     await saveConfig(config, tmpDir);
     const loaded = await loadConfig(tmpDir);
@@ -167,7 +90,7 @@ describe("saveConfig", () => {
   it("creates parent directory if it doesn't exist", async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
     const configDir = join(tmpDir, "nested", "subdir");
-    const config: DispatchConfig = { enabledProviders: ["opencode"] };
+    const config: DispatchConfig = { provider: "opencode" };
     await saveConfig(config, configDir);
     const raw = await readFile(join(configDir, "config.json"), "utf-8");
     expect(JSON.parse(raw)).toEqual(config);
@@ -175,24 +98,25 @@ describe("saveConfig", () => {
 
   it("writes pretty-printed JSON with trailing newline", async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
-    const config: DispatchConfig = { enabledProviders: ["copilot"] };
+    const config: DispatchConfig = { provider: "copilot" };
     await saveConfig(config, tmpDir);
     const raw = await readFile(join(tmpDir, "config.json"), "utf-8");
-    expect(raw).toBe(JSON.stringify({ enabledProviders: ["copilot"] }, null, 2) + "\n");
+    expect(raw).toBe(JSON.stringify({ provider: "copilot" }, null, 2) + "\n");
   });
 
   it("overwrites existing config", async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
-    await saveConfig({ enabledProviders: ["opencode"], source: "github" }, tmpDir);
-    await saveConfig({ enabledProviders: ["copilot"] }, tmpDir);
+    await saveConfig({ provider: "opencode", model: "some-model" }, tmpDir);
+    await saveConfig({ provider: "copilot" }, tmpDir);
     const loaded = await loadConfig(tmpDir);
-    expect(loaded).toEqual({ enabledProviders: ["copilot"] });
+    expect(loaded).toEqual({ provider: "copilot" });
   });
 
   it("round-trips config with all Azure DevOps fields", async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "dispatch-test-"));
     const config: DispatchConfig = {
-      enabledProviders: ["copilot"],
+      provider: "copilot",
+      model: "gpt-4o",
       source: "azdevops",
       org: "https://dev.azure.com/myorg",
       project: "MyProject",
@@ -223,8 +147,15 @@ describe("getConfigPath", () => {
 // ─── validateConfigValue ─────────────────────────────────────────────
 
 describe("validateConfigValue", () => {
-  it("returns null for enabledProviders (array field, skips string validation)", () => {
-    expect(validateConfigValue("enabledProviders", "anything")).toBe(null);
+  it("accepts valid provider names", () => {
+    expect(validateConfigValue("provider", "opencode")).toBe(null);
+    expect(validateConfigValue("provider", "copilot")).toBe(null);
+  });
+
+  it("rejects invalid provider name", () => {
+    const result = validateConfigValue("provider", "invalid");
+    expect(result).not.toBe(null);
+    expect(result).toContain("Invalid provider");
   });
 
   it("accepts valid source names", () => {
@@ -236,6 +167,43 @@ describe("validateConfigValue", () => {
     const result = validateConfigValue("source", "jira");
     expect(result).not.toBe(null);
     expect(result).toContain("Invalid source");
+  });
+
+  it("accepts valid testTimeout (within bounds)", () => {
+    expect(validateConfigValue("testTimeout", String(CONFIG_BOUNDS.testTimeout.min))).toBe(null);
+    expect(validateConfigValue("testTimeout", "10")).toBe(null);
+    expect(validateConfigValue("testTimeout", "1.5")).toBe(null);
+    expect(validateConfigValue("testTimeout", String(CONFIG_BOUNDS.testTimeout.max))).toBe(null);
+  });
+
+  it("rejects testTimeout below minimum", () => {
+    const zero = validateConfigValue("testTimeout", "0");
+    expect(zero).not.toBe(null);
+    expect(zero).toContain("between");
+
+    const negative = validateConfigValue("testTimeout", "-5");
+    expect(negative).not.toBe(null);
+    expect(negative).toContain("between");
+  });
+
+  it("rejects testTimeout above maximum", () => {
+    const result = validateConfigValue("testTimeout", String(CONFIG_BOUNDS.testTimeout.max + 1));
+    expect(result).not.toBe(null);
+    expect(result).toContain("between");
+  });
+
+  it("rejects non-numeric testTimeout", () => {
+    const text = validateConfigValue("testTimeout", "abc");
+    expect(text).not.toBe(null);
+    expect(text).toContain("between");
+
+    const empty = validateConfigValue("testTimeout", "");
+    expect(empty).not.toBe(null);
+  });
+
+  it("rejects Infinity and NaN for testTimeout", () => {
+    expect(validateConfigValue("testTimeout", "Infinity")).not.toBe(null);
+    expect(validateConfigValue("testTimeout", "NaN")).not.toBe(null);
   });
 
   it("accepts valid planTimeout (within bounds)", () => {
@@ -484,6 +452,8 @@ describe("merge precedence", () => {
    * This mirrors the merge logic in main() in src/cli.ts.
    */
   const CONFIG_TO_CLI: Record<string, string> = {
+    provider: "provider",
+    model: "model",
     source: "issueSource",
     specTimeout: "specTimeout",
   };
@@ -503,56 +473,60 @@ describe("merge precedence", () => {
   }
 
   it("config value fills in when CLI flag is not explicit", () => {
-    const args: Record<string, unknown> = { issueSource: "github" };
-    const config: DispatchConfig = { source: "azdevops" };
+    const args: Record<string, unknown> = { provider: "opencode" };
+    const config: DispatchConfig = { provider: "copilot" };
     const explicitFlags = new Set<string>();
     applyMerge(args, config, explicitFlags);
-    expect(args.issueSource).toBe("azdevops");
+    expect(args.provider).toBe("copilot");
   });
 
   it("CLI flag takes precedence over config", () => {
-    const args: Record<string, unknown> = { issueSource: "github" };
-    const config: DispatchConfig = { source: "azdevops" };
-    const explicitFlags = new Set<string>(["issueSource"]);
+    const args: Record<string, unknown> = { provider: "opencode" };
+    const config: DispatchConfig = { provider: "copilot" };
+    const explicitFlags = new Set<string>(["provider"]);
     applyMerge(args, config, explicitFlags);
-    expect(args.issueSource).toBe("github");
+    expect(args.provider).toBe("opencode");
   });
 
   it("default is used when neither CLI nor config provides a value", () => {
-    const args: Record<string, unknown> = { issueSource: "github" };
+    const args: Record<string, unknown> = { provider: "opencode" };
     const config: DispatchConfig = {};
     const explicitFlags = new Set<string>();
     applyMerge(args, config, explicitFlags);
-    expect(args.issueSource).toBe("github");
+    expect(args.provider).toBe("opencode");
   });
 
   it("merge applies to each configurable field", () => {
     const args: Record<string, unknown> = {
+      provider: "opencode",
+      model: "",
       issueSource: "github",
       specTimeout: undefined,
     };
     const config: DispatchConfig = {
+      model: "claude-sonnet-4-5",
       source: "azdevops",
       specTimeout: 12,
     };
     const explicitFlags = new Set<string>();
     applyMerge(args, config, explicitFlags);
+    expect(args.model).toBe("claude-sonnet-4-5");
     expect(args.issueSource).toBe("azdevops");
     expect(args.specTimeout).toBe(12);
   });
 
   it("partially explicit flags still allow config for other fields", () => {
     const args: Record<string, unknown> = {
-      issueSource: "github",
-      specTimeout: 5,
+      provider: "opencode",
+      model: "",
     };
     const config: DispatchConfig = {
-      source: "azdevops",
-      specTimeout: 12,
+      provider: "copilot",
+      model: "gpt-4o",
     };
-    const explicitFlags = new Set<string>(["issueSource"]);
+    const explicitFlags = new Set<string>(["provider"]);
     applyMerge(args, config, explicitFlags);
-    expect(args.issueSource).toBe("github");
-    expect(args.specTimeout).toBe(12);
+    expect(args.provider).toBe("opencode");
+    expect(args.model).toBe("gpt-4o");
   });
 });

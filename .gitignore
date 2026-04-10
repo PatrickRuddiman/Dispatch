@@ -4,8 +4,6 @@ dist/
 .DS_Store
 .dispatch/*
 .dispatch/worktrees/
-.opencode/
-.claude/
 
 # Secrets / environment
 .env
