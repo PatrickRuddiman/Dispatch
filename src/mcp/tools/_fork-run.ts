@@ -19,7 +19,12 @@ import { wireRunLogs } from "../server.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const WORKER_PATH = join(__dirname, "..", "dispatch-worker.js");
+// When bundled by tsup, _fork-run.ts is inlined into dist/cli.js (__dirname = dist/).
+// The worker lives at dist/mcp/dispatch-worker.js, so try both possible locations.
+const WORKER_PATH = [
+  join(__dirname, "mcp", "dispatch-worker.js"),       // bundled: __dirname = dist/
+  join(__dirname, "..", "dispatch-worker.js"),         // unbundled: __dirname = dist/mcp/tools/
+].find((p) => existsSync(p)) ?? join(__dirname, "mcp", "dispatch-worker.js");
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
 export interface ForkRunOptions {
