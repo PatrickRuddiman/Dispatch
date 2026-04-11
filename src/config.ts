@@ -48,6 +48,8 @@ export interface DispatchConfig {
   nextIssueId?: number;
   /** Maximum number of concurrent MCP runs (child processes). Defaults to defaultConcurrency(). */
   maxRuns?: number;
+  /** Preferred provider for `dispatch shell` orchestrator mode. */
+  orchestratorProvider?: ProviderName;
 }
 
 /** Minimum and maximum bounds for numeric configuration values. */
@@ -61,7 +63,7 @@ export const CONFIG_BOUNDS = {
 } as const;
 
 /** Valid configuration key names. */
-export const CONFIG_KEYS = ["enabledProviders", "providerModels", "source", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "maxRuns", "org", "project", "workItemType", "iteration", "area", "username"] as const;
+export const CONFIG_KEYS = ["enabledProviders", "providerModels", "source", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "maxRuns", "org", "project", "workItemType", "iteration", "area", "username", "orchestratorProvider"] as const;
 
 /** A valid configuration key name. */
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -273,6 +275,13 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
       }
       if (!/^[a-zA-Z0-9-]+$/.test(value)) {
         return `Invalid username "${value}". Must contain only alphanumeric characters and hyphens`;
+      }
+      return null;
+    }
+
+    case "orchestratorProvider": {
+      if (!PROVIDER_NAMES.includes(value as ProviderName)) {
+        return `Invalid orchestratorProvider "${value}". Available: ${PROVIDER_NAMES.join(", ")}`;
       }
       return null;
     }

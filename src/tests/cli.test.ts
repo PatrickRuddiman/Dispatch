@@ -647,9 +647,12 @@ describe("help text completeness", () => {
       registeredFlags.add(toCliFlag(attr));
     }
 
+    // Flags that belong to subcommands (shell, mcp, config) — not in the main parser
+    const subcommandFlags = new Set(["--prompt", "--model", "--http", "--port", "--host"]);
+
     const extra: string[] = [];
     for (const flag of helpFlags) {
-      if (!registeredFlags.has(flag)) {
+      if (!registeredFlags.has(flag) && !subcommandFlags.has(flag)) {
         extra.push(flag);
       }
     }

@@ -70,12 +70,19 @@ export const HELP = `
   Interactive dispatch runs pause exhausted failed tasks so you can rerun them
   in place; verbose or non-TTY runs do not wait for input.
 
+  Shell (orchestrator mode):
+    dispatch shell                      Launch provider as interactive orchestrator with keep-alive
+    dispatch shell --provider <name>    Use a specific provider
+    dispatch shell --prompt "..."       Start with an initial prompt
+    dispatch shell --model <model>      Override the provider's model
+
   Config:
     dispatch config                     Launch interactive configuration wizard
     dispatch config --cwd <dir>         Configure a specific project directory
 
     Additional settings available via config file (.dispatch/config.json):
-      workItemType, iteration, area (Azure DevOps filters), username (branch prefix)
+      workItemType, iteration, area (Azure DevOps filters), username (branch prefix),
+      orchestratorProvider (preferred provider for dispatch shell)
 
   Examples:
     dispatch 14
@@ -394,6 +401,48 @@ async function main() {
     return;
   }
 
+  // ── Shell subcommand ──────────────────────────────────────────
+  if (rawArgv[0] === "shell") {
+    const shellProgram = new Command("dispatch-shell")
+      .exitOverride()
+      .configureOutput({ writeOut: () => {}, writeErr: () => {} })
+      .helpOption(false)
+      .allowUnknownOption(true)
+      .allowExcessArguments(true)
+      .addOption(
+        new Option("--provider <name>", "Force a specific provider").choices(PROVIDER_NAMES),
+      )
+      .option("--prompt <text>", "Initial prompt for the orchestrator")
+      .option("--model <model>", "Model override for the provider")
+      .option("--cwd <dir>", "Working directory", (v: string) => resolve(v));
+
+    try {
+      shellProgram.parse(rawArgv.slice(1), { from: "user" });
+    } catch (err) {
+      if (err instanceof CommanderError) {
+        log.error(err.message);
+        process.exit(1);
+      }
+      throw err;
+    }
+
+    const shellOpts = shellProgram.opts<{
+      provider?: ProviderName;
+      prompt?: string;
+      model?: string;
+      cwd?: string;
+    }>();
+
+    const { runShellCommand } = await import("./shell/index.js");
+    await runShellCommand({
+      provider: shellOpts.provider,
+      prompt: shellOpts.prompt,
+      model: shellOpts.model,
+      cwd: shellOpts.cwd ?? process.cwd(),
+    });
+    process.exit(0);
+  }
+
   const [args, explicitFlags] = parseArgs(rawArgv);
 
   // Enable verbose logging before anything else
@@ -436,6 +485,25 @@ async function main() {
   if (args.version) {
     console.log(`dispatch v${__VERSION__}`);
     process.exit(0);
+  }
+
+  // ── Confirm when dispatching all open issues ───────────────
+  const hasIssueIds = args.issueIds.length > 0;
+  const hasSpec = args.spec !== undefined;
+  const hasRespec = args.respec !== undefined;
+  const hasFeature = args.feature !== undefined;
+  const isNoArgDispatch = !hasIssueIds && !hasSpec && !hasRespec && !hasFeature;
+
+  if (isNoArgDispatch && !args.force && !args.dryRun && process.stdout.isTTY) {
+    const { createInterface } = await import("node:readline");
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    const answer = await new Promise<string>((resolve) => {
+      rl.question("No issues specified. This will dispatch all open issues. Continue? [y/N] ", resolve);
+    });
+    rl.close();
+    if (answer.toLowerCase() !== "y" && answer.toLowerCase() !== "yes") {
+      process.exit(0);
+    }
   }
 
   // ── Delegate to orchestrator ───────────────────────────────

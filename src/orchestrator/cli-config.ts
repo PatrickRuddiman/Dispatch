@@ -22,7 +22,7 @@ import { detectDatasource, DATASOURCE_NAMES } from "../datasources/index.js";
  * corresponding field names on `RawCliArgs`. Used during the merge step
  * to fill in CLI flag defaults from the config file.
  */
-const CONFIG_TO_CLI: Record<ConfigKey, keyof RawCliArgs> = {
+const CONFIG_TO_CLI: Partial<Record<ConfigKey, keyof RawCliArgs>> = {
   enabledProviders: "enabledProviders",
   providerModels: "providerModels",
   source: "issueSource",
@@ -73,6 +73,7 @@ export async function resolveCliConfig(args: RawCliArgs): Promise<RawCliArgs> {
   const merged = { ...args };
   for (const configKey of CONFIG_KEYS) {
     const cliField = CONFIG_TO_CLI[configKey];
+    if (!cliField) continue; // config-only keys (maxRuns, orchestratorProvider) have no CLI equivalent
     const configValue = config[configKey];
     if (configValue !== undefined && !explicitFlags.has(cliField)) {
       setCliField(merged, cliField, configValue);

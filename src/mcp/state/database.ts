@@ -77,6 +77,7 @@ let _db: Database.Database | null = null;
 const CURRENT_SCHEMA_VERSION = 3;
 
 function createSchema(db: Database.Database): void {
+  // Step 1: Create tables (IF NOT EXISTS is a no-op for existing tables)
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_version (
       version INTEGER NOT NULL
@@ -98,8 +99,6 @@ function createSchema(db: Database.Database): void {
       session_id     TEXT
     );
 
-    CREATE INDEX IF NOT EXISTS idx_runs_session_id ON runs(session_id);
-
     CREATE TABLE IF NOT EXISTS tasks (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
       run_id      TEXT    NOT NULL,
@@ -114,9 +113,6 @@ function createSchema(db: Database.Database): void {
       finished_at INTEGER,
       FOREIGN KEY (run_id) REFERENCES runs(run_id)
     );
-
-    CREATE INDEX IF NOT EXISTS idx_tasks_run_id ON tasks(run_id);
-    CREATE INDEX IF NOT EXISTS idx_tasks_task_id ON tasks(task_id);
 
     CREATE TABLE IF NOT EXISTS spec_runs (
       run_id         TEXT    PRIMARY KEY,
@@ -133,10 +129,11 @@ function createSchema(db: Database.Database): void {
       queued_at      INTEGER,
       session_id     TEXT
     );
-
-    CREATE INDEX IF NOT EXISTS idx_spec_runs_session_id ON spec_runs(session_id);
   `);
 
+  // Step 2: Run migrations BEFORE creating indexes on migrated columns.
+  // Existing DBs may lack columns added in later versions (e.g. session_id).
+  // Migrations must add those columns before we can create indexes on them.
   const row = db.prepare("SELECT version FROM schema_version LIMIT 1").get() as { version: number } | undefined;
   if (!row) {
     db.prepare("INSERT INTO schema_version (version) VALUES (?)").run(CURRENT_SCHEMA_VERSION);
@@ -147,6 +144,14 @@ function createSchema(db: Database.Database): void {
       db.prepare("UPDATE schema_version SET version = ?").run(CURRENT_SCHEMA_VERSION);
     }
   }
+
+  // Step 3: Create indexes (safe now that migrations have ensured all columns exist)
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_runs_session_id ON runs(session_id);
+    CREATE INDEX IF NOT EXISTS idx_tasks_run_id ON tasks(run_id);
+    CREATE INDEX IF NOT EXISTS idx_tasks_task_id ON tasks(task_id);
+    CREATE INDEX IF NOT EXISTS idx_spec_runs_session_id ON spec_runs(session_id);
+  `);
 }
 
 function migrateToV2(db: Database.Database): void {
