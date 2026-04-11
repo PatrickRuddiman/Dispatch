@@ -8,7 +8,8 @@ import { boot as bootOrchestrator } from "../../orchestrator/runner.js";
 import { createRun } from "../state/manager.js";
 import { PROVIDER_NAMES } from "../../providers/interface.js";
 import { DATASOURCE_NAMES } from "../../datasources/interface.js";
-import { forkDispatchRun } from "./_fork-run.js";
+import { getRunQueue } from "../../queue/run-queue.js";
+import { mcpLogCallback } from "../server.js";
 import { loadMcpConfig } from "./_resolve-config.js";
 
 export function registerDispatchTools(server: McpServer, cwd: string): void {
@@ -40,9 +41,7 @@ export function registerDispatchTools(server: McpServer, cwd: string): void {
         };
       }
 
-      const runId = createRun({ cwd, issueIds: args.issueIds });
-
-      forkDispatchRun(runId, server, {
+      const workerMessage = {
         type: "dispatch",
         cwd,
         opts: {
@@ -67,10 +66,19 @@ export function registerDispatchTools(server: McpServer, cwd: string): void {
           planRetries: args.planRetries,
           force: args.force,
         },
+      };
+
+      const runId = createRun({
+        cwd,
+        issueIds: args.issueIds,
+        status: "queued",
+        workerMessage: JSON.stringify(workerMessage),
       });
 
+      getRunQueue().enqueue(runId, mcpLogCallback(runId, server));
+
       return {
-        content: [{ type: "text", text: JSON.stringify({ runId, status: "running" }) }],
+        content: [{ type: "text", text: JSON.stringify({ runId, status: "queued" }) }],
       };
     }
   );

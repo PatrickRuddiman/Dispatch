@@ -59,6 +59,37 @@ vi.mock("../helpers/confirm-large-batch.js", () => ({
   confirmLargeBatch: vi.fn().mockResolvedValue(true),
 }));
 
+vi.mock("../mcp/state/database.js", () => ({
+  openDatabase: vi.fn(),
+  closeDatabase: vi.fn(),
+}));
+
+vi.mock("../mcp/state/manager.js", () => ({
+  createRun: vi.fn().mockReturnValue("test-run-id"),
+  createSpecRun: vi.fn().mockReturnValue("test-spec-run-id"),
+  getRun: vi.fn().mockReturnValue({ runId: "test-run-id", status: "completed", total: 0, completed: 0, failed: 0 }),
+  getSpecRun: vi.fn().mockReturnValue({ runId: "test-spec-run-id", status: "completed", total: 0, generated: 0, failed: 0 }),
+  getTasksForRun: vi.fn().mockReturnValue([]),
+  markOrphanedRunsFailed: vi.fn(),
+  listResumableSessions: vi.fn().mockReturnValue([]),
+  requeueSessionRuns: vi.fn().mockReturnValue([]),
+  waitForRunCompletion: vi.fn().mockResolvedValue(true),
+  registerLiveRun: vi.fn(),
+  unregisterLiveRun: vi.fn(),
+  addLogCallback: vi.fn(),
+  emitLog: vi.fn(),
+}));
+
+vi.mock("../queue/run-queue.js", () => ({
+  initRunQueue: vi.fn(),
+  getRunQueue: vi.fn().mockReturnValue({ enqueue: vi.fn(), drain: vi.fn(), abort: vi.fn() }),
+  resetRunQueue: vi.fn(),
+}));
+
+vi.mock("../config.js", () => ({
+  CONFIG_BOUNDS: { maxRuns: { min: 1, max: 32 }, concurrency: { min: 1, max: 64 }, planTimeout: { min: 1, max: 120 }, specTimeout: { min: 1, max: 120 }, specWarnTimeout: { min: 1, max: 120 }, specKillTimeout: { min: 1, max: 120 } },
+}));
+
 // ─── Imports (AFTER vi.mock calls) ──────────────────────────────────
 
 import { boot, type RawCliArgs } from "../orchestrator/runner.js";
@@ -69,6 +100,7 @@ import { getDatasource } from "../datasources/index.js";
 import { runSpecPipeline } from "../orchestrator/spec-pipeline.js";
 import { runDispatchPipeline } from "../orchestrator/dispatch-pipeline.js";
 import { confirmLargeBatch } from "../helpers/confirm-large-batch.js";
+import { createSpecRun } from "../mcp/state/manager.js";
 import type { IssueDetails, Datasource } from "../datasources/interface.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -179,24 +211,12 @@ describe("--respec routing in runFromCli()", () => {
     expect(getDatasource).toHaveBeenCalledWith("md");
     expect(mockDs.list).toHaveBeenCalledOnce();
     expect(mockDs.list).toHaveBeenCalledWith({ cwd: "/tmp/test-cwd", org: undefined, project: undefined });
-    expect(runSpecPipeline).toHaveBeenCalledOnce();
-    expect(runSpecPipeline).toHaveBeenCalledWith({
+    // Non-dry-run goes through queue: verify createSpecRun with correct issues
+    expect(createSpecRun).toHaveBeenCalledWith(expect.objectContaining({
       issues: "1,2",
-      issueSource: "md",
-      provider: "copilot",
-      serverUrl: undefined,
-      cwd: "/tmp/test-cwd",
-      outputDir: undefined,
-      org: undefined,
-      project: undefined,
-      concurrency: undefined,
-      dryRun: false,
-      model: undefined,
-      workItemType: undefined,
-      iteration: undefined,
-      area: undefined,
-      specTimeout: 10,
-    });
+      status: "queued",
+      sessionId: expect.any(String),
+    }));
   });
 
   // ─── Direct delegation (respec with arguments) ─────────────────
@@ -207,48 +227,22 @@ describe("--respec routing in runFromCli()", () => {
 
     expect(getDatasource).not.toHaveBeenCalled();
     expect(resolveSource).not.toHaveBeenCalled();
-    expect(runSpecPipeline).toHaveBeenCalledOnce();
-    expect(runSpecPipeline).toHaveBeenCalledWith({
+    // Non-dry-run: verify queue path
+    expect(createSpecRun).toHaveBeenCalledWith(expect.objectContaining({
       issues: "5,10",
-      issueSource: "md",
-      provider: "copilot",
-      serverUrl: undefined,
-      cwd: "/tmp/test-cwd",
-      outputDir: undefined,
-      org: undefined,
-      project: undefined,
-      concurrency: undefined,
-      dryRun: false,
-      model: undefined,
-      workItemType: undefined,
-      iteration: undefined,
-      area: undefined,
-      specTimeout: 10,
-    });
+      status: "queued",
+    }));
   });
 
   it("delegates directly to generateSpecs() when respec has file paths", async () => {
     const agent = await boot({ cwd: "/tmp/test" });
     await agent.runFromCli(createRawCliArgs({ respec: ["src/**/*.md", "docs/*.md"] }));
 
-    expect(runSpecPipeline).toHaveBeenCalledOnce();
-    expect(runSpecPipeline).toHaveBeenCalledWith({
+    // Non-dry-run: verify queue path
+    expect(createSpecRun).toHaveBeenCalledWith(expect.objectContaining({
       issues: ["src/**/*.md", "docs/*.md"],
-      issueSource: "md",
-      provider: "copilot",
-      serverUrl: undefined,
-      cwd: "/tmp/test-cwd",
-      outputDir: undefined,
-      org: undefined,
-      project: undefined,
-      concurrency: undefined,
-      dryRun: false,
-      model: undefined,
-      workItemType: undefined,
-      iteration: undefined,
-      area: undefined,
-      specTimeout: 10,
-    });
+      status: "queued",
+    }));
   });
 
   // ─── Mutual exclusion ─────────────────────────────────────────
@@ -299,8 +293,9 @@ describe("--respec routing in runFromCli()", () => {
     const agent = await boot({ cwd: "/tmp/test" });
     await agent.runFromCli(createRawCliArgs({ respec: [] }));
 
-    expect(runSpecPipeline).toHaveBeenCalledOnce();
-    expect(vi.mocked(runSpecPipeline).mock.calls[0][0]).toHaveProperty("issues", "42,99,7");
+    expect(createSpecRun).toHaveBeenCalledWith(expect.objectContaining({
+      issues: "42,99,7",
+    }));
   });
 
   it("passes identifiers as array when not all are numeric", async () => {
@@ -317,8 +312,9 @@ describe("--respec routing in runFromCli()", () => {
     const agent = await boot({ cwd: "/tmp/test" });
     await agent.runFromCli(createRawCliArgs({ respec: [] }));
 
-    expect(runSpecPipeline).toHaveBeenCalledOnce();
-    expect(vi.mocked(runSpecPipeline).mock.calls[0][0]).toHaveProperty("issues", ["42", "feature-auth", "7"]);
+    expect(createSpecRun).toHaveBeenCalledWith(expect.objectContaining({
+      issues: ["42", "feature-auth", "7"],
+    }));
   });
 
   // ─── resolveSource failure ────────────────────────────────────
@@ -351,7 +347,7 @@ describe("--respec routing in runFromCli()", () => {
     await agent.runFromCli(createRawCliArgs({ respec: [] }));
 
     expect(confirmLargeBatch).toHaveBeenCalledWith(150);
-    expect(runSpecPipeline).toHaveBeenCalledOnce();
+    expect(createSpecRun).toHaveBeenCalledOnce();
   });
 
   it("exits cleanly when user declines confirmation for bare respec", async () => {

@@ -9,7 +9,8 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createSpecRun, finishSpecRun, listSpecRuns, getSpecRun, waitForRunCompletion } from "../state/manager.js";
 import { PROVIDER_NAMES } from "../../providers/interface.js";
 import { DATASOURCE_NAMES } from "../../datasources/interface.js";
-import { forkDispatchRun } from "./_fork-run.js";
+import { getRunQueue } from "../../queue/run-queue.js";
+import { mcpLogCallback } from "../server.js";
 import { loadMcpConfig } from "./_resolve-config.js";
 import { getDatasource } from "../../datasources/index.js";
 
@@ -66,9 +67,7 @@ export function registerSpecTools(server: McpServer, cwd: string): void {
         resolvedIssues = existing.map((item) => item.number).join(",");
       }
 
-      const runId = createSpecRun({ cwd, issues: resolvedIssues });
-
-      forkDispatchRun(runId, server, {
+      const workerMessage = {
         type: "spec",
         cwd,
         opts: {
@@ -87,7 +86,16 @@ export function registerSpecTools(server: McpServer, cwd: string): void {
           dryRun: args.dryRun,
           cwd,
         },
-      }, {
+      };
+
+      const runId = createSpecRun({
+        cwd,
+        issues: resolvedIssues,
+        status: "queued",
+        workerMessage: JSON.stringify(workerMessage),
+      });
+
+      getRunQueue().enqueue(runId, mcpLogCallback(runId, server), {
         onDone: (result) => {
           if ("generated" in result) {
             finishSpecRun(runId, "completed", {
@@ -100,7 +108,7 @@ export function registerSpecTools(server: McpServer, cwd: string): void {
       });
 
       return {
-        content: [{ type: "text", text: JSON.stringify({ runId, status: "running" }) }],
+        content: [{ type: "text", text: JSON.stringify({ runId, status: "queued" }) }],
       };
     }
   );
@@ -220,8 +228,8 @@ export function registerSpecTools(server: McpServer, cwd: string): void {
           };
         }
 
-        // Long-poll if requested and still running
-        if (run.status === "running" && args.waitMs > 0) {
+        // Long-poll if requested and still running or queued
+        if ((run.status === "running" || run.status === "queued") && args.waitMs > 0) {
           const completed = await waitForRunCompletion(
             args.runId,
             args.waitMs,
@@ -233,7 +241,7 @@ export function registerSpecTools(server: McpServer, cwd: string): void {
         }
 
         const response: Record<string, unknown> = { ...run };
-        if (run.status === "running") {
+        if (run.status === "running" || run.status === "queued") {
           response.retryAfterMs = 5000;
         }
         return {

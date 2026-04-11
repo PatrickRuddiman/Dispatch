@@ -234,7 +234,15 @@ export async function createMcpServer(opts: {
  * @param server  The McpServer instance
  */
 export function wireRunLogs(runId: string, server: McpServer): void {
-  addLogCallback(runId, (message, level) => {
+  addLogCallback(runId, mcpLogCallback(runId, server));
+}
+
+/**
+ * Create a log callback that forwards messages to an MCP server.
+ * Used by tool handlers to pass to the RunQueue.
+ */
+export function mcpLogCallback(runId: string, server: McpServer): (message: string, level?: "info" | "warn" | "error") => void {
+  return (message, level) => {
     server.sendLoggingMessage({
       level: level === "error" ? "error" : level === "warn" ? "warning" : "info",
       logger: `dispatch.run.${runId}`,
@@ -242,5 +250,5 @@ export function wireRunLogs(runId: string, server: McpServer): void {
     }).catch((err: unknown) => {
       console.error("[dispatch-mcp] sendLoggingMessage error:", err);
     });
-  });
+  };
 }

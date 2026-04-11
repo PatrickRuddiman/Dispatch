@@ -6,7 +6,7 @@ import { z } from "zod";
 import { join } from "node:path";
 import { readdir } from "node:fs/promises";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { getRun, listRuns, getTasksForRun, listRunsByStatus, waitForRunCompletion } from "../state/manager.js";
+import { getRun, listRuns, getTasksForRun, listRunsByStatus, waitForRunCompletion, getQueuePosition } from "../state/manager.js";
 import { getDatasource } from "../../datasources/index.js";
 import { loadConfig } from "../../config.js";
 import { DATASOURCE_NAMES } from "../../datasources/interface.js";
@@ -31,8 +31,8 @@ export function registerMonitorTools(server: McpServer, cwd: string): void {
           };
         }
 
-        // Long-poll if requested and still running
-        if (run.status === "running" && args.waitMs > 0) {
+        // Long-poll if requested and still running or queued
+        if ((run.status === "running" || run.status === "queued") && args.waitMs > 0) {
           const completed = await waitForRunCompletion(
             args.runId,
             args.waitMs,
@@ -45,8 +45,12 @@ export function registerMonitorTools(server: McpServer, cwd: string): void {
 
         const tasks = getTasksForRun(args.runId);
         const response: Record<string, unknown> = { run, tasks };
-        if (run.status === "running") {
+        if (run.status === "running" || run.status === "queued") {
           response.retryAfterMs = 5000;
+        }
+        if (run.status === "queued") {
+          const pos = getQueuePosition(args.runId);
+          if (pos !== null) response.queuePosition = pos;
         }
         return {
           content: [{ type: "text", text: JSON.stringify(response) }],
@@ -65,7 +69,7 @@ export function registerMonitorTools(server: McpServer, cwd: string): void {
     "runs_list",
     "List recent dispatch runs with their status.",
     {
-      status: z.enum(["running", "completed", "failed", "cancelled"]).optional()
+      status: z.enum(["queued", "running", "completed", "failed", "cancelled"]).optional()
         .describe("Filter by status (omit for all)"),
       limit: z.number().int().min(1).max(100).optional().describe("Max results (default 20)"),
     },

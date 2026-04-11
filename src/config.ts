@@ -46,6 +46,8 @@ export interface DispatchConfig {
   username?: string;
   /** Internal auto-increment counter for MD datasource issue IDs. Defaults to 1 when absent. */
   nextIssueId?: number;
+  /** Maximum number of concurrent MCP runs (child processes). Defaults to defaultConcurrency(). */
+  maxRuns?: number;
 }
 
 /** Minimum and maximum bounds for numeric configuration values. */
@@ -55,10 +57,11 @@ export const CONFIG_BOUNDS = {
   specWarnTimeout: { min: 1, max: 120 },
   specKillTimeout: { min: 1, max: 120 },
   concurrency: { min: 1, max: 64 },
+  maxRuns: { min: 1, max: 32 },
 } as const;
 
 /** Valid configuration key names. */
-export const CONFIG_KEYS = ["enabledProviders", "providerModels", "source", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area", "username"] as const;
+export const CONFIG_KEYS = ["enabledProviders", "providerModels", "source", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "maxRuns", "org", "project", "workItemType", "iteration", "area", "username"] as const;
 
 /** A valid configuration key name. */
 export type ConfigKey = (typeof CONFIG_KEYS)[number];
@@ -160,6 +163,7 @@ function migrateConfig(raw: Record<string, unknown>): DispatchConfig {
   if (typeof raw.specWarnTimeout === "number") config.specWarnTimeout = raw.specWarnTimeout;
   if (typeof raw.specKillTimeout === "number") config.specKillTimeout = raw.specKillTimeout;
   if (typeof raw.concurrency === "number") config.concurrency = raw.concurrency;
+  if (typeof raw.maxRuns === "number") config.maxRuns = raw.maxRuns;
   if (typeof raw.org === "string") config.org = raw.org;
   if (typeof raw.project === "string") config.project = raw.project;
   if (typeof raw.workItemType === "string") config.workItemType = raw.workItemType;
@@ -238,6 +242,14 @@ export function validateConfigValue(key: ConfigKey, value: string): string | nul
       const num = Number(value);
       if (!Number.isInteger(num) || num < CONFIG_BOUNDS.concurrency.min || num > CONFIG_BOUNDS.concurrency.max) {
         return `Invalid concurrency "${value}". Must be an integer between ${CONFIG_BOUNDS.concurrency.min} and ${CONFIG_BOUNDS.concurrency.max}`;
+      }
+      return null;
+    }
+
+    case "maxRuns": {
+      const num = Number(value);
+      if (!Number.isInteger(num) || num < CONFIG_BOUNDS.maxRuns.min || num > CONFIG_BOUNDS.maxRuns.max) {
+        return `Invalid maxRuns "${value}". Must be an integer between ${CONFIG_BOUNDS.maxRuns.min} and ${CONFIG_BOUNDS.maxRuns.max}`;
       }
       return null;
     }

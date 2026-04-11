@@ -58,6 +58,37 @@ vi.mock("../orchestrator/datasource-helpers.js", () => ({
   parseIssueFilename: vi.fn(),
 }));
 
+vi.mock("../mcp/state/database.js", () => ({
+  openDatabase: vi.fn(),
+  closeDatabase: vi.fn(),
+}));
+
+vi.mock("../mcp/state/manager.js", () => ({
+  createRun: vi.fn().mockReturnValue("test-run-id"),
+  createSpecRun: vi.fn().mockReturnValue("test-spec-run-id"),
+  getRun: vi.fn().mockReturnValue({ runId: "test-run-id", status: "completed", total: 0, completed: 0, failed: 0 }),
+  getSpecRun: vi.fn().mockReturnValue({ runId: "test-spec-run-id", status: "completed", total: 0, generated: 0, failed: 0 }),
+  getTasksForRun: vi.fn().mockReturnValue([]),
+  markOrphanedRunsFailed: vi.fn(),
+  listResumableSessions: vi.fn().mockReturnValue([]),
+  requeueSessionRuns: vi.fn().mockReturnValue([]),
+  waitForRunCompletion: vi.fn().mockResolvedValue(true),
+  registerLiveRun: vi.fn(),
+  unregisterLiveRun: vi.fn(),
+  addLogCallback: vi.fn(),
+  emitLog: vi.fn(),
+}));
+
+vi.mock("../queue/run-queue.js", () => ({
+  initRunQueue: vi.fn(),
+  getRunQueue: vi.fn().mockReturnValue({ enqueue: vi.fn(), drain: vi.fn(), abort: vi.fn() }),
+  resetRunQueue: vi.fn(),
+}));
+
+vi.mock("../config.js", () => ({
+  CONFIG_BOUNDS: { maxRuns: { min: 1, max: 32 }, concurrency: { min: 1, max: 64 }, planTimeout: { min: 1, max: 120 }, specTimeout: { min: 1, max: 120 }, specWarnTimeout: { min: 1, max: 120 }, specKillTimeout: { min: 1, max: 120 } },
+}));
+
 // ─── Imports (AFTER vi.mock calls) ──────────────────────────────────
 
 import { boot, type RawCliArgs } from "../orchestrator/runner.js";
@@ -218,26 +249,39 @@ describe("runFromCli()", () => {
   });
 
   it("calls resolveCliConfig with the raw args", async () => {
-    const args = createRawCliArgs({ issueIds: ["1"] });
+    const args = createRawCliArgs({ issueIds: ["1"], dryRun: true });
     const runner = await boot({ cwd: "/tmp/test" });
     await runner.runFromCli(args);
 
     expect(resolveCliConfig).toHaveBeenCalledWith(args);
   });
 
-  it("routes to dispatch pipeline when no spec/respec flags", async () => {
+  it("routes to dispatch pipeline in dry-run mode", async () => {
     const runner = await boot({ cwd: "/tmp/test" });
-    await runner.runFromCli(createRawCliArgs({ issueIds: ["1", "2"] }));
+    await runner.runFromCli(createRawCliArgs({ issueIds: ["1", "2"], dryRun: true }));
 
     expect(runDispatchPipeline).toHaveBeenCalledWith(
-      expect.objectContaining({ issueIds: ["1", "2"] }),
+      expect.objectContaining({ issueIds: ["1", "2"], dryRun: true }),
       "/tmp/test",
     );
   });
 
-  it("routes to spec pipeline when --spec is set", async () => {
+  it("creates a queued run via the DB in non-dry-run dispatch mode", async () => {
+    const { createRun } = await import("../mcp/state/manager.js");
     const runner = await boot({ cwd: "/tmp/test" });
-    await runner.runFromCli(createRawCliArgs({ spec: "1,2" }));
+    await runner.runFromCli(createRawCliArgs({ issueIds: ["1", "2"] }));
+
+    expect(createRun).toHaveBeenCalledWith(expect.objectContaining({
+      issueIds: ["1", "2"],
+      status: "queued",
+      workerMessage: expect.any(String),
+      sessionId: expect.any(String),
+    }));
+  });
+
+  it("routes to spec pipeline in dry-run mode when --spec is set", async () => {
+    const runner = await boot({ cwd: "/tmp/test" });
+    await runner.runFromCli(createRawCliArgs({ spec: "1,2", dryRun: true }));
 
     expect(runSpecPipeline).toHaveBeenCalledWith(
       expect.objectContaining({ issues: "1,2", provider: "copilot", cwd: "/tmp/test-cwd", specTimeout: DEFAULT_SPEC_TIMEOUT_MIN }),
@@ -245,45 +289,58 @@ describe("runFromCli()", () => {
     expect(runDispatchPipeline).not.toHaveBeenCalled();
   });
 
-  it("forwards retries to spec generation", async () => {
+  it("creates a queued spec run via the DB in non-dry-run spec mode", async () => {
+    const { createSpecRun } = await import("../mcp/state/manager.js");
     const runner = await boot({ cwd: "/tmp/test" });
-    await runner.runFromCli(createRawCliArgs({ spec: "1,2", retries: 3 }));
+    await runner.runFromCli(createRawCliArgs({ spec: "1,2" }));
+
+    expect(createSpecRun).toHaveBeenCalledWith(expect.objectContaining({
+      issues: "1,2",
+      status: "queued",
+      workerMessage: expect.any(String),
+      sessionId: expect.any(String),
+    }));
+  });
+
+  it("forwards retries to spec generation in dry-run mode", async () => {
+    const runner = await boot({ cwd: "/tmp/test" });
+    await runner.runFromCli(createRawCliArgs({ spec: "1,2", retries: 3, dryRun: true }));
 
     expect(runSpecPipeline).toHaveBeenCalledWith(
       expect.objectContaining({ issues: "1,2", retries: 3 }),
     );
   });
 
-  it("forwards explicit specTimeout to spec pipeline", async () => {
+  it("forwards explicit specTimeout to spec pipeline in dry-run mode", async () => {
     const runner = await boot({ cwd: "/tmp/test" });
-    await runner.runFromCli(createRawCliArgs({ spec: "1,2", specTimeout: 7.5 }));
+    await runner.runFromCli(createRawCliArgs({ spec: "1,2", specTimeout: 7.5, dryRun: true }));
 
     expect(runSpecPipeline).toHaveBeenCalledWith(
       expect.objectContaining({ issues: "1,2", specTimeout: 7.5 }),
     );
   });
 
-  it("uses default specTimeout when omitted in spec mode", async () => {
+  it("uses default specTimeout when omitted in dry-run spec mode", async () => {
     const runner = await boot({ cwd: "/tmp/test" });
-    await runner.runFromCli(createRawCliArgs({ spec: "1,2", specTimeout: undefined }));
+    await runner.runFromCli(createRawCliArgs({ spec: "1,2", specTimeout: undefined, dryRun: true }));
 
     expect(runSpecPipeline).toHaveBeenCalledWith(
       expect.objectContaining({ issues: "1,2", specTimeout: DEFAULT_SPEC_TIMEOUT_MIN }),
     );
   });
 
-  it("forwards explicit specTimeout to spec pipeline for --respec", async () => {
+  it("forwards explicit specTimeout to spec pipeline for --respec in dry-run mode", async () => {
     const runner = await boot({ cwd: "/tmp/test" });
-    await runner.runFromCli(createRawCliArgs({ respec: "7", specTimeout: 7.5 }));
+    await runner.runFromCli(createRawCliArgs({ respec: "7", specTimeout: 7.5, dryRun: true }));
 
     expect(runSpecPipeline).toHaveBeenCalledWith(
       expect.objectContaining({ issues: "7", specTimeout: 7.5 }),
     );
   });
 
-  it("uses default specTimeout when omitted in respec mode", async () => {
+  it("uses default specTimeout when omitted in dry-run respec mode", async () => {
     const runner = await boot({ cwd: "/tmp/test" });
-    await runner.runFromCli(createRawCliArgs({ respec: "7", specTimeout: undefined }));
+    await runner.runFromCli(createRawCliArgs({ respec: "7", specTimeout: undefined, dryRun: true }));
 
     expect(runSpecPipeline).toHaveBeenCalledWith(
       expect.objectContaining({ issues: "7", specTimeout: DEFAULT_SPEC_TIMEOUT_MIN }),
@@ -314,9 +371,9 @@ describe("runFromCli()", () => {
     );
   });
 
-  it("uses defaultConcurrency when concurrency is not set", async () => {
+  it("uses defaultConcurrency in dry-run mode when concurrency is not set", async () => {
     const runner = await boot({ cwd: "/tmp/test" });
-    await runner.runFromCli(createRawCliArgs({ issueIds: ["1"] }));
+    await runner.runFromCli(createRawCliArgs({ issueIds: ["1"], dryRun: true }));
 
     expect(runDispatchPipeline).toHaveBeenCalledWith(
       expect.objectContaining({ concurrency: 2 }),
@@ -332,23 +389,23 @@ describe("runFromCli()", () => {
     await expect(runner.runFromCli(createRawCliArgs())).rejects.toThrow("config error");
   });
 
-  it("propagates errors from the dispatch pipeline", async () => {
+  it("propagates errors from the dispatch pipeline in dry-run mode", async () => {
     vi.mocked(runDispatchPipeline).mockRejectedValue(new Error("dispatch error"));
 
     const runner = await boot({ cwd: "/tmp/test" });
 
     await expect(
-      runner.runFromCli(createRawCliArgs({ issueIds: ["1"] })),
+      runner.runFromCli(createRawCliArgs({ issueIds: ["1"], dryRun: true })),
     ).rejects.toThrow("dispatch error");
   });
 
-  it("propagates errors from the spec pipeline", async () => {
+  it("propagates errors from the spec pipeline in dry-run mode", async () => {
     vi.mocked(runSpecPipeline).mockRejectedValue(new Error("spec error"));
 
     const runner = await boot({ cwd: "/tmp/test" });
 
     await expect(
-      runner.runFromCli(createRawCliArgs({ spec: "1" })),
+      runner.runFromCli(createRawCliArgs({ spec: "1", dryRun: true })),
     ).rejects.toThrow("spec error");
   });
 });

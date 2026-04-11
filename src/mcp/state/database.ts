@@ -16,9 +16,9 @@ import { mkdirSync } from "node:fs";
 
 // ── Record types ──────────────────────────────────────────────
 
-export const RUN_STATUSES = ["running", "completed", "failed", "cancelled"] as const;
+export const RUN_STATUSES = ["queued", "running", "completed", "failed", "cancelled"] as const;
 export const TASK_STATUSES = ["pending", "running", "success", "failed", "skipped"] as const;
-export const SPEC_STATUSES = ["running", "completed", "failed"] as const;
+export const SPEC_STATUSES = ["queued", "running", "completed", "failed"] as const;
 
 export type RunStatus = typeof RUN_STATUSES[number];
 export type TaskStatus = typeof TASK_STATUSES[number];
@@ -35,6 +35,9 @@ export interface RunRecord {
   completed: number;
   failed: number;
   error: string | null;
+  workerMessage: string | null;  // serialized fork message for queue
+  queuedAt: number | null;       // unix ms, set when status = "queued"
+  sessionId: string | null;      // groups runs from a single CLI invocation
 }
 
 export interface TaskRecord {
@@ -62,13 +65,16 @@ export interface SpecRunRecord {
   generated: number;
   failed: number;
   error: string | null;
+  workerMessage: string | null;  // serialized fork message for queue
+  queuedAt: number | null;       // unix ms, set when status = "queued"
+  sessionId: string | null;      // groups runs from a single CLI invocation
 }
 
 // ── Database singleton ────────────────────────────────────────
 
 let _db: Database.Database | null = null;
 
-const CURRENT_SCHEMA_VERSION = 1;
+const CURRENT_SCHEMA_VERSION = 3;
 
 function createSchema(db: Database.Database): void {
   db.exec(`
@@ -77,17 +83,22 @@ function createSchema(db: Database.Database): void {
     );
 
     CREATE TABLE IF NOT EXISTS runs (
-      run_id      TEXT    PRIMARY KEY,
-      cwd         TEXT    NOT NULL,
-      issue_ids   TEXT    NOT NULL DEFAULT '[]',
-      status      TEXT    NOT NULL DEFAULT 'running',
-      started_at  INTEGER NOT NULL,
-      finished_at INTEGER,
-      total       INTEGER NOT NULL DEFAULT 0,
-      completed   INTEGER NOT NULL DEFAULT 0,
-      failed      INTEGER NOT NULL DEFAULT 0,
-      error       TEXT
+      run_id         TEXT    PRIMARY KEY,
+      cwd            TEXT    NOT NULL,
+      issue_ids      TEXT    NOT NULL DEFAULT '[]',
+      status         TEXT    NOT NULL DEFAULT 'running',
+      started_at     INTEGER NOT NULL,
+      finished_at    INTEGER,
+      total          INTEGER NOT NULL DEFAULT 0,
+      completed      INTEGER NOT NULL DEFAULT 0,
+      failed         INTEGER NOT NULL DEFAULT 0,
+      error          TEXT,
+      worker_message TEXT,
+      queued_at      INTEGER,
+      session_id     TEXT
     );
+
+    CREATE INDEX IF NOT EXISTS idx_runs_session_id ON runs(session_id);
 
     CREATE TABLE IF NOT EXISTS tasks (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -108,22 +119,71 @@ function createSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_tasks_task_id ON tasks(task_id);
 
     CREATE TABLE IF NOT EXISTS spec_runs (
-      run_id      TEXT    PRIMARY KEY,
-      cwd         TEXT    NOT NULL,
-      issues      TEXT    NOT NULL DEFAULT '',
-      status      TEXT    NOT NULL DEFAULT 'running',
-      started_at  INTEGER NOT NULL,
-      finished_at INTEGER,
-      total       INTEGER NOT NULL DEFAULT 0,
-      generated   INTEGER NOT NULL DEFAULT 0,
-      failed      INTEGER NOT NULL DEFAULT 0,
-      error       TEXT
+      run_id         TEXT    PRIMARY KEY,
+      cwd            TEXT    NOT NULL,
+      issues         TEXT    NOT NULL DEFAULT '',
+      status         TEXT    NOT NULL DEFAULT 'running',
+      started_at     INTEGER NOT NULL,
+      finished_at    INTEGER,
+      total          INTEGER NOT NULL DEFAULT 0,
+      generated      INTEGER NOT NULL DEFAULT 0,
+      failed         INTEGER NOT NULL DEFAULT 0,
+      error          TEXT,
+      worker_message TEXT,
+      queued_at      INTEGER,
+      session_id     TEXT
     );
+
+    CREATE INDEX IF NOT EXISTS idx_spec_runs_session_id ON spec_runs(session_id);
   `);
 
   const row = db.prepare("SELECT version FROM schema_version LIMIT 1").get() as { version: number } | undefined;
   if (!row) {
     db.prepare("INSERT INTO schema_version (version) VALUES (?)").run(CURRENT_SCHEMA_VERSION);
+  } else {
+    if (row.version < 2) migrateToV2(db);
+    if (row.version < 3) migrateToV3(db);
+    if (row.version < CURRENT_SCHEMA_VERSION) {
+      db.prepare("UPDATE schema_version SET version = ?").run(CURRENT_SCHEMA_VERSION);
+    }
+  }
+}
+
+function migrateToV2(db: Database.Database): void {
+  // Add queue columns to runs table
+  const runCols = db.prepare("PRAGMA table_info(runs)").all() as Array<{ name: string }>;
+  const runColNames = new Set(runCols.map((c) => c.name));
+  if (!runColNames.has("worker_message")) {
+    db.exec("ALTER TABLE runs ADD COLUMN worker_message TEXT");
+  }
+  if (!runColNames.has("queued_at")) {
+    db.exec("ALTER TABLE runs ADD COLUMN queued_at INTEGER");
+  }
+
+  // Add queue columns to spec_runs table
+  const specCols = db.prepare("PRAGMA table_info(spec_runs)").all() as Array<{ name: string }>;
+  const specColNames = new Set(specCols.map((c) => c.name));
+  if (!specColNames.has("worker_message")) {
+    db.exec("ALTER TABLE spec_runs ADD COLUMN worker_message TEXT");
+  }
+  if (!specColNames.has("queued_at")) {
+    db.exec("ALTER TABLE spec_runs ADD COLUMN queued_at INTEGER");
+  }
+}
+
+function migrateToV3(db: Database.Database): void {
+  // Add session_id column to runs table
+  const runCols = db.prepare("PRAGMA table_info(runs)").all() as Array<{ name: string }>;
+  if (!runCols.some((c) => c.name === "session_id")) {
+    db.exec("ALTER TABLE runs ADD COLUMN session_id TEXT");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_runs_session_id ON runs(session_id)");
+  }
+
+  // Add session_id column to spec_runs table
+  const specCols = db.prepare("PRAGMA table_info(spec_runs)").all() as Array<{ name: string }>;
+  if (!specCols.some((c) => c.name === "session_id")) {
+    db.exec("ALTER TABLE spec_runs ADD COLUMN session_id TEXT");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_spec_runs_session_id ON spec_runs(session_id)");
   }
 }
 

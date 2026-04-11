@@ -86,7 +86,7 @@ describe("openDatabase", () => {
     // Verify schema_version table exists and has a row
     const row = db.prepare("SELECT version FROM schema_version LIMIT 1").get() as { version: number } | undefined;
     expect(row).toBeDefined();
-    expect(row?.version).toBe(1);
+    expect(row?.version).toBe(3);
   });
 
   it("creates runs table", () => {

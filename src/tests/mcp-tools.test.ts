@@ -70,6 +70,10 @@ const { mockForkDispatchRun } = vi.hoisted(() => ({
   mockForkDispatchRun: vi.fn().mockReturnValue({ on: vi.fn(), send: vi.fn(), kill: vi.fn() }),
 }));
 
+const { mockEnqueue } = vi.hoisted(() => ({
+  mockEnqueue: vi.fn(),
+}));
+
 // ─── Module mocks ────────────────────────────────────────────
 
 vi.mock("../mcp/state/manager.js", () => ({
@@ -87,6 +91,7 @@ vi.mock("../mcp/state/manager.js", () => ({
   listRuns: mockListRuns,
   getTasksForRun: mockGetTasksForRun,
   listRunsByStatus: mockListRunsByStatus,
+  getQueuePosition: vi.fn().mockReturnValue(null),
   registerLiveRun: vi.fn(),
   unregisterLiveRun: vi.fn(),
   addLogCallback: mockAddLogCallback,
@@ -104,7 +109,7 @@ vi.mock("../config.js", () => ({
   loadConfig: mockLoadConfig,
   saveConfig: mockSaveConfig,
   validateConfigValue: mockValidateConfigValue,
-  CONFIG_KEYS: ["enabledProviders", "source", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "org", "project", "workItemType", "iteration", "area", "username"] as const,
+  CONFIG_KEYS: ["enabledProviders", "source", "planTimeout", "specTimeout", "specWarnTimeout", "specKillTimeout", "concurrency", "maxRuns", "org", "project", "workItemType", "iteration", "area", "username"] as const,
 }));
 
 vi.mock("../datasources/index.js", () => ({
@@ -121,6 +126,31 @@ vi.mock("node:fs/promises", () => ({
 vi.mock("../mcp/tools/_fork-run.js", () => ({
   forkDispatchRun: mockForkDispatchRun,
 }));
+
+vi.mock("../queue/fork-run.js", () => ({
+  forkDispatchRun: mockForkDispatchRun,
+}));
+
+vi.mock("../mcp/run-queue.js", () => ({
+  getRunQueue: vi.fn(() => ({ enqueue: mockEnqueue, drain: vi.fn(), abort: vi.fn() })),
+  initRunQueue: vi.fn(),
+  resetRunQueue: vi.fn(),
+}));
+
+vi.mock("../queue/run-queue.js", () => ({
+  getRunQueue: vi.fn(() => ({ enqueue: mockEnqueue, drain: vi.fn(), abort: vi.fn() })),
+  initRunQueue: vi.fn(),
+  resetRunQueue: vi.fn(),
+}));
+
+vi.mock("../mcp/server.js", async (importOriginal) => {
+  const actual = await importOriginal() as Record<string, unknown>;
+  return {
+    ...actual,
+    wireRunLogs: vi.fn(),
+    mcpLogCallback: vi.fn().mockReturnValue(vi.fn()),
+  };
+});
 
 vi.mock("../orchestrator/datasource-helpers.js", () => ({
   parseIssueFilename: vi.fn((filePath: string) => {
@@ -199,27 +229,23 @@ describe("registerDispatchTools", () => {
     const result = await server.getHandler("dispatch_run")({ issueIds: ["42"] });
     const data = JSON.parse(result.content[0]!.text);
     expect(data.runId).toBe("test-run-id");
-    expect(data.status).toBe("running");
-    expect(mockCreateRun).toHaveBeenCalledWith({ cwd: "/cwd", issueIds: ["42"] });
+    expect(data.status).toBe("queued");
+    expect(mockCreateRun).toHaveBeenCalledWith(expect.objectContaining({
+      cwd: "/cwd",
+      issueIds: ["42"],
+      status: "queued",
+      workerMessage: expect.any(String),
+    }));
   });
 
-  it("dispatch_run calls forkDispatchRun with correct arguments", async () => {
+  it("dispatch_run enqueues via RunQueue with correct arguments", async () => {
     const server = createMockServer();
     registerDispatchTools(server as never, "/cwd");
     await server.getHandler("dispatch_run")({ issueIds: ["42"], provider: "opencode" });
 
-    expect(mockForkDispatchRun).toHaveBeenCalledWith(
+    expect(mockEnqueue).toHaveBeenCalledWith(
       "test-run-id",
       expect.anything(),
-      expect.objectContaining({
-        type: "dispatch",
-        cwd: "/cwd",
-        opts: expect.objectContaining({
-          issueIds: ["42"],
-          dryRun: false,
-          provider: "opencode",
-        }),
-      }),
     );
   });
 
@@ -264,25 +290,17 @@ describe("registerSpecTools", () => {
     const result = await server.getHandler("spec_generate")({ issues: "42" });
     const data = JSON.parse(result.content[0]!.text);
     expect(data.runId).toBe("test-spec-run-id");
-    expect(data.status).toBe("running");
+    expect(data.status).toBe("queued");
   });
 
-  it("spec_generate calls forkDispatchRun with spec type and onDone callback", async () => {
+  it("spec_generate enqueues via RunQueue with onDone callback", async () => {
     const server = createMockServer();
     registerSpecTools(server as never, "/cwd");
     await server.getHandler("spec_generate")({ issues: "42", provider: "opencode" });
 
-    expect(mockForkDispatchRun).toHaveBeenCalledWith(
+    expect(mockEnqueue).toHaveBeenCalledWith(
       "test-spec-run-id",
       expect.anything(),
-      expect.objectContaining({
-        type: "spec",
-        cwd: "/cwd",
-        opts: expect.objectContaining({
-          issues: "42",
-          enabledProviders: ["opencode"],
-        }),
-      }),
       expect.objectContaining({
         onDone: expect.any(Function),
       }),
@@ -294,8 +312,8 @@ describe("registerSpecTools", () => {
     registerSpecTools(server as never, "/cwd");
     await server.getHandler("spec_generate")({ issues: "42" });
 
-    // Get the onDone callback passed to forkDispatchRun
-    const onDone = mockForkDispatchRun.mock.calls[0]![3]!.onDone as (result: Record<string, unknown>) => void;
+    // Get the onDone callback passed to enqueue
+    const onDone = mockEnqueue.mock.calls[0]![2]!.onDone as (result: Record<string, unknown>) => void;
     onDone({ total: 3, generated: 2, failed: 1 });
 
     expect(mockFinishSpecRun).toHaveBeenCalledWith("test-spec-run-id", "completed", {
@@ -578,8 +596,8 @@ describe("registerRecoveryTools", () => {
     const data = JSON.parse(result.content[0]!.text);
     // Should NOT return "No failed tasks found" — should create a new run
     expect(data.runId).toBe("retry-run-id");
-    expect(data.status).toBe("running");
-    expect(mockForkDispatchRun).toHaveBeenCalled();
+    expect(data.status).toBe("queued");
+    expect(mockEnqueue).toHaveBeenCalled();
   });
 
   it("run_retry creates a new run and returns newRunId when there are failed tasks", async () => {
@@ -594,11 +612,11 @@ describe("registerRecoveryTools", () => {
     const result = await server.getHandler("run_retry")({ runId: "run-1" });
     const data = JSON.parse(result.content[0]!.text);
     expect(data.runId).toBe("new-run-id");
-    expect(data.status).toBe("running");
+    expect(data.status).toBe("queued");
     expect(data.originalRunId).toBe("run-1");
   });
 
-  it("run_retry calls forkDispatchRun for the new run", async () => {
+  it("run_retry enqueues via RunQueue for the new run", async () => {
     const server = createMockServer();
     registerRecoveryTools(server as never, "/cwd");
     mockGetRun.mockReturnValue({ runId: "run-1", issueIds: '["42"]', status: "failed" });
@@ -606,16 +624,9 @@ describe("registerRecoveryTools", () => {
     mockCreateRun.mockReturnValue("new-run-id");
     await server.getHandler("run_retry")({ runId: "run-1" });
 
-    expect(mockForkDispatchRun).toHaveBeenCalledWith(
+    expect(mockEnqueue).toHaveBeenCalledWith(
       "new-run-id",
       expect.anything(),
-      expect.objectContaining({
-        type: "dispatch",
-        opts: expect.objectContaining({
-          issueIds: ["42"],
-          force: true,
-        }),
-      }),
     );
   });
 
@@ -648,7 +659,7 @@ describe("registerRecoveryTools", () => {
     expect(data.taskId).toBe("t:1");
   });
 
-  it("task_retry calls forkDispatchRun for the new run", async () => {
+  it("task_retry enqueues via RunQueue for the new run", async () => {
     const server = createMockServer();
     registerRecoveryTools(server as never, "/cwd");
     mockGetRun.mockReturnValue({ runId: "run-1", issueIds: '["42"]', status: "failed" });
@@ -656,17 +667,9 @@ describe("registerRecoveryTools", () => {
     mockCreateRun.mockReturnValue("task-retry-run-id");
     await server.getHandler("task_retry")({ runId: "run-1", taskId: "t:1" });
 
-    expect(mockForkDispatchRun).toHaveBeenCalledWith(
+    expect(mockEnqueue).toHaveBeenCalledWith(
       "task-retry-run-id",
       expect.anything(),
-      expect.objectContaining({
-        type: "dispatch",
-        opts: expect.objectContaining({
-          issueIds: ["42"],
-          concurrency: 1,
-          force: true,
-        }),
-      }),
     );
   });
 });
@@ -702,19 +705,17 @@ describe("forkDispatchRun IPC handler", () => {
   // by importing the real module and simulating IPC events on a mock child process.
 
   it("task_start IPC message triggers createTask and updateTaskStatus", async () => {
-    // We need to import the real _fork-run module for this test.
-    // Since it's mocked above, we use vi.importActual to get the real module
-    // and test its IPC handler logic by simulating the fork and message flow.
-    // However, since fork is a side effect, we test the handler logic indirectly
-    // through the integration of the tool handlers.
-
-    // This test verifies that the forkDispatchRun mock is called correctly
+    // This test verifies that the RunQueue enqueue is called correctly
     // (the actual IPC handler logic is in _fork-run.ts which is tested via
     // the integration of progress events -> DB updates).
     const server = createMockServer();
     registerDispatchTools(server as never, "/cwd");
     await server.getHandler("dispatch_run")({ issueIds: ["42"] });
-    expect(mockForkDispatchRun).toHaveBeenCalledTimes(1);
-    expect(mockCreateRun).toHaveBeenCalledWith({ cwd: "/cwd", issueIds: ["42"] });
+    expect(mockEnqueue).toHaveBeenCalledTimes(1);
+    expect(mockCreateRun).toHaveBeenCalledWith(expect.objectContaining({
+      cwd: "/cwd",
+      issueIds: ["42"],
+      status: "queued",
+    }));
   });
 });

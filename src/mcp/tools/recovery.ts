@@ -9,7 +9,8 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getRun, getTasksForRun, createRun } from "../state/manager.js";
 import { PROVIDER_NAMES } from "../../providers/interface.js";
-import { forkDispatchRun } from "./_fork-run.js";
+import { getRunQueue } from "../../queue/run-queue.js";
+import { mcpLogCallback } from "../server.js";
 import { loadMcpConfig } from "./_resolve-config.js";
 import { parseIssueFilename } from "../../orchestrator/datasource-helpers.js";
 
@@ -72,9 +73,7 @@ export function registerRecoveryTools(server: McpServer, cwd: string): void {
         issueIds = failedIssueIds.size > 0 ? [...failedIssueIds] : allIssueIds;
       }
 
-      const newRunId = createRun({ cwd, issueIds });
-
-      forkDispatchRun(newRunId, server, {
+      const workerMessage = {
         type: "dispatch",
         cwd,
         opts: {
@@ -92,10 +91,19 @@ export function registerRecoveryTools(server: McpServer, cwd: string): void {
           concurrency: args.concurrency ?? config.concurrency ?? 1,
           force: true,
         },
+      };
+
+      const newRunId = createRun({
+        cwd,
+        issueIds,
+        status: "queued",
+        workerMessage: JSON.stringify(workerMessage),
       });
 
+      getRunQueue().enqueue(newRunId, mcpLogCallback(newRunId, server));
+
       return {
-        content: [{ type: "text", text: JSON.stringify({ runId: newRunId, status: "running", originalRunId: args.runId }) }],
+        content: [{ type: "text", text: JSON.stringify({ runId: newRunId, status: "queued", originalRunId: args.runId }) }],
       };
     }
   );
@@ -143,9 +151,7 @@ export function registerRecoveryTools(server: McpServer, cwd: string): void {
       const parsed = parseIssueFilename(task.file || task.taskId.split(":")[0]);
       const issueIds = parsed ? [parsed.issueId] : allIssueIds;
 
-      const newRunId = createRun({ cwd, issueIds });
-
-      forkDispatchRun(newRunId, server, {
+      const taskWorkerMessage = {
         type: "dispatch",
         cwd,
         opts: {
@@ -163,10 +169,19 @@ export function registerRecoveryTools(server: McpServer, cwd: string): void {
           concurrency: 1,
           force: true,
         },
+      };
+
+      const newRunId = createRun({
+        cwd,
+        issueIds,
+        status: "queued",
+        workerMessage: JSON.stringify(taskWorkerMessage),
       });
 
+      getRunQueue().enqueue(newRunId, mcpLogCallback(newRunId, server));
+
       return {
-        content: [{ type: "text", text: JSON.stringify({ runId: newRunId, status: "running", taskId: args.taskId }) }],
+        content: [{ type: "text", text: JSON.stringify({ runId: newRunId, status: "queued", taskId: args.taskId }) }],
       };
     }
   );

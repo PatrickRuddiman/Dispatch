@@ -40,6 +40,7 @@ export const HELP = `
     --no-worktree          Skip git worktree isolation for parallel issues
     --feature [name]       Group issues into a single feature branch and PR
     --force                Ignore prior run state and re-run all tasks
+    --resume [sessionId]   Resume an interrupted session (prompts if multiple exist)
     --concurrency <n>      Max parallel dispatches (default: min(cpus, freeMB/500), max: ${MAX_CONCURRENCY})
     --provider <name>      Force a specific provider: ${PROVIDER_NAMES.join(", ")} (auto-selected by default)
     --source <name>        Issue source: ${DATASOURCE_NAMES.join(", ")} (optional; auto-detected from git remote)
@@ -124,6 +125,7 @@ export const CLI_OPTIONS_MAP: Record<string, string> = {
   branch: "noBranch",
   worktree: "noWorktree",
   force: "force",
+  resume: "resume",
   verbose: "verbose",
   spec: "spec",
   respec: "respec",
@@ -163,6 +165,7 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
     .option("--no-worktree", "Skip git worktree isolation")
     .option("--feature [name]", "Group issues into a single feature branch")
     .option("--force", "Ignore prior run state")
+    .option("--resume [sessionId]", "Resume an interrupted session")
     .option("--verbose", "Show detailed debug output")
     .option("--spec <values...>", "Spec mode: issue numbers, glob, or text")
     .option("--respec [values...]", "Regenerate specs")
@@ -298,6 +301,7 @@ export function parseArgs(argv: string[]): [ParsedArgs, Set<string>] {
       args.respec = opts.respec.length === 1 ? opts.respec[0] : opts.respec;
     }
   }
+  if (opts.resume !== undefined) args.resume = opts.resume;
   if (opts.feature) args.feature = opts.feature;
   if (opts.source !== undefined) args.issueSource = opts.source;
   if (opts.concurrency !== undefined) args.concurrency = opts.concurrency;
@@ -398,12 +402,28 @@ async function main() {
   // ── Graceful shutdown on signals ───────────────────────────
   process.on("SIGINT", async () => {
     log.debug("Received SIGINT, cleaning up...");
+    try {
+      const { getRunQueue } = await import("./queue/run-queue.js");
+      getRunQueue().abort();
+    } catch { /* queue may not be initialized */ }
+    try {
+      const { closeDatabase } = await import("./mcp/state/database.js");
+      closeDatabase();
+    } catch { /* db may not be open */ }
     await runCleanup();
     process.exit(130);
   });
 
   process.on("SIGTERM", async () => {
     log.debug("Received SIGTERM, cleaning up...");
+    try {
+      const { getRunQueue } = await import("./queue/run-queue.js");
+      getRunQueue().abort();
+    } catch { /* queue may not be initialized */ }
+    try {
+      const { closeDatabase } = await import("./mcp/state/database.js");
+      closeDatabase();
+    } catch { /* db may not be open */ }
     await runCleanup();
     process.exit(143);
   });
