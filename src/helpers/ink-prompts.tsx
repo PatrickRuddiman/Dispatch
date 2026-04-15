@@ -163,6 +163,110 @@ export function multiSelect<T>(opts: {
 }
 
 /**
+ * Result from multiSelectWithActions — selected values plus any values
+ * toggled with an action key (e.g. marked for re-auth).
+ */
+export type MultiSelectResult<T> = { values: T[]; marked: T[] };
+
+/**
+ * Ink-based multi-select with action keys.
+ * Like multiSelect, but supports additional toggle keys (e.g. "r" to mark
+ * an item for re-auth). Returns both the selected values and the marked values.
+ */
+export function multiSelectWithActions<T>(opts: {
+  message: string;
+  choices: Array<{ name: string; value: T; description?: string; default?: boolean }>;
+  actions: Array<{ key: string; label: string }>;
+}): Promise<MultiSelectResult<T>> {
+  return new Promise((resolve) => {
+    function MultiSelectActionsPrompt() {
+      const { exit } = useApp();
+      const [cursor, setCursor] = useState(0);
+      const [selected, setSelected] = useState<Set<number>>(() => {
+        const initial = new Set<number>();
+        opts.choices.forEach((c, i) => { if (c.default) initial.add(i); });
+        return initial;
+      });
+      const [marked, setMarked] = useState<Set<number>>(new Set());
+      const selectedRef = useRef(selected);
+      const markedRef = useRef(marked);
+      useEffect(() => { selectedRef.current = selected; }, [selected]);
+      useEffect(() => { markedRef.current = marked; }, [marked]);
+
+      useInput((input, key) => {
+        if (key.upArrow) {
+          setCursor((prev) => (prev > 0 ? prev - 1 : opts.choices.length - 1));
+        } else if (key.downArrow) {
+          setCursor((prev) => (prev < opts.choices.length - 1 ? prev + 1 : 0));
+        } else if (input === " ") {
+          setSelected((prev) => {
+            const next = new Set(prev);
+            if (next.has(cursor)) next.delete(cursor);
+            else next.add(cursor);
+            return next;
+          });
+        } else if (key.return) {
+          const values = opts.choices
+            .filter((_, i) => selectedRef.current.has(i))
+            .map((c) => c.value);
+          const markedValues = opts.choices
+            .filter((_, i) => markedRef.current.has(i))
+            .map((c) => c.value);
+          resolve({ values, marked: markedValues });
+          exit();
+        } else {
+          const action = opts.actions.find((a) => a.key === input.toLowerCase());
+          if (action) {
+            setMarked((prev) => {
+              const next = new Set(prev);
+              if (next.has(cursor)) next.delete(cursor);
+              else next.add(cursor);
+              return next;
+            });
+          }
+        }
+      });
+
+      const actionHints = opts.actions.map((a) => `${a.key} to ${a.label}`).join(", ");
+
+      return (
+        <Box flexDirection="column">
+          <Box>
+            <Text color={PALETTE.accent} bold>? </Text>
+            <Text>{opts.message}</Text>
+            <Text color={PALETTE.muted}> (space to toggle, {actionHints}, enter to confirm)</Text>
+          </Box>
+          {opts.choices.map((choice, i) => {
+            const isSelected = selected.has(i);
+            const isMarked = marked.has(i);
+            const isCursor = i === cursor;
+            const checkbox = isSelected ? "◉" : "◯";
+            const pointer = isCursor ? "❯" : " ";
+            const markIndicator = isMarked ? " ⟳" : "";
+            return (
+              <Box key={choice.name}>
+                <Text color={isCursor ? PALETTE.accent : undefined}>
+                  {pointer} {checkbox} {choice.name}
+                </Text>
+                {isMarked && (
+                  <Text color={PALETTE.warn}>{markIndicator}</Text>
+                )}
+                {choice.description && isCursor && (
+                  <Text color={PALETTE.muted}> — {choice.description}</Text>
+                )}
+              </Box>
+            );
+          })}
+        </Box>
+      );
+    }
+
+    const instance = render(<MultiSelectActionsPrompt />);
+    instance.waitUntilExit().catch(() => {});
+  });
+}
+
+/**
  * Ink-based text input prompt. Returns the user's text input.
  */
 export function input(opts: {

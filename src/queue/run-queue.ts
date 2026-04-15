@@ -99,6 +99,7 @@ export class RunQueue {
       const userOnExit = ctx.options?.onExit;
       forkDispatchRun(runId, parsedMessage, {
         ...ctx.options,
+        runType: table,
         logCallback: ctx.logCallback,
         onExit: (code) => {
           userOnExit?.(code);

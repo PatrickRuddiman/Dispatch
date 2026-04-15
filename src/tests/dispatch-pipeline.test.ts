@@ -2728,3 +2728,146 @@ describe("git rev-parse shell option for Windows compatibility", () => {
     }
   });
 });
+
+describe("non-worktree post-processing on task failure", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    setupMockDispatch();
+    resetAuthMocks();
+    // Reset all datasource methods to defaults (clearAllMocks only clears
+    // call history, not implementations set by earlier test blocks).
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    vi.mocked(ds.supportsGit).mockReturnValue(true);
+    vi.mocked(ds.createAndSwitchBranch).mockReset().mockResolvedValue(undefined);
+    vi.mocked(ds.switchBranch).mockReset().mockResolvedValue(undefined);
+    vi.mocked(ds.pushBranch).mockReset().mockResolvedValue(undefined);
+    vi.mocked(ds.createPullRequest).mockReset().mockResolvedValue("https://example.com/pr/1");
+    vi.mocked(ds.commitAllChanges).mockReset().mockResolvedValue(undefined);
+    vi.mocked(ds.getCurrentBranch).mockReset().mockResolvedValue("main");
+    vi.mocked(ds.getDefaultBranch).mockReset().mockResolvedValue("main");
+    vi.mocked(ds.getUsername).mockReset().mockResolvedValue("testuser");
+    vi.mocked(ds.buildBranchName).mockReset().mockReturnValue("testuser/dispatch/1");
+    vi.mocked(ds.update).mockReset().mockResolvedValue(undefined);
+    // Reset module mocks that may have been overridden by multi-issue tests
+    vi.mocked(writeItemsToTempDir).mockResolvedValue({
+      files: ["/tmp/dispatch-test/1-test.md"],
+      issueDetailsByFile: new Map([["/tmp/dispatch-test/1-test.md", {
+        number: "1",
+        title: "Test",
+        body: "# Test\n\n- [ ] Implement the feature",
+        labels: [],
+        state: "open",
+        url: "https://example.com/1",
+        comments: [],
+        acceptanceCriteria: "",
+      }]]),
+    });
+    vi.mocked(parseTaskFile).mockResolvedValue(TASK_FILE_FIXTURE);
+    vi.mocked(parseIssueFilename).mockReturnValue({ issueId: "1", slug: "test" });
+    // Executor fails — triggers preserveContext = true in non-TTY mode
+    mocks.mockExecute.mockResolvedValue({
+      success: false,
+      data: null,
+      error: "Executor failed",
+      durationMs: 100,
+    });
+    mocks.mockGenerate.mockResolvedValue({
+      data: null,
+      success: false,
+      error: "mock: not configured",
+      durationMs: 0,
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("still pushes branch when executor fails", async () => {
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ noBranch: false, noPlan: true, retries: 0 }),
+      "/tmp/test",
+    );
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result.failed).toBe(1);
+    expect(ds.pushBranch).toHaveBeenCalled();
+  });
+
+  it("still creates PR when executor fails", async () => {
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ noBranch: false, noPlan: true, retries: 0 }),
+      "/tmp/test",
+    );
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result.failed).toBe(1);
+    expect(ds.createPullRequest).toHaveBeenCalled();
+  });
+
+  it("still restores original branch when executor fails", async () => {
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ noBranch: false, noPlan: true, retries: 0 }),
+      "/tmp/test",
+    );
+    await vi.runAllTimersAsync();
+
+    const result = await resultPromise;
+
+    expect(result.failed).toBe(1);
+    expect(ds.switchBranch).toHaveBeenCalledWith("main", expect.anything());
+  });
+
+  it("does not run commit skill when executor fails", async () => {
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ noBranch: false, noPlan: true, retries: 0 }),
+      "/tmp/test",
+    );
+    await vi.runAllTimersAsync();
+
+    await resultPromise;
+
+    expect(mocks.mockGenerate).not.toHaveBeenCalled();
+  });
+
+  it("restores branch even when push fails", async () => {
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    vi.mocked(ds.pushBranch).mockRejectedValue(new Error("push failed"));
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ noBranch: false, noPlan: true, retries: 0 }),
+      "/tmp/test",
+    );
+    await vi.runAllTimersAsync();
+
+    await resultPromise;
+
+    expect(ds.switchBranch).toHaveBeenCalledWith("main", expect.anything());
+  });
+
+  it("restores branch even when PR creation fails", async () => {
+    const ds = vi.mocked(getDatasource)("md") as unknown as Datasource;
+    vi.mocked(ds.createPullRequest).mockRejectedValue(new Error("PR creation failed"));
+
+    const resultPromise = runDispatchPipeline(
+      baseOpts({ noBranch: false, noPlan: true, retries: 0 }),
+      "/tmp/test",
+    );
+    await vi.runAllTimersAsync();
+
+    await resultPromise;
+
+    expect(ds.switchBranch).toHaveBeenCalledWith("main", expect.anything());
+  });
+});

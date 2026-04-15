@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
-import { select, confirm, input, multiSelect } from "../helpers/ink-prompts.js";
+import { select, confirm, input, multiSelectWithActions } from "../helpers/ink-prompts.js";
 import { runInteractiveConfigWizard } from "../config-prompts.js";
 import { loadConfig, saveConfig } from "../config.js";
 import { detectDatasource, getGitRemoteUrl, parseAzDevOpsRemoteUrl } from "../datasources/index.js";
@@ -12,7 +12,7 @@ vi.mock("../helpers/ink-prompts.js", () => ({
   select: vi.fn(),
   confirm: vi.fn(),
   input: vi.fn(),
-  multiSelect: vi.fn(),
+  multiSelectWithActions: vi.fn(),
 }));
 
 vi.mock("../config.js", async (importOriginal) => {
@@ -111,7 +111,7 @@ beforeEach(() => {
   vi.mocked(input).mockResolvedValue("");
   vi.mocked(ensureAuthReady).mockResolvedValue(undefined);
   vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
-  vi.mocked(multiSelect).mockResolvedValue(["copilot", "claude", "codex", "opencode"]);
+  vi.mocked(multiSelectWithActions).mockResolvedValue({ values: ["copilot", "claude", "codex", "opencode"], marked: [] });
   vi.mocked(setupProviderAuth).mockResolvedValue(true);
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -123,7 +123,7 @@ describe("runInteractiveConfigWizard", () => {
   it("basic flow — detects providers and selects datasource, saves config with enabledProviders", async () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot", "claude", "codex", "opencode"]);
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot", "claude", "codex", "opencode"], marked: [] });
     vi.mocked(select).mockResolvedValueOnce("github"); // datasource
     vi.mocked(confirm)
       .mockResolvedValueOnce(false)  // skip model config
@@ -159,7 +159,7 @@ describe("runInteractiveConfigWizard", () => {
       source: "github",
     });
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot", "claude", "codex", "opencode"]);
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot", "claude", "codex", "opencode"], marked: [] });
     vi.mocked(confirm)
       .mockResolvedValueOnce(true)   // reconfigure
       .mockResolvedValueOnce(false)  // skip model config
@@ -177,7 +177,7 @@ describe("runInteractiveConfigWizard", () => {
   it("user cancels at save confirmation", async () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot", "claude", "codex", "opencode"]);
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot", "claude", "codex", "opencode"], marked: [] });
     vi.mocked(select).mockResolvedValueOnce("github"); // datasource
     vi.mocked(confirm)
       .mockResolvedValueOnce(false)  // skip model config
@@ -191,7 +191,7 @@ describe("runInteractiveConfigWizard", () => {
   it("does not run auth setup for providers the user declines to enable", async () => {
     const statuses = defaultProviderStatuses(); // only copilot authenticated
     vi.mocked(getProviderStatuses).mockResolvedValue(statuses);
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot"]); // only select copilot
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot"], marked: [] }); // only select copilot
     vi.mocked(select).mockResolvedValueOnce("github"); // datasource
     vi.mocked(confirm)
       .mockResolvedValueOnce(false)  // skip model config
@@ -205,7 +205,7 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(getProviderStatuses)
       .mockResolvedValueOnce(statuses)                   // initial check
       .mockResolvedValueOnce(allAuthenticatedStatuses()); // re-check after setup
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot", "claude"]); // select copilot + claude (unauth)
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot", "claude"], marked: [] }); // select copilot + claude (unauth)
     vi.mocked(select).mockResolvedValueOnce("github"); // datasource
     vi.mocked(confirm)
       .mockResolvedValueOnce(false)  // skip model config
@@ -223,7 +223,7 @@ describe("runInteractiveConfigWizard", () => {
       providerStatus("opencode", "OpenCode", "not-configured"),
     ];
     vi.mocked(getProviderStatuses).mockResolvedValue(noAuth);
-    vi.mocked(multiSelect).mockResolvedValueOnce([]); // select nothing
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: [], marked: [] }); // select nothing
     await runInteractiveConfigWizard();
     expect(select).not.toHaveBeenCalled();
     expect(saveConfig).not.toHaveBeenCalled();
@@ -232,7 +232,7 @@ describe("runInteractiveConfigWizard", () => {
   it("saves only selected and authenticated providers in enabledProviders", async () => {
     const statuses = defaultProviderStatuses(); // only copilot authenticated
     vi.mocked(getProviderStatuses).mockResolvedValue(statuses);
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot"]); // only select copilot
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot"], marked: [] }); // only select copilot
     vi.mocked(select).mockResolvedValueOnce("github"); // datasource
     vi.mocked(confirm)
       .mockResolvedValueOnce(false)  // skip model config
@@ -249,7 +249,7 @@ describe("runInteractiveConfigWizard", () => {
   it("user deselects an authenticated provider — excluded from enabledProviders", async () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot", "codex", "opencode"]); // deselect claude
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot", "codex", "opencode"], marked: [] }); // deselect claude
     vi.mocked(select).mockResolvedValueOnce("github"); // datasource
     vi.mocked(confirm)
       .mockResolvedValueOnce(false)  // skip model config
@@ -269,7 +269,7 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(detectDatasource).mockResolvedValueOnce("github");
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot", "claude", "codex", "opencode"]);
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot", "claude", "codex", "opencode"], marked: [] });
     vi.mocked(select).mockResolvedValueOnce("github"); // datasource
     vi.mocked(confirm)
       .mockResolvedValueOnce(false)  // skip model config
@@ -287,7 +287,7 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(detectDatasource).mockResolvedValueOnce("github");
     vi.mocked(loadConfig).mockResolvedValue({ source: "azdevops" });
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot", "claude", "codex", "opencode"]);
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot", "claude", "codex", "opencode"], marked: [] });
     vi.mocked(confirm)
       .mockResolvedValueOnce(true)   // reconfigure
       .mockResolvedValueOnce(false)  // skip model config
@@ -306,7 +306,7 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(detectDatasource).mockResolvedValueOnce(null);
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot", "claude", "codex", "opencode"]);
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot", "claude", "codex", "opencode"], marked: [] });
     vi.mocked(select).mockResolvedValueOnce("md"); // datasource
     vi.mocked(confirm)
       .mockResolvedValueOnce(false)  // skip model config
@@ -323,7 +323,7 @@ describe("runInteractiveConfigWizard", () => {
   it("selecting auto saves config without source field", async () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot", "claude", "codex", "opencode"]);
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot", "claude", "codex", "opencode"], marked: [] });
     vi.mocked(select).mockResolvedValueOnce("auto"); // datasource
     vi.mocked(confirm)
       .mockResolvedValueOnce(false)  // skip model config
@@ -337,7 +337,7 @@ describe("runInteractiveConfigWizard", () => {
   it("datasource choices include auto as first option", async () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot", "claude", "codex", "opencode"]);
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot", "claude", "codex", "opencode"], marked: [] });
     vi.mocked(select).mockResolvedValueOnce("github"); // datasource
     vi.mocked(confirm)
       .mockResolvedValueOnce(false)  // skip model config
@@ -352,7 +352,7 @@ describe("runInteractiveConfigWizard", () => {
   it("azdevops source — prompts for org, project, workItemType, iteration, area", async () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot", "claude", "codex", "opencode"]);
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot", "claude", "codex", "opencode"], marked: [] });
     vi.mocked(select).mockResolvedValueOnce("azdevops"); // datasource
     vi.mocked(input)
       .mockResolvedValueOnce("https://dev.azure.com/myorg")  // org
@@ -381,7 +381,7 @@ describe("runInteractiveConfigWizard", () => {
   it("azdevops source — empty inputs omit fields from config", async () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot", "claude", "codex", "opencode"]);
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot", "claude", "codex", "opencode"], marked: [] });
     vi.mocked(select).mockResolvedValueOnce("azdevops"); // datasource
     vi.mocked(input)
       .mockResolvedValueOnce("")   // org — skip
@@ -404,7 +404,7 @@ describe("runInteractiveConfigWizard", () => {
   it("azdevops source — pre-fills org and project from git remote", async () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot", "claude", "codex", "opencode"]);
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot", "claude", "codex", "opencode"], marked: [] });
     vi.mocked(getGitRemoteUrl).mockResolvedValueOnce("https://dev.azure.com/myorg/MyProject/_git/myrepo");
     vi.mocked(parseAzDevOpsRemoteUrl).mockReturnValueOnce({
       orgUrl: "https://dev.azure.com/myorg",
@@ -438,7 +438,7 @@ describe("runInteractiveConfigWizard", () => {
   it("non-azdevops source — does not prompt for azdevops fields", async () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot", "claude", "codex", "opencode"]);
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot", "claude", "codex", "opencode"], marked: [] });
     vi.mocked(select).mockResolvedValueOnce("github"); // datasource
     vi.mocked(confirm)
       .mockResolvedValueOnce(false)  // skip model config
@@ -455,7 +455,7 @@ describe("runInteractiveConfigWizard", () => {
   it("triggers auth when github datasource is selected", async () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot", "claude", "codex", "opencode"]);
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot", "claude", "codex", "opencode"], marked: [] });
     vi.mocked(select).mockResolvedValueOnce("github"); // datasource
     vi.mocked(confirm)
       .mockResolvedValueOnce(false)  // skip model config
@@ -467,7 +467,7 @@ describe("runInteractiveConfigWizard", () => {
   it("triggers auth when azdevops datasource is selected with org", async () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot", "claude", "codex", "opencode"]);
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot", "claude", "codex", "opencode"], marked: [] });
     vi.mocked(select).mockResolvedValueOnce("azdevops"); // datasource
     vi.mocked(input)
       .mockResolvedValueOnce("https://dev.azure.com/myorg")  // org
@@ -485,7 +485,7 @@ describe("runInteractiveConfigWizard", () => {
   it("does not trigger auth for md datasource", async () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot", "claude", "codex", "opencode"]);
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot", "claude", "codex", "opencode"], marked: [] });
     vi.mocked(select).mockResolvedValueOnce("md"); // datasource
     vi.mocked(confirm)
       .mockResolvedValueOnce(false)  // skip model config
@@ -498,7 +498,7 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(ensureAuthReady).mockRejectedValueOnce(new Error("auth failed"));
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot", "claude", "codex", "opencode"]);
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot", "claude", "codex", "opencode"], marked: [] });
     vi.mocked(select).mockResolvedValueOnce("github"); // datasource
     vi.mocked(confirm)
       .mockResolvedValueOnce(false)  // skip model config
@@ -517,7 +517,7 @@ describe("runInteractiveConfigWizard", () => {
     vi.mocked(detectDatasource).mockResolvedValueOnce("github");
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot", "claude", "codex", "opencode"]);
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot", "claude", "codex", "opencode"], marked: [] });
     vi.mocked(select).mockResolvedValueOnce("auto"); // auto selected, but detected as github
     vi.mocked(confirm)
       .mockResolvedValueOnce(false)  // skip model config
@@ -531,7 +531,7 @@ describe("runInteractiveConfigWizard", () => {
   it("skipping model config does not save providerModels", async () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot"]);
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot"], marked: [] });
     vi.mocked(select).mockResolvedValueOnce("github"); // datasource
     vi.mocked(confirm)
       .mockResolvedValueOnce(false)  // skip model config
@@ -544,7 +544,7 @@ describe("runInteractiveConfigWizard", () => {
   it("model config step saves overrides when user selects non-default models", async () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot"]);
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot"], marked: [] });
     vi.mocked(listProviderModels).mockResolvedValueOnce(["model-a", "model-b"]);
     vi.mocked(select)
       .mockResolvedValueOnce("model-a")  // strong model for copilot
@@ -563,7 +563,7 @@ describe("runInteractiveConfigWizard", () => {
   it("model config step — choosing default does not save override", async () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot"]);
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot"], marked: [] });
     vi.mocked(listProviderModels).mockResolvedValueOnce(["model-a", "model-b"]);
     vi.mocked(select)
       .mockResolvedValueOnce(undefined)  // strong model — keep default
@@ -580,7 +580,7 @@ describe("runInteractiveConfigWizard", () => {
   it("model config step — listProviderModels failure falls back to registry defaults", async () => {
     vi.mocked(loadConfig).mockResolvedValue({});
     vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
-    vi.mocked(multiSelect).mockResolvedValueOnce(["copilot"]);
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({ values: ["copilot"], marked: [] });
     vi.mocked(listProviderModels).mockRejectedValueOnce(new Error("connection refused"));
     vi.mocked(select)
       .mockResolvedValueOnce(undefined)  // strong — keep default
@@ -592,5 +592,59 @@ describe("runInteractiveConfigWizard", () => {
     await runInteractiveConfigWizard();
     // Should not throw — wizard continues with defaults
     expect(saveConfig).toHaveBeenCalled();
+  });
+
+  // ─── Re-auth via 'r' key ────────────────────────────────────────
+
+  it("marking a provider for reauth triggers setupProviderAuth even if already authenticated", async () => {
+    vi.mocked(loadConfig).mockResolvedValue({});
+    vi.mocked(getProviderStatuses)
+      .mockResolvedValueOnce(allAuthenticatedStatuses())  // initial
+      .mockResolvedValueOnce(allAuthenticatedStatuses()); // re-check after auth
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({
+      values: ["copilot", "opencode"],
+      marked: ["opencode"],
+    });
+    vi.mocked(select).mockResolvedValueOnce("github"); // datasource
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false)  // skip model config
+      .mockResolvedValueOnce(true);  // save
+    await runInteractiveConfigWizard();
+    expect(setupProviderAuth).toHaveBeenCalledWith("opencode");
+    expect(setupProviderAuth).not.toHaveBeenCalledWith("copilot");
+  });
+
+  it("unmarked authenticated providers skip auth setup", async () => {
+    vi.mocked(loadConfig).mockResolvedValue({});
+    vi.mocked(getProviderStatuses).mockResolvedValue(allAuthenticatedStatuses());
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({
+      values: ["copilot", "claude"],
+      marked: [],
+    });
+    vi.mocked(select).mockResolvedValueOnce("github"); // datasource
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false)  // skip model config
+      .mockResolvedValueOnce(true);  // save
+    await runInteractiveConfigWizard();
+    expect(setupProviderAuth).not.toHaveBeenCalled();
+  });
+
+  it("multiple providers can be marked for reauth simultaneously", async () => {
+    vi.mocked(loadConfig).mockResolvedValue({});
+    vi.mocked(getProviderStatuses)
+      .mockResolvedValueOnce(allAuthenticatedStatuses())
+      .mockResolvedValueOnce(allAuthenticatedStatuses());
+    vi.mocked(multiSelectWithActions).mockResolvedValueOnce({
+      values: ["copilot", "claude", "opencode"],
+      marked: ["claude", "opencode"],
+    });
+    vi.mocked(select).mockResolvedValueOnce("github"); // datasource
+    vi.mocked(confirm)
+      .mockResolvedValueOnce(false)  // skip model config
+      .mockResolvedValueOnce(true);  // save
+    await runInteractiveConfigWizard();
+    expect(setupProviderAuth).toHaveBeenCalledWith("claude");
+    expect(setupProviderAuth).toHaveBeenCalledWith("opencode");
+    expect(setupProviderAuth).not.toHaveBeenCalledWith("copilot");
   });
 });

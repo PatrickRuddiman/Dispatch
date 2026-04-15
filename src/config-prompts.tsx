@@ -7,7 +7,7 @@
  */
 
 import chalk from "chalk";
-import { select, confirm, input, multiSelect } from "./helpers/ink-prompts.js";
+import { select, confirm, input, multiSelectWithActions } from "./helpers/ink-prompts.js";
 import { log } from "./helpers/logger.js";
 import { PALETTE } from "./helpers/format.js";
 import {
@@ -100,7 +100,7 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
   console.log();
 
   // ── Provider selection ─────────────────────────────────────
-  const selectedProviders = await multiSelect<ProviderName>({
+  const result = await multiSelectWithActions<ProviderName>({
     message: "Select providers to enable:",
     choices: providerStatuses.map((ps) => {
       const isAuth = ps.authStatus.status === "authenticated";
@@ -111,7 +111,10 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
         default: isAuth,
       };
     }),
+    actions: [{ key: "r", label: "re-auth" }],
   });
+  const selectedProviders = result.values;
+  const reauthProviders = result.marked;
 
   if (selectedProviders.length === 0) {
     log.error("At least one provider must be enabled to use Dispatch.");
@@ -119,10 +122,11 @@ export async function runInteractiveConfigWizard(configDir?: string): Promise<vo
     return;
   }
 
-  // ── Auth setup for selected-but-unauthenticated providers ──
+  // ── Auth setup for selected-but-unauthenticated providers (+ reauth) ──
   const needsAuth = selectedProviders.filter((name) => {
     const ps = providerStatuses.find((p) => p.name === name);
-    return ps && ps.authStatus.status !== "authenticated";
+    const markedForReauth = reauthProviders.includes(name);
+    return ps && (ps.authStatus.status !== "authenticated" || markedForReauth);
   });
 
   if (needsAuth.length > 0) {

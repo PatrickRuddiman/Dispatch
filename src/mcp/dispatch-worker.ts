@@ -26,6 +26,16 @@ process.on("message", (msg: WorkerMessage) => {
   void handleMessage(msg);
 });
 
+/** Send an IPC message and wait for it to flush before continuing. */
+function sendAndFlush(msg: Record<string, unknown>): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    process.send!(msg, (err: Error | null) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+}
+
 async function handleMessage(msg: WorkerMessage): Promise<void> {
   try {
     if (msg.type === "dispatch") {
@@ -36,7 +46,7 @@ async function handleMessage(msg: WorkerMessage): Promise<void> {
           process.send!({ type: "progress", event });
         },
       } as never);
-      process.send!({ type: "done", result });
+      await sendAndFlush({ type: "done", result });
     } else if (msg.type === "spec") {
       const result = await runSpecPipeline({
         ...msg.opts,
@@ -44,10 +54,10 @@ async function handleMessage(msg: WorkerMessage): Promise<void> {
           process.send!({ type: "spec_progress", event });
         },
       } as never);
-      process.send!({ type: "done", result });
+      await sendAndFlush({ type: "done", result });
     }
   } catch (err) {
-    process.send!({ type: "error", message: err instanceof Error ? err.message : String(err) });
+    await sendAndFlush({ type: "error", message: err instanceof Error ? err.message : String(err) }).catch(() => {});
   }
   process.exit(0);
 }

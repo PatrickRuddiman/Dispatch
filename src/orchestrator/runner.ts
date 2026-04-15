@@ -17,7 +17,7 @@ import { checkPrereqs } from "../helpers/prereqs.js";
 import { ensureGitignoreEntry } from "../helpers/gitignore.js";
 import { openDatabase } from "../mcp/state/database.js";
 import {
-  createRun, createSpecRun, getRun, getTasksForRun,
+  createRun, createSpecRun, getRun, getSpecRun, getTasksForRun,
   markOrphanedRunsFailed, listResumableSessions, requeueSessionRuns,
   waitForRunCompletion,
 } from "../mcp/state/manager.js";
@@ -361,8 +361,11 @@ async function awaitQueuedRuns(
   }
 
   // Wait for all runs to reach terminal status
+  const getStatus = mode === "spec"
+    ? (runId: string) => getSpecRun(runId)?.status ?? null
+    : (runId: string) => getRun(runId)?.status ?? null;
   await Promise.all(runIds.map((runId) =>
-    waitForRunCompletion(runId, 600_000, () => getRun(runId)?.status ?? null),
+    waitForRunCompletion(runId, 600_000, () => getStatus(runId)),
   ));
 
   // Build summary from DB

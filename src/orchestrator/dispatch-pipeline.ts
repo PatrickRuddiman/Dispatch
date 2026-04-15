@@ -767,6 +767,8 @@ export async function runDispatchPipeline(
           if (stopAfterIssue) break;
         }
 
+        // Phase 1: Commit generation — only on clean success
+        let commitSkillResult: SkillResult<CommitOutput> | undefined;
         if (!preserveContext) {
           if (!noBranch && branchName && defaultBranch && details && datasource.supportsGit()) {
             try {
@@ -781,7 +783,6 @@ export async function runDispatchPipeline(
           }
 
           fileLogger?.phase("Commit generation");
-          let commitSkillResult: SkillResult<CommitOutput> | undefined;
           if (!noBranch && branchName && defaultBranch && details && datasource.supportsGit()) {
             try {
               const branchDiff = await getBranchDiff(defaultBranch, issueCwd);
@@ -812,104 +813,109 @@ export async function runDispatchPipeline(
               log.warn(`Commit agent error for issue #${details.number}: ${log.formatErrorChain(err)}`);
             }
           }
+        }
 
-          fileLogger?.phase("PR lifecycle");
-          if (!noBranch && branchName && defaultBranch && details) {
-            if (feature && featureBranchName) {
-              if (worktreePath) {
-                try {
-                  await removeWorktree(cwd, file);
-                } catch (err) {
-                  log.warn(`Could not remove worktree for issue #${details.number}: ${log.formatErrorChain(err)}`);
-                }
-              }
-
+        // Phase 2: PR lifecycle — always runs for standard mode so that
+        // single-issue (non-worktree) runs push, create a PR, and restore
+        // the original branch even when tasks fail.
+        // Feature mode merge stays guarded because merging a partial branch
+        // into a shared feature branch is risky.
+        fileLogger?.phase("PR lifecycle");
+        if (!noBranch && branchName && defaultBranch && details) {
+          if (feature && featureBranchName && !preserveContext) {
+            if (worktreePath) {
               try {
-                await datasource.switchBranch(featureBranchName, lifecycleOpts);
-                await exec("git", ["merge", branchName, "--no-ff", "-m", `merge: issue #${details.number}`], { cwd, shell: process.platform === "win32" });
-                log.debug(`Merged ${branchName} into ${featureBranchName}`);
+                await removeWorktree(cwd, file);
               } catch (err) {
-                const mergeError = `Could not merge ${branchName} into feature branch: ${log.formatErrorChain(err)}`;
-                log.warn(mergeError);
-                try {
-                  await exec("git", ["merge", "--abort"], { cwd, shell: process.platform === "win32" });
-                } catch { }
-                for (const task of fileTasks) {
-                  const tuiTask = tui.state.tasks.find((t) => t.task === task);
-                  if (tuiTask) {
-                    tuiTask.status = "failed";
-                    tuiTask.error = mergeError;
-                  }
-                  upsertResult(results, { task, success: false, error: mergeError });
-                }
-                return { halted: false };
+                log.warn(`Could not remove worktree for issue #${details.number}: ${log.formatErrorChain(err)}`);
               }
+            }
 
+            try {
+              await datasource.switchBranch(featureBranchName, lifecycleOpts);
+              await exec("git", ["merge", branchName, "--no-ff", "-m", `merge: issue #${details.number}`], { cwd, shell: process.platform === "win32" });
+              log.debug(`Merged ${branchName} into ${featureBranchName}`);
+            } catch (err) {
+              const mergeError = `Could not merge ${branchName} into feature branch: ${log.formatErrorChain(err)}`;
+              log.warn(mergeError);
               try {
-                await exec("git", ["branch", "-d", branchName], { cwd, shell: process.platform === "win32" });
-                log.debug(`Deleted local branch ${branchName}`);
-              } catch (err) {
-                log.warn(`Could not delete local branch ${branchName}: ${log.formatErrorChain(err)}`);
+                await exec("git", ["merge", "--abort"], { cwd, shell: process.platform === "win32" });
+              } catch { }
+              for (const task of fileTasks) {
+                const tuiTask = tui.state.tasks.find((t) => t.task === task);
+                if (tuiTask) {
+                  tuiTask.status = "failed";
+                  tuiTask.error = mergeError;
+                }
+                upsertResult(results, { task, success: false, error: mergeError });
               }
+              return { halted: false };
+            }
 
+            try {
+              await exec("git", ["branch", "-d", branchName], { cwd, shell: process.platform === "win32" });
+              log.debug(`Deleted local branch ${branchName}`);
+            } catch (err) {
+              log.warn(`Could not delete local branch ${branchName}: ${log.formatErrorChain(err)}`);
+            }
+
+            try {
+              await datasource.switchBranch(featureDefaultBranch!, lifecycleOpts);
+            } catch (err) {
+              log.warn(`Could not switch back to ${featureDefaultBranch}: ${log.formatErrorChain(err)}`);
+            }
+          } else if (!feature) {
+            if (datasource.supportsGit()) {
               try {
-                await datasource.switchBranch(featureDefaultBranch!, lifecycleOpts);
+                await datasource.pushBranch(branchName, issueLifecycleOpts);
+                log.debug(`Pushed branch ${branchName}`);
+                fileLogger?.info(`Pushed branch ${branchName}`);
               } catch (err) {
-                log.warn(`Could not switch back to ${featureDefaultBranch}: ${log.formatErrorChain(err)}`);
+                log.warn(`Could not push branch ${branchName}: ${log.formatErrorChain(err)}`);
               }
-            } else {
-              if (datasource.supportsGit()) {
-                try {
-                  await datasource.pushBranch(branchName, issueLifecycleOpts);
-                  log.debug(`Pushed branch ${branchName}`);
-                  fileLogger?.info(`Pushed branch ${branchName}`);
-                } catch (err) {
-                  log.warn(`Could not push branch ${branchName}: ${log.formatErrorChain(err)}`);
-                }
-              }
+            }
 
-              if (datasource.supportsGit()) {
-                try {
-                  const prTitle = (commitSkillResult?.success && commitSkillResult.data.prTitle) || await buildPrTitle(details.title, defaultBranch, issueLifecycleOpts.cwd);
-                  const prBody = (commitSkillResult?.success && commitSkillResult.data.prDescription) || await buildPrBody(
-                    details,
-                    fileTasks,
-                    issueResults,
-                    defaultBranch,
-                    datasource.name,
-                    issueLifecycleOpts.cwd,
-                  );
-                  const prUrl = await datasource.createPullRequest(
-                    branchName,
-                    details.number,
-                    prTitle,
-                    prBody,
-                    issueLifecycleOpts,
-                    startingBranch,
-                  );
-                  if (prUrl) {
-                    log.success(`Created PR for issue #${details.number}: ${prUrl}`);
-                    fileLogger?.info(`Created PR: ${prUrl}`);
-                  }
-                } catch (err) {
-                  log.warn(`Could not create PR for issue #${details.number}: ${log.formatErrorChain(err)}`);
-                  fileLogger?.warn(`PR creation failed: ${log.extractMessage(err)}`);
+            if (datasource.supportsGit()) {
+              try {
+                const prTitle = (commitSkillResult?.success && commitSkillResult.data.prTitle) || await buildPrTitle(details.title, defaultBranch, issueLifecycleOpts.cwd);
+                const prBody = (commitSkillResult?.success && commitSkillResult.data.prDescription) || await buildPrBody(
+                  details,
+                  fileTasks,
+                  issueResults,
+                  defaultBranch,
+                  datasource.name,
+                  issueLifecycleOpts.cwd,
+                );
+                const prUrl = await datasource.createPullRequest(
+                  branchName,
+                  details.number,
+                  prTitle,
+                  prBody,
+                  issueLifecycleOpts,
+                  startingBranch,
+                );
+                if (prUrl) {
+                  log.success(`Created PR for issue #${details.number}: ${prUrl}`);
+                  fileLogger?.info(`Created PR: ${prUrl}`);
                 }
+              } catch (err) {
+                log.warn(`Could not create PR for issue #${details.number}: ${log.formatErrorChain(err)}`);
+                fileLogger?.warn(`PR creation failed: ${log.extractMessage(err)}`);
               }
+            }
 
-              if (useWorktrees && worktreePath) {
-                try {
-                  await removeWorktree(cwd, file);
-                } catch (err) {
-                  log.warn(`Could not remove worktree for issue #${details.number}: ${log.formatErrorChain(err)}`);
-                }
-              } else if (!useWorktrees && datasource.supportsGit()) {
-                try {
-                  await datasource.switchBranch(defaultBranch, lifecycleOpts);
-                  log.debug(`Switched back to ${defaultBranch}`);
-                } catch (err) {
-                  log.warn(`Could not switch back to ${defaultBranch}: ${log.formatErrorChain(err)}`);
-                }
+            if (useWorktrees && worktreePath && !preserveContext) {
+              try {
+                await removeWorktree(cwd, file);
+              } catch (err) {
+                log.warn(`Could not remove worktree for issue #${details.number}: ${log.formatErrorChain(err)}`);
+              }
+            } else if (!useWorktrees && datasource.supportsGit()) {
+              try {
+                await datasource.switchBranch(defaultBranch, lifecycleOpts);
+                log.debug(`Switched back to ${defaultBranch}`);
+              } catch (err) {
+                log.warn(`Could not switch back to ${defaultBranch}: ${log.formatErrorChain(err)}`);
               }
             }
           }

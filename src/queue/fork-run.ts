@@ -14,7 +14,7 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
-  createTask, updateTaskStatus, updateRunCounters, finishRun,
+  createTask, updateTaskStatus, updateRunCounters, finishRun, finishSpecRun,
   emitLog,
 } from "../mcp/state/manager.js";
 
@@ -39,6 +39,8 @@ export interface ForkRunOptions {
   onExit?: (code: number | null) => void;
   /** Optional log callback wired before forking. */
   logCallback?: LogCallback;
+  /** Which DB table this run belongs to — determines how errors and results are finalized. */
+  runType?: "runs" | "spec_runs";
 }
 
 export function forkDispatchRun(
@@ -126,12 +128,24 @@ export function forkDispatchRun(
           updateRunCounters(runId, result["total"] as number, result["completed"] as number, result["failed"] as number);
           finishRun(runId, (result["failed"] as number) > 0 ? "failed" : "completed");
           emitLog(runId, `Dispatch complete: ${result["completed"] as number}/${result["total"] as number} tasks succeeded`);
+        } else if ("generated" in result) {
+          // Spec result
+          const total = result["total"] as number;
+          const generated = result["generated"] as number;
+          const failed = result["failed"] as number;
+          finishSpecRun(runId, failed > 0 ? "failed" : "completed", { total, generated, failed });
+          emitLog(runId, `Spec complete: ${generated}/${total} specs generated`);
         }
         break;
       }
       case "error": {
-        finishRun(runId, "failed", msg["message"] as string);
-        emitLog(runId, `Run error: ${msg["message"] as string}`, "error");
+        const errorMsg = msg["message"] as string;
+        if (options?.runType === "spec_runs") {
+          finishSpecRun(runId, "failed", { total: 0, generated: 0, failed: 0 }, errorMsg);
+        } else {
+          finishRun(runId, "failed", errorMsg);
+        }
+        emitLog(runId, `Run error: ${errorMsg}`, "error");
         break;
       }
     }
@@ -141,7 +155,12 @@ export function forkDispatchRun(
   worker.on("exit", (code) => {
     clearInterval(heartbeat);
     if (code !== 0 && code !== null) {
-      finishRun(runId, "failed", `Worker process exited with code ${code}`);
+      const exitError = `Worker process exited with code ${code}`;
+      if (options?.runType === "spec_runs") {
+        finishSpecRun(runId, "failed", { total: 0, generated: 0, failed: 0 }, exitError);
+      } else {
+        finishRun(runId, "failed", exitError);
+      }
       emitLog(runId, `Worker process exited unexpectedly (code ${code})`, "error");
     }
     options?.onExit?.(code);
